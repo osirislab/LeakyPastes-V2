@@ -1,0 +1,3623 @@
+id,title,username,language,date,content
+Pd2Y5jTS,DSL_UIPersonnel_StatusSort,RustyDios,UnrealScript,Thursday 18th of May 2023 12:57:45 PM CDT,"
+simulated function int SortByStatus(StateObjectReference A, StateObjectReference B)
+{
+	local XComGameState_Unit UnitA, UnitB;
+	local string StatusA, StatusB, TimeLabelA, TimeLabelB, TimeValueA, TimeValueB;
+	local int RankA, RankB, iTimeValueA, iTimeValueB;
+	local EMentalState CurrentMentalStateA, CurrentMentalStateB;
+
+	UnitA = XComGameState_Unit(`XCOMHISTORY.GetGameStateForObjectID(A.ObjectID));
+	UnitB = XComGameState_Unit(`XCOMHISTORY.GetGameStateForObjectID(B.ObjectID));
+
+	//CANNOT USE THIS AS DOES NOT GATHER ENOUGH DATA EG: TIME
+	//StatusA = class'UIUtilities_Strategy'.static.GetPersonnelStatus(UnitA);
+	//StatusB = class'UIUtilities_Strategy'.static.GetPersonnelStatus(UnitB);
+
+	//THIS GIVES US ALPHABETICAL STATUS, TIME LABEL (DAYS/HRS), VALUE AS AN INT IN HRS?
+	UnitA.GetStatusStringsSeparate(StatusA, TimeLabelA, iTimeValueA);
+	UnitB.GetStatusStringsSeparate(StatusB, TimeLabelB, iTimeValueB);
+
+	//THIS GIVES THE ABOVE BUT ALSO INCLUDES CHL DATA (TIME VALUE HERE IS A USELESS STRING THAT DOESNT COMPARE CORRECTLY)
+	class'UIUtilities_Strategy'.static.GetPersonnelStatusSeparate(UnitA, StatusA, TimeLabelA, TimeValueA, -1, false);
+	class'UIUtilities_Strategy'.static.GetPersonnelStatusSeparate(UnitB, StatusB, TimeLabelB, TimeValueB, -1, false);
+
+	//convert STRING time back into an INT for correct comparrisons
+	//iTimeValueA = int(TimeValueA);
+	//iTimeValueB = int(TimeValueB);
+
+	//GIVES MENTAL STATE AS AN ENUM
+	CurrentMentalStateA = UnitA.GetMentalState();
+	CurrentMentalStateB = UnitB.GetMentalState();
+
+	//SO AVAILIABLE SORT BY RANK STILL
+	RankA = UnitA.GetRank();
+	RankB = UnitB.GetRank();
+
+	//sort by Shaken TO BOTTOM
+	if (!UnitA.bIsShaken && UnitB.bIsShaken)
+	{
+		return m_bFlipSort ? -1 : 1;
+	}
+	else if (UnitA.bIsShaken && !UnitB.bIsShaken)
+	{
+		return m_bFlipSort ? 1 : -1;
+	}
+
+	//sort by status string Alphabetical, A is less than Z
+	if( StatusA < StatusB )
+	{
+		return m_bFlipSort ? -1 : 1;
+	}
+	else if( StatusA > StatusB )
+	{
+		return m_bFlipSort ? 1 : -1;
+	}
+
+	//sort by mental Ready 2, Tired 1, Shaken 0
+	if (CurrentMentalStateA > CurrentMentalStateB)
+	{
+		return m_bFlipSort ? -1 : 1;
+	}
+	else if (CurrentMentalStateA < CurrentMentalStateB)
+	{
+		return m_bFlipSort ? 1 : -1;
+	}
+
+	//sort by time ASCENDING
+	if( iTimeValueA < iTimeValueB )
+	{
+		return m_bFlipSort ? -1 : 1;
+	}
+	else if( iTimeValueA > iTimeValueB )
+	{
+		return m_bFlipSort ? 1 : -1;
+	}
+
+	//sort by rank
+	if (class'UISL_SSStatusAutoSort'.default.bSortStatusIncludesRank)
+	{
+		if( RankA > RankB )
+		{
+			return m_bFlipSort ? -1 : 1;
+		}
+		else if( RankA < RankB )
+		{
+			return m_bFlipSort ? 1 : -1;
+		}
+	}
+	
+	return 0;
+}
+"
+DU1F7pHe,Prim algorithm for MST,Lucky_Dummy,Haskell,Thursday 18th of May 2023 12:55:42 PM CDT,"import Data.List
+
+-- В graph на каждом шагу будем хранить ребра, у которых хотя бы одна вершина НЕ содержиться в текущем MST (Minimal Spanning Tree)
+-- Также будем поддерживать список ребёр в MST и список неприсоединённых к MST вершин
+-- На каждом шагу выбираем ребро минимального веса, среди смежных с текущим MST, за начальное ребро берём наименьшее среди всех
+prim :: (Ord c, Eq a) => [(a, a, c)] -> [(a, a, c)]
+prim [] = []
+prim graph = prim' (tail sortedEdges) mst unvisited where -- Основная функция, подготавливает данные для вспомогательной
+  sortedEdges = nub $ sortBy (\(_, _, w1) (_, _, w2) -> compare w1 w2) graph -- Сортируем ребра по весу и удаляем дубликаты
+  mst = [head sortedEdges] -- Добавляем первое ребро в MST
+  unvisited = foldl (flip delete) (nub $ concatMap getVertices graph) (getVertices $ head mst) -- Создаем список неприсоединённых к MST вершин
+  prim' graph mst unvisited -- Вспомогательная функция, рекурсивно выполняет шаги алгоритма
+      | null graph = mst
+      | null unvisited = mst
+      | otherwise = prim' newGraph newMst newUnvisited where
+        (from, to, weight) = head (filter (\(x, y, _) -> notElem x unvisited || notElem y unvisited) graph) -- Берём ребро с наименьшим весом, соединённое с MST
+        newMst = (from, to, weight) : mst -- Добавляем это ребро в MST
+        newUnvisited = foldl (flip delete) unvisited [from, to] -- Удаляем вершину из непосещённых
+        newGraph = filter (\(x, y, _) -> elem x newUnvisited || elem y newUnvisited) graph -- Убираем из списка ребёр, те что соединяют вершины из MST
+  getVertices (x, y, _) = [x, y] -- Функция для получения списка вершин некоторого ребра  
+
+graph :: [(Int, Int, Int)]
+graph = [(1, 2, 2), (1, 3, 5), (2, 3, 1), (2, 4, 6), (2, 5, 3), (3, 5, 1), (4, 5, 3)]
+
+main :: IO ()
+main = print $ prim graph"
+6eUXTtzk,mining,Shadow3641,Lua,Thursday 18th of May 2023 12:53:56 PM CDT,"--[[
+Slot 1: Stone
+Slot 2: Dirt
+Slot 3: Sand
+Slot 4: Gravel
+Slot 15: Bucket
+Slot 16: Fuel
+]]--
+
+local ok, tArgs, ignoredFuel, oldprint, fuelAmount, nSlots = true, { ... }, 0, print, nil
+
+for i = 1, 13 do
+	if turtle.getItemCount( i ) == 0 then
+		nSlots = i - 1
+		print( ""You have ""..nSlots.."" stacks of waste blocks, is this correct? Y/N"" )
+		while true do
+			local _, char = os.pullEvent( ""char"" )
+			if char:lower() == ""n"" then
+				error()
+			elseif char:lower() == ""y"" then
+				break
+			end
+		end
+		break
+	end
+end
+
+if turtle.getItemCount( 15 ) ~= 1 then
+	error( ""Place a single bucket in slot 15"" )
+end
+if turtle.getItemCount( 16 ) == 0 then
+	print( ""Are you sure you wish to continue with no fuel in slot 16? Y/N"" )
+	while true do
+		local _, char = os.pullEvent( ""char"" )
+		if char:lower() == ""n"" then
+			error()
+		elseif char:lower() == ""y"" then
+			break
+		end
+	end
+end
+
+local function print( text )
+	oldprint( ""["" .. os.time() .. ""]"" .. text )
+	local file = fs.open( ""turtleLog"", ""a"" )
+	file.writeLine( ""["" .. os.time() .. ""]"" .. text )
+	file.close()
+end
+
+function dumpWaste()
+	while ok do
+		for i = 1, nSlots do
+			local count = turtle.getItemCount( i )
+			if count > 10 then
+				turtle.select( i )
+				turtle.drop( count - 10 )
+			end
+		end
+		local id = os.startTimer( 10 )
+		while true do
+			local _, tid = os.pullEvent( ""timer"" )
+			if tid == id then
+				break
+			end
+		end
+	end
+end
+
+function notwaste( func )
+	for i = 1, nSlots do
+		turtle.select( i )
+		if func() then
+			return false
+		end
+	end
+	if func == turtle.compare then
+		return turtle.detect()
+	elseif func == turtle.compareDown then
+		return turtle.detectDown()
+	elseif func == turtle.compareUp then
+		return turtle.detectUp()
+	end
+end
+
+function check( nLevel )
+	if not nLevel then
+		nLevel = 1
+	elseif nLevel > 200 then
+		return
+	end
+	if not ok then return end
+	--check for lava
+	turtle.select( 14 )
+	if turtle.getItemCount( 14 ) == 0 and not turtle.compare() and not turtle.detect() then
+		turtle.select( 15 )
+		if turtle.place() then
+			print( ""[check]: Liquid detected!"" )
+			if turtle.refuel() then
+				print( ""[check]: Refueled using lava source!"" )
+				turtle.forward()
+				check( nLevel + 1 )
+				while not turtle.back() do end
+				ignoredFuel = ignoredFuel + 2
+			else
+				print( ""[check]: Liquid was not lava!"" )
+				turtle.place()
+			end
+		end
+	end
+	--check for inventories
+	if turtle.detect() and turtle.suck() then
+		while turtle.suck() do end
+	end
+	--check for ore
+	if notwaste( turtle.compare ) then
+		print( ""[check]: Ore Detected!"" )
+		repeat turtle.dig() until turtle.forward()
+		print( ""[check]: Dug ore!"" )
+		check( nLevel + 1 )
+		while not turtle.back() do end
+		ignoredFuel = ignoredFuel + 2
+	end
+	if not ok then return end
+	turtle.turnLeft()
+	--check for lava
+	turtle.select( 14 )
+	if turtle.getItemCount( 14 ) == 0 and not turtle.compare() and not turtle.detect() then
+		turtle.select( 15 )
+		if turtle.place() then
+			print( ""[check]: Liquid detected!"" )
+			if turtle.refuel() then
+				print( ""[check]: Refueled using lava source!"" )
+				turtle.forward()
+				check( nLevel + 1 )
+				while not turtle.back() do end
+				ignoredFuel = ignoredFuel + 2
+			else
+				print( ""[check]: Liquid was not lava!"" )
+				turtle.place()
+			end
+		end
+	end
+	--check for inventories
+	if turtle.detect() and turtle.suck() then
+		while turtle.suck() do end
+	end
+	--check for ore
+	if notwaste( turtle.compare ) then
+		print( ""[check]: Ore Detected!"" )
+		repeat turtle.dig() until turtle.forward()
+		print( ""[check]: Dug ore!"" )
+		check( nLevel + 1 )
+		while not turtle.back() do end
+		ignoredFuel = ignoredFuel + 2
+	end
+	turtle.turnRight()
+	if not ok then return end
+	turtle.turnRight()
+	--check for lava
+	turtle.select( 14 )
+	if turtle.getItemCount( 14 ) == 0 and not turtle.compare() and not turtle.detect() then
+		turtle.select( 15 )
+		if turtle.place() then
+			print( ""[check]: Liquid detected!"" )
+			if turtle.refuel() then
+				print( ""[check]: Refueled using lava source!"" )
+				turtle.forward()
+				check( nLevel + 1 )
+				while not turtle.back() do end
+				ignoredFuel = ignoredFuel + 2
+			else
+				print( ""[check]: Liquid was not lava!"" )
+				turtle.place()
+			end
+		end
+	end
+	--check for inventories
+	if turtle.detect() and turtle.suck() then
+		while turtle.suck() do end
+	end
+	--check for ore
+	if notwaste( turtle.compare ) then
+		print( ""[check]: Ore Detected!"" )
+		repeat turtle.dig() until turtle.forward()
+		print( ""[check]: Dug ore!"" )
+		check( nLevel + 1 )
+		while not turtle.back() do end
+		ignoredFuel = ignoredFuel + 2
+	end
+	turtle.turnLeft()
+	if not ok then return end
+	--check for lava
+	turtle.select( 14 )
+	if turtle.getItemCount( 14 ) == 0 and not turtle.compareUp() and not turtle.detectUp() then
+		turtle.select( 15 )
+		if turtle.placeUp() then
+			print( ""[check]: Liquid detected!"" )
+			if turtle.refuel() then
+				print( ""[check]: Refueled using lava source!"" )
+				turtle.up()
+				check( nLevel + 1 )
+				while not turtle.down() do end
+				ignoredFuel = ignoredFuel + 2
+			else
+				print( ""[check]: Liquid was not lava!"" )
+				turtle.placeUp()
+			end
+		end
+	end
+	--check for inventories
+	if turtle.detectUp() and turtle.suckUp() then
+		while turtle.suckUp() do end
+	end
+	--check for ore
+	if notwaste( turtle.compareUp ) then
+		print( ""[check]: Ore Detected!"" )
+		repeat turtle.digUp() until turtle.up()
+		print( ""[check]: Dug ore!"" )
+		check( nLevel + 1 )
+		while not turtle.down() do end
+		ignoredFuel = ignoredFuel + 2
+	end
+	if not ok then return end
+	--check for lava
+	turtle.select( 14 )
+	if turtle.getItemCount( 14 ) == 0 and not turtle.compareDown() and not turtle.detectDown() then
+		turtle.select( 15 )
+		if turtle.placeDown() then
+			print( ""[check]: Liquid detected!"" )
+			if turtle.refuel() then
+				print( ""[check]: Refueled using lava source!"" )
+				turtle.down()
+				check( nLevel + 1 )
+				while not turtle.up() do end
+				ignoredFuel = ignoredFuel + 2
+			else
+				print( ""[check]: Liquid was not lava!"" )
+				turtle.placeDown()
+			end
+		end
+	end
+	--check for inventories
+	if turtle.detectDown() and turtle.suckDown() then
+		while turtle.suckDown() do end
+	end
+	--check for ore
+	if notwaste( turtle.compareDown ) then
+		print( ""[check]: Ore Detected!"" )
+		repeat turtle.digDown() until turtle.down()
+		print( ""[check]: Dug ore!"" )
+		check( nLevel + 1 )
+		while not turtle.up() do end
+		ignoredFuel = ignoredFuel + 2
+	end
+end
+
+function branch()
+	local gone = 0
+	for i = 1, 15 do
+		repeat turtle.dig() until turtle.forward()
+		print( ""[branch]: Dug forward!"" )
+		gone = gone + 1
+		if not ok then break end
+		check()
+		if not ok then break end
+	end
+	print( ""[branch]: Returning!"" )
+	turtle.turnLeft()
+	turtle.turnLeft()
+	for i = 1, gone do
+		while not turtle.forward() do
+			while turtle.dig() do end
+			while turtle.attack() do end
+		end
+	end
+	ignoredFuel = ignoredFuel + ( gone * 2 )
+	print( ""[branch]: Returned!"" )
+end
+
+function main()
+	local gone = 0
+	while ok do
+		for i = 1, 3 do
+			repeat turtle.dig() until turtle.forward()
+			print( ""[main]: Dug forward!"" )
+			gone = gone + 1
+			if not ok then break end --not ok, don't keep running
+			check()
+			if not ok then break end
+		end
+		if not ok then break end
+		turtle.turnLeft()
+		print( ""[main]: Initiating branch!"" )
+		branch()
+		turtle.turnLeft()
+		if not ok then break end --not ok, don't run second branch
+		turtle.turnRight()
+		print( ""[main]: Intiating branch!"" )
+		branch()
+		turtle.turnRight()
+	end
+	--not ok, return to base
+	print( ""[main]: Returning to base!"" )
+	turtle.turnLeft()
+	turtle.turnLeft()
+	repeat
+		while not turtle.forward() do
+			while turtle.attack() do end
+			while turtle.dig() do end
+		end
+		gone = gone - 1
+	until gone == 0
+end
+
+
+function findMaxLevel()
+	local level = turtle.getFuelLevel()
+	if turtle.getItemCount( 16 ) > 1 then
+		if not fuelAmount then
+			turtle.select( 16 )
+			turtle.refuel( 1 )
+			fuelAmount = turtle.getFuelLevel() - level
+			print( ""[findMaxLevel]: Found fuelAmount: ""..fuelAmount)
+		end
+		print( ""[findMaxLevel]: Found max level: "" .. turtle.getItemCount( 16 ) * fuelAmount + turtle.getFuelLevel() .. ""!"")
+		return turtle.getItemCount( 16 ) * fuelAmount + turtle.getFuelLevel()
+	else
+		print( ""[findMaxLevel]: Found max level: "" .. turtle.getFuelLevel() .. ""!"" )
+		return turtle.getFuelLevel()
+	end
+end
+
+function isOk()
+	local okLevel = findMaxLevel() / 2 + 10
+	while ok do
+		local currentLevel = turtle.getFuelLevel()
+		if currentLevel < 100 then --check fuel
+			print( ""[isOk]: Fuel Level Low!"" )
+			if turtle.getItemCount( 16 ) > 0 then
+				print( ""[isOk]: Refueling!"" )
+				repeat
+					turtle.select( 16 )
+				until turtle.refuel( 1 ) or turtle.getSelectedSlot() == 16
+				if turtle.getFuelLevel() > currentLevel then
+					print( ""[isOk]: Refuel Successful!"" )
+				else
+					print( ""[isOk]: Refuel Unsuccessful, Initiating return!"" )
+					ok = false
+				end
+			end
+		elseif okLevel - ignoredFuel > findMaxLevel()  then
+			print(""[isOk]: Fuel Reserves Depleted!  Initiating return!"")
+			ok = false
+		end
+		--make sure turtle can take new items
+		local hasSpace = false
+		for i = 5, 15 do
+			if turtle.getItemCount( i ) == 0 then
+				hasSpace = true
+			end
+		end
+		if not hasSpace then
+			print( ""[isOk]: Out of space!  Intiating return!"" )
+			ok = false
+		elseif ok then
+			print( ""[isOk]: Everything is OK!"" )
+			local id = os.startTimer( 10 )
+			while true do
+				local _, tid = os.pullEvent( ""timer"" )
+				if tid == id then
+					break
+				end
+			end
+		end
+	end
+end
+
+
+function trackTime()
+	local sTime = table.concat( tArgs, "" "" )
+	local nSeconds = 0
+	for i, period in sTime:gmatch( ""(%d+)%s+(%a+)s?"" ) do
+		if period:lower() == ""second"" then
+			nSeconds = nSeconds + i
+		elseif period:lower() == ""minute"" then
+			nSeconds = nSeconds + ( i * 60 )
+		elseif period:lower() == ""hour"" then
+			nSeconds = nSeconds + ( i * 3600 )
+		end
+	end
+	print( ""[trackTime]: Starting timer for ""..nSeconds.."" seconds!"" )
+	local id = os.startTimer( nSeconds )
+	while ok do
+		local _, tid = os.pullEvent( ""timer"" )
+		if id == tid then
+			print( ""[trackTime]: End of session reached!  Returning to base!"" )
+			ok = false
+		end
+	end
+end
+
+parallel.waitForAll( trackTime, isOk, main, dumpWaste )
+for i = 5, 14 do
+	turtle.select( i )
+	turtle.dropDown()
+end"
+CJ4qtamU,addRoom,SethVan,C++,Thursday 18th of May 2023 12:50:10 PM CDT,"#include <a.out.h>
+
+#include <QDebug>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QString>
+#include <QStringList>
+#include <algorithm>
+
+#include ""./ui_widget.h""
+#include ""widget.h""
+
+Widget::Widget( QWidget *parent ) : QWidget( parent ), ui( new Ui::Widget )
+{
+    ui->setupUi( this );
+}
+
+Widget::~Widget()
+{
+    delete ui;
+}
+
+void Widget::on_addItemButton_clicked()
+{
+    addNewRoom();
+}
+
+void Widget::on_newItemLineEdit_returnPressed()
+{
+    addNewRoom();
+}
+
+void Widget::on_deleteItemButton_clicked()
+{
+    if ( ui->listWidget->currentItem() )
+    {
+       QString room = ui->listWidget->currentItem()->text();
+       QString str = ""Are you sure you want to permanently delete this room?:\n\"""" + room + ""\"""";
+
+       if ( QMessageBox::critical( this, ""Deleting room is permanent!"", str, QMessageBox::Yes, QMessageBox::Cancel ) ==
+            QMessageBox::Yes )
+       {
+          delete ui->listWidget->takeItem( ui->listWidget->currentRow() );
+       }
+    }
+}
+
+void Widget::addNewRoom()
+{
+    if ( ui->newItemLineEdit->text().size() )
+    {
+        QString room = ui->newItemLineEdit->text();
+
+        auto lastDoubleDotPos = room.lastIndexOf("".."");
+
+        /* Inside isNotAPossibleSequenceInput() all non-sequence inputs will be added normally and the
+         * remainder of addNewRoom() becomes irrelevant. In likewise manner valid sequential inputs are
+         * added inside of functions processedAsNumberSequence() and processedAsLetterSequence(). */
+        if ( isNotAPossibleSequenceInput( lastDoubleDotPos, room ))
+        {
+           return;
+        }
+
+        QString seqBegin = room.first(lastDoubleDotPos); //left side of ""..""
+        QString seqEnd = room.mid(lastDoubleDotPos + 2); //right side of ""..""
+
+
+        if ( seqEndFormatIsInvalid(seqBegin, seqEnd, room) )
+        {
+            return;
+        }
+
+        if( processedAsNumberSequence(seqBegin, seqEnd, room) )
+        {
+            return;
+        }
+
+        if( processedAsLetterSequence(seqBegin, seqEnd, room) )
+        {
+            return;
+        }
+        else
+        {
+            return ambiguousFormatWarning(room);
+        }
+    }
+}
+
+bool Widget::isNotAPossibleSequenceInput(int pos, const QString& room)
+{
+    if ( pos == -1 )
+    {
+        if(room.contains("".""))
+        {
+            ambiguousFormatWarning(room);
+            return true;
+        }
+        addLineEditText();
+        return true;
+    }
+    if (room.lastIndexOf(""..."") == pos - 1 || pos == room.size() - 2 || pos == 0)
+    {
+        ambiguousFormatWarning(room);
+        return true;
+    }
+    return false;
+}
+
+void Widget::ambiguousFormatWarning(const QString& room)
+{
+    QString ambigMsgBoxTitle = ""Ambiguous format detected..."";
+    QString ambigMsgBoxMsg = ""Ambiguous format detected in inputted room:\n\"""" + room +
+            ""\""\nIf you meant to convey a sequence of inputs, then click \'Cancel\'""
+            "" and resubmit placing at the end either number(s) or a letter (of matching case) on either side of ""
+            ""two dots with the greater value on the right side. Examples:\n\'Suite 100..120\', \'Bungalow 2A..C\'\n""
+            ""Otherwise click \'Ignore\' and just one room will be submitted as what was written."";
+
+    if (QMessageBox::warning( this, ambigMsgBoxTitle, ambigMsgBoxMsg, QMessageBox::Ignore, QMessageBox::Cancel )
+            == QMessageBox::Cancel )
+    {
+       return;
+    }
+    else
+    {
+         addLineEditText();
+         return;
+    }
+}
+
+void Widget::addLineEditText()
+{
+   ui->listWidget->addItem( ui->newItemLineEdit->text() );
+   ui->newItemLineEdit->clear();
+}
+
+bool Widget::seqEndFormatIsInvalid(const QString& seqBegin, const QString& seqEnd, const QString& room)
+{
+    if ( seqEnd.size() > 1 )
+    {
+        if (std::any_of( seqEnd.begin(), seqEnd.end(), []( auto c ) { return !c.isDigit(); } ) ||
+              !seqBegin.back().isDigit() )
+        {
+            ambiguousFormatWarning(room);
+            return true;
+        }
+        return false;
+    }
+}
+
+bool Widget::processedAsNumberSequence(const QString& seqBegin, const QString& seqEnd, const QString& room)
+{
+    if ( seqEnd.front().isDigit() )
+    {
+        if ( std::all_of( seqBegin.begin(), seqBegin.end(), []( auto c ) { return c.isDigit(); } ) )
+        {
+            if (seqBegin.toInt() >= seqEnd.toInt())
+            {
+                ambiguousFormatWarning(room);
+            }
+            else
+            {
+                addLineEditSequence("""", seqBegin.toInt(), seqEnd.toInt(), RoomSequence::Number);
+            }
+        }
+        else
+        {
+            int i = seqBegin.size() - 1;
+            for ( ; seqBegin[ i ].isDigit() && i > -1; --i );
+            auto startNumber = seqBegin.last( seqBegin.size() - (i + 1)).toInt();
+            auto endNumber = seqEnd.toInt();
+            if(startNumber < endNumber)
+            {
+                addLineEditSequence(seqBegin.first( i + 1 ), startNumber,
+                                           endNumber, RoomSequence::Number );
+            }
+            else
+            {
+                ambiguousFormatWarning(room);
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+void Widget::addLineEditSequence(const QString& base, int roomNumberStart, int roomNumberEnd, RoomSequence type)
+{
+    int currentRoom = roomNumberStart;
+    for ( ; currentRoom < roomNumberEnd + 1; ++currentRoom )
+    {
+        QString addMe;
+        if(type == RoomSequence::Letter)
+        {
+            addMe = base + QChar(currentRoom);
+        }
+        else
+        {
+            addMe = base + QString::number(currentRoom);
+        }
+        ui->listWidget->addItem( addMe );
+    }
+    ui->newItemLineEdit->clear();
+
+}
+
+bool Widget::processedAsLetterSequence(const QString& seqBegin, const QString& seqEnd, const QString& room)
+{
+    if ( seqEnd.front().isLetter() && seqBegin.back().isLetter() && seqBegin.back() < seqEnd.front() &&
+         seqBegin.back().category() == seqEnd.front().category() ) //category refers to case
+    {
+        QString base = seqBegin.size() > 1? seqBegin.first(seqBegin.size() - 1) : """";
+        addLineEditSequence(base, seqBegin.back().unicode(), seqEnd.front().unicode(), RoomSequence::Letter);
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+"
+dM1e0aZL,123,maxim_shlyahtin,Python,Thursday 18th of May 2023 12:25:08 PM CDT,"import pandas as pd
+import numpy as np
+
+path_right = r""C:\Users\Max-13700kf\PycharmProjects\pythonProject\ex.csv""
+path_left = r""path to elagin left""
+
+elagin_right_df = pd.read_csv(path_right)
+# elagin_left_df = pd.read_csv(path_left)
+
+# 1
+print(elagin_right_df.head())
+
+# 2
+print(elagin_right_df.isnull().sum(), elagin_right_df.info, sep='\n')
+
+
+#3
+print(elagin_right_df.duplicated())
+
+#4
+print(elagin_right_df.n)
+
+#5
+elagin_right_df['education'] = None
+elagin_right_df['age'] = None
+print(elagin_right_df.sort_values(['education', 'age'], ascending=[False, False]).head(20))"
+E3pCesLw,archivemodified,studioart,PHP,Thursday 18th of May 2023 11:57:14 AM CDT,"<?php
+	if( ! defined( 'ABSPATH' ) ) { die(); }
+
+	global $avia_config, $more;
+
+	/*
+	 * get_header is a basic wordpress function, used to retrieve the header.php file in your theme directory.
+	 */
+	get_header();
+
+	$showheader = true;
+
+			//	get the current taxonomy term
+				$term = get_queried_object();
+			//	vars - ACF for showing Images and Color in Category Backend
+				$image = get_field('image', $term);
+				$color = get_field('color', $term);					 
+	if( avia_get_option( 'frontpage' ) && $blogpage_id = avia_get_option( 'blogpage' ) )
+	{
+		if( get_post_meta( $blogpage_id, 'header', true ) == 'no' )
+		{
+			$showheader = false;
+		}
+	}
+
+	if( $showheader )
+	{
+		echo avia_title( array( 'title' => avia_which_archive() ) );
+	}
+
+	do_action( 'ava_after_main_title' );
+
+	?>
+
+		<div class='container_wrap container_wrap_first main_color <?php avia_layout_class( 'main' ); ?>'>
+
+
+
+<div id=""av_section_2"" class=""category-description-background avia-section main_color avia-section-default avia-shadow avia-bg-style-scroll avia-builder-el-1 el_after_av_section avia-builder-el-last container_wrap sidebar_right"" >
+
+	<style type=""text/css"">
+
+		.entry-content-wrapper .post-title {
+			color: <?php echo $color; ?>;
+		}
+		.blog-categories.minor-meta a {
+			color: <?php echo $color; ?>;
+			}
+		<?php if( $image ): ?>
+			.categoryheaderimage {
+				background-image: url(<?php echo $image['url']; ?>);
+			}
+		<?php endif; ?>
+	</style>		 
+
+	<div class=""categoryheaderimage"">
+			
+	</div>
+	
+	
+	<div class=""container"">
+		<div class=""template-page content  av-content-small alpha units"">
+			<div class=""post-entry post-entry-type-page"">
+				<div class=""entry-content-wrapper clearfix"">
+					<?php
+
+					$tds = term_description();
+					if( $tds )
+					{
+						echo ""<div class='category-term-description'>{$tds}</div>"";
+					}
+					?>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>	
+
+			<div class='container template-blog '>
+
+				<main class='content <?php avia_layout_class( 'content' ); ?> units' <?php avia_markup_helper( array( 'context' => 'content', 'post_type' => 'post' ) );?>>
+					<?php  if( is_category() )
+						{
+						//	echo '<h1>' . 'Kategorie: ' . single_cat_title('',false) . '</h1>';
+						}			
+					?>
+					
+					<?php  if( is_tag() )
+						{
+						//	echo '<h1>' . 'Schlagwort: ' . single_tag_title('',false) . '</h1>';
+						}
+					?>
+				
+                    <?php
+					$avia_config['blog_style'] = apply_filters( 'avf_blog_style', avia_get_option( 'blog_style', 'multi-big' ), 'archive' );
+					if( $avia_config['blog_style'] == 'blog-grid' )
+					{
+						global $posts;
+
+						$post_ids = array();
+						foreach( $posts as $post )
+						{
+							$post_ids[] = $post->ID;
+						}
+
+						if( ! empty( $post_ids ) )
+						{
+							$atts = array(
+										'type'			=> 'grid',
+										'items'			=> get_option( 'posts_per_page' ),
+										'columns'		=> 3,
+										'class'			=> 'avia-builder-el-no-sibling',
+										'paginate'		=> 'yes',
+										'use_main_query_pagination' => 'yes',
+										'contents' 	=> 'excerpt_read_more',  /* weiterlesen-link */
+										'custom_query'	=> array(
+																'post__in'	=> $post_ids,
+																'post_type'	=> get_post_types()
+															)
+									);
+
+							/**
+							 * @since 4.5.5
+							 * @return array
+							 */
+							$atts = apply_filters( 'avf_post_slider_args', $atts, 'archive' );
+
+							$blog = new avia_post_slider( $atts );
+							$blog->query_entries();
+
+							echo '<div class=""entry-content-wrapper"">' . $blog->html() . '</div>';
+						}
+						else
+						{
+							get_template_part( 'includes/loop', 'index' );
+						}
+					}
+					else
+					{
+						/* Run the loop to output the posts.
+						 * If you want to overload this in a child theme then include a file
+						 * called loop-index.php and that will be used instead.
+						 */
+						$more = 0;
+						get_template_part( 'includes/loop', 'index' );
+					}
+                    ?>
+
+				<!--end content-->
+				</main>
+
+				<?php
+
+				//get the sidebar
+                if( avia_get_option( 'archive_sidebar' ) == 'archive_sidebar_separate' )
+				{
+                    $avia_config['currently_viewing'] = 'archive';
+                }
+                else
+				{
+                    $avia_config['currently_viewing'] = 'blog';
+                }
+
+				get_sidebar();
+
+				?>
+
+			</div><!--end container-->
+
+		</div><!-- close default .container_wrap element -->
+
+<?php
+		get_footer();
+"
+QKWz35Ks,csv reader 2,VioletVi,Python,Thursday 18th of May 2023 11:46:44 AM CDT,"import csv
+def read_csv_values(file_path, start_row = 0, end_row = 1e99):
+    columns = [] # a list to store the columns in
+    onRowNumber = 0 #an integer to track the row number 
+    headerList = [] # a list to store the headers in
+    with open(file_path, 'r') as csv_file: #open the CSV file, and then close it when we reach the end of this block
+        reader = csv.reader(csv_file) #read the file as a CSV file
+        for row in reader: # for each row in the file
+            colNum = 0 #we are starting at column zero
+            if onRowNumber == 0: # if the row is zero...
+                for col in row:
+                    columns.append([]) # Make empty lists to store each column's data
+                    headerList.append(col) #Store the headers from row zero
+
+            if onRowNumber < start_row: #if we are at the not yet at the row the user specified...
+                pass # Do nothing
+
+            elif onRowNumber >= end_row: #if we have reached the last row the user asked for
+                return columns, headerList # return and end the function
+
+            else: #Otherwise we are in the range the user asked for
+                for col in row: #for each column in the row...
+                    try:
+                        columns[colNum].append(float(col)) #try to convert it into a float
+                    except: #if that fails...
+                        if col != """": # if its not an empty string
+                            columns[colNum].append(col) #add the cell value as a string
+                            
+                    colNum += 1 # increase colNum by one
+            onRowNumber += 1 #increase row number by one
+    return columns, headerList
+
+
+file_path = 'cancer.csv'
+values_array, headers = read_csv_values(file_path, 0, 1)
+
+print(headers)
+print(values_array)
+"
+p3pzD1CC,Easter Bread,dgodinov,Python,Thursday 18th of May 2023 11:36:31 AM CDT,"budget = float(input())
+price_for_kg_flour = float(input())
+price_for_pack_eggs = price_for_kg_flour * 0.75
+price_for_quart_milk = (price_for_kg_flour * 1.25) / 4
+
+money_needed_for_one_loaf = price_for_kg_flour + price_for_pack_eggs + price_for_quart_milk
+
+loaves = 0
+colored_eggs = 0
+
+while budget >= money_needed_for_one_loaf:
+      loaves += 1
+      budget -= money_needed_for_one_loaf
+      colored_eggs += 3
+      if loaves % 3 == 0:
+            colored_eggs -= loaves - 2
+
+print(f""You made {loaves} loaves of Easter bread! Now you have {colored_eggs} eggs ""
+      f""and {budget:.2f}BGN left."")
+"
+G3WVQ7Yf,Pythion CSV read,VioletVi,Python,Thursday 18th of May 2023 11:23:14 AM CDT,"def read_csv_values(file_path):
+    columns = []
+    headers = True
+    with open(file_path, 'r') as csv_file:
+        reader = csv.reader(csv_file)
+        for row in reader:
+            colNum = 0
+            for col in row:
+
+                if headers:
+                    columns.append([])
+                else:
+                    columns[colNum].append(float(col))
+                    colNum += 1
+            if headers:
+                headers = False
+
+    return columns"
+2Xzs1Gnh,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:46:50 AM CDT,"SELECT `name` FROM `characters`
+ORDER BY `name`;"
+XDQRj0fr,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:46:19 AM CDT,"SELECT `country_name`, `country_code`,
+IF (`currency_code` = 'EUR', 'Euro', 'Not Euro') AS `currency` 
+— ако първото условие е вярно връщаме втората стойност, в противен случай третата
+FROM `countries`
+ORDER BY `country_name` ASC;"
+ZQ9rge4h,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:45:55 AM CDT,"SELECT `country_name`, `population` FROM `countries`
+WHERE `continent_code` = ""EU""
+ORDER BY `population` DESC, `country_name` ASC 
+LIMIT 30;"
+4ph486f4,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:45:32 AM CDT,"SELECT `peak_name` FROM `peaks`
+ORDER BY `peak_name` ASC;"
+iH5aMMXq,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:44:32 AM CDT,"UPDATE `employees` 
+SET 
+    `salary` = `salary` * 1.12
+WHERE
+    `department_id` IN (1 , 2, 4, 11);
+
+SELECT `salary` FROM `employees`;"
+UckEbhqn,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:44:03 AM CDT,"SELECT 
+    `first_name`, `last_name`, `hire_date`
+FROM
+    `employees`
+ORDER BY `hire_date` DESC
+LIMIT 7;"
+YuJpRG1a,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:43:36 AM CDT,"SELECT 
+    *
+FROM
+    `projects`
+ORDER BY `start_date` ASC , `name` ASC, `project_id` ASC
+LIMIT 10;"
+4eDLid7R,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:43:05 AM CDT,"SELECT DISTINCT `job_title` FROM `employees`
+ORDER BY `job_title` ASC;"
+QcBHPdPk,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:42:41 AM CDT,"CREATE VIEW `v_employees_job_titles` AS
+    SELECT 
+        CONCAT_WS(' ', `first_name`, `middle_name`, `last_name`) AS `full_name`,
+        `job_title`
+    FROM
+        `employees`;
+        
+SELECT * FROM `v_employees_job_titles`;"
+vn1XuptW,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 10:42:14 AM CDT,"CREATE VIEW `v_employees_salaries` AS
+SELECT `first_name`, `last_name`, `salary`
+FROM `employees`;
+
+SELECT * FROM `v_employees_salaries`;"
+QuZcL9rb,is_Dumper,Seredenko-V,C++,Thursday 18th of May 2023 10:36:22 AM CDT,"#include <iostream>
+#include <memory>
+#include <string>
+#include <string_view>
+
+using namespace std;
+
+class AnyStorageBase {
+public:
+    virtual void Print(ostream& out) const = 0;
+    virtual ~AnyStorageBase() = default;
+
+private:
+};
+
+template <typename T>
+class AnyStorage : public AnyStorageBase {
+public:
+    AnyStorage(T&& data)
+        : data_(move(data)) {
+    }
+
+    AnyStorage(const T& data)
+        : data_(data) {
+    }
+
+    void Print(ostream& out) const override {
+        out << data_;
+    }
+
+private:
+    T data_;
+};
+
+class Dumper;
+
+class Any {
+public:
+    template <class S>
+    Any(S&& type) {
+        cout << is_same<S, Dumper>::value << endl;
+        cout << is_same<S, Dumper&>::value << endl;
+        using Initial = std::remove_reference_t<S>;
+        ptr_ = std::make_unique<AnyStorage<Initial>>(std::forward<S>(type));
+    }
+
+    void Print(std::ostream& out) const {
+        ptr_->Print(out);
+    }
+
+private:
+    std::unique_ptr<AnyStorageBase> ptr_;
+};
+
+class Dumper {
+public:
+    Dumper() {
+        std::cout << ""construct""sv << std::endl;
+    }
+    ~Dumper() {
+        std::cout << ""destruct""sv << std::endl;
+    }
+    Dumper(const Dumper&) {
+        std::cout << ""copy""sv << std::endl;
+    }
+    Dumper(Dumper&&) {
+        std::cout << ""move""sv << std::endl;
+    }
+    Dumper& operator=(const Dumper&) {
+        std::cout << ""= copy""sv << std::endl;
+        return *this;
+    }
+    Dumper& operator=(Dumper&&) {
+        std::cout << ""= move""sv << std::endl;
+        return *this;
+    }
+};
+
+ostream& operator<<(ostream& out, const Any& arg) {
+    arg.Print(out);
+    return out;
+}
+
+ostream& operator<<(ostream& out, const Dumper&) {
+    return out;
+}
+
+int main() {
+    //Any any_int(42);
+    //Any any_string(""abc""s);
+    //cout << any_int << endl << any_string << endl;
+    //Any any_dumper_temp{ Dumper{} };
+    Dumper auto_dumper;
+    Any any_dumper_auto(auto_dumper);
+    AnyStorage<int> test(5);
+    return 0;
+}"
+uiPqg6bJ,Untitled,vvsvvs,C#,Thursday 18th of May 2023 10:31:50 AM CDT,"namespace Snake
+{
+    using System;
+    using System.Linq;
+    public class Program
+    {
+        static void Main(string[] args)
+        {
+            int[] dimensions = Console.ReadLine().Split("" "", StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToArray();
+            string snakeName = Console.ReadLine();
+            int rows = dimensions[0];
+            int cols = dimensions[1];
+
+            //ACTION
+            char[,] matrix = new char[rows, cols];
+
+            //Creating The Snake's Matrix Path
+            int index = 0;
+
+            for (int row = 0; row < rows; row++)
+            {
+                for (int col = 0; col < cols; col++)
+                {
+                    if (row % 2 == 0)
+                    {
+                        matrix[row, col] = snakeName[index];                                                
+                    }
+                    else
+                    {
+                        matrix[row, cols - 1 - col] = snakeName[index];
+                    }
+
+                    index++;
+
+                    if (index >= snakeName.Length)
+                    {
+                        index = 0;
+                    }
+                }
+            }
+
+            for (int row = 0; row < rows; row++)
+            {
+                for (int col = 0; col < cols; col++)
+                {
+                    Console.Write(matrix[row, col]);
+                }
+
+                Console.WriteLine();
+            }
+        }
+    }
+}"
+Jddzqean,Auto tree chopping,OscarGlo,Lua,Thursday 18th of May 2023 10:02:25 AM CDT,"function findSlot(sub)
+  for i = 1,16 do
+    local item = turtle.getItemDetail(i)
+    if item and string.match(item.name, sub) then
+      return i
+    end
+  end
+  return nil
+end
+
+function isLog(block)
+  return string.match(block.name, ""log"")
+end
+ 
+local dir = 1
+
+function turnDir()
+  if dir == 1 then
+    turtle.turnLeft()
+  else
+    turtle.turnRight()
+  end
+end
+
+local run = true
+while run do
+  -- Refuel
+  if turtle.getFuelLevel() == 0 then
+    local stackCount = 0
+    for i = 1,16 do
+      turtle.select(i)
+	  local item = turtle.getItemDetail()
+      if item and not string.match(item.name, ""sapling"") and turtle.refuel(8) then
+        break
+      end
+      run = false
+    end
+  end
+  
+  -- Unload
+  local ok, block = turtle.inspectUp()
+  if ok and not string.match(block.name, ""leaves"") then
+    -- Count log stacks
+    local stacks = 0
+    for i = 1,16 do
+      turtle.select(i)
+      local item = turtle.getItemDetail()
+      if item and string.match(item.name, ""log"") then
+        stacks = stacks + 1
+      end
+    end
+    -- Keep first log stack
+    for i = 16,1,-1 do
+      if stacks == 1 then
+        break
+      end
+      turtle.select(i)
+      local item = turtle.getItemDetail()
+      if item and string.match(item.name, ""log"") then
+        turtle.dropUp()
+        stacks = stacks - 1
+      end
+    end
+  end
+  
+  -- Movement
+  local ok, block = turtle.inspect()
+  if not ok then
+    turtle.forward()
+  else
+    if not isLog(block) then
+      -- Restock
+      while turtle.suck() do end
+      
+      turnDir()
+      turtle.forward()
+      local endReached = turtle.detect()
+      turnDir()
+
+      if not endReached then
+        dir = -dir
+      end
+    else
+      -- Chop tree
+      height = 0
+      turtle.dig()
+      turtle.forward()
+      turtle.digDown()
+      while true do
+        local ok, block = turtle.inspectUp()
+        if not ok or not isLog(block) then
+          break
+        end
+        turtle.digUp()
+        turtle.up()
+        height = height + 1
+      end
+      
+      -- Replant
+      while height > 0 do
+        turtle.down()
+        height = height - 1
+      end
+      local slot = findSlot(""sapling"")
+      if slot then
+        turtle.select(slot)
+        turtle.placeDown()
+      end
+    end
+  end
+end"
+1a2nG9CY,Untitled,alefranklin,C#,Thursday 18th of May 2023 09:59:22 AM CDT,"using OpenTK.Graphics.OpenGL;
+using OpenTK.Wpf;
+ 
+private void Renderer_Render(TimeSpan obj)
+        {
+            if (!_acquisition)
+                return;
+//initialization things. Set up the drawing, not much to modify here.
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GL.Enable(EnableCap.DepthTest);
+            GL.DepthMask(true);
+            GL.DepthFunc(DepthFunction.Lequal);
+            GL.ClearDepth(1.0f);
+            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
+            GL.PushMatrix();
+            GL.MatrixMode(MatrixMode.Projection);
+    
+    //_pointsToDraw is a matrix of float containing the list of points needed to draw the signal for each channel acquiring.
+    //the signal is in this format (x0,y0,x1,y1,x2,y2 ..... x(xPoints), y(xPoints)) so it contains both x and y values alternated.
+    //_pointsToDraw[0] refers to the list of points of the first channel. _pointsToDraw[0][1] refers to the y value of the first point of the first channel.
+    
+    //xPoints is a constant that determines the lenght of the x axis of the signal, so how many horizontal points will be drawn.
+    //it can be changed but mind to also resize the structures that uses xPoints as their size for example _pointsToDraw.
+    //each _pointsToDraw[i] is initialized like that _pointsToDraw[i] = new float[xPoints * 2]. (*2 since it contains both x and y so we need the double of space)
+    
+    //_latestSample is an array that stores for each channel the latest sample that was drawn.
+    //as we fill _pointsToDraw[channel] we also move _latestSample[channel] for each sample we write so we have an index of where the signal was written so far. Since the signal ""loops"" in our xPoints _latestSample[channel] cannot be greater that xPoints so as we increase _latestSample we have to use the module of xPoints (example: _latestSample[channel] = (_latestSample[channel] + 1) % xAxis).
+            for (int ch = 0; ch < _pointsToDraw.Length; ch++)
+            {
+                GL.LoadIdentity();//resets the transformation matrix to default
+                GL.LineWidth(0.5f);//sets the line width
+                GL.Scale(2.0 / xPoints, 0.1, 1.0); //scale the signal in the 3 directions (x, y, z) 
+                GL.Translate(-xPoints/2, ((ch + 1) * 0.8) - 9 , 1.0); //translate the signal in the 3 directions (x, y ,z)
+                //sets the format of the array:
+                //InterleavedArrayFormat.V2f means that each vertex of the signal is expressed by 2 floats, one for x and one for y (exactly the format of _pointsToDraw).
+                //the second parameter refers to the starting point of the array. we want to display the whole signal so we start from 0
+                //the third parameter refers to the array containing the points, we of course use _pointsToDraw[ch]
+                GL.InterleavedArrays(InterleavedArrayFormat.V2f, 0, _pointsToDraw[ch]); 
+                if (_latestSample[ch] != -1)
+                {
+                    //these two functions determines how the points selected before are going to be drawn.
+                    //the first parametere is the type of drawing, in this case a simple Line
+                    //the second parameter is the starting point to draw
+                    //the third parameter is the number of subsequent points to draw from the starting point.
+                    // so first we draw the points from the start to the _latestSample then we leave a small gap to show the difference between the new signal that is being written and the old signal that has to be overwritten (in this case i had 2000 points of xPoints and left a gap of 20 points. and then starting from _latestSample point + 20 points of gap we draw the latest part of the signal (the old signal)
+                    GL.DrawArrays(PrimitiveType.LineStrip, 0, _latestSample[ch]);
+                    GL.DrawArrays(PrimitiveType.LineStrip, _latestSample[ch] + 20,xPoints - (20 + _latestSample[ch]));
+                }
+                
+                GL.End();
+            }
+            GL.PopMatrix();
+ 
+        }"
+RxLqFzep,WiFi and UART,MAGCARI,Arduino,Thursday 18th of May 2023 09:53:33 AM CDT,"#include <SoftwareSerial.h>
+#include <ESP8266WiFi.h>
+#include <FirebaseESP8266.h>
+
+EspSoftwareSerial::UART testSerial;
+
+// WiFi credentials
+const char* ssid = ""no internet"";
+const char* password = ""nointernet"";
+
+void setup() {
+  Serial.begin(9600);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(""."");
+  }
+
+  Serial.println("""");
+  Serial.println(""WiFi connected"");
+  Serial.print(""IP address: "");
+  Serial.println(WiFi.localIP());
+
+  testSerial.begin(115200, EspSoftwareSerial::SWSERIAL_8N1, D7, D8, false, 95, 11);
+  if(!testSerial){
+    Serial.println(""Invalid EspSoftwareSerial pin configuration, check config"");
+    while(1){
+      delay(1000);
+    }
+  }
+  Serial.println(""EspSoftwareSerial init"");
+}
+
+void loop(){
+  if(testSerial.available()){
+    char receivedData = testSerial.read();
+    Serial.println(receivedData);
+  }
+}"
+EtKDnSwF,load dovi script,vpeter,Bash,Thursday 18th of May 2023 09:39:01 AM CDT,"#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2023-present Team CoreELEC (https://coreelec.org)
+
+message() {
+  >&2 echo ""${@}""
+}
+
+# get coreelec release information
+source /etc/os-release
+
+load_dovi_from_android() {
+  local rv=1  # error
+  message ""load dovi from android start""
+
+  mountpoint -q /android/vendor || mount -o ro /dev/vendor /android/vendor
+  DOVI_KO=""/android/vendor/lib/modules/dovi.ko""
+  if [ -f ${DOVI_KO} ]; then
+    modinfo ${DOVI_KO}
+    insmod  ${DOVI_KO}
+    rv=0
+  else
+    message ""dovi module doesn't exist""
+  fi
+
+  message ""load dovi from android end""
+  return ${rv}
+}
+
+cleanup() {
+  message ""cleanup dovi start""
+
+  if mountpoint -q /android/vendor; then
+    rmmod dovi.ko 2>/dev/null
+    umount /android/vendor
+  fi
+
+  message ""cleanup dovi end""
+}
+
+if [ ""${COREELEC_DEVICE}"" != ""Amlogic-ng"" ]; then
+  exit 0
+fi
+
+if [ ! -b /dev/vendor ]; then
+  exit 0
+fi
+
+case ""${1}"" in
+  start)
+    load_dovi_from_android
+    [ ${?} -eq 0 ] && exit 0
+    cleanup
+    ;;
+  stop)
+    cleanup
+    ;;
+esac
+"
+Y6vUi9A7,scHashInterpreter,T3RRYT3RR0R,Batch,Thursday 18th of May 2023 09:30:33 AM CDT,"@Echo off& Set f=For /f ""UsebackQ Delims="" %%z in
+Setlocal EnableDelayedExpansion&%f% (""%~1"")Do (Set ""l=%%~z""&Set ""l=!l:;=-!""&%f:z=G% (`cmd/u/c ^""Echo(!l!^""^|find/v """"^|findstr ""^^""`)Do (If %%G==- (Set/a i=i%%127+1)Else if %%G==# ((CMD /C Exit !i!)&<nul Set/p ""=7!=EXITCODEASCII!""&Set i=0)))"
+x0yamDkd,Multidimensional_list,ALEXANDAR_GEORGIEV,Python,Thursday 18th of May 2023 09:28:02 AM CDT,"# Multidimensional_list
+# Even_matrix
+row = int(input())
+
+matrix = []
+
+for row_index in range(row):
+    inner_list = [int(el) for el in input().split("", "") if int(el) % 2 == 0]
+    matrix.append(inner_list)
+
+print(matrix)
+
+# Flattening_matrix
+row = int(input())
+
+flatten = []
+
+for _ in range(row):
+    inner_list = [int(el) for el in input().split(', ')]
+    flatten.extend(inner_list)
+
+
+print(flatten)
+
+# Primary_diagonal
+rows = int(input())
+
+matrix = []
+
+for _ in range(rows):
+    inner_list = [int(el) for el in input().split()]
+    matrix.append(inner_list)
+
+sum_diagonal = 0
+for index in range(rows):
+    sum_diagonal += matrix[index][index]
+
+print(sum_diagonal)
+
+# Square_with_maximum_sum
+rows, cols = [int(el) for el in input().split("", "")]
+
+matrix = []
+
+for _ in range(rows):
+    inner_list = [int(el) for el in input().split("", "")]
+    matrix.append(inner_list)
+
+
+max_sum = float('-int')
+sub_matrix = []
+
+for row_index in range(rows-1):
+    for col_index in range(cols-1):
+        current_element = matrix[row_index][col_index]
+        element_below = matrix[row_index + 1][col_index]
+        next_element = matrix[row_index][col_index + 1]
+        diagonal_element = matrix[row_index + 1][col_index + 1]
+        current_sum_elements = current_element + element_below + next_element + diagonal_element
+
+        if max_sum < current_sum_elements:
+            max_sum = current_sum_elements
+            sub_matrix = [[current_element, next_element], [element_below, diagonal_element]]
+
+print(*sub_matrix[0])
+print(*sub_matrix[1])
+print(max_sum)
+
+# Sum_matrix_columns
+rows, cols = [int(el) for el in input().split("", "")]
+
+matrix = []
+
+for _ in range(rows):
+    inner_list = [int(el) for el in input().split()]
+    matrix.append(inner_list)
+
+col_sums = []
+for col_index in range(cols):
+    sum_col_elements = 0
+    for row_index in range(rows):
+        sum_col_elements += matrix[row_index][col_index]
+    col_sums.append(sum_col_elements)
+
+for col_sum in col_sums:
+    print(col_sum)
+
+# Sum_matrix_elements
+# Брой редове
+# брой колони
+# Четем данните за редове и колони
+rows, cols = [int(el) for el in input().split("", "")]
+
+matrix = []
+
+
+for _ in range(rows):
+    inner_list = [int(el) for el in input().split("", "")]
+    matrix.append(inner_list)
+
+
+# Взимаме елементите от матрицата
+sum_nums = 0
+for row_index in range(rows):
+    for col_index in range(cols):
+        sum_nums += matrix[row_index][col_index]
+
+print(sum_nums)
+print(matrix)
+
+# TODO Solution 2
+# Четем данните за редове и колони
+rows, cols = [int(el) for el in input().split("", "")]
+
+matrix = []
+
+
+for _ in range(rows):
+    inner_list = [int(el) for el in input().split("", "")]
+    sum_nums += sum(inner_list)
+    matrix.append(inner_list)
+
+
+
+print(sum_nums)
+print(matrix)
+
+# Symbol_in_matrix
+def find_element_in_matrix(matrix, element):
+    for row_index in range(n):
+        for col_index in range(n):
+            if matrix[row_index][col_index] == element:
+                return (row_index, col_index)
+
+
+n = int(input())
+
+matrix = []
+
+for _ in range(n):
+    inner_list = list(input())  # List ot characters
+    matrix.append(inner_list)
+
+searched_symbol = input()
+position = find_element_in_matrix(matrix, searched_symbol)
+
+if position:
+    print(position)
+else:
+    print(f""{searched_symbol} does not occur in the matrix"")
+"
+baUWMRyM,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 09:25:23 AM CDT,"SELECT 
+    `title`
+FROM
+    `books`
+WHERE
+    `title` LIKE 'Harry Potter%'
+ORDER BY `id`;"
+y9nkD0KT,Color or Die 2 ESP,DashaBars,Lua,Thursday 18th of May 2023 09:20:21 AM CDT,loadstring(game:HttpGet('https://raw.githubusercontent.com/DashaBars/Hack/main/Color%20or%20Die%202%20ESP.lua'))
+quh2Bs6W,BCn Texture Compression,Zgragselus,C++,Thursday 18th of May 2023 09:20:16 AM CDT,"#ifndef __TEXTURE_COMPRESSOR__H__
+#define __TEXTURE_COMPRESSOR__H__
+
+#include <math.h>
+
+#define BC_ROUNDING_BIAS
+
+namespace Engine
+{
+	class TextureCompressor
+	{
+	public:
+		enum class Format
+		{
+			BC1 = 0,
+			BC2,
+			BC3,
+			BC4,
+			BC5
+		};
+
+		enum class Quality
+		{
+			NORMAL = 0,
+			HIGH
+		};
+
+	private:
+		static unsigned char mLookUp8To5[256][2];
+		static unsigned char mLookUp8To6[256][2];
+		static float mMidPoints5[32];
+		static float mMidPoints6[64];
+		static unsigned char mExpand5[32];
+		static unsigned char mExpand6[64];
+		static unsigned char mQuantGTab[256 + 16];
+		static unsigned char mQuantRBTab[256 + 16];
+		static bool mQuantInitialized;
+
+		static int Mul8Bit(int a, int b)
+		{
+			int t = a * b + 128;
+			return (t + (t >> 8)) >> 8;
+		}
+
+		static void From16Bit(unsigned char* out, unsigned short v)
+		{
+			int r = (v & 0xF800) >> 11;
+			int g = (v & 0x07E0) >> 5;
+			int b = (v & 0x001F) >> 0;
+
+			// Expand to 8-bit via bit replication
+			out[0] = (r * 33) >> 2;
+			out[1] = (g * 65) >> 4;
+			out[2] = (b * 33) >> 2;
+			out[3] = 0;
+		}
+
+		static unsigned short As16Bit(int r, int g, int b)
+		{
+			return (unsigned short)((Mul8Bit(r, 31) << 11) + (Mul8Bit(g, 63) << 5) + Mul8Bit(b, 31));
+		}
+
+		static int Lerp13(int a, int b)
+		{
+#ifdef BC_ROUNDING_BIAS
+			return a + Mul8Bit(b - a, 0x55);
+#else
+			return (2 * a + b) / 3;
+#endif
+		}
+
+		static void Lerp13RGB(unsigned char* out, unsigned char* p1, unsigned char* p2)
+		{
+			out[0] = (unsigned char)Lerp13(p1[0], p2[0]);
+			out[1] = (unsigned char)Lerp13(p1[1], p2[1]);
+			out[2] = (unsigned char)Lerp13(p1[2], p2[2]);
+		}
+
+		static void EvalColors(unsigned char* color, unsigned short c0, unsigned short c1)
+		{
+			From16Bit(color + 0, c0);
+			From16Bit(color + 4, c1);
+			Lerp13RGB(color + 8, color + 0, color + 4);
+			Lerp13RGB(color + 12, color + 4, color + 0);
+		}
+
+		static void PrecomputeTables()
+		{
+			for (int i = 0; i < 32; i++)
+			{
+				mExpand5[i] = (i << 3) | (i >> 2);
+			}
+
+			for (int i = 0; i < 64; i++)
+			{
+				mExpand6[i] = (i << 2) | (i >> 4);
+			}
+
+			for (int i = 0; i < 256 + 16; i++)
+			{
+				int v = i - 8 < 0 ? 0 : i - 8 > 255 ? 255 : i - 8;
+				mQuantRBTab[i] = mExpand5[Mul8Bit(v, 31)];
+				mQuantGTab[i] = mExpand6[Mul8Bit(v, 63)];
+			}
+
+			mQuantInitialized = true;
+		}
+
+		static void DitherBlock(unsigned char* dest, unsigned char* block)
+		{
+			if (mQuantInitialized == false)
+			{
+				PrecomputeTables();
+			}
+
+			int err[8];
+			int* ep1 = err;
+			int* ep2 = err + 4;
+			int* et;
+
+			// Process channels separately and dither
+			for (int channel = 0; channel < 3; channel++)
+			{
+				unsigned char* bp = block + channel;
+				unsigned char* dp = dest + channel;
+
+				unsigned char* quant = (channel == 1) ? mQuantGTab + 8 : mQuantRBTab + 8;
+
+				err[0] = err[1] = err[2] = err[3] = err[4] = err[5] = err[6] = err[7] = 0;
+
+				for (int i = 0; i < 4; i++)
+				{
+					dp[0] = quant[bp[0] + ((3 * ep2[1] + 5 * ep2[0]) >> 4)];
+					ep1[0] = bp[0] - dp[0];
+					dp[4] = quant[bp[4] + ((7 * ep1[0] + 3 * ep2[2] + 5 * ep2[1] + ep2[0]) >> 4)];
+					ep1[1] = bp[4] - dp[4];
+					dp[8] = quant[bp[8] + ((7 * ep1[1] + 3 * ep2[3] + 5 * ep2[2] + ep2[1]) >> 4)];
+					ep1[2] = bp[8] - dp[8];
+					dp[12] = quant[bp[12] + ((7 * ep1[2] + 5 * ep2[3] + ep2[2]) >> 4)];
+					ep1[3] = bp[12] - dp[12];
+					bp += 16;
+					dp += 16;
+
+					// Swap
+					et = ep1;
+					ep1 = ep2;
+					ep2 = et;
+				}
+			}
+		}
+
+		static unsigned int MatchColorsBlock(unsigned char* block, unsigned char* color, bool dither)
+		{
+			// Calculate vector for color line
+			int dir[3] = { color[0 * 4 + 0] - color[1 * 4 + 0], color[0 * 4 + 1] - color[1 * 4 + 1], color[0 * 4 + 2] - color[1 * 4 + 2] };
+
+			// Calculate colors projected on this line
+			int stops[4];
+			for (int i = 0; i < 4; i++)
+			{
+				stops[i] = color[i * 4 + 0] * dir[0] + color[i * 4 + 1] * dir[1] + color[i * 4 + 2] * dir[2];
+			}
+
+			// Calculate ideal projection of each pixel color on the line
+			int dots[16];
+			for (int i = 0; i < 16; i++)
+			{
+				dots[i] = block[i * 4 + 0] * dir[0] + block[i * 4 + 1] * dir[1] + block[i * 4 + 2] * dir[2];
+			}
+
+			// At this point all colors are projected on the line, we have just 4 colors linearly on the given line. Determine which is the closest color for given projection
+			int c0 = (stops[1] + stops[3]);
+			int half = (stops[3] + stops[2]);
+			int c3 = (stops[2] + stops[0]);
+
+			// Resulting mask
+			int mask = 0;
+
+			if (!dither)
+			{
+				for (int i = 15; i >= 0; i--)
+				{
+					int dot = dots[i] * 2;
+					mask <<= 2;
+
+					if (dot < half)
+					{
+						mask |= (dot < c0) ? 1 : 3;
+					}
+					else
+					{
+						mask |= (dot < c3) ? 2 : 0;
+					}
+				}
+			}
+			else
+			{
+				// Floyd-Steinberg dithering 
+				int err[8];
+				int* ep1 = err;
+				int* ep2 = err + 4;
+
+				int* dp = dots;
+
+				c0 <<= 3;
+				half <<= 3;
+				c3 <<= 3;
+
+				for (int i = 0; i < 8; i++)
+				{
+					err[i] = 0;
+				}
+
+				for (int y = 0; y < 4; y++)
+				{
+					int dot, lmask, step;
+
+					dot = (dp[0] << 4) + (3 * ep2[1] + 5 * ep2[0]);
+					if (dot < half)
+						step = (dot < c0) ? 1 : 3;
+					else
+						step = (dot < c3) ? 2 : 0;
+					ep1[0] = dp[0] - stops[step];
+					lmask = step;
+
+					dot = (dp[1] << 4) + (7 * ep1[0] + 3 * ep2[2] + 5 * ep2[1] + ep2[0]);
+					if (dot < half)
+						step = (dot < c0) ? 1 : 3;
+					else
+						step = (dot < c3) ? 2 : 0;
+					ep1[1] = dp[1] - stops[step];
+					lmask |= step << 2;
+
+					dot = (dp[2] << 4) + (7 * ep1[1] + 3 * ep2[3] + 5 * ep2[2] + ep2[1]);
+					if (dot < half)
+						step = (dot < c0) ? 1 : 3;
+					else
+						step = (dot < c3) ? 2 : 0;
+					ep1[2] = dp[2] - stops[step];
+					lmask |= step << 4;
+
+					dot = (dp[3] << 4) + (7 * ep1[2] + 5 * ep2[3] + ep2[2]);
+					if (dot < half)
+						step = (dot < c0) ? 1 : 3;
+					else
+						step = (dot < c3) ? 2 : 0;
+					ep1[3] = dp[3] - stops[step];
+					lmask |= step << 6;
+
+					dp += 4;
+					mask |= lmask << (y * 8);
+					{ int* et = ep1; ep1 = ep2; ep2 = et; } // swap
+				}
+
+			}
+
+			return mask;
+		}
+
+		static void OptimizeColorBlock(unsigned char* block, unsigned short* max16, unsigned short* min16)
+		{
+			// Find minimum, maximum and mean color per channel
+			int mean_value[3];
+			int min_value[3];
+			int max_value[3];
+
+			for (int channel = 0; channel < 3; channel++)
+			{
+				int minv, maxv, muv;
+
+				muv = maxv = minv = block[channel];
+				for (int i = 4; i < 64; i += 4)
+				{
+					muv += block[i + channel];
+
+					if (block[i + channel] < minv)
+					{
+						minv = block[i + channel];
+					}
+					else if (block[i + channel] > maxv)
+					{
+						maxv = block[i + channel];
+					}
+				}
+
+				mean_value[channel] = (muv + 8) >> 4;
+				min_value[channel] = minv;
+				max_value[channel] = maxv;
+			}
+
+			// Calculate elements of covariance matrix (symmetrical matrix - therefore calculating only bottom triangle of it):
+			// R*R G*R B*R
+			// R*G G*G B*G
+			// R*B G*B B*B
+			int covariance_int[6] = { 0 };
+			for (int i = 0; i < 16; i++)
+			{
+				int r = block[i * 4 + 0] - mean_value[0];
+				int g = block[i * 4 + 1] - mean_value[1];
+				int b = block[i * 4 + 2] - mean_value[2];
+
+				covariance_int[0] += r * r;
+				covariance_int[1] += r * g;
+				covariance_int[2] += r * b;
+				covariance_int[3] += g * g;
+				covariance_int[4] += g * b;
+				covariance_int[5] += b * b;
+			}
+
+			float covariance_float[6] = { 0.0f };
+			for (int i = 0; i < 6; i++)
+			{
+				covariance_float[i] = (float)covariance_int[i] / 255.0f;
+			}
+
+			// Find principal axis based on power interation
+			float axis[3] = { (float)(max_value[0] - min_value[0]), (float)(max_value[1] - min_value[1]), (float)(max_value[2] - min_value[2]) };
+
+			int ITERATIONS = 1;
+			for (int iter = 0; iter < ITERATIONS; iter++)
+			{
+				float r = axis[0] * covariance_float[0] + axis[1] * covariance_float[1] + axis[2] * covariance_float[2];
+				float g = axis[0] * covariance_float[1] + axis[1] * covariance_float[3] + axis[2] * covariance_float[4];
+				float b = axis[0] * covariance_float[2] + axis[1] * covariance_float[4] + axis[2] * covariance_float[5];
+
+				axis[0] = r;
+				axis[1] = g;
+				axis[2] = b;
+			}
+
+			// Calculate magnitude of strongest principal axis component
+			float magnitude = fabsf(axis[0]);
+			if (fabsf(axis[1]) > magnitude)
+			{
+				magnitude = fabsf(axis[1]);
+			}
+			if (fabsf(axis[2]) > magnitude)
+			{
+				magnitude = fabsf(axis[2]);
+			}
+
+			// Calculate coefficients for principal axis (in integer - range 0 - 1000), if strongest component of principal axis is too weak, default to luminance
+			int vector[3] = { 299, 587, 114 };
+			if (magnitude >= 4.0f)
+			{
+				magnitude = 512.0f / magnitude;
+				vector[0] = (int)(axis[0] * magnitude);
+				vector[1] = (int)(axis[1] * magnitude);
+				vector[2] = (int)(axis[2] * magnitude);
+			}
+
+			// Pick colors at extreme points
+			unsigned char* minp = block;
+			unsigned char* maxp = block;
+
+			int mind = block[0] * vector[0] + block[1] * vector[1] + block[2] * vector[2];
+			int maxd = mind;
+			for (int i = 1; i < 16; i++)
+			{
+				int dot = block[i * 4 + 0] * vector[0] + block[i * 4 + 1] * vector[1] + block[i * 4 + 2] * vector[2];
+
+				if (dot < mind)
+				{
+					mind = dot;
+					minp = block + i * 4;
+				}
+
+				if (dot > maxd)
+				{
+					maxd = dot;
+					maxp = block + i * 4;
+				}
+			}
+
+			*min16 = As16Bit(minp[0], minp[1], minp[2]);
+			*max16 = As16Bit(maxp[0], maxp[1], maxp[2]);
+		}
+
+		static unsigned short Quantize5(float x)
+		{
+			unsigned short q;
+			x = x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x;
+			q = (unsigned short)(x * 31.0f);
+			q += (x > mMidPoints5[q]);
+			return q;
+		}
+
+		static unsigned short Quantize6(float x)
+		{
+			unsigned short q;
+			x = x < 0.0f ? 0.0f : x > 1.0f ? 1.0f : x;
+			q = (unsigned short)(x * 63.0f);
+			q += (x > mMidPoints6[q]);
+			return q;
+		}
+
+		static int RefineBlock(unsigned char* block, unsigned short* max16, unsigned short* min16, unsigned int mask)
+		{
+			int oldmin = *min16;
+			int oldmax = *max16;
+
+			// Check whether all pixels have same idx
+			if ((mask ^ (mask << 2)) < 4)
+			{
+				int r = 8;
+				int g = 8;
+				int b = 8;
+
+				for (int i = 0; i < 16; i++)
+				{
+					r += block[i * 4 + 0];
+					g += block[i * 4 + 1];
+					b += block[i * 4 + 2];
+				}
+
+				r >>= 4;
+				g >>= 4;
+				b >>= 4;
+
+				*max16 = (mLookUp8To5[r][0] << 11) | (mLookUp8To6[g][0] << 5) | mLookUp8To5[b][0];
+				*min16 = (mLookUp8To5[r][1] << 11) | (mLookUp8To6[g][1] << 5) | mLookUp8To5[b][1];
+			}
+			else
+			{
+				int at1[3] = { 0, 0, 0 };
+				int at2[3] = { 0, 0, 0 };
+				unsigned int cm = mask;
+
+				int w1table[4] = { 3, 0, 2 ,1 };
+				int prods[4] = { 0x090000, 0x000900, 0x040102, 0x010402 };
+
+				int accumulate = 0;
+
+				for (int i = 0; i < 16; i++, cm >>= 2)
+				{
+					int step = cm & 3;
+					int w1 = w1table[step];
+
+					int r = block[i * 4 + 0];
+					int g = block[i * 4 + 1];
+					int b = block[i * 4 + 2];
+
+					accumulate += prods[step];
+
+					at1[0] += w1 * r;
+					at1[1] += w1 * g;
+					at1[2] += w1 * b;
+					at2[0] += r;
+					at2[1] += g;
+					at2[2] += b;
+				}
+
+				at2[0] = 3 * at2[0] - at1[0];
+				at2[1] = 3 * at2[1] - at1[1];
+				at2[2] = 3 * at2[2] - at1[2];
+
+				int xx = accumulate >> 16;
+				int yy = (accumulate >> 8) & 0xff;
+				int xy = (accumulate >> 0) & 0xff;
+
+				float f = 3.0f / 255.0f / (xx * yy - xy * xy);
+
+				*max16 = Quantize5((at1[0] * yy - at2[0] * xy) * f) << 11;
+				*max16 |= Quantize6((at1[1] * yy - at2[1] * xy) * f) << 5;
+				*max16 |= Quantize5((at1[2] * yy - at2[2] * xy) * f) << 0;
+
+				*min16 = Quantize5((at2[0] * xx - at1[0] * xy) * f) << 11;
+				*min16 |= Quantize6((at2[1] * xx - at1[1] * xy) * f) << 5;
+				*min16 |= Quantize5((at2[2] * xx - at1[2] * xy) * f) << 0;
+			}
+
+			return (oldmin != *min16) || (oldmax != *max16);
+		}
+
+		static void CompressColorBlock(unsigned char* dest, unsigned char* src, bool dithering)
+		{
+			unsigned int mask = 0;
+			unsigned short max16 = 0;
+			unsigned short min16 = 0;
+;
+			unsigned char dblock[16 * 4] = { 0 };
+
+			// Check if block is single constant color
+			int i = 0;
+			for (i = 1; i < 16; i++)
+			{
+				//if (((unsigned int*)src)[i] != ((unsigned int*)src)[0])
+				if ((src[i * 4 + 0] != src[0]) ||
+					(src[i * 4 + 1] != src[1]) ||
+					(src[i * 4 + 2] != src[2]))
+				{
+					break;
+				}
+			}
+
+			if (i == 16)
+			{
+				// Constant color, use just that one
+				int r = src[0];
+				int g = src[1];
+				int b = src[2];
+
+				max16 = (mLookUp8To5[r][0] << 11) | (mLookUp8To6[g][0] << 5) | mLookUp8To5[b][0];
+				min16 = (mLookUp8To5[r][1] << 11) | (mLookUp8To6[g][1] << 5) | mLookUp8To5[b][1];
+
+				mask = 0xAAAAAAAA;
+			}
+			else
+			{
+				if (dithering)
+				{
+					DitherBlock(dblock, src);
+				}
+
+				OptimizeColorBlock(dithering ? dblock : src, &max16, &min16);
+
+				if (max16 == min16)
+				{
+					mask = 0x0;
+
+					min16 = 0;
+					max16 = 0;
+				}
+				else
+				{
+					unsigned char color[4 * 4];
+					EvalColors(color, max16, min16);
+					mask = MatchColorsBlock(src, color, dithering);
+				}
+
+				for (i = 0; i < 2; i++)
+				{
+					unsigned int lastmask = mask;
+
+					if (RefineBlock(dithering ? dblock : src, &max16, &min16, mask))
+					{
+						if (max16 == min16)
+						{
+							mask = 0;
+							break;
+						}
+						else
+						{
+							unsigned char color[4 * 4];
+							EvalColors(color, max16, min16);
+							mask = MatchColorsBlock(src, color, dithering);
+						}
+					}
+
+					if (mask == lastmask)
+					{
+						break;
+					}
+				}
+			}
+
+			if (max16 < min16)
+			{
+				unsigned short t = min16;
+				min16 = max16;
+				max16 = t;
+
+				mask ^= 0x55555555;
+			}
+
+			dest[0] = (unsigned char)(max16);
+			dest[1] = (unsigned char)(max16 >> 8);
+			dest[2] = (unsigned char)(min16);
+			dest[3] = (unsigned char)(min16 >> 8);
+			dest[4] = (unsigned char)(mask);
+			dest[5] = (unsigned char)(mask >> 8);
+			dest[6] = (unsigned char)(mask >> 16);
+			dest[7] = (unsigned char)(mask >> 24);
+		}
+
+		static void SampleAlphaBlock(unsigned char* dest, unsigned char* src, int stride)
+		{
+			// Resample alpha to be 4 bit per pixel
+			for (int i = 0; i < 16; i += 2)
+			{
+				int a1 = (src[i * stride]) >> 4;
+				int a2 = (src[(i + 1) * stride]) >> 4;
+
+				unsigned char alpha = (unsigned char)((a1 << 4) + a2);
+
+				dest[i / 2] = alpha;
+			}
+		}
+
+		static void CompressAlphaBlock(unsigned char* dest, unsigned char* src, int stride)
+		{
+			// Find min and max value
+			int minval = src[0];
+			int maxval = src[0];
+
+			for (int i = 1; i < 16; i++)
+			{
+				if (src[i * stride] < minval)
+				{
+					minval = src[i * stride];
+				}
+				else if (src[i * stride] > maxval)
+				{
+					maxval = src[i * stride];
+				}
+			}
+
+			// Encode min and max value in result
+			dest[0] = (unsigned char)maxval;
+			dest[1] = (unsigned char)minval;
+			dest += 2;
+
+			// Determine color indices (mask)
+			int dist = maxval - minval;
+			int dist2 = dist * 2;
+			int dist4 = dist * 4;
+
+			int bias = (dist < 8) ? (dist - 1) : (dist / 2 + 2);
+			bias -= minval * 7;
+
+			int bits = 0;
+			int mask = 0;
+
+			for (int i = 0; i < 16; i++)
+			{
+				int a = src[i * stride] * 7 + bias;
+
+				int ind, t;
+
+				// Select indext (linear scale lerp factor between 0 (val = min) and 7 (val = max)
+				t = (a >= dist4) ? -1 : 0; ind = t & 4; a -= dist4 & t;
+				t = (a >= dist2) ? -1 : 0; ind += t & 2; a -= dist2 & t;
+				ind += (a >= dist);
+
+				// Linear scale into block compression index
+				ind = -ind & 7;
+				ind ^= (2 > ind);
+
+				// Write index
+				mask |= ind << bits;
+				if ((bits += 3) >= 8)
+				{
+					*dest++ = (unsigned char)mask;
+					mask >>= 8;
+					bits -= 8;
+				}
+			}
+		}
+
+	public:
+		static void CompressBlock(unsigned char* dest, unsigned char* src, Format format, bool dithering)
+		{
+			if (format == Format::BC1)
+			{
+				CompressColorBlock(dest, src, dithering);
+			}
+			else if (format == Format::BC2)
+			{
+				SampleAlphaBlock(dest, src + 3, 4);
+				CompressColorBlock(dest + 8, src, dithering);
+			}
+			else if (format == Format::BC3)
+			{
+				CompressAlphaBlock(dest, src + 3, 4);
+				CompressColorBlock(dest + 8, src, dithering);
+			}
+			else if (format == Format::BC4)
+			{
+				CompressAlphaBlock(dest, src, 4);
+			}
+			else if (format == Format::BC5)
+			{
+				CompressAlphaBlock(dest, src, 4);
+				CompressAlphaBlock(dest + 8, src + 1, 4);
+			}
+		}
+
+		static void Compress(size_t width, size_t height, unsigned char* dest, unsigned char* src, Format format, size_t stride, bool alpha, bool dithering)
+		{
+			int channels = alpha ? 4 : 3;
+
+			unsigned char* ptr = dest;
+
+			for (int y = 0; y < height; y += 4)
+			{
+				for (int x = 0; x < width; x += 4)
+				{
+					unsigned char compressed[16 * 4] = { 0 };
+					unsigned char original[16 * 4] = { 0 };
+
+					for (int i = 0; i < 4; i++)
+					{
+						for (int j = 0; j < 4; j++)
+						{
+							original[(i * 4 + j) * 4 + 0] = src[((y + i) * width + (x + j)) * channels + 0];
+							original[(i * 4 + j) * 4 + 1] = src[((y + i) * width + (x + j)) * channels + 1];
+							original[(i * 4 + j) * 4 + 2] = src[((y + i) * width + (x + j)) * channels + 2];
+							original[(i * 4 + j) * 4 + 3] = (alpha ? src[((y + i) * width + (x + j)) * channels + 3] : 255);
+						}
+					}
+
+					CompressBlock(compressed, original, format, dithering);
+
+					if (format == Format::BC1 || format == Format::BC4)
+					{
+						for (int i = 0; i < 8; i++)
+						{
+							(*ptr) = compressed[i];
+							ptr++;
+						}
+					}
+					else
+					{
+						for (int i = 0; i < 16; i++)
+						{
+							(*ptr) = compressed[i];
+							ptr++;
+						}
+					}
+				}
+			}
+		}
+	};
+}
+
+#endif"
+rF40PdZB,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 09:05:42 AM CDT,"SELECT 
+    CONCAT_WS(' ', `first_name`, `last_name`) AS `Full Name`,
+    TIMESTAMPDIFF(DAY, `born`, `died`) AS `DAYS LIVED`
+FROM
+    `authors`"
+qQHy56hz,Untitled,Nastart,C++,Thursday 18th of May 2023 08:48:01 AM CDT,"#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <string>
+#include <vector>
+#include <set>
+
+using namespace std;
+
+class RouteManager {
+    public:
+        void AddRoute(const int& start, const int& finish) {
+            reachable_lists_[start].insert(finish);
+            reachable_lists_[finish].insert(start);
+        }
+ 
+        int FindNearestFinish(int start, int finish) const {
+        int result = abs(start - finish);
+        if (reachable_lists_.count(start) < 1) {
+            return result;
+        }
+        const set<int>& reachable_stations = reachable_lists_.at(start);
+        if (!reachable_stations.empty()) {
+            auto it = reachable_stations.equal_range(finish);
+            if (it.first != reachable_stations.begin()) {
+                --it.first;
+            }
+            if (it.first == reachable_stations.end()) {
+                --it.first;
+            }
+            if (it.second == reachable_stations.end()) {
+                --it.second;
+            }
+            
+            int dis = min(abs(finish - *it.first), abs(finish - *it.second));
+            result = min(result, dis);
+
+        }
+        return result;
+    }
+    private:
+        map<int, set<int>> reachable_lists_;
+};
+
+int main() {
+    RouteManager routes;
+
+    int query_count;
+    cin >> query_count;
+
+    for (int query_id = 0; query_id < query_count; ++query_id) {
+        string query_type;
+        cin >> query_type;
+        int start, finish;
+        cin >> start >> finish;
+        if (query_type == ""ADD""s) {
+            routes.AddRoute(start, finish);
+        } else if (query_type == ""GO""s) {
+            cout << routes.FindNearestFinish(start, finish) << ""\n""s;
+        }
+    }
+}"
+x6aNLcy9,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 08:32:29 AM CDT,"SELECT 
+    ROUND(SUM(`cost`), 2) AS `Sum`
+FROM
+    `books`;"
+gTeC9WbK,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 08:12:42 AM CDT,"SELECT 
+    REPLACE(`title`, 'The', '***') AS `title`
+FROM
+    `books`
+WHERE
+    SUBSTRING(`title`, 1, 3) = 'The'
+ORDER BY `id`;"
+P6jzue2y,Untitled,Caesar9988,MySQL,Thursday 18th of May 2023 08:04:38 AM CDT,"SELECT 
+    `title`
+FROM
+    `books`
+WHERE
+    LOWER(SUBSTRING(`title`, 1, 3) = 'the')
+ORDER BY `id`;"
+kK2X9egE,Auto crop farming,OscarGlo,Lua,Thursday 18th of May 2023 08:01:18 AM CDT,"function findSlot(name)
+  for i = 1,16 do
+    local item = turtle.getItemDetail(i)
+    if item and item.name == name then
+      return i
+    end
+  end
+  return nil
+end
+
+local cropSeeds = {
+  [""minecraft:beetroots""] = ""minecraft:beetroot_seeds"",
+  [""minecraft:wheat""] = ""minecraft:wheat_seeds"",
+  
+  [""minecraft:potatoes""] = ""minecraft:potato"",
+  [""minecraft:carrots""] = ""minecraft:carrot"",
+}
+
+function getCropInfo()
+  local ok, block = turtle.inspectDown()
+  if not ok then
+    return nil
+  end
+  
+  local pamCrop = string.match(block.name, ""harvestcraft:pam(%a+)crop"")
+  if pamCrop then
+    return {
+      seed = ""harvestcraft:"" .. pamCrop .. ""item"",
+      mature = block.state.age == 3
+    }
+  end
+  
+  local seed = cropSeeds[block.name]
+  if seed == nil then
+    return nil
+  end
+  
+  return {
+     seed = seed,
+     mature = block.state.age == 7 or (
+       block.name == ""minecraft:beetroots"" and block.state.age == 3
+     )
+  }
+end
+ 
+local dir = 1
+ 
+function turnDir()
+  if dir == 1 then
+    turtle.turnLeft()
+  else
+    turtle.turnRight()
+  end
+end
+
+local run = true
+while run do
+  -- Refuel
+  if turtle.getFuelLevel() == 0 then
+    for i = 1,16 do
+      turtle.select(i)
+      if turtle.refuel(8) then
+        break
+      end
+    end
+    run = false
+  end
+
+  -- Unload
+  local ok, block = turtle.inspectUp()
+  if ok and not string.match(block.name, ""leaves"") then
+    for i = 1,16 do
+      turtle.select(i)
+      if not turtle.refuel(0) then
+        turtle.dropUp()
+      end
+    end
+  end
+
+  -- Crop harvesting
+  local crop = getCropInfo()
+  if crop and crop.mature then
+    turtle.digDown()
+    local slot = findSlot(crop.seed)
+    if slot then
+      turtle.select(slot)
+      turtle.placeDown()
+    end
+  end
+  
+  -- Movement
+  if turtle.detect() then
+    turnDir()
+    turtle.forward()
+    local endReached = turtle.detect()
+    turnDir()
+    
+    if not endReached then
+      dir = -dir
+    end
+  else
+    turtle.forward()
+  end
+end"
+bDfKETz6,Robot,Tommy12345678,YAML,Thursday 18th of May 2023 07:56:55 AM CDT,"#===================================================================================#
+#-------------------------------      INPUT BOOLEAN  ----------------------------------#
+#===================================================================================#
+
+input_boolean:                # -- Decidi  da UI in quali giorni della settimana
+  robot_1:
+    name: Lunedi
+  robot_2:
+    name: Martedi
+  robot_3:
+    name: Mercoledi
+  robot_4:
+    name: Giovedi
+  robot_5:
+    name: Venerdi
+  robot_6:
+    name: sabato
+  robot_7:
+    name: Domenica
+
+  
+#===================================================================================#
+#-------------------------------      INPUT DATETIME  ----------------------------------#
+#===================================================================================#
+
+input_datetime:
+  
+  robot_ora_inizio:       # -- Ora di inizio condizione
+    name: Ora Inizio
+    has_date: false
+    has_time: true
+
+  robot_ora_fine:         # -- Ora di fine condizione
+    name: Ora Fine
+    has_date: false
+    has_time: true
+  
+  robot_ora_avvio_auto:   # -- Ora di avvio automatico
+    name: Ora Avvio Auto
+    has_date: false
+    has_time: true
+
+
+
+#===================================================================================#
+#-------------------------------      SENSOR      ----------------------------------#
+#===================================================================================#
+
+sensor:
+
+  - platform: template
+    sensors:
+
+      robot_giorno_settimana:
+        value_template: >
+          {{ now().weekday()|int + 1 }}
+
+
+#===================================================================================#
+#-------------------------------      AUTOMATION   ----------------------------------#
+#===================================================================================#
+
+
+automation:
+
+  - id: robot_avvia_auto
+    alias: ""Avvia Robot Auto""
+
+    trigger:
+
+      - platform: state							# -- Trigger 1 -  Quando Esci
+        entity_id: device_tracker.xxxxx
+        to: 'not_home'
+      
+      - platform: time							# -- Trigger 2 -  All'ora prestabilita
+        at: 
+          - input_datetime.robot_ora_avvio_auto
+
+    condition:
+
+      - condition: state						# -- Serve se trigger 2
+        entity_id: ""device_tracker.xxxxx""
+        state: 'not_home'
+      
+      - condition: time							# -- Serve se trigger 1
+        after: input_datetime.robot_ora_inizio
+        before: input_datetime.robot_ora_fine
+      
+      - condition: template						# -- Controlla il giorno della settimana
+        value_template: >
+          {% set giorno = 'input_boolean.robot_' + states('sensor.robot_giorno_settimana') %}
+          {{ is_state(giorno, 'on') }}
+
+    action:
+
+      - service: BlaBlaBLa						# -- Quello che vuoi
+
+"
+aybLNMW3,loop_with_yield.ml,kenpusney,OCaml,Thursday 18th of May 2023 07:50:47 AM CDT,"open Effect
+open Effect.Shallow
+
+type 'a t += Recur : 'a -> 'b t | Yield : 'a -> unit t | Return : 'a -> 'a t
+
+let recur a = perform (Recur a)
+let yield a = perform (Yield a)
+let return a = perform (Return a)
+
+type ('a, 'b) state = Finished | NotStarted | Running of ('a, 'b) continuation
+
+let loop : 'a -> ('a -> 'b) -> unit -> 'b option =
+ fun init fn ->
+  let state' = ref NotStarted in
+  let rec helper : 'a -> unit -> 'b option =
+   fun input () ->
+    match !state' with
+    | NotStarted ->
+        state' := Running (fiber fn);
+        helper init ()
+    | Finished -> None
+    | Running k ->
+        continue_with k input
+          {
+            retc =
+              (fun _ ->
+                state' := Finished;
+                helper input ());
+            exnc = (fun e -> raise e);
+            effc =
+              (fun (type b) (eff : b t) ->
+                match eff with
+                | Recur value ->
+                    Some
+                      (fun (_ : (b, _) continuation) ->
+                        state' := Running (fiber fn);
+                        helper (Obj.magic value) ())
+                | Yield value ->
+                    Some
+                      (fun (k : (b, _) continuation) ->
+                        state' := Running (Obj.magic k);
+                        Some (Obj.magic value))
+                | Return value ->
+                    Some
+                      (fun (_ : (b, _) continuation) ->
+                        state' := Finished;
+                        Some (Obj.magic value))
+                | _ -> None);
+          }
+  in
+  helper init
+
+let loopwith init fn = loop init fn ()
+
+let rec runloop f loop =
+  match loop () with
+  | Some x ->
+      f x;
+      runloop f loop
+  | None -> ()
+
+let compose f g x = f (g x)
+
+let fact i =
+  loopwith (i, 1) (fun (iter, acc) ->
+      if iter > 0 then recur (iter - 1, iter * acc, 1) else return acc)
+
+let print_optional = function
+  | Some x -> print_endline (string_of_int x)
+  | None -> print_endline ""None""
+
+let count n =
+  let counter =
+    loop 0 (fun i ->
+        if i < n then (
+          yield i;
+          recur (i + 1))
+        else return i)
+  in
+  runloop (compose print_endline string_of_int) counter
+
+let () =
+  print_optional (fact 5);
+  count 5
+"
+tkp0myw4,struck_begin,cuniszkiewicz,C#,Thursday 18th of May 2023 07:07:56 AM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Struct
+{
+    internal class Program
+    {
+        struct Student
+        {
+            public string name;
+            public string surname;
+            public int index;
+            public double avg;
+        
+        }
+        static void Main(string[] args)
+        {
+            Student[] student = new Student[3];
+            int decision;
+            do
+            {
+                Console.Clear();
+                Console.WriteLine(""0 - EXIT"");
+                Console.WriteLine(""1 - Add student to data base"");
+                Console.WriteLine(""2 - Print students"");
+                Console.Write(""Your decision: "");
+                decision = int.Parse(Console.ReadLine());
+
+                switch (decision)
+                {
+                    case 0:
+
+                        break;
+                        case 1:
+                        for (int i = 0; i < student.Length; i++)
+                        {
+                            Console.WriteLine($""Student {i + 1}: "");
+                            Console.Write($""Name: "");
+                            student[i].name = Console.ReadLine();
+                            Console.Write($""Surname: "");
+                            student[i].surname = Console.ReadLine();
+                            Console.Write($""Index: "");
+                            student[i].index = int.Parse(Console.ReadLine());
+                            Console.Write($""Average of grades: "");
+                            student[i].avg = double.Parse(Console.ReadLine());
+                        }
+                        break; 
+                    case 2:
+                        Console.Clear();
+                        for (int i = 0; i < student.Length; i++)
+                        {
+                            Console.WriteLine($""Student: {student[i].name} "" +
+                                $""{student[i].surname} index: {student[i].index}"");
+                        }
+
+                        Console.ReadKey();
+                        break;
+                    default:
+                        break;
+                }   
+            } while (decision != 0);
+        }
+    }
+}
+"
+ecaU6XCm,sh_aliases,Shuraken007,Bash,Thursday 18th of May 2023 06:59:49 AM CDT,"host_sub_proxy () {
+   declare sub_args;
+   if [ -f $SCRIPT_DIR/host_sub.pl ]; then
+      sub_args=$(perl $SCRIPT_DIR/host_sub.pl $@);
+      [ $? != 0 ] && echo $sub_args && return 1;
+      echo ""$sub_args""
+   fi
+   sub_args=$(echo $sub_args | tail -n1);
+   printf '%sOk? [y/n]%s ' \
+     ""$FMT_YELLOW"" ""$FMT_RESET""
+   read -r opt
+   case $opt in
+     y*|Y*|"""") eval ""command $sub_args"";;
+     n*|N*) echo ""----------""; return ;;
+   esac
+}
+
+ssh() {
+   host_sub_proxy ssh $@;
+}
+scp() {
+   host_sub_proxy scp $@;
+}
+ssh-copy-id() {
+   host_sub_proxy ssh-copy-id $@;
+}
+sshpass () {
+   host_sub_proxy sshpass $@;
+}
+rsync () {
+   host_sub_proxy rsync $@;
+}
+"
+n7zPMMDq,host_sub.pl,Shuraken007,Perl,Thursday 18th of May 2023 06:35:27 AM CDT,"#!/usr/local/bin/perl
+
+use strict;
+use warnings;
+use Data::Dumper;
+
+my @known_cmd = ('ssh', 'scp'),
+my %config = (
+   game => {
+      host => 'bandit.labs.overthewire.org',
+      port => '2220',
+      users => [
+         {
+            user => 'bandit0',
+            password => 'bandit0',
+         },
+         {
+            user => 'bandit1',
+            password => '~/tmp/bash_game/readme',
+            is_file =>1,
+         },
+         {
+            user => 'bandit2',
+            password => '~/tmp/bash_game/-',
+            is_file => 1,
+         },
+         {
+            user => 'bandit3',
+            password => '~/tmp/bash_game/spaces in this filename',
+            is_file => 1,
+         },
+         {
+            user => 'bandit4',
+            password => '~/tmp/bash_game/.hidden',
+            is_file => 1,
+         },
+         {
+            user => 'bandit5',
+            password => '~/tmp/bash_game/inhere/-file07',
+            is_file => 1,
+         },
+         {
+            user => 'bandit6',
+            password => '~/tmp/bash_game/inhere/maybehere07/.file2',
+            is_file => 1,
+         },
+         {
+            user => 'bandit7',
+            password => '~/tmp/bash_game/var/lib/dpkg/info/bandit7.password',
+            is_file => 1,
+         },
+         {
+            user => 'bandit8',
+            password => 'TESKZC0XvTetK0S9xNwm25STk5iWrBvP',
+         }
+      ]
+   }
+);
+
+sub get_passwd {
+   my $user_cfg = shift @_;
+   my ($pass, $is_file) = @$user_cfg{'password', 'is_file'};
+   return () if ! $pass;
+
+   my @cmd = ('sshpass');
+   if ($is_file) {
+      push @cmd, '-f';
+      $pass =~ s#(?!\\)( )#\\ #g;
+      push @cmd, $pass;
+   } else {
+      push @cmd, '-p', $pass;
+   }
+   return @cmd;
+}
+
+sub get_host_alias_by_user {
+   my $user = shift @_;
+   my $host_alias;
+
+   while( my($host_alias_cfg, $data_cfg) = each %config) {
+      for (@{$data_cfg->{'users'}}) {
+         if ($_->{'user'} eq $user) {
+            # print ""find ----> $host_alias_cfg\n"";
+            return $host_alias_cfg;
+         }
+      }
+   }
+}
+
+sub parse_args{
+   my (@args) = @_;
+   my ($cmd, $cmd_i, $is_port, $host_alias, $host_i, $user, $host_path);
+
+   while (my ($i, $arg) = each @args) {
+      OUTER:
+      for my $known_cmd (@known_cmd) {
+         if ($arg eq $known_cmd)
+         {
+            $cmd=$arg; 
+            $cmd_i=$i;
+            last;
+         } 
+         next OUTER;
+      }
+
+      if ($arg eq '-p' || $arg eq '-P') {
+         $is_port = 1;
+         last;
+      }
+
+      my ($arg_user, $arg_host, $arg_host_path)=$arg =~ m/([^\@:]+)?\@?([^:]+)?(:.+)?/;
+      if ($arg_user && !$arg_host) {
+         $arg_host = get_host_alias_by_user($arg_user);
+      }
+      if (!$arg_host) {
+         $arg_host = $arg;
+         $arg_user = undef;
+      }
+      # printf( ""%s-->%s-->%s\n"", $arg_user||'', $arg_host||'', $arg_host_path||'');
+      for my $host_alias_cfg (keys %config) {
+         next if $host_alias_cfg ne $arg_host;
+
+         $host_alias = $arg_host; $host_i = $i; $host_path = $arg_host_path||'';
+         my $are_spaces_escaped = $host_path =~ s#(?!\\)( )#\\ #g;
+         if ($are_spaces_escaped && $host_path !~ /^\"".+\""$/) {
+            $host_path =~ s/(:)(.+)/$1\""$2\""/
+         }
+         $user = $config{$host_alias}{'users'}[0] if !$arg_user;
+         last if $user;
+
+         for my $user_cfg (@{$config{$host_alias}{'users'}}) {
+            next if $user_cfg->{'user'} ne $arg_user;
+            $user = $user_cfg;
+            last;
+         }
+         $user //= {user => $arg_user};
+      }
+   }
+
+   my %result = (
+      cmd => $cmd,
+      cmd_i => $cmd_i,
+      host_alias => $host_alias,
+      host_i => $host_i,
+      user_cfg => $user,
+      is_port => $is_port//0,
+      host_path => $host_path,
+   );
+   # print Dumper(\%result);
+   return %result;
+}
+
+sub main{
+   my (@args) = @_;
+   my %p_args = parse_args(@args);
+   my ($cmd, $cmd_i, $host_alias, $host_i, $user_cfg, $is_port, $host_path) = 
+      @p_args{qw(cmd cmd_i host_alias host_i user_cfg is_port host_path)};
+   $cmd //= '';
+
+   if ($host_alias) {
+      my $host = $config{$host_alias}{'host'};
+      my $user = $user_cfg->{'user'};
+      $args[$host_i] = ""$user\@$host$host_path"";
+   }
+
+   my $main_cmd = $args[0];
+   if (!$is_port) {
+      my $port = $config{$host_alias}{'port'};
+      if ($port && $main_cmd eq 'rsync' && $cmd ne 'ssh') {
+         splice @args, 1, 0, '-e', ""'ssh -p $port'"", '--info=progress2';
+      } elsif ($port && $cmd eq 'ssh') {
+         push @args, '-p', $port;
+      } elsif ($port && $cmd eq 'scp') {
+         splice @args, $cmd_i+1, 0, '-P', $port;
+         $host_i+=2;
+      }
+   }
+
+   my @password_cmd = get_passwd($user_cfg);
+   splice @args, 0, 0, @password_cmd;
+   return @args;
+}
+
+@ARGV = main(@ARGV);
+print join("" "", @ARGV);"
+9Zvgvi5K,GoLinkedList,Te4nick,Go,Thursday 18th of May 2023 06:13:45 AM CDT,"package LinkedList
+
+import (
+	""errors""
+	""fmt""
+	""strings""
+)
+
+type Node struct {
+	value interface{}
+	next  *Node
+}
+
+type LinkedList struct {
+	first *Node
+	last  *Node
+	size  int
+}
+
+func New(values ...interface{}) *LinkedList {
+	ll := &LinkedList{}
+	if len(values) > 0 {
+		ll.Add(values...)
+	}
+	return ll
+}
+
+func (ll *LinkedList) Add(values ...interface{}) {
+	for _, value := range values {
+		node := &Node{value: value, next: nil}
+		if ll.size == 0 {
+			ll.first = node
+			ll.last = node
+		} else {
+			ll.last.next = node
+			ll.last = node
+		}
+		ll.size++
+	}
+}
+
+func (ll *LinkedList) Append(values ...interface{}) {
+	ll.Add(values...)
+}
+
+func (ll *LinkedList) Prepend(values ...interface{}) {
+	for index := len(values) - 1; index >= 0; index-- {
+		node := &Node{value: values[index], next: ll.first}
+		ll.first = node
+		if ll.size == 0 {
+			ll.last = node
+		}
+		ll.size++
+	}
+}
+
+func (ll *LinkedList) Set(index int, value interface{}) error {
+	if !ll.withinRange(index) {
+		return errors.New(fmt.Sprintf(""LinkedList: index %d is out of range (size = %d)"", index, ll.size))
+	}
+
+	foundValue := ll.first
+	for i := 0; i != index; i++ {
+		foundValue = foundValue.next
+	}
+	foundValue.value = value
+	return nil
+}
+
+func (ll *LinkedList) Get(index int) (interface{}, error) {
+	if !ll.withinRange(index) {
+		return nil, errors.New(fmt.Sprintf(""LinkedList: index %d is out of range (size = %d)"", index, ll.size))
+	}
+
+	node := ll.first
+	for i := 0; i != index; i, node = i+1, node.next {
+	}
+	return node.value, nil
+}
+
+func (ll *LinkedList) Remove(index int) error {
+	if !ll.withinRange(index) {
+		return errors.New(fmt.Sprintf(""LinkedList: index %d is out of range (size = %d)"", index, ll.size))
+	} else if ll.size == 1 {
+		ll.Clear()
+	}
+
+	var beforeNode *Node
+	node := ll.first
+	for e := 0; e != index; e, node, beforeNode = e+1, node.next, node {
+	}
+
+	if node == ll.first {
+		ll.first = node.next
+	}
+	if node == ll.last {
+		ll.last = beforeNode
+	}
+	if beforeNode != nil {
+		beforeNode.next = node.next
+	}
+
+	node = nil
+	ll.size--
+	return nil
+}
+
+func (ll *LinkedList) Insert(index int, values ...interface{}) error {
+
+	if !ll.withinRange(index) {
+		return errors.New(fmt.Sprintf(""LinkedList: index %d is out of range (size = %d)"", index, ll.size))
+	}
+	if index == 0 {
+		ll.Prepend(values...)
+		return nil
+	}
+
+	ll.size += len(values)
+	var beforeNode *Node
+	foundNode := ll.first
+	for e := 0; e != index; e, foundNode, beforeNode = e+1, foundNode.next, foundNode {
+	}
+
+	oldNextElement := beforeNode.next
+	for _, value := range values {
+		newElement := &Node{value: value}
+		beforeNode.next = newElement
+		beforeNode = newElement
+	}
+	beforeNode.next = oldNextElement
+	return nil
+}
+
+func (ll *LinkedList) Contains(values ...interface{}) bool {
+	valueMap := make(map[interface{}]bool)
+
+	// заполняем map значениями
+	for i := 0; i < len(values); i++ {
+		valueMap[values[i]] = true
+	}
+
+	// проверяем каждый узел списка на наличие в map
+	for node := ll.first; node != nil; node = node.next {
+		if _, ok := valueMap[node.value]; ok {
+			delete(valueMap, node.value)
+		}
+
+		if len(valueMap) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (ll *LinkedList) IndexOf(value interface{}) (int, error) {
+	if ll.size == 0 {
+		return -1, errors.New(fmt.Sprintf(""LinkedList: list is empty (size = %d)"", ll.size))
+	}
+	for index, node := range ll.Values() {
+		if node == value {
+			return index, nil
+		}
+	}
+	return -1, errors.New(fmt.Sprintf(""LinkedList: value %v is not in list"", value))
+}
+
+func (ll *LinkedList) Empty() bool {
+	return ll.size == 0
+}
+
+func (ll *LinkedList) Size() int {
+	return ll.size
+}
+
+func (ll *LinkedList) Clear() {
+	ll.first = nil
+	ll.last = nil
+	ll.size = 0
+}
+
+func (ll *LinkedList) Values() []interface{} {
+	values := make([]interface{}, ll.size, ll.size)
+	for v, node := 0, ll.first; node != nil; v, node = v+1, node.next {
+		values[v] = node.value
+	}
+	return values
+}
+
+func (ll *LinkedList) Swap(i, j int) error {
+	if !ll.withinRange(i) || !ll.withinRange(j) {
+		return errors.New(fmt.Sprintf(""LinkedList: i=%d or j=%d is out of range (size=%d)"", i, j, ll.size))
+	}
+	if i == j {
+		return nil
+	}
+
+	var node1, node2 *Node
+	for e, currNode := 0, ll.first; node1 == nil || node2 == nil; e, currNode = e+1, currNode.next {
+		switch e {
+		case i:
+			node1 = currNode
+		case j:
+			node2 = currNode
+		}
+	}
+	node1.value, node2.value = node2.value, node1.value
+	return nil
+}
+
+func (ll *LinkedList) Sort(less func(a, b interface{}) bool) {
+	// Если список пустой или содержит только один элемент, он уже отсортирован.
+	if ll.first == nil || ll.first.next == nil {
+		return
+	}
+
+	// Создаем новый список, в который будем вставлять элементы в отсортированном порядке.
+	sorted := &LinkedList{first: nil, last: nil, size: ll.size}
+
+	// Перебираем все элементы и вставляем их в отсортированный список.
+	for node := ll.first; node != nil; {
+		next := node.next
+
+		// Находим место, куда нужно вставить текущий элемент в отсортированный список.
+		curr := sorted.first
+		var prev *Node
+		for curr != nil && less(curr.value, node.value) {
+			prev = curr
+			curr = curr.next
+		}
+
+		// Вставляем текущий элемент в отсортированный список.
+		if prev == nil {
+			sorted.first = node
+		} else {
+			prev.next = node
+		}
+		node.next = curr
+
+		// Переходим к следующему элементу.
+		node = next
+	}
+
+	// Обновляем первый и последний элементы в исходном списке.
+	ll.first = sorted.first
+	ll.last = sorted.last
+}
+
+func (ll *LinkedList) String() string {
+	s := ""LinkedList: [""
+	strValues := make([]string, ll.size)
+	for index, node := 0, ll.first; node != nil; index, node = index+1, node.next {
+		strValues[index] = fmt.Sprintf(""%v"", node.value)
+	}
+	return s + strings.Join(strValues, "", "") + ""]""
+}
+
+func (ll *LinkedList) withinRange(index int) bool {
+	return 0 <= index && index < ll.size
+}
+"
+GV1kuQu7,overthewire_8_9,Shuraken007,Bash,Thursday 18th of May 2023 06:13:35 AM CDT,"cat data.txt | perl -ne 'BEGIN{%a=();}$a{$_}++;END{while(($k,$v) = each %a) {print $k if $v==1}}'"
+siwV7W3g,Container Lab Test Registry with Auth.,aznashwan,Bash,Thursday 18th of May 2023 06:12:35 AM CDT,"#!/bin/bash
+
+set -eux
+
+apt-get install -y apache2-utils
+
+CERTS_DIR=""${CERTS_DIR:=/etc/docker/testregcerts}""
+REGISTRY_USER=""${REGISTRY_USER:=testuser}""
+REGISTRY_PASSWORD=""${REGISTRY_PASSWORD:=Passw0rd}""
+
+# Create the self-signed x509 certificates we'll be using:
+mkdir -p ""$CERTS_DIR""
+openssl req \
+  -newkey rsa:4096 -nodes -sha256 -keyout ""${CERTS_DIR}/domain.key"" \
+  -addext ""subjectAltName = DNS:myregistry.domain.com"" \
+  -x509 -days 365 -out ""${CERTS_DIR}/domain.crt""
+
+# We will encrypt the password 
+AUTH_DIR=""${CERTS_DIR}/auth""
+mkdir -p ""$AUTH_DIR""
+htpasswd -bnB ""$REGISTRY_USER"" ""$REGISTRY_PASSWORD"" > ""${AUTH_DIR}/htpasswd""
+
+# Run registry container with mounts/env vars required for auth.
+# The `-v source:target` arguments mount the host directories in the containers.
+# The `-e VAR=val` arguments pass the necessary env variables for the Registry.
+# Note that the `-e VAR=/path` arguments refer to paths WITHIN the registry container.
+docker container run -d \
+	-p 5000:5000 --name registry_basic \
+	-v ""${AUTH_DIR}"":""${AUTH_DIR}"" -v ""${CERTS_DIR}"":""${CERTS_DIR}"" \
+	-e REGISTRY_AUTH=htpasswd \
+	-e REGISTRY_AUTH_HTPASSWD_REALM=""Registry Realm"" \
+	-e REGISTRY_AUTH_HTPASSWD_PATH=""${AUTH_DIR}/htpasswd"" \
+	-e REGISTRY_HTTP_TLS_CERTIFICATE=""${CERTS_DIR}/domain.crt"" \
+	-e REGISTRY_HTTP_TLS_KEY=""${CERTS_DIR}/domain.key"" \
+	registry
+
+# Cat the creds for the user:
+echo ""Your 'user / pass' is:  ${REGISTRY_USER} / ${REGISTRY_PASSWORD}"""
+scG6yiL0,Container Lab Flask App.,aznashwan,Python,Thursday 18th of May 2023 06:10:52 AM CDT,"#!/usr/bin/env python3
+
+import json, os, sys
+
+import flask
+
+# Simple test app which will list/cat files on the host.
+app = flask.Flask(__name__)
+
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def get_dirpath(path):
+    path = f""/{path}""
+    if os.path.isdir(path):
+        # List entries within directories:
+        return json.dumps(sorted(os.listdir(path)), indent=4)
+    elif os.path.isfile(path):
+        # Return contents of files:
+        with open(path, ""r"") as fin:
+            return fin.read()
+    else:
+        # 404 if the path is a link or does not exist:
+        flask.abort(404)
+
+
+if __name__ == ""__main__"":
+    print(f""sys.argv: {sys.argv}"")
+    if len(sys.argv) < 3:
+        raise ValueError(f""USAGE: python3 {sys.argv[0]} HOSTNAME PORT_NUMBER"")
+    hostname = sys.argv[1]
+    port = int(sys.argv[2])
+
+    app.run(hostname, port)"
+j8rMUufx,data576,TestGuy1,JSON,Thursday 18th of May 2023 06:00:06 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'a70590cf6b5f28ab21bd51ec9ed0daaba4c4ee3107a61b6890d6a8f67c88ca65be0e0bea9baa499cda879abac8c09f42bbf652e2a46e71cf5486715e5dbe81dda9db1ef696ca52f30d53aab3e19300d259b09acb93b74d181cc69076cb3219c72931be73d899c7ee7a9a376754f41b4faf20bfd13f0d58992d8dc9aec8ab0e16',
+  otherdata: [
+    '4d4cbfc0c1c9453ecdbdc5a690857b1a',
+    '16f57285d651f64dd516c0a37c180d4d',
+    'a3b8a7d6ef7629fbc539f8a2ab3dfa71',
+    '65a3982beaad281aac274825baae72b2',
+    'bd1441e763f3e9964f07d2e3d0a86a81',
+    '1366921a2ea36cf1d11af644589049ba',
+    'b64901e028b7df326f8f6ee375244fbf',
+    '61ca00261af5047a780c030ea4ed30c7'
+  ]
+}"
+7g2tDWx3,Untitled,verygoodplugins,PHP,Thursday 18th of May 2023 05:50:18 AM CDT,"<?php
+/**
+ * Plugin Name: WPBakery Page Builder
+ * Plugin URI: http://wpbakery.com
+ * Description: Drag and drop page builder for WordPress. Take full control over your WordPress site, build any layout you can imagine – no programming knowledge required.
+ * Version: 6.11.0
+ * Author: Michael M - WPBakery.com
+ * Author URI: http://wpbakery.com
+ * Text Domain: js_composer
+ * Domain Path: /locale/
+ * Requires at least: 4.9
+ * Woo: 18734001738633:249bdd2d5fc84782b12368a238115991
+ *
+ * @package WPBakery Page Builder
+ */
+
+// don't load directly
+if ( ! defined( 'ABSPATH' ) ) {
+	die( '-1' );
+}
+/**
+ * Current WPBakery Page Builder version
+ */
+if ( ! defined( 'WPB_VC_VERSION' ) ) {
+	/**
+	 *
+	 */
+	define( 'WPB_VC_VERSION', '6.11.0' );
+}
+
+$dir = dirname( __FILE__ );
+define( 'WPB_PLUGIN_DIR', $dir );
+define( 'WPB_PLUGIN_FILE', __FILE__ );
+
+require_once $dir . '/include/classes/core/class-vc-manager.php';
+/**
+ * Main WPBakery Page Builder manager.
+ * @var Vc_Manager $vc_manager - instance of composer management.
+ * @since 4.2
+ */
+global $vc_manager;
+if ( ! $vc_manager ) {
+	$vc_manager = Vc_Manager::getInstance();
+	// Load components
+	$vc_manager->loadComponents();
+}
+"
+eFMwHd8X,Untitled,D3ENNY,PHP,Thursday 18th of May 2023 05:44:38 AM CDT,"<?php
+class Template{
+
+        public function template($page){
+            echo(""<br>entering into Template.template()<br>"");
+  
+            try{
+                $extension = '.php';
+                $default = ""index"";
+                $error404 = ERROR . '404' . $extension; 
+                //si blocca alla riga sopra
+                $components = COMPONENTS . 'admin/';
+                $request_page = isset($page) ? $page : $default;
+                $included_page = PAGES . $request_page . $extension;
+
+                $output = [];
+
+                if(file_exists($included_page)){
+                    require_once($components . 'head.php');
+                    require_once($components . 'header.php');
+                    require_once($components . 'aside.php');
+                    require_once($included_page);
+                    require_once($components . 'footer.php');
+                }else{
+                    require_once($error404);
+                }
+
+            }catch(Exception $e){
+                var_dump($e);
+                echo ""error"";
+            }
+
+            return $output;
+        }
+
+?>
+====================
+config.php
+====================
+<?php
+
+    define('ABSPATH', $_SERVER[""DOCUMENT_ROOT""] . '/progetti/login-volandia/');
+    define('PAGES', ABSPATH . 'pages/');
+    define('COMPONENTS', ABSPATH . 'assets/components/');
+    define('ERROR', PAGES . 'error/');"
+5yLTtmjL,code de base modifie,granteeric,Arduino,Thursday 18th of May 2023 05:04:45 AM CDT,"#include <dht11.h>
+#include <LiquidCrystal_I2C.h>
+
+#define DHT11PIN 2 // broche DATA -> broche 2
+#define ventilateurPIN 4 // broche -> pour ventilateur
+
+
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+dht11 DHT11;
+
+uint8_t stateVentilator {0};        //variable d'état du ventilateur 0 arret, 1 en marche
+
+void setup()
+{ 
+    pinMode(ventilateurPIN,OUTPUT);                             // definit ventilateurPIN comme une sortie
+    lcd.init();                                                 // initialisation de l’afficheur
+    lcd.backlight();                                            // active le rétro-éclairage
+}
+void loop(){
+    DHT11.read(DHT11PIN);                                       //A voir en fonction de ta librairie installer
+    lcd.clear();                                                // effacer le contenu de l’Afficheur LCD
+    lcd.setCursor(0, 0);                                        // se positionner à la première ligne
+    lcd.print(""temperature= "");
+    lcd.setCursor(0,1);                                         // se positionner à la deuxième ligne
+    lcd.print( (static_cast<float>DHT11.temperature ) );        // Afficher la température sur l'afficheur  //toujouts en fonction de ta lib
+    if ( (static_cast<float>DHT11.temperature ) >28.0f) {       //ici on compare la température avec 28°C float et float (nombre a virgule)
+        digitalWrite(ventilateurPIN,HIGH);                      // le ventilateur se met à tourner
+        stateVentilator = 1;                                    // on met à jour l'état du ventilateur
+    } else {
+        digitalWrite(ventilateurPIN,LOW);                       // le ventilateur s'arrête
+        stateVentilator = 0;                                    // on met à jour l'état du ventilateur
+    }
+delay(2000);
+}"
+ngKHP3ag,ESP32 WebServer DIY Irrigation Kit,microrobotics,Arduino,Thursday 18th of May 2023 04:54:57 AM CDT,"#include <WiFi.h>
+#include <time.h>
+#include <ESPAsyncWebServer.h>
+
+// Define your pins
+#define MOISTURE_SENSOR_PIN 34
+#define RELAY_PIN 13
+
+// Initial thresholds
+int MOISTURE_MIN = 300;
+int MOISTURE_MAX = 800;
+
+AsyncWebServer server(80);
+
+unsigned long lastWateringTime = 0;
+time_t pumpActivationTime = 0;
+
+const char* ntpServer = ""pool.ntp.org"";
+const long  gmtOffset_sec = 0;    // Change this to the offset of your timezone in seconds
+const int   daylightOffset_sec = 3600; // Change this to the daylight saving for your timezone in seconds
+
+const char* ssid = ""your_SSID"";       // replace with your wifi ssid 
+const char* password = ""your_PASSWORD""; // replace with your wifi password
+
+void setup(){
+  Serial.begin(115200);
+  pinMode(MOISTURE_SENSOR_PIN, INPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH); // Normally relay is active low
+
+  // Connect to Wi-Fi.
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println(""Connecting to WiFi..."");
+  }
+  Serial.println(""Connected to WiFi"");
+  Serial.print(""IP Address: "");
+  Serial.println(WiFi.localIP());
+
+  // Init and get the time
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+  // Setup server routes
+  server.on(""/status"", HTTP_GET, [](AsyncWebServerRequest *request){
+    String message = ""Soil moisture: "";
+    message += String(map(analogRead(MOISTURE_SENSOR_PIN), MOISTURE_MIN, MOISTURE_MAX, 0, 100));
+    message += ""%\nLast watering: "";
+    message += String((millis() - lastWateringTime)/60000);
+    message += "" minutes ago"";
+    request->send(200, ""text/plain"", message);
+  });
+
+  server.on(""/setMinMoisture"", HTTP_GET, [](AsyncWebServerRequest *request){
+    String message;
+    if(request->hasParam(""value"")) {
+      int newMin = request->getParam(""value"")->value().toInt();
+      if(newMin < MOISTURE_MAX) {
+        MOISTURE_MIN = newMin;
+        message = ""New minimum moisture set to "";
+        message += String(MOISTURE_MIN);
+      } else {
+        message = ""Invalid value. Minimum moisture must be less than maximum moisture."";
+      }
+    } else {
+      message = ""No value provided."";
+    }
+    request->send(200, ""text/plain"", message);
+  });
+
+  server.on(""/setMaxMoisture"", HTTP_GET, [](AsyncWebServerRequest *request){
+    String message;
+    if(request->hasParam(""value"")) {
+      int newMax = request->getParam(""value"")->value().toInt();
+      if(newMax > MOISTURE_MIN) {
+        MOISTURE_MAX = newMax;
+        message = ""New maximum moisture set to "";
+        message += String(MOISTURE_MAX);
+      } else {
+        message = ""Invalid value. Maximum moisture must be greater than minimum moisture."";
+      }
+    } else {
+      message = ""No value provided."";
+    }
+    request->send(200, ""text/plain"", message);
+  });
+
+  server.on(""/setPumpTime"", HTTP_GET, [](AsyncWebServerRequest *request){
+    String message;
+    if(request->hasParam(""timestamp"")) {
+      pumpActivationTime = request->getParam(""timestamp"")->value().toInt();
+      message = ""Pump set to activate at "";
+      message += String(pumpActivationTime);
+    } else {
+      message = ""No timestamp provided."";
+    }
+    request->send(200, ""text/plain"", message);
+  });
+
+  server.begin();
+}
+
+void loop(){
+  int soilMoisture = map(analogRead(MOISTURE_SENSOR_PIN), MOISTURE_MIN, MOISTURE_MAX, 0, 100);
+
+  time_t now;
+  time(&now);
+
+  // If soil is too dry, or it's the scheduled pump time, turn on the pump
+  if(soilMoisture < 50 || now >= pumpActivationTime) {
+    digitalWrite(RELAY_PIN, LOW);
+    lastWateringTime = millis();
+    pumpActivationTime = 0; // Reset the scheduled pump time
+  } else {
+    digitalWrite(RELAY_PIN, HIGH);
+  }
+}
+"

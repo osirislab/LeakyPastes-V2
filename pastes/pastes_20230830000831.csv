@@ -1,0 +1,4359 @@
+id,title,username,language,date,content
+qMrJUPfk,atm.lua,HandieAndy,Lua,Tuesday 29th of August 2023 06:04:57 PM CDT,"--[[
+atm.lua is a client program that runs on a computer connected to a backing
+currency supply, to facilitate deposits and withdrawals as well as other
+banking actions.
+
+Each ATM keeps a secret security key that it uses to authorize secure actions
+like recording transactions.
+]]--
+
+local g = require(""simple-graphics"")
+local bankClient = require(""bank-client"")
+
+local BANK_HOST = ""central-bank""
+local SECURITY_KEY = ""4514-1691-1660-7358-1884-0506-0878-7098-1511-3359-3602-3581-6910-0791-1843-5936""
+local modem = peripheral.find(""modem"") or error(""No modem attached."")
+bankClient.init(peripheral.getName(modem), BANK_HOST, SECURITY_KEY)
+
+local W, H = term.getSize()
+
+local function drawFrame()
+    g.clear(term, colors.white)
+    g.drawXLine(term, 1, W, 1, colors.black)
+    g.drawText(term, 2, 1, ""ATM"", colors.white, colors.black)
+end
+
+local function tryReadDiskCredentials(name)
+    if disk.hasData(name) then
+        local dataFile = fs.combine(disk.getMountPath(name), ""bank-credentials.json"")
+        if fs.exists(dataFile) then
+            local f = io.open(dataFile, ""r"")
+            local content = textutils.unserializeJSON(f:read(""*a""))
+            f:close()
+            if (
+                content ~= nil and
+                content.username and
+                type(content.username) == ""string"" and
+                content.password and
+                type(content.password) == ""string""
+            ) then
+                return content
+            end
+        end
+    end
+    return nil
+end
+
+local function tryLoginViaInput()
+    drawFrame()
+    g.drawTextCenter(term, W/2, 3, ""Enter your username and password below."", colors.black, colors.white)
+    g.drawText(term, 16, 5, ""Username"", colors.black, colors.white)
+    g.drawXLine(term, 16, 34, 6, colors.lightGray)
+    g.drawText(term, 16, 8, ""Password"", colors.black, colors.white)
+    g.drawXLine(term, 16, 34, 9, colors.lightGray)
+
+    g.fillRect(term, 22, 11, 9, 3, colors.green)
+    g.drawTextCenter(term, W/2, 12, ""Login"", colors.white, colors.green)
+
+    g.fillRect(term, 22, 15, 9, 3, colors.red)
+    g.drawTextCenter(term, W/2, 16, ""Cancel"", colors.white, colors.red)
+
+    local username = """"
+    local password = """"
+    local selectedInput = ""username""
+    while true do
+        local usernameColor = colors.lightGray
+        if selectedInput == ""username"" then usernameColor = colors.gray end
+        g.drawXLine(term, 16, 34, 6, usernameColor)
+        g.drawText(term, 16, 6, string.rep(""*"", #username), colors.white, usernameColor)
+
+        local passwordColor = colors.lightGray
+        if selectedInput == ""password"" then passwordColor = colors.gray end
+        g.drawXLine(term, 16, 34, 9, passwordColor)
+        g.drawText(term, 16, 9, string.rep(""*"", #password), colors.white, passwordColor)
+
+        local event, p1, p2, p3 = os.pullEvent()
+        if event == ""char"" then
+            local char = p1
+            if selectedInput == ""username"" and #username < 12 then
+                username = username .. char
+            elseif selectedInput == ""password"" and #password < 18 then
+                password = password .. char
+            end
+        elseif event == ""key"" then
+            local keyCode = p1
+            local held = p2
+            if keyCode == keys.backspace then
+                if selectedInput == ""username"" and #username > 0 then
+                    username = string.sub(username, 1, #username - 1)
+                elseif selectedInput == ""password"" and #password > 0 then
+                    password = string.sub(password, 1, #password - 1)
+                end
+            elseif keyCode == keys.tab and selectedInput == ""username"" then
+                selectedInput = ""password""
+            end
+        elseif event == ""mouse_click"" then
+            local button = p1
+            local x = p2
+            local y = p3
+            if y == 6 and x >= 16 and x <= 34 then
+                selectedInput = ""username""
+            elseif y == 9 and x >= 16 and x <= 34 then
+                selectedInput = ""password""
+            elseif y >= 11 and y <= 13 and x >= 22 and x <= 30 then
+                return {username = username, password = password} -- Do login
+            elseif y >= 15 and y <= 17 and x >= 22 and x <= 30 then
+                return nil -- Cancel
+            end
+        end
+    end
+end
+
+local function showLoginUI()
+    while true do
+        drawFrame()
+        g.drawTextCenter(term, W/2, 3, ""Welcome to HandieBank ATM!"", colors.green, colors.white)
+        g.drawTextCenter(term, W/2, 5, ""Insert your card below, or click to login."", colors.black, colors.white)
+        g.fillRect(term, 22, 7, 9, 3, colors.green)
+        g.drawTextCenter(term, W/2, 8, ""Login"", colors.white, colors.green)
+        local event, p1, p2, p3 = os.pullEvent()
+        if event == ""disk"" then
+            local credentials = tryReadDiskCredentials(p1)
+            if credentials then
+                return credentials
+            else
+                disk.eject(p1)
+            end
+        elseif event == ""mouse_click"" then
+            local button = p1
+            local x = p2
+            local y = p3
+            if button == 1 and x >= 22 and x <= 30 and y >= 7 and y <= 9 then
+                local credentials = tryLoginViaInput()
+                if credentials then return credentials end
+            end
+        end
+    end
+end
+
+local function checkCredentialsUI(credentials)
+    drawFrame()
+    g.drawTextCenter(term, W/2, 3, ""Checking your credentials..."", colors.black, colors.white)
+    os.sleep(1)
+    bankClient.logIn(credentials.username, credentials.password)
+    local accounts, errorMsg = bankClient.getAccounts()
+    if not accounts then
+        bankClient.logOut()
+        g.drawTextCenter(term, W/2, 5, errorMsg, colors.red, colors.white)
+        os.sleep(2)
+        return false
+    end
+    g.drawTextCenter(term, W/2, 5, ""Authentication successful."", colors.green, colors.white)
+    os.sleep(1)
+    return true
+end
+
+local function showAccountUI(account)
+    while true do
+        drawFrame()
+        g.drawXLine(term, 1, W, 2, colors.gray)
+        g.drawText(term, 2, 2, ""Account: "" .. account.name, colors.white, colors.gray)
+        g.drawText(term, W-3, 2, ""Back"", colors.white, colors.blue)
+
+        g.drawText(term, 2, 4, ""ID"", colors.gray, colors.white)
+        g.drawText(term, 2, 5, account.id, colors.black, colors.white)
+        g.drawText(term, 2, 7, ""Name"", colors.gray, colors.white)
+        g.drawText(term, 2, 8, account.name, colors.black, colors.white)
+        g.drawText(term, 2, 10, ""Balance ($HMK)"", colors.gray, colors.white)
+        g.drawText(term, 2, 11, tostring(account.balance), colors.orange, colors.white)
+
+        g.drawButton(term, 35, 4, 16, 3, ""Deposit"", colors.white, colors.green)
+        g.drawButton(term, 35, 8, 16, 3, ""Withdraw"", colors.white, colors.purple)
+        g.drawButton(term, 35, 12, 16, 3, ""Delete Account"", colors.white, colors.red)
+        local event, button, x, y = os.pullEvent(""mouse_click"")
+        if button == 1 then
+            if y == 2 and x >= W-3 then
+                return -- exit back to the accounts UI
+            end
+        end
+    end
+end
+
+local function showAccountsUI()
+    local accounts, errorMsg = bankClient.getAccounts()
+    while true do
+        drawFrame()
+        g.drawXLine(term, 1, 19, 2, colors.gray)
+        g.drawText(term, 2, 2, ""Account"", colors.white, colors.gray)
+        g.drawXLine(term, 10, 35, 2, colors.lightGray)
+        g.drawText(term, 11, 2, ""Name"", colors.white, colors.lightGray)
+        g.drawXLine(term, 36, W, 2, colors.gray)
+        g.drawText(term, 37, 2, ""Balance"", colors.white, colors.gray)
+        g.drawText(term, W-6, 2, ""Log Out"", colors.white, colors.red)
+        if accounts then
+            for i, account in pairs(accounts) do
+                local bg = colors.blue
+                if i % 2 == 0 then bg = colors.lightBlue end
+                local fg = colors.white
+                local y = i + 2
+                g.drawXLine(term, 1, W, y, bg)
+                g.drawText(term, 2, y, ""*"" .. string.sub(account.id, -5, -1), fg, bg)
+                g.drawText(term, 11, y, account.name, fg, bg)
+                g.drawText(term, 37, y, tostring(account.balance), fg, bg)
+            end
+        else
+            g.drawTextCenter(term, W/2, 4, ""Error: "" .. errorMsg, colors.red, colors.white)
+        end
+        local event, button, x, y = os.pullEvent(""mouse_click"")
+        if button == 1 then
+            if accounts and y > 2 and (y - 2) <= #accounts then
+                showAccountUI(accounts[y-2])
+            elseif y == 2 and x >= W-6 then
+                bankClient.logOut()
+                return
+            end
+        end
+    end
+end
+
+while true do
+    local credentials = showLoginUI()
+    local loginSuccess = checkCredentialsUI(credentials)
+    if loginSuccess then
+        showAccountsUI()
+    end
+end"
+HG34aXFf,MOK layout Braille,dksetiavan,JSON,Tuesday 29th of August 2023 05:31:11 PM CDT,"OK_Layout_Begin
+Name:Braille
+⠁⠃⠉⠙⠑⠋⠛⠓⠊⠚
+⠟⠺⠑⠗⠞⠽⠥⠊⠕⠏
+⠁⠎⠙⠋⠛⠓⠚⠅⠇
+⠵⠭⠉⠧⠃⠝⠍
+
+
+
+
+1234567890
+qwertyuiop
+asdfghjkl
+zxcvbnm
+⠠⠲⠩⠙⠯⠔⠦⠴⠀
+⠦⠸⠤⠿⠬⠨⠣⠬
+⠈⠪⠻⠼⠌⠳⠄⠶
+⠖⠆⠒⠦⠲⠂
+⣿$%^&*()⠀
+`_-=+·<>
+@[]#/\'""
+!;:?.,
+OK_Layout_End
+"
+RiS5J6Pq,MOK layout Zhuang alphabet,dksetiavan,JSON,Tuesday 29th of August 2023 05:30:34 PM CDT,"OK_Layout_Begin
+Name:Zhuang
+1234567890
+ƽɯerɵəuiopƂ
+asdfgƅзklƌ
+ƨчcvbnmŋ
+!@#$%^&*()
+ƽƜERƟƏUIOPƃ
+ASDFGƄЗKLƌ
+ƧЧCVBNMŊ
+£¥€$%^&*()№√⁙
+~`{}÷_-=|+§∷‡
+@[]#/\'""«»—‐–
+…<>!;:?‹›±.,
+ˉˋˇ´¨˙˚¸﹐˛˘˜ˆ
+―∑éə®†Ωœøπ•·¡
+æß∂ðƒ©ªº∆≠℥∞¿
+ʒΩ≈çþ∫ŋµ≤≥°
+OK_Layout_End
+"
+ceAxTBzs,MOK layout Latin aphabet,dksetiavan,JSON,Tuesday 29th of August 2023 05:29:23 PM CDT,"OK_Layout_Begin
+Name:Latin alphabet
+ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ
+QVERTYIOP
+ASDFGHKL
+ZXCBNM
+ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ
+ⅪⅫⅬⅭⅮⅯ Ↄ
+ⅺⅻⅼⅽⅾⅿ ↄ
+ↀↁↂ ↅↆↇↈ
+£¥€$%^&*()№√⁙
+~`{}÷_-=|+§∷‡
+@[]#/\'""«»—‐–
+…<>!;:?‹›±.,
+ˉˋˇ´¨˙˚¸﹐˛˘˜ˆ
+―∑éə®†Ωœøπ•·¡
+æß∂ðƒ©ªº∆≠℥∞¿
+ʒΩ≈çþ∫ŋµ≤≥°
+OK_Layout_End
+"
+4ynR5FPQ,PHP sqlite3 json results,metalx1000,PHP,Tuesday 29th of August 2023 04:48:34 PM CDT,"<?php
+// Copyright (C) 2023 Kris Occhipinti
+// https://filmsbykris.com
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Affero General Public
+// License as published by the Free Software Foundation;
+// version 3 of the License.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program; if not, write to the Free Software Foundation,
+// Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+// https://www.gnu.org/licenses/agpl-3.0.txt
+
+$table = ""invoices"";
+$db = new SQLite3('db/invoices.db');
+$results = $db->query(""SELECT * FROM $table"");
+$data = array();
+while ($row = $results->fetchArray(SQLITE3_ASSOC)) {
+  array_push($data,$row);
+}
+print json_encode($data);
+?>
+"
+rHw7NhQD,ffmpeg errors,iconoclasthero,Bash,Tuesday 29th of August 2023 04:25:03 PM CDT,"$ ffmpeg -i I\ Love\ It\ When\ You\ Lie\ --\ Disc\ 03.flac -acodec libfdk_aac -vbr 4 I\ Love\ It\ When\ You\ Lie\ --\ Disc\ 03.m4b
+ffmpeg version N-110065-g30cea1d39b Copyright (c) 2000-2023 the FFmpeg developers
+  built with gcc 11 (Ubuntu 11.4.0-1ubuntu1~22.04)
+  configuration: --prefix=/dev/shm/cache/ffmpeg_build --pkg-config-flags=--static --extra-cflags=-I/dev/shm/cache/ffmpeg_build/include --extra-ldflags=-L/dev/shm/cache/ffmpeg_build/lib --extra-libs='-lpthread -lm' --ld=g++ --bindir=/dev/shm/cache/ffmpeg_build/bin --enable-gpl --enable-gnutls --enable-libaom --enable-libass --enable-libfdk-aac --enable-libfreetype --enable-libmp3lame --enable-libopus --enable-libsvtav1 --enable-libdav1d --enable-libvorbis --enable-libvpx --enable-libx264 --enable-libx265 --enable-nonfree --enable-libwebp
+  libavutil      58.  5.100 / 58.  5.100
+  libavcodec     60.  6.101 / 60.  6.101
+  libavformat    60.  4.100 / 60.  4.100
+  libavdevice    60.  2.100 / 60.  2.100
+  libavfilter     9.  4.100 /  9.  4.100
+  libswscale      7.  2.100 /  7.  2.100
+  libswresample   4. 11.100 /  4. 11.100
+  libpostproc    57.  2.100 / 57.  2.100
+Input #0, flac, from 'I Love It When You Lie -- Disc 03.flac':
+  Metadata:
+    encoder         : Lavf60.4.100
+  Duration: 00:02:51.93, start: 0.000000, bitrate: 8384 kb/s
+  Stream #0:0: Audio: flac, 44100 Hz, stereo, s16
+Stream mapping:
+  Stream #0:0 -> #0:0 (flac (native) -> aac (libfdk_aac))
+Press [q] to stop, [?] for help
+[libfdk_aac @ 0x560dff6742c0] Note, the VBR setting is unsupported and only works with some parameter combinations
+Output #0, ipod, to 'I Love It When You Lie -- Disc 03.m4b':
+  Metadata:
+    encoder         : Lavf60.4.100
+  Stream #0:0: Audio: aac (mp4a / 0x6134706D), 44100 Hz, stereo, s16
+    Metadata:
+      encoder         : Lavc60.6.101 libfdk_aac
+[NULL @ 0x560dff66fa80] sample/frame number mismatch in adjacent frames
+[libfdk_aac @ 0x560dff6742c0] Queue input is backward in time
+    Last message repeated 1 times
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580672, current: 1043964; changing to 7580673. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580673, current: 460; changing to 7580674. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580674, current: 1484; changing to 7580675. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580675, current: 2508; changing to 7580676. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580676, current: 3532; changing to 7580677. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580677, current: 4556; changing to 7580678. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580678, current: 5580; changing to 7580679. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580679, current: 6604; changing to 7580680. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580680, current: 7628; changing to 7580681. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580681, current: 8652; changing to 7580682. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7580682, current: 9676; changing to 7580683. This may result in incorrect timestamps in the output file.
+
+.
+.
+.
+
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586639, current: 6109644; changing to 7586640. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586640, current: 6110668; changing to 7586641. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586641, current: 6111692; changing to 7586642. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586642, current: 6112716; changing to 7586643. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586643, current: 6113740; changing to 7586644. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586644, current: 6114764; changing to 7586645. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586645, current: 6115788; changing to 7586646. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586646, current: 6116812; changing to 7586647. This may result in incorrect timestamps in the output file.
+[ipod @ 0x560dff673080] Non-monotonous DTS in output stream 0:0; previous: 7586647, current: 6117836; changing to 7586648. This may result in incorrect timestamps in the output file.
+size=    3924kB time=00:02:18.72 bitrate= 231.7kbits/s speed=23.9x    
+video:0kB audio:3871kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: 1.372075%
+Exiting normally, received signal 2.
+"
+jRRxPf76,Untitled,Sergey_Schcelov,C++,Tuesday 29th of August 2023 04:17:39 PM CDT,"#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#define int long long
+
+using namespace std;
+
+
+
+signed main() {
+    uint64_t n, K, Q;
+    cin >> n >> K >> Q;
+
+    vector<int> a(n);
+    for (int i = 0; i < n; ++i)
+        a[i] = i+1;
+    vector<int> k(K);
+    for (int i = 0; i < K; ++i) {
+        int a;
+        cin >> a;
+        k[i] = 1 << a;
+    }
+
+    while (Q-- > 0){
+        uint64_t q;
+        cin >> q; --q;
+        for (int i = K-1; i >= 0; --i) {
+            if (q % (k[i]*2) < k[i])
+                q += k[i];
+            else
+                q -= k[i];
+        }
+        cout << a[q] << '\n';
+    }
+}"
+sz6Xxeqp,"Hello, World!",JardelJlts,Bash,Tuesday 29th of August 2023 04:09:37 PM CDT,"#!/bin/bash
+echo ""Hello, World!"""
+yWRjFMTx,Obsidian Templater Script 001,E0DE074599,JavaScript,Tuesday 29th of August 2023 03:49:23 PM CDT,"<%*
+// CREDIT: ZACH YOUNG for the folder enumeration magic
+const fileName = ""!notes""
+const projectName = await tp.system.prompt(""New Project Name:"");
+
+// Get all folders
+const folderItems = app.vault.getAllLoadedFiles().filter(x => x instanceof tp.obsidian.TFolder);
+// Prompt user to select folder
+const selectedFolder = (await tp.system.suggester((item) => item.path, folderItems)).path;
+
+// If a selection is made, do something...
+if (selectedFolder) {
+	// Check if the new project folder already exists
+	const folderExists = app.vault.getAbstractFileByPath(`${selectedFolder}/${projectName}`);
+
+	// If folder doesn't exist, create it and move the template copy into the new project folder
+	if (!folderExists || !(folderExists instanceof tp.obsidian.TFolder)) {
+		// Create a new folder, at the selectedFolder location
+		await this.app.vault.createFolder(`${selectedFolder}/${projectName}`);
+		
+		// Create the new file, using the required template, and move it to the new project folder
+		await tp.file.move(`${selectedFolder}/${projectName}/${fileName}`)
+	}
+
+	// If folder exists, check for file with name newFile exists
+	else {
+		const fileExists = tp.file.find_tfile(`${selectedFolder}/${projectName}/${fileName}`);
+
+		// Check if file exists at new folder...
+		if (!fileExists || !(folderExists instanceof tp.obsidian.TFile)) {
+			// Create the new file, using the required template, and move it to the new project folder
+			await tp.file.move(`${selectedFolder}/${projectName}/${fileName}`)
+		}
+		else {
+			// If it already exists, open the file
+			app.workspace.activeLeaf.openFile(`${selectedFolder}/${projectName}/${fileName}`);
+		} // end fileExists if statement
+	} // end folderExists if statement
+} //end selectedFolder if statement
+-%>"
+kDVMU0ef,Untitled,Rofyda_Elghadban1,C++,Tuesday 29th of August 2023 02:29:39 PM CDT,"int t;
+ cin>>t;
+ while(t--){
+  ll l,r,a,counter1=0,ans1=0,counter2=0,ans2=0,res=0,maxi=INT_MIN;
+  cin>>l>>r>>a;
+  for(ll i=l;i<=r;i++){
+    if(counter1==0){
+      if(i%a==0){
+        ans1=i;
+        counter1++;
+        break;
+      }else{
+        continue;
+      }
+    }else if(counter1==1&&counter2==0){
+      if(i%a==0){
+        ans2=i;
+        counter2++;
+        break;
+      }else{
+        continue;
+      }
+    }else{
+      continue;
+    }
+  }
+  if(counter1==1||counter2==1){
+    for(int i=ans1;i<=ans2;i++){
+      res=(floor(i/a))+(i%a);
+      maxi=max(res,maxi);
+    }
+  }cout<<maxi<<""\n"";
+ }"
+9wYzvJKx,Base Conversion,KeiranHalkyon,Bash,Tuesday 29th of August 2023 02:17:08 PM CDT,"read -p ""Enter value : "" val
+read -p ""Enter input base : "" ib
+read -p ""Enter output base : "" ob
+if [ $ib -lt 2 ] || [ $ob -lt 2 ]; then
+        echo ""Input/output base cannot be less than 2""
+        exit 1
+fi
+if [ $ib -gt 16 ] || [ $ob -gt 16 ]; then
+        echo ""Input/output base cannot be greater than 16""
+        exit 1
+fi
+val=`echo $val | tr [:lower:] [:upper:]`
+echo ""Output : ""
+echo ""obase=$ob; ibase=$ib; $val"" | bc
+"
+BJN9i578,Palindrome,KeiranHalkyon,Bash,Tuesday 29th of August 2023 02:15:36 PM CDT,"read -p ""Enter a word : "" str
+echo ""|$str|""
+len=$((`echo $str | wc -m`-1 ))
+i=0
+while [ $i -lt $((len/2)) ]
+do
+        if [ ! `echo $str | cut -c $((i+1))` = `echo $str | cut -c $((len-i))` ]
+        then
+                echo ""Not Palindrome""
+                exit 0
+        fi
+        i=$((i+1))
+done
+echo ""Palindrome""
+"
+RT3iAkNw,5476353,iamjohnrex03,CSS,Tuesday 29th of August 2023 02:03:44 PM CDT,"/**modify skip create account link on CSL**/
+a.m1ba {
+    font-size: 20px;
+    background: #ffecb3;
+    padding: 20px;
+    width: 100%;
+    max-width: 330px;
+    border-radius: 5px;
+}
+/**ends here**/"
+zUqUryba,tuplas y diccionarios,teslariu,Python,Tuesday 29th of August 2023 02:00:02 PM CDT,"#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# dos tipos de Colecciones:
+
+# a) tuplas: son listas ordenadas e INMUTABLES
+# b) diccionarios: son colecciones no ordenadas y MUTABLES
+""""""
+#tupla vacía
+tupla = ()
+
+# tupla con mas de un elemento
+tupla = (1,2,3)
+print(tupla)
+
+# tupla con 1 elemento
+tupla = (1,)
+print(tupla)
+
+# no existe append ni insert
+#tupla.append(1) # da error
+""""""
+# diccionarios: son una colección de pares de datos denominados
+# clave:valor
+# Las claves son únicas, no se pueden repetir. Los valores se pueden repetir
+
+# dicc vacio:
+dicc = {}
+
+# dicc con datos
+dicc = {""blanco"": ""white"", ""rojo"":""red""}
+print(dicc)
+
+# su longitud es la cantidad de pares
+print(f""Total de pares clave-valor del dicc: {len(dicc)}"")
+"
+KuaVJadx,integrador debuggeado,teslariu,Python,Tuesday 29th of August 2023 01:40:02 PM CDT,"#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+""""""
+Una universidad desea crear un programa para contabilizar los cursos que
+tiene cada alumno. Para ello se debe realizar primero una aplicación
+de consola la cual debe solicitar el nombre de un alumno y la cantidad 
+de cursos en la que se encuentra inscripto. Estos dos valores deben 
+almacenarse como una lista de dos elementos (el nombre y la cantidad
+de cursos como un número entero) en una lista de alumnos.
+
+Veamos un ejemplo más completo de entrada y salida
+
+Ingrese el número de la operación que desea ejecutar:
+1 - Ver la lista de alumnos.
+2 - Añadir un alumno a la lista.
+3 - Salir.
+>>> 2
+
+Ingrese el nombre del alumno: Pablo
+Ingrese la cantidad de cursos: 3
+¡El alumno fue añadido a la lista!
+Ingrese el número de la operación que desea ejecutar:
+1 - Ver la lista de alumnos.
+2 - Añadir un alumno a la lista.
+3 - Salir.
+>>> 1
+Lista de alumnos:
+Pablo - 3 cursos
+
+Ingrese el número de la operación que desea ejecutar:
+1 - Ver la lista de alumnos.
+2 - Añadir un alumno a la lista.
+3 - Salir.
+>>> 4
+La opción ingresada no es correcta, vuelva a
+intentarlo.
+Ingrese el número de la operación que desea ejecutar:
+1 - Ver la lista de alumnos.
+2 - Añadir un alumno a la lista.
+3 - Salir.
+>>> 3
+¡Gracias por utilizar el programa!
+
+
+""""""
+# Pasos para encarar un programa (el orden puede variar)
+# a) Identificar que datos se deben registrar y como implementarlos
+# b) identificar las estructuras lógicas a usar
+
+# a) nombre de un alumno, cantidad de cursos almacenados como una lista
+# de 2 elementos en una lista de alumnos
+# Ej: alumnos = [ [""Juan"",3], [""Ana"",2], [""Maria"", 4] ]
+
+# b) El cliente quiere un menu de opciones que se ejecuta hasta que el
+# usuario desee salir  --> TEMPLATE WHILE TRUE
+
+# creo una lista vacía para guardar datos de los alumnos
+alumnos = []
+
+while True:
+	                                    
+	print(""""""
+		Menu de opciones
+	--------------------------------
+	1 - Ver la lista de alumnos.
+	2 - Añadir un alumno a la lista.
+	3 - Salir.
+	--------------------------------
+	"""""")
+	
+	opcion = input(""Ingrese su opción: "")
+	
+	if opcion == ""1"":
+		# Ticket nº1 fecha tope 15/09/23 --solucionado 29/08/23
+		# Lista de alumnos:
+		# Pablo - 3 cursos
+		# Juan - 2 cursos
+		# Ana - 5 cursos
+		if not alumnos:
+			print(""No hay alumnos"")
+		else:
+			print(""Lista de alumnos"")
+			for alumno in alumnos:
+				print(f""{alumno[0]} - {alumno[1]} cursos"")
+		
+		
+	elif opcion == ""2"":
+		nombre = input(""Ingrese el nombre del alumno: "")
+		while True:
+			cursos = input(""Ingrese la cantidad de cursos: "")
+			if cursos.isnumeric() and int(cursos):
+				cursos = int(cursos)
+				break
+			else:
+				print(""Debe ingresar un número entero positivo"")
+		alumnos.append([nombre, cursos])
+		print(""¡El alumno fue añadido a la lista!"")
+		
+		
+		
+	elif opcion == ""3"":
+		print(""¡Gracias por utilizar el programa!"")
+		break
+		
+	else:
+		print(""Opción incorrecta"")
+		
+		
+
+
+
+
+
+
+
+"
+zcgCCEQS,[CONSOLE] SCRIPT,RohanPhuyal,JavaScript,Tuesday 29th of August 2023 01:06:48 PM CDT,"(async function () {
+    var playAgain = null;
+    document.querySelector(""shopping-page-base"")
+        ?.shadowRoot.querySelector(""shopping-homepage"")
+        ?.shadowRoot.querySelector(""cs-feed-layout"")
+        ?.shadowRoot.querySelector(""msn-shopping-game-pane"").setAttribute('gamestate', 'active');
+
+    var shoppingGame = document.querySelector(""shopping-page-base"")
+        ?.shadowRoot.querySelector(""shopping-homepage"")
+        ?.shadowRoot.querySelector(""cs-feed-layout"")
+        ?.shadowRoot.querySelector(""msn-shopping-game-pane"")
+        ?.shadowRoot.querySelector(""msft-stripe"");
+    shoppingGame.scrollIntoView({ behavior: ""smooth"" });
+
+    async function executeScript() {
+        console.log(""Executing"");
+        var pricesAll = []; // Array to store original prices
+        var discountAll = []; // Array to store discounts
+        var finalPrice = [];
+        var cheapestIndex; // Store the index of the cheapest item
+
+
+        async function pricesOfAll() {
+            var prices = document
+                .querySelector(""shopping-page-base"")
+                ?.shadowRoot.querySelector(""shopping-homepage"")
+                ?.shadowRoot.querySelector(""cs-feed-layout"")
+                ?.shadowRoot.querySelector(""msn-shopping-game-pane"").displayedShoppingEntities;
+
+            var loopTimes = prices.length;
+            for (let i = 0; i < loopTimes; i++) {
+                pricesAll.push(prices[i].priceInfo.originalPrice); // Add original price to pricesAll array
+                discountAll.push(prices[i].dealPercentage); // Add discount to discountAll array
+            }
+        }
+
+        async function calculateDiscount() {
+            for (let i = 0; i < pricesAll.length; i++) {
+                let initPrice = parseFloat(pricesAll[i].replace(/[$,]/g, """"));
+                let discountPercentage = parseFloat(discountAll[i].replace(""%"", """"));
+                let discountedPrice = (initPrice - ((initPrice * discountPercentage) / 100));
+                finalPrice.push(discountedPrice);
+            }
+        }
+        async function findCheapestIndex(finalPrice) {
+            var cheapestPrice = Math.min(...finalPrice); // Find the lowest value in the finalPrice array
+            var cheapIndex = finalPrice.indexOf(cheapestPrice); // Get the index of the lowest value
+            return cheapIndex;
+        }
+
+        async function highlightAndRemoveItems(correctIndex, items) {
+            for (let i = 0; i < items.length; i++) {
+                if (i === correctIndex) {
+                    items[i].style.borderColor = ""green"";
+                } else {
+                    items[i].style.display = ""none"";
+                }
+            }
+            pricesAll = [];
+            discountAll = [];
+            finalPrice = [];
+            cheapestIndex = null;
+
+        }
+        async function playAgainFunc() {
+            // Get the initial shadow DOM element
+            const firstShadowRoot = document.querySelector(""#root > div > div > fluent-design-system-provider > div > div:nth-child(4) > div > shopping-page-base"").shadowRoot;
+
+            // Traverse through the shadow DOM to find the desired elements
+            const shoppingHomepage = firstShadowRoot.querySelector(""div > div.shopping-page-content > shopping-homepage"").shadowRoot;
+            const csFeedLayout = shoppingHomepage.querySelector(""div > cs-feed-layout"").shadowRoot;
+            const shoppingGamePane = csFeedLayout.querySelector(""msn-shopping-game-pane"").shadowRoot;
+            const gamePanelContainer = shoppingGamePane.querySelector(""div.shopping-game-pane-container > div.game-panel-container > div.game-panel-header-2"");
+            if(gamePanelContainer){
+                // Search for a button with the text ""Play Again"" within the div
+            playAgain = gamePanelContainer.querySelectorAll(""button"")[0];
+            }
+            if (playAgain !== null) {
+                console.log(""Terminating playAgainFunc(): playAgain button found!"");
+                playAgain.click();
+                clearInterval(fixIntervalId);
+                playAgain=null;
+                setTimeout(() => executeScript(), 9000);
+            }
+        }
+        await pricesOfAll();
+        await calculateDiscount();
+        cheapestIndex = await findCheapestIndex(finalPrice);
+        console.log(""Original Price: "" + pricesAll);
+        console.log(""Discount%: "" + discountAll);
+        console.log(""Final Price: "" + finalPrice);
+        console.log(""Answer: "" + cheapestIndex);
+        await highlightAndRemoveItems(cheapestIndex, shoppingGame.getElementsByClassName(""shopping-game-card-outline""));
+        // Only schedule the setTimeout if playAgain is still null
+        var fixIntervalId = setInterval(async function () {
+            await playAgainFunc();
+        }, 100);
+    }
+        await executeScript();
+})();
+"
+5jj0tQS0,[BOOKMARKLET] SCRIPT,RohanPhuyal,JavaScript,Tuesday 29th of August 2023 01:05:48 PM CDT,"javascript:void%20function(){(async%20function(){async%20function%20a(){async%20function%20d(){var%20a=document.querySelector(%22shopping-page-base%22)%3F.shadowRoot.querySelector(%22shopping-homepage%22)%3F.shadowRoot.querySelector(%22cs-feed-layout%22)%3F.shadowRoot.querySelector(%22msn-shopping-game-pane%22).displayedShoppingEntities,b=a.length;for(let%20c=0;c%3Cb;c++)j.push(a[c].priceInfo.originalPrice),k.push(a[c].dealPercentage)}async%20function%20e(){for(let%20a=0;a%3Cj.length;a++){let%20b=parseFloat(j[a].replace(/[$,]/g,%22%22)),c=parseFloat(k[a].replace(%22%25%22,%22%22)),d=b-b*c/100;l.push(d)}}async%20function%20f(a){var%20b=Math.min(...a),c=a.indexOf(b);return%20c}async%20function%20g(){const%20c=document.querySelector(%22%23root%20%3E%20div%20%3E%20div%20%3E%20fluent-design-system-provider%20%3E%20div%20%3E%20div:nth-child(4)%20%3E%20div%20%3E%20shopping-page-base%22).shadowRoot,d=c.querySelector(%22div%20%3E%20div.shopping-page-content%20%3E%20shopping-homepage%22).shadowRoot,e=d.querySelector(%22div%20%3E%20cs-feed-layout%22).shadowRoot,f=e.querySelector(%22msn-shopping-game-pane%22).shadowRoot,g=f.querySelector(%22div.shopping-game-pane-container%20%3E%20div.game-panel-container%20%3E%20div.game-panel-header-2%22);g%26%26(b=g.querySelectorAll(%22button%22)[0]),null!==b%26%26(console.log(%22Terminating%20playAgainFunc():%20playAgain%20button%20found!%22),b.click(),clearInterval(m),b=null,setTimeout(()=%3Ea(),9e3))}console.log(%22Executing%22);var%20h,j=[],k=[],l=[];await%20d(),await%20e(),h=await%20f(l),console.log(%22Original%20Price:%20%22+j),console.log(%22Discount%25:%20%22+k),console.log(%22Final%20Price:%20%22+l),console.log(%22Answer:%20%22+h),await%20async%20function%20c(a,b){for(let%20c=0;c%3Cb.length;c++)c===a%3Fb[c].style.borderColor=%22green%22:b[c].style.display=%22none%22;j=[],k=[],l=[],h=null}(h,c.getElementsByClassName(%22shopping-game-card-outline%22));var%20m=setInterval(async%20function(){await%20g()},100)}var%20b=null;document.querySelector(%22shopping-page-base%22)%3F.shadowRoot.querySelector(%22shopping-homepage%22)%3F.shadowRoot.querySelector(%22cs-feed-layout%22)%3F.shadowRoot.querySelector(%22msn-shopping-game-pane%22).setAttribute(%22gamestate%22,%22active%22);var%20c=document.querySelector(%22shopping-page-base%22)%3F.shadowRoot.querySelector(%22shopping-homepage%22)%3F.shadowRoot.querySelector(%22cs-feed-layout%22)%3F.shadowRoot.querySelector(%22msn-shopping-game-pane%22)%3F.shadowRoot.querySelector(%22msft-stripe%22);c.scrollIntoView({behavior:%22smooth%22}),await%20a()})()}();"
+Qsuq1QpX,Stylesheet for IGM,kubakaoff8,CSS,Tuesday 29th of August 2023 12:02:54 PM CDT,"CSS
+	#game
+	{
+		font-family:""Comic Sans MS"",Times,serif;
+		color:white;
+	}
+	.thing
+	{
+		border-radius:8px;
+		background:rgba(0,0,0,0.5);
+	}
+	#game.filtersOn .thing.cantAfford.notOwned
+	{
+		filter:blur(3px);
+	}"
+PPRMh7zn,login AM test,jhillBHT,C,Tuesday 29th of August 2023 11:55:10 AM CDT,"<script>
+window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+ 'event': 'login', // status update based on form submit
+    'userId': 'abc123', // Identifier from ga cookie and/or CRM ID
+    'pricingPlan': 'premium', // choose from 3 free, basic, premium
+    'sessionNumber': 7, // please use a variable based on the ga_session_number variable in google analytics
+ });
+</script>
+"
+kMbPfBRb,Untitled,romaaaka,Python,Tuesday 29th of August 2023 11:54:44 AM CDT,"hello_message = """"""
+Привет, это простое приветственное сообщение, меня надо изменить!
+Проверим тебя?
+""""""
+answer_taken_into = ""Ответ учтён!""
+error_occurred = ""Произошла ошибка, я уже о ней сообщил администрации. Повторите попытку чуть позже!"" # Сообщение для пользователя
+error_message = ""Произошла ошибка у пользователя {user_id}!"" # Сообщение для админов
+results = """"""
+Итак, у тебя {score}/{max} правильных ответов. 
+Сюда нужно подставить необходимое.
+""""""
+# score - баллы пользователя
+# max - сумма всех возможных баллов
+use_keyboard = ""Пожалуйста ответьте на этот вопрос с помощью кнопок, которые находятся под полем ввода сообщения!""
+choose_answer = ""Выберете правильный ответ на кнопках.""
+write_answer = ""Впишите правильный ответ.""
+no_questions = ""Вопросов нет""
+
+# -------
+
+q_text_passed = ""Окей, я записал. Теперь отметьте нужный вариант: Вопрос с вариантами ответа или открытый вопрос""
+q_type_passed_open = ""Как скажете. Теперь через запятую перечислите правильные ответы на вопрос (регистр не важен)""
+q_type_passed_variative = ""Как скажете. Теперь через запятую перечислите варианты ответов на вопрос.""
+q_answers_passed = (""Хорошо. Я зарегистрировал такие ответы: \n{answers}\n\nТеперь введите текст, которым будет ""
+                    ""отвечать бот"")
+q_options_passed = (""Хорошо. Теперь выберете правильный ответ"")
+q_right_passed = ""Отлично. Верным отмечен вариант: {option}. Теперь введите текст, которым будет отвечат бот.""
+q_response_passed = ""Замечательно. Теперь укажите кол-во баллов, которые будут давать за этот вопрос""
+q_weight_passed = (
+    ""Прекрасно. За этот вопрос будут давать {weight} баллов. Теперь подтвердите сохранять ли этот вопрос.""
+    ""Для этого у вас появилась кнопка внизу. В противном случае можете отменить."")
+q_confirmed = ""Вопрос создан под номером {question_id}!""
+
+delete_question = ""Введите номер вопроса, который хотите удалить.\nВнимание, операция не обратима!""
+view_question = ""Введите номер вопроса, который хотите посмотреть""
+user_status = ""Этот пользователь сейчас на {question_id} вопросе и имеет {score} баллов""
+user_deleted = ""Пользователь удален""
+"
+ScTzTXxW,Untitled,sifterstudios,Go,Tuesday 29th of August 2023 11:51:22 AM CDT,"package web
+
+import (
+	""encoding/json""
+	""fmt""
+	""github.com/gorilla/mux""
+	""log""
+	""net/http""
+	""reflect""
+	""strconv""
+	""sync""
+	""time""
+
+	""github.com/sifterstudios/bitbucket-notifier/bitbucket""
+	""github.com/sifterstudios/bitbucket-notifier/data""
+	""github.com/sifterstudios/bitbucket-notifier/notification""
+)
+
+func StartWebServer() {
+	r := mux.NewRouter()
+
+	r.PathPrefix(""/static/"").Handler(http.StripPrefix(""/static/"", http.FileServer(http.Dir(""../web/static/""))))
+	r.HandleFunc(""/"", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, ""../web/templates/index.html"")
+	})
+	r.HandleFunc(""/send-notification"", sendNotificationHandler).Methods(""POST"")
+	r.HandleFunc(""/update"", updateHandler).Methods(""GET"")
+	r.HandleFunc(""/stats"", getStatsHandler).Methods(""GET"")
+	r.HandleFunc(""/config"", getConfigHandler).Methods(""GET"")
+	r.HandleFunc(""/config"", setConfigHandler).Methods(""POST"")
+
+	fmt.Println(""Listening on port 1337"")
+	fmt.Println(""Go to http://localhost:1337 to change settings and test the setup!"")
+	err := http.ListenAndServe("":1337"", r)
+	if err != nil {
+		return
+	}
+	var wg sync.WaitGroup
+	go func() {
+		wg.Add(1)
+		startScheduledUpdate()
+		wg.Done()
+	}()
+	wg.Wait()
+}
+
+func startScheduledUpdate() {
+	for {
+		time.Sleep(time.Duration(data.UserConfig.ConfigNotifications.PollingInterval) * time.Second)
+		println(""Updating..."" + time.Now().String())
+		go updateHandler(nil, nil)
+	}
+}
+func getStatsHandler(writer http.ResponseWriter, _ *http.Request) {
+	if len(data.CurrentPrs) == 0 {
+		updateHandler(writer, nil)
+	}
+	stats := data.ConvertActivePrResponseToUiStatistics(data.CurrentPrs)
+
+	writer.Header().Set(""Content-Type"", ""application/json"")
+	_, err := writer.Write([]byte(fmt.Sprintf(
+		`{""lastUpdate"": %d, ""numberOfActivePrComments"": %d, ""numberOfActivePrTasks"": %d}`,
+		stats.LastUpdate, stats.NumberOfActivePrComments, stats.NumberOfActivePrTasks)))
+	if err != nil {
+		return
+	}
+}
+
+func getConfigHandler(writer http.ResponseWriter, _ *http.Request) {
+	config := data.UserConfig.ConfigNotifications
+	fmt.Println(config)
+	jsonUiStats, err := json.Marshal(config)
+	if err != nil {
+		fmt.Println(err)
+	}
+	_, err = writer.Write(jsonUiStats)
+	if err != nil {
+		return
+	}
+}
+func setConfigHandler(_ http.ResponseWriter, request *http.Request) {
+	err := request.ParseForm()
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(request.Form)
+	newConfig := data.ConfigNotifications{}
+	pollingInterval, err := strconv.Atoi(request.Form.Get(""monitoringFrequencyInput""))
+	if err != nil {
+		fmt.Println(err)
+	}
+	newConfig.PollingInterval = pollingInterval
+	newConfig.Comments = request.Form.Get(""notifyCommentsCheckbox"") == ""on""
+	newConfig.Tasks = request.Form.Get(""notifyTasksCheckbox"") == ""on""
+	newConfig.StatusChanges = request.Form.Get(""notifyStatusChangesCheckbox"") == ""on""
+	newConfig.CompletionTime = request.Form.Get(""notifyCompletionTimeCheckbox"") == ""on""
+
+	data.UserConfig.ConfigNotifications = newConfig
+}
+
+func updateHandler(writer http.ResponseWriter, _ *http.Request) {
+	prResponse, err := bitbucket.GetCurrentPullRequestsByUser(data.UserConfig)
+	if err != nil {
+		log.Print(err)
+	}
+
+	if !reflect.DeepEqual(prResponse.Values, data.CurrentPrs) {
+		data.HandleCurrentPrs(prResponse.Values)
+	}
+
+	activityResponse, err := bitbucket.GetPullRequestsActivity(data.CurrentPrs)
+	data.HandlePrActivity(data.CurrentPrs, activityResponse)
+
+	uiStats := data.ConvertActivePrResponseToUiStatistics(prResponse.Values)
+
+	fmt.Println(uiStats)
+
+	if writer != nil {
+		jsonUiStats, err := json.Marshal(uiStats)
+		_, err = writer.Write(jsonUiStats)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func sendNotificationHandler(writer http.ResponseWriter, _ *http.Request) {
+	err := notification.SendNotification(""Test notification"", ""It just works! :D"")
+	if err != nil {
+		http.Error(writer, ""Failed to send notification"", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]string{
+		""message"": ""Notification sent successfully, look top right!"",
+	}
+	writer.Header().Set(""Content-Type"", ""application/json"")
+	err = json.NewEncoder(writer).Encode(response)
+	if err != nil {
+		return
+	}
+}"
+WReRLLBm,Overwrite uvicorn's formatMessage,bozhilov,Python,Tuesday 29th of August 2023 11:49:09 AM CDT,"fmt = Formatter(fmt=""[%(levelprefix)s] [%(name)s]: %(message)s"")
+
+def formatMessage(self, record: logging.LogRecord) -> str:
+        recordcopy = copy(record)
+        levelname = recordcopy.levelname
+        seperator = "" "" * (8 - len(recordcopy.levelname))
+        if self.use_colors:
+            levelname = self.color_level_name(levelname, recordcopy.levelno)
+            if ""color_message"" in recordcopy.__dict__:
+                recordcopy.msg = recordcopy.__dict__[""color_message""]
+                recordcopy.__dict__[""message""] = recordcopy.getMessage()
+        recordcopy.__dict__[""levelprefix""] = levelname 
+        return fmt.formatMessage(recordcopy)
+
+ColourizedFormatter.formatMessage = formatMessage"
+2n2eQ8gG,Untitled,TaylorsRus,Lua,Tuesday 29th of August 2023 11:39:32 AM CDT,"local StateClass = {}
+StateClass.__index = StateClass
+
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local RunService = game:GetService(""RunService"")
+local Player = game:GetService(""Players"").LocalPlayer
+
+local State = ReplicatedStorage:WaitForChild(""State"")
+
+local AlreadyCounting = false
+local LastChange = nil
+
+local COUNTDOWN_INTERVAL = .5
+local IDLE_REVERT_TIME = 5
+
+function StateClass.new(StateMachine)
+	local self = setmetatable({}, StateClass)
+	self.Name = StateMachine
+	self.States = {}	
+	for _,State in ipairs(State[StateMachine]:GetChildren()) do
+		self.States[State.Name] = require(State)
+	end
+
+	self.State = require(script.None)
+	self.ReturnState = self.States.Idle
+	return self
+end
+
+function StateClass:InitStates()
+	for _,State in self.States do
+		if State.Init then
+			State.Init()
+		end
+	end
+end
+
+function StateClass:ChangeState(State)
+	if self.State.Name == State then 
+		return
+	end
+	local ValidState = false
+	local ErrorMessage = """"
+	
+	for StateName, Other in self.States do
+		ErrorMessage = ""Attempted to change to invalid state enum.""
+		if StateName == State then
+			ValidState = true
+			break
+		end
+	end
+
+	local OldState = self.State
+	local NewState = self.States[State]
+	
+	if NewState.RequiredStates then
+		ValidState = false
+		ErrorMessage = ""Attempted to forbidden state""
+		
+		for _,RequiredState in ipairs(NewState.RequiredStates) do
+			if RequiredState == OldState.Name then
+				ValidState = true
+			end
+		end 
+	end
+		
+	if not ValidState then
+		error(ErrorMessage.."": ""..NewState.Name)
+	end
+	
+	
+	if not NewState.IgnoreCallbacks then		
+		if OldState.Exit and not NewState.IgnoreExit then
+			OldState.Exit(NewState)
+		end
+		if NewState.Enter then 
+			NewState.Enter(OldState)
+		end
+	end
+
+	self.State = NewState	
+	print(self.Name.."" State Change:"",self.State.Name)
+	if NewState.Name == ""Idle"" then
+		return 
+	end
+	
+	LastChange = os.clock()
+	if AlreadyCounting then return end
+	AlreadyCounting = true
+	
+	if NewState.Movement then
+		local Humanoid = Player.Character:WaitForChild(""Humanoid"")
+		repeat task.wait() until Humanoid.MoveDirection.Magnitude == 0
+	elseif not NewState.Movement and not NewState.Holdable then
+		while true do
+			task.wait(COUNTDOWN_INTERVAL)
+			local DeltaTime = os.clock() - LastChange
+			if DeltaTime >= IDLE_REVERT_TIME then
+				break
+			end	
+		end
+	end
+	
+	if not NewState.Holdable then
+		self:ChangeState(self.ReturnState)
+	end
+	AlreadyCounting = false
+end
+
+function StateClass:ChangeReturnState(State)
+	if not self.States[State] then
+		error(""Attempted to change return state to invalid state enum."")
+	end
+	self.ReturnState = self.States[State]
+end
+
+function StateClass:FetchState(State)
+	return self.State
+end
+
+
+return StateClass"
+93a2GrJj,Murder Myster 2 - ROLES RADAR,anphu04,Lua,Tuesday 29th of August 2023 11:03:39 AM CDT,"-- 28/2/2023 : last exploit(s) before going home tomorrow
+myplr = game.Players.LocalPlayer
+uis = game:GetService('UserInputService')
+
+local event
+local stop = false
+event = uis.InputBegan:Connect(function(input,gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.R then
+        stop = true
+    end
+end)
+
+--//////////////////////////////////
+
+function surf(part,face,color3)
+    local gui = Instance.new(""SurfaceGui"")
+    gui.Name = ""NightVision_Surface""
+    gui.LightInfluence = 1
+    gui.AlwaysOnTop = true
+    gui.Face = face
+    
+    local fr = Instance.new(""Frame"")
+    fr.Size = UDim2.new(1,0,1,0)
+    fr.BorderSizePixel = 0
+    fr.BackgroundColor3 = color3
+    fr.BackgroundTransparency = 0.5
+    fr.Parent = gui
+    
+    gui.Parent = part
+end
+
+function highlight(char, color3)
+    local root = char:FindFirstChild('HumanoidRootPart')
+    surf(root, ""Top"", color3)
+    surf(root, ""Bottom"", color3) 
+    surf(root, ""Right"", color3) 
+    surf(root, ""Left"", color3) 
+    surf(root, ""Front"", color3)
+    surf(root, ""Back"", color3)
+
+    --[[for j,part in pairs(char:GetChildren()) do
+        if part:IsA(""BasePart"") or part:IsA(""MeshPart"") then
+            surf(""Top"")
+            surf(""Bottom"") 
+            surf(""Right"") 
+            surf(""Left"") 
+            surf(""Front"")
+            surf(""Back"")
+        end
+    end]]
+    
+end
+
+function alreadyhas(char, tagname)
+    local oldtag
+    for i,v in pairs(char:GetChildren()) do
+        if v.Name == 'innocent_tag' or v.Name == 'gun_tag' or v.Name == 'knife_tag' then
+            oldtag = v
+            break
+        end
+    end
+
+    local already
+    if oldtag and oldtag.Name == tagname then
+        already = true
+    else
+        already = false
+
+        if oldtag and oldtag.Name ~= tagname then
+            oldtag:Destroy()
+        end
+
+        local newtag = Instance.new('BoolValue')
+        newtag.Name = tagname
+        newtag.Parent = char
+
+        for j,part in pairs(char:GetChildren()) do
+            if part:IsA(""BasePart"") or part:IsA(""MeshPart"") then
+                for i,v in pairs(part:GetChildren()) do
+                    if v.Name == 'NightVision_Surface' then
+                        v:Destroy() -- also remove the old ones in the process
+                        ok = true
+                    end
+                end
+            end
+        end
+    end
+
+    return already
+end
+
+while not stop do
+    for i,plr in pairs(game.Players:GetChildren()) do
+        if plr ~= game.Players.LocalPlayer then
+            local char = plr.Character
+            if char == nil then continue end
+
+            if char:FindFirstChild('Knife') then
+                if not alreadyhas(char,'knife_tag') then
+                    highlight(char,Color3.new(1,0,0))
+                end
+
+                -- if youre a sheriff, aimbot at the murderer's head
+                if myplr.Character and myplr.Character:FindFirstChild('Gun') then
+                    workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, char:FindFirstChild('Head').Position)
+                end
+
+            elseif char:FindFirstChild('Gun') then
+                if not alreadyhas(char,'gun_tag') then
+                    highlight(char,Color3.new(0,0,1))
+                end
+            else
+                if not alreadyhas(char,'innocent_tag') then
+                    highlight(char,Color3.new(0,1,0))
+                end
+            end
+
+        end
+    end
+
+    local gundrop = workspace:FindFirstChild('GunDrop')
+    if gundrop then
+        if not alreadyhas(gundrop, 'gundrop_tag') then
+            surf(gundrop, ""Top"", Color3.new(0,0,1))
+            surf(gundrop, ""Bottom"", Color3.new(0,0,1)) 
+            surf(gundrop, ""Right"", Color3.new(0,0,1)) 
+            surf(gundrop, ""Left"", Color3.new(0,0,1)) 
+            surf(gundrop, ""Front"", Color3.new(0,0,1))
+            surf(gundrop, ""Back"", Color3.new(0,0,1))
+        end
+    end
+
+    wait()
+end
+event:Disconnect()"
+W9AUvu77,larghezza albero,davegimo,Python,Tuesday 29th of August 2023 10:58:49 AM CDT,"class Node:
+   def __init__(self, val):
+      self.left = None
+      self.right = None
+      self.val = val
+
+
+a = Node(1)
+b = Node(2)
+c = Node(3)
+d = Node(4)
+e = Node(5)
+f = Node(6)
+g = Node(7)
+h = Node(9)
+
+a.left = b
+a.right = c
+b.left = d
+b.right = e
+c.left = f
+c.right = g
+g.right = h
+
+
+
+def stampa_larghezza(a):
+    l = []
+    larghezza_aux(a,l,0)
+    print(l)
+
+    larghezza = 0
+    for element in l:
+        if len(element) > larghezza:
+            larghezza = len(element)
+
+    return larghezza
+
+def larghezza_aux(a,l,k):
+    if a is None:
+        return
+
+    if len(l) <= k:
+        l.append([])
+        
+    l[k].append(a.val)
+
+    larghezza_aux(a.left,l,k+1)
+    larghezza_aux(a.right,l,k+1)
+
+
+
+
+larghezza = stampa_larghezza(a)
+print(larghezza)
+ 
+        
+"
+13vwbVrt,Write CSV,peterhowells,Java,Tuesday 29th of August 2023 10:28:00 AM CDT,"import java.util.*;
+import java.io.*;
+
+public class Gr11_Write_Values_To_File {
+    public static void main(String[] args) throws IOException{
+        String filename = ""C:/Data/random.txt"";
+        //String filename = ""C:/Data/random2.csv"";
+        
+        double arrRan[] = new double[50];
+        
+        for (int i = 0; i < arrRan.length; i++) {
+            arrRan[i] = Math.random();
+        }
+        System.out.println(Arrays.toString(arrRan));
+        
+        PrintWriter outFile = new PrintWriter(new FileWriter(filename));
+        
+        for (int i = 0; i < arrRan.length; i++) {
+            String line = """" + arrRan[i] + "","";
+            //String line = """" + arrRan[i] + "","";    // for csv data
+            outFile.println(line);
+        }
+        outFile.close();
+        System.out.println(""Data written to "" + filename);
+    }
+}"
+W5j09V53,11388 - GCD LCM,MiinaMagdy,C++,Tuesday 29th of August 2023 10:11:00 AM CDT,"/*
++---------------------------------------------+
+|                                             |
+|       © 29/08/2023 (16:22) MinaMagdy        |
+|                                             |
++---------------------------------------------+
+*/
+#include <bits/stdc++.h>
+#include <ext/pb_ds/assoc_container.hpp>
+#include <ext/pb_ds/tree_policy.hpp>
+
+using namespace std;
+using namespace __gnu_pbds;
+#define ordered_set tree<int, null_type, less<int>, rb_tree_tag, tree_order_statistics_node_update>
+#define multi_ordered_set tree<int, null_type, less_equal<int>, rb_tree_tag, tree_order_statistics_node_update>
+#define endl ""\n""
+#define MOD 1000000007
+#define INF 2000000000
+#define all(s) s.begin(), s.end()
+#define rall(s) s.rbegin(), s.rend()
+#define sz(x) int(x.size())
+
+typedef long long ll;
+typedef long double ld;
+typedef unsigned long long ull;
+
+ll lcm(ll a, ll b) {
+    return a / __gcd(a, b) * b;
+}
+
+void solve() {
+    ll a, b;
+    cin >> a >> b;
+    ll g = __gcd(a, b);
+    ll l = lcm(a, b);
+    if (a == g && b == l) {
+        cout << a << "" "" << b << endl;
+    }
+    else {
+        cout << -1 << endl;
+    }
+}
+
+int main(void)
+{
+    ios_base::sync_with_stdio(false), cin.tie(NULL), cout.tie(NULL);
+    int testcase = 1;
+    cin >> testcase;
+    while (testcase--)
+        solve();
+    return 0;
+}"
+EBncjBhA,News Aug29 23,Newscaster_Ned,Email,Tuesday 29th of August 2023 09:54:26 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎,‎ ‎y‎o‎u‎ ‎w‎o‎r‎t‎h‎l‎e‎s‎s‎ ‎p‎i‎l‎e‎s‎ ‎o‎f‎ ‎n‎i‎g‎g‎e‎r‎ ‎d‎u‎n‎g‎.‎
+
+C‎h‎i‎c‎a‎g‎o‎ ‎M‎a‎y‎o‎r‎ ‎B‎l‎a‎m‎e‎s‎ ‎A‎u‎t‎o‎ ‎T‎h‎e‎f‎t‎ ‎S‎u‎r‎g‎e‎ ‎o‎n‎ ‎C‎a‎r‎s‎ ‎M‎a‎d‎e‎ ‎T‎o‎o‎ ‎E‎a‎s‎y‎ ‎t‎o‎ ‎S‎t‎e‎a‎l‎
+B‎i‎d‎e‎n‎'‎s‎ ‎A‎l‎i‎a‎s‎e‎s‎ ‎H‎i‎d‎ ‎D‎o‎c‎u‎m‎e‎n‎t‎s‎ ‎f‎r‎o‎m‎ ‎N‎a‎t‎i‎o‎n‎a‎l‎ ‎A‎r‎c‎h‎i‎v‎e‎s‎ ‎i‎n‎ ‎P‎l‎a‎i‎n‎ ‎S‎i‎g‎h‎t‎
+U‎n‎i‎v‎e‎r‎s‎i‎t‎y‎ ‎o‎f‎ ‎N‎o‎r‎t‎h‎ ‎C‎a‎r‎o‎l‎i‎n‎a‎ ‎M‎u‎r‎d‎e‎r‎ ‎O‎c‎c‎u‎r‎r‎e‎d‎ ‎i‎n‎ ‎G‎u‎n‎-‎F‎r‎e‎e‎ ‎Z‎o‎n‎e‎
+‘‎B‎a‎c‎h‎e‎l‎o‎r‎e‎t‎t‎e‎’‎ ‎A‎l‎u‎m‎ ‎J‎o‎s‎h‎ ‎S‎e‎i‎t‎e‎r‎ ‎D‎i‎e‎s‎ ‎a‎t‎ ‎3‎6‎
+P‎o‎p‎e‎ ‎F‎r‎a‎n‎c‎i‎s‎ ‎D‎r‎a‎w‎s‎ ‎F‎i‎r‎e‎ ‎f‎o‎r‎ ‎E‎x‎a‎l‎t‎i‎n‎g‎ ‎R‎u‎s‎s‎i‎a‎n‎ ‎H‎i‎s‎t‎o‎r‎y‎
+P‎e‎a‎c‎e‎ ‎T‎a‎l‎k‎s‎ ‎B‎e‎t‎w‎e‎e‎n‎ ‎I‎s‎r‎a‎e‎l‎,‎ ‎L‎i‎b‎y‎a‎ ‎C‎o‎l‎l‎a‎p‎s‎e‎ ‎A‎f‎t‎e‎r‎ ‎B‎e‎i‎n‎g‎ ‎R‎e‎v‎e‎a‎l‎e‎d‎
+G‎e‎r‎m‎a‎n‎ ‎I‎S‎I‎S‎ ‎B‎r‎i‎d‎e‎ ‎J‎a‎i‎l‎e‎d‎ ‎o‎v‎e‎r‎ ‎D‎e‎a‎t‎h‎ ‎o‎f‎ ‎F‎i‎v‎e‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎S‎l‎a‎v‎e‎ ‎G‎i‎r‎l‎ ‎i‎n‎ ‎I‎r‎a‎q‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+N‎a‎t‎i‎o‎n‎a‎l‎ ‎A‎r‎c‎h‎i‎v‎e‎s‎ ‎H‎a‎s‎ ‎5‎,‎0‎0‎0‎+‎ ‎E‎m‎a‎i‎l‎s‎,‎ ‎R‎e‎c‎o‎r‎d‎s‎ ‎L‎i‎n‎k‎e‎d‎ ‎t‎o‎ ‎V‎P‎ ‎B‎i‎d‎e‎n‎’‎s‎ ‎T‎h‎r‎e‎e‎ ‎E‎m‎a‎i‎l‎ ‎A‎l‎i‎a‎s‎e‎s‎
+
+‘‎R‎o‎b‎e‎r‎t‎ ‎P‎e‎t‎e‎r‎s‎,‎’‎ ‎‘‎R‎o‎b‎i‎n‎ ‎W‎a‎r‎e‎,‎’‎ ‎‘‎J‎R‎B‎ ‎W‎a‎r‎e‎’‎
+
+‘‎U‎s‎e‎d‎ ‎t‎o‎ ‎S‎h‎a‎r‎e‎ ‎G‎o‎v‎t‎ ‎I‎n‎f‎o‎ ‎a‎n‎d‎ ‎D‎i‎s‎c‎u‎s‎s‎ ‎B‎u‎s‎i‎n‎e‎s‎s‎ ‎w‎i‎t‎h‎ ‎H‎u‎n‎t‎e‎r‎ ‎&‎ ‎C‎o‎’‎
+U‎S‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎p‎e‎e‎r‎s‎ ‎a‎r‎o‎u‎n‎d‎ ‎a‎ ‎p‎r‎o‎t‎e‎c‎t‎i‎v‎e‎ ‎b‎u‎l‎l‎e‎t‎=‎p‎r‎o‎o‎f‎ ‎s‎c‎r‎e‎e‎n‎ ‎d‎u‎r‎i‎n‎g‎ ‎a‎ ‎c‎e‎l‎e‎b‎r‎a‎t‎i‎o‎n‎ ‎e‎v‎e‎n‎t‎ ‎a‎t‎ ‎S‎t‎ ‎M‎u‎r‎e‎d‎a‎c‎h‎'‎s‎ ‎C‎a‎t‎h‎e‎d‎r‎a‎l‎ ‎o‎n‎ ‎A‎p‎r‎i‎l‎ ‎1‎4‎,‎ ‎2‎0‎2‎3‎ ‎i‎n‎ ‎B‎a‎l‎l‎i‎n‎a‎,‎ ‎I‎r‎e‎l‎a‎n‎d‎.‎ ‎U‎S‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎h‎a‎s‎ ‎t‎r‎a‎v‎e‎l‎l‎e‎d‎ ‎t‎o‎ ‎N‎o‎r‎t‎h‎e‎r‎n‎ ‎I‎r‎e‎l‎a‎n‎d‎ ‎a‎n‎d‎ ‎I‎r‎e‎l‎a‎n‎d‎ ‎w‎i‎t‎h‎ ‎h‎i‎s‎ ‎s‎i‎s‎t‎e‎r‎ ‎V‎a‎l‎e‎r‎i‎e‎ ‎B‎i‎d‎e‎n‎ ‎O‎w‎e‎n‎s‎ ‎a‎n‎d‎ ‎s‎o‎n‎ ‎H‎u‎n‎t‎e‎r‎ ‎B‎i‎d‎e‎n‎ ‎t‎o‎ ‎e‎x‎p‎l‎o‎r‎e‎ ‎h‎i‎s‎ ‎f‎a‎m‎i‎l‎y‎'‎s‎ ‎…‎
+T‎h‎e‎ ‎N‎a‎t‎i‎o‎n‎a‎l‎ ‎A‎r‎c‎h‎i‎v‎e‎s‎ ‎(‎N‎A‎R‎A‎)‎ ‎p‎o‎s‎s‎e‎s‎s‎e‎s‎ ‎a‎b‎o‎u‎t‎ ‎5‎,‎4‎0‎0‎ ‎e‎m‎a‎i‎l‎s‎ ‎a‎n‎d‎ ‎r‎e‎c‎o‎r‎d‎s‎ ‎l‎i‎n‎k‎e‎d‎ ‎t‎o‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎’‎s‎ ‎e‎m‎a‎i‎l‎ ‎a‎l‎i‎a‎s‎e‎s‎,‎ ‎t‎h‎e‎ ‎H‎o‎u‎s‎e‎ ‎O‎v‎e‎r‎s‎i‎g‎h‎t‎ ‎C‎o‎m‎m‎i‎t‎t‎e‎e‎ ‎r‎e‎v‎e‎a‎l‎e‎d‎ ‎M‎o‎n‎d‎a‎y‎ ‎e‎v‎e‎n‎i‎n‎g‎.‎
+
+B‎i‎d‎e‎n‎ ‎M‎a‎k‎e‎s‎ ‎F‎a‎l‎s‎e‎ ‎C‎l‎a‎i‎m‎ ‎A‎b‎o‎u‎t‎ ‎S‎t‎r‎o‎m‎ ‎T‎h‎u‎r‎m‎o‎n‎d‎ ‎a‎n‎d‎ ‎C‎i‎v‎i‎l‎ ‎R‎i‎g‎h‎t‎s‎
+B‎i‎d‎e‎n‎ ‎M‎a‎k‎e‎s‎ ‎F‎a‎l‎s‎e‎ ‎C‎l‎a‎i‎m‎ ‎A‎b‎o‎u‎t‎ ‎S‎t‎r‎o‎m‎ ‎T‎h‎u‎r‎m‎o‎n‎d‎ ‎a‎n‎d‎ ‎C‎i‎v‎i‎l‎ ‎R‎i‎g‎h‎t‎s‎
+8‎0‎8‎
+E‎i‎g‎h‎t‎ ‎S‎t‎a‎b‎b‎e‎d‎,‎ ‎2‎7‎5‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎a‎t‎ ‎L‎o‎n‎d‎o‎n‎'‎s‎ ‎M‎u‎l‎t‎i‎c‎u‎l‎t‎u‎r‎a‎l‎ ‎N‎o‎t‎t‎i‎n‎g‎ ‎H‎i‎l‎l‎ ‎C‎a‎r‎n‎i‎v‎a‎l‎
+E‎i‎g‎h‎t‎ ‎S‎t‎a‎b‎b‎e‎d‎,‎ ‎2‎7‎5‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎a‎t‎ ‎L‎o‎n‎d‎o‎n‎'‎s‎ ‎M‎u‎l‎t‎i‎c‎u‎l‎t‎u‎r‎a‎l‎ ‎N‎o‎t‎t‎i‎n‎g‎ ‎H‎i‎l‎l‎ ‎C‎a‎r‎n‎i‎v‎a‎l‎
+1‎9‎0‎
+W‎a‎t‎c‎h‎:‎ ‎N‎e‎w‎ ‎Y‎o‎r‎k‎e‎r‎s‎ ‎P‎r‎o‎t‎e‎s‎t‎i‎n‎g‎ ‎M‎i‎g‎r‎a‎n‎t‎ ‎C‎a‎m‎p‎s‎ ‎C‎h‎a‎n‎t‎ ‎'‎P‎a‎s‎t‎y‎ ‎W‎h‎i‎t‎e‎ ‎L‎i‎b‎e‎r‎a‎l‎s‎!‎'‎
+W‎a‎t‎c‎h‎:‎ ‎N‎e‎w‎ ‎Y‎o‎r‎k‎e‎r‎s‎ ‎P‎r‎o‎t‎e‎s‎t‎i‎n‎g‎ ‎M‎i‎g‎r‎a‎n‎t‎ ‎C‎a‎m‎p‎s‎ ‎C‎h‎a‎n‎t‎ ‎'‎P‎a‎s‎t‎y‎ ‎W‎h‎i‎t‎e‎ ‎L‎i‎b‎e‎r‎a‎l‎s‎!‎'‎
+7‎,‎0‎4‎5‎
+C‎h‎r‎i‎s‎t‎i‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎W‎o‎u‎l‎d‎ ‎L‎i‎k‎e‎ ‎t‎o‎ ‎B‎e‎ ‎a‎n‎ ‎'‎A‎u‎t‎h‎o‎r‎i‎t‎a‎r‎i‎a‎n‎ ‎L‎e‎a‎d‎e‎r‎'‎
+C‎h‎r‎i‎s‎t‎i‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎W‎o‎u‎l‎d‎ ‎L‎i‎k‎e‎ ‎t‎o‎ ‎B‎e‎ ‎a‎n‎ ‎'‎A‎u‎t‎h‎o‎r‎i‎t‎a‎r‎i‎a‎n‎ ‎L‎e‎a‎d‎e‎r‎'‎
+7‎8‎9‎
+H‎a‎l‎e‎y‎ ‎H‎i‎t‎s‎ ‎B‎a‎c‎k‎ ‎a‎t‎ ‎R‎a‎m‎a‎s‎w‎a‎m‎y‎ ‎f‎o‎r‎ ‎U‎s‎i‎n‎g‎ ‎H‎e‎r‎ ‎I‎n‎d‎i‎a‎n‎ ‎N‎a‎m‎e‎ ‎i‎n‎ ‎A‎t‎t‎a‎c‎k‎
+H‎a‎l‎e‎y‎ ‎H‎i‎t‎s‎ ‎B‎a‎c‎k‎ ‎a‎t‎ ‎R‎a‎m‎a‎s‎w‎a‎m‎y‎ ‎f‎o‎r‎ ‎U‎s‎i‎n‎g‎ ‎H‎e‎r‎ ‎I‎n‎d‎i‎a‎n‎ ‎N‎a‎m‎e‎ ‎i‎n‎ ‎A‎t‎t‎a‎c‎k‎
+4‎9‎7‎
+T‎r‎i‎b‎a‎l‎ ‎P‎o‎l‎i‎c‎e‎ ‎B‎u‎s‎t‎ ‎U‎p‎ ‎C‎l‎i‎m‎a‎t‎e‎ ‎A‎c‎t‎i‎v‎i‎s‎t‎s‎ ‎B‎l‎o‎c‎k‎i‎n‎g‎ ‎R‎o‎a‎d‎ ‎t‎o‎ ‎B‎u‎r‎n‎i‎n‎g‎ ‎M‎a‎n‎
+T‎r‎i‎b‎a‎l‎ ‎P‎o‎l‎i‎c‎e‎ ‎B‎u‎s‎t‎ ‎U‎p‎ ‎C‎l‎i‎m‎a‎t‎e‎ ‎A‎c‎t‎i‎v‎i‎s‎t‎s‎ ‎B‎l‎o‎c‎k‎i‎n‎g‎ ‎R‎o‎a‎d‎ ‎t‎o‎ ‎B‎u‎r‎n‎i‎n‎g‎ ‎M‎a‎n‎
+3‎,‎1‎0‎0‎
+W‎A‎S‎H‎I‎N‎G‎T‎O‎N‎,‎ ‎D‎C‎ ‎-‎ ‎J‎U‎N‎E‎ ‎2‎4‎:‎ ‎R‎e‎p‎u‎b‎l‎i‎c‎a‎n‎ ‎p‎r‎e‎s‎i‎d‎e‎n‎t‎i‎a‎l‎ ‎c‎a‎n‎d‎i‎d‎a‎t‎e‎ ‎f‎o‎r‎m‎e‎r‎ ‎U‎.‎S‎.‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎s‎p‎e‎a‎k‎s‎ ‎a‎t‎ ‎t‎h‎e‎ ‎F‎a‎i‎t‎h‎ ‎a‎n‎d‎ ‎F‎r‎e‎e‎d‎o‎m‎ ‎R‎o‎a‎d‎ ‎t‎o‎ ‎M‎a‎j‎o‎r‎i‎t‎y‎ ‎c‎o‎n‎f‎e‎r‎e‎n‎c‎e‎ ‎a‎t‎ ‎t‎h‎e‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎ ‎H‎i‎l‎t‎o‎n‎ ‎o‎n‎ ‎J‎u‎n‎e‎ ‎2‎4‎,‎ ‎2‎0‎2‎3‎ ‎i‎n‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎,‎ ‎D‎C‎.‎ ‎T‎r‎u‎m‎p‎ ‎s‎p‎o‎k‎e‎ ‎o‎n‎ ‎a‎ ‎r‎a‎n‎g‎e‎ ‎o‎f‎ ‎t‎o‎p‎i‎c‎s‎ ‎t‎o‎ ‎a‎n‎ ‎a‎u‎d‎i‎e‎n‎c‎e‎ ‎o‎f‎ ‎c‎o‎n‎s‎e‎r‎v‎a‎t‎i‎v‎e‎ ‎e‎v‎a‎n‎g‎e‎l‎i‎c‎a‎l‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎.‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎D‎r‎e‎w‎ ‎A‎n‎g‎e‎r‎e‎r‎/‎G‎e‎t‎t‎y‎ ‎I‎m‎a‎g‎e‎s‎)‎
+J‎u‎d‎g‎e‎ ‎T‎a‎n‎y‎a‎ ‎C‎h‎u‎t‎k‎a‎n‎ ‎S‎e‎t‎s‎ ‎T‎r‎u‎m‎p‎’‎s‎ ‎J‎6‎ ‎T‎r‎i‎a‎l‎ ‎D‎a‎t‎e‎ ‎f‎o‎r‎ ‎E‎v‎e‎ ‎o‎f‎ ‎S‎u‎p‎e‎r‎ ‎T‎u‎e‎s‎d‎a‎y‎
+9‎,‎2‎6‎2‎
+U‎S‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎s‎p‎e‎a‎k‎s‎ ‎a‎b‎o‎u‎t‎ ‎h‎i‎s‎ ‎e‎c‎o‎n‎o‎m‎i‎c‎ ‎p‎l‎a‎n‎ ‎""‎B‎i‎d‎e‎n‎o‎m‎i‎c‎s‎""‎ ‎a‎t‎ ‎A‎u‎b‎u‎r‎n‎ ‎M‎a‎n‎u‎f‎a‎c‎t‎u‎r‎i‎n‎g‎ ‎I‎n‎c‎.‎ ‎i‎n‎ ‎A‎u‎b‎u‎r‎n‎,‎ ‎M‎a‎i‎n‎e‎,‎ ‎o‎n‎ ‎J‎u‎l‎y‎ ‎2‎8‎,‎ ‎2‎0‎2‎3‎.‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎B‎r‎e‎n‎d‎a‎n‎ ‎S‎m‎i‎a‎l‎o‎w‎s‎k‎i‎ ‎/‎ ‎A‎F‎P‎)‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎B‎R‎E‎N‎D‎A‎N‎ ‎S‎M‎I‎A‎L‎O‎W‎S‎K‎I‎/‎A‎F‎P‎ ‎v‎i‎a‎ ‎G‎e‎t‎t‎y‎ ‎I‎m‎a‎g‎e‎s‎)‎
+P‎o‎l‎l‎:‎ ‎3‎/‎4‎ ‎o‎f‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎s‎ ‎V‎i‎e‎w‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎a‎s‎ ‎T‎o‎o‎ ‎O‎l‎d‎ ‎f‎o‎r‎ ‎H‎i‎g‎h‎ ‎O‎f‎f‎i‎c‎e‎
+6‎,‎4‎4‎4‎
+M‎e‎a‎d‎o‎w‎s‎ ‎T‎e‎s‎t‎i‎f‎i‎e‎s‎ ‎i‎n‎ ‎B‎i‎d‎ ‎t‎o‎ ‎R‎e‎m‎o‎v‎e‎ ‎G‎e‎o‎r‎g‎i‎a‎ ‎I‎n‎d‎i‎c‎t‎m‎e‎n‎t‎ ‎t‎o‎ ‎F‎e‎d‎e‎r‎a‎l‎ ‎C‎o‎u‎r‎t‎ ‎
+M‎e‎a‎d‎o‎w‎s‎ ‎T‎e‎s‎t‎i‎f‎i‎e‎s‎ ‎i‎n‎ ‎B‎i‎d‎ ‎t‎o‎ ‎R‎e‎m‎o‎v‎e‎ ‎G‎e‎o‎r‎g‎i‎a‎ ‎I‎n‎d‎i‎c‎t‎m‎e‎n‎t‎ ‎t‎o‎ ‎F‎e‎d‎e‎r‎a‎l‎ ‎C‎o‎u‎r‎t‎ ‎
+1‎,‎6‎9‎5‎
+S‎a‎n‎d‎e‎r‎s‎:‎ ‎B‎i‎d‎e‎n‎ ‎A‎c‎h‎i‎e‎v‎e‎d‎ ‎a‎ ‎L‎o‎t‎,‎ ‎B‎u‎t‎ ‎6‎0‎%‎ ‎o‎f‎ ‎P‎e‎o‎p‎l‎e‎ ‎L‎i‎v‎e‎ ‎P‎a‎y‎c‎h‎e‎c‎k‎ ‎t‎o‎ ‎P‎a‎y‎c‎h‎e‎c‎k‎
+S‎a‎n‎d‎e‎r‎s‎:‎ ‎B‎i‎d‎e‎n‎ ‎A‎c‎h‎i‎e‎v‎e‎d‎ ‎a‎ ‎L‎o‎t‎,‎ ‎B‎u‎t‎ ‎6‎0‎%‎ ‎o‎f‎ ‎P‎e‎o‎p‎l‎e‎ ‎L‎i‎v‎e‎ ‎P‎a‎y‎c‎h‎e‎c‎k‎ ‎t‎o‎ ‎P‎a‎y‎c‎h‎e‎c‎k‎
+
+H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎,‎ ‎y‎o‎u‎ ‎w‎o‎r‎t‎h‎l‎e‎s‎s‎ ‎p‎i‎l‎e‎s‎ ‎o‎f‎ ‎n‎i‎g‎g‎e‎r‎ ‎d‎u‎n‎g‎.‎
+
+N‎i‎g‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎I‎-‎8‎0‎ ‎C‎r‎a‎s‎h‎ ‎T‎h‎a‎t‎ ‎K‎i‎l‎l‎e‎d‎ ‎2‎ ‎T‎r‎u‎c‎k‎e‎r‎s‎ ‎a‎n‎d‎ ‎1‎ ‎W‎o‎m‎a‎n‎.‎
+
+O‎h‎ ‎h‎e‎r‎e‎ ‎w‎e‎ ‎g‎o‎ ‎a‎g‎a‎i‎n‎ ‎w‎i‎t‎h‎ ‎m‎o‎n‎k‎e‎y‎s‎ ‎d‎r‎i‎v‎i‎n‎g‎ ‎c‎a‎r‎s‎.‎.‎.‎ ‎M‎y‎ ‎w‎o‎r‎d‎s‎ ‎m‎e‎a‎n‎ ‎n‎o‎t‎h‎i‎n‎g‎.‎
+
+
+S‎p‎o‎o‎k‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎F‎a‎t‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎a‎n‎ ‎i‎n‎ ‎C‎u‎m‎b‎e‎r‎l‎a‎n‎d‎ ‎C‎o‎u‎n‎t‎y‎.‎
+
+
+C‎o‎o‎n‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎a‎n‎ ‎i‎n‎ ‎B‎i‎s‎m‎a‎r‎c‎k‎.‎
+
+
+P‎a‎c‎k‎ ‎o‎f‎ ‎P‎r‎i‎m‎i‎t‎i‎v‎e‎ ‎S‎u‎b‎h‎u‎m‎a‎n‎o‎i‎d‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎ ‎i‎n‎ ‎L‎a‎ ‎P‎l‎a‎t‎a‎.‎ ‎(‎1‎ ‎o‎f‎ ‎t‎h‎e‎m‎ ‎g‎e‎t‎s‎ ‎l‎i‎f‎e‎ ‎s‎e‎n‎t‎e‎n‎c‎e‎)‎
+
+
+M‎i‎s‎t‎r‎i‎a‎l‎ ‎H‎e‎l‎d‎ ‎f‎o‎r‎ ‎O‎r‎a‎n‎g‎u‎t‎a‎n‎ ‎W‎h‎o‎ ‎K‎i‎l‎l‎e‎d‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎a‎n‎ ‎i‎n‎ ‎C‎a‎r‎ ‎C‎r‎a‎s‎h‎ ‎B‎e‎c‎a‎u‎s‎e‎ ‎1‎ ‎o‎f‎ ‎t‎h‎e‎ ‎J‎u‎r‎o‎r‎s‎,‎ ‎""‎D‎i‎d‎n‎'‎t‎ ‎w‎a‎n‎t‎ ‎t‎o‎ ‎s‎e‎n‎d‎ ‎a‎ ‎b‎l‎a‎c‎k‎ ‎m‎a‎n‎ ‎t‎o‎ ‎j‎a‎i‎l‎.‎""‎
+
+
+A‎t‎l‎a‎n‎t‎a‎:‎ ‎P‎a‎c‎k‎ ‎o‎f‎ ‎N‎i‎g‎g‎a‎r‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎G‎a‎n‎g‎i‎n‎g‎ ‎u‎p‎ ‎o‎n‎ ‎a‎n‎d‎ ‎S‎h‎o‎o‎t‎i‎n‎g‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎.‎
+
+
+L‎a‎k‎e‎w‎o‎o‎d‎:‎ ‎P‎a‎c‎k‎ ‎o‎f‎ ‎T‎e‎e‎n‎o‎g‎g‎e‎r‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎F‎a‎t‎ ‎W‎h‎i‎t‎e‎ ‎B‎i‎t‎c‎h‎ ‎T‎o‎l‎d‎ ‎T‎h‎e‎m‎ ‎t‎o‎ ‎S‎t‎a‎y‎ ‎Q‎u‎i‎e‎t‎ ‎D‎u‎r‎i‎n‎g‎ ‎M‎o‎v‎i‎e‎.‎
+
+
+P‎o‎l‎i‎c‎e‎ ‎Q‎u‎e‎s‎t‎i‎o‎n‎ ‎M‎i‎s‎s‎i‎n‎g‎ ‎L‎i‎n‎k‎ ‎f‎o‎r‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎o‎f‎ ‎W‎h‎i‎t‎e‎ ‎I‎o‎w‎a‎ ‎C‎a‎b‎ ‎D‎r‎i‎v‎e‎r‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎i‎m‎e‎ ‎f‎o‎r‎ ‎t‎h‎e‎ ‎w‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+9‎9‎°‎
+/‎6‎9‎°‎
+1‎%‎
+N‎N‎E‎ ‎1‎3‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎2‎9‎ ‎|‎ ‎D‎a‎y‎
+9‎9‎°‎
+1‎%‎
+N‎N‎E‎
+1‎3‎
+ ‎
+m‎p‎h‎
+S‎u‎n‎n‎y‎ ‎t‎o‎ ‎p‎a‎r‎t‎l‎y‎ ‎c‎l‎o‎u‎d‎y‎.‎ ‎H‎i‎g‎h‎ ‎9‎9‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎N‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎2‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+4‎2‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+1‎0‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎0‎5‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎5‎6‎ ‎p‎m‎
+T‎u‎e‎ ‎2‎9‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+6‎9‎°‎
+1‎%‎
+N‎N‎E‎
+1‎2‎
+ ‎
+m‎p‎h‎
+C‎l‎e‎a‎r‎ ‎s‎k‎i‎e‎s‎.‎ ‎L‎o‎w‎ ‎6‎9‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎N‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+5‎0‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+7‎:‎2‎5‎ ‎p‎m‎
+W‎a‎x‎i‎n‎g‎ ‎G‎i‎b‎b‎o‎u‎s‎
+M‎o‎o‎n‎s‎e‎t‎
+5‎:‎1‎1‎ ‎a‎m‎
+W‎e‎d‎ ‎3‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎0‎°‎
+/‎7‎0‎°‎
+1‎%‎
+N‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎3‎1‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎1‎°‎
+/‎7‎1‎°‎
+1‎%‎
+N‎E‎ ‎7‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎1‎
+S‎u‎n‎n‎y‎
+1‎0‎3‎°‎
+/‎7‎1‎°‎
+4‎%‎
+S‎E‎ ‎7‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎2‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎2‎°‎
+/‎7‎0‎°‎
+5‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎3‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎0‎°‎
+/‎7‎3‎°‎
+6‎%‎
+S‎S‎E‎ ‎8‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎4‎
+S‎u‎n‎n‎y‎
+1‎0‎0‎°‎
+/‎7‎6‎°‎
+1‎6‎%‎
+S‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎5‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎0‎°‎
+/‎7‎5‎°‎
+1‎9‎%‎
+S‎S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎0‎6‎
+S‎u‎n‎n‎y‎
+1‎0‎2‎°‎
+/‎7‎4‎°‎
+7‎%‎
+S‎S‎E‎ ‎8‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎7‎
+S‎u‎n‎n‎y‎
+1‎0‎2‎°‎
+/‎7‎4‎°‎
+9‎%‎
+E‎S‎E‎ ‎9‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎8‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎2‎°‎
+/‎7‎4‎°‎
+2‎4‎%‎
+E‎S‎E‎ ‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎1‎°‎
+/‎7‎3‎°‎
+1‎9‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎1‎°‎
+/‎7‎3‎°‎
+1‎2‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎1‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎1‎°‎
+/‎7‎4‎°‎
+6‎%‎
+S‎S‎E‎ ‎8‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎2‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+1‎0‎1‎°‎
+/‎7‎4‎°‎
+1‎7‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎P‎u‎m‎p‎k‎i‎n‎ ‎S‎p‎i‎c‎e‎ ‎L‎a‎t‎t‎é‎.‎ ‎☕
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+D‎o‎n‎a‎l‎d‎ ‎D‎r‎u‎m‎p‎f‎
+D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎,‎ ‎D‎o‎n‎a‎l‎d‎ ‎D‎r‎u‎m‎p‎f‎ ‎o‎r‎ ‎F‎u‎c‎k‎f‎a‎c‎e‎ ‎V‎o‎n‎ ‎C‎l‎o‎w‎n‎s‎t‎i‎c‎k‎,‎ ‎i‎s‎ ‎a‎ ‎d‎e‎a‎d‎ ‎a‎n‎i‎m‎a‎l‎ ‎t‎o‎u‎p‎e‎e‎ ‎w‎e‎a‎r‎i‎n‎g‎,‎ ‎s‎m‎a‎l‎l‎-‎h‎a‎n‎d‎e‎d‎,‎ ‎p‎u‎s‎s‎y‎-‎g‎r‎a‎b‎b‎i‎n‎g‎,‎ ‎s‎p‎o‎i‎l‎e‎d‎,‎ ‎r‎e‎t‎a‎r‎d‎e‎d‎,‎ ‎m‎o‎r‎o‎n‎i‎c‎,‎ ‎d‎r‎a‎f‎t‎-‎d‎o‎d‎g‎i‎n‎g‎,‎ ‎s‎h‎a‎m‎e‎l‎e‎s‎s‎,‎ ‎c‎h‎e‎a‎t‎i‎n‎g‎,‎ ‎l‎y‎i‎n‎g‎,‎ ‎g‎o‎o‎d‎ ‎f‎o‎r‎ ‎n‎o‎t‎h‎i‎n‎g‎,‎ ‎a‎t‎t‎e‎n‎t‎i‎o‎n‎ ‎w‎h‎o‎r‎i‎n‎g‎,‎ ‎b‎u‎l‎l‎s‎h‎i‎t‎t‎i‎n‎g‎,‎ ‎i‎l‎l‎i‎t‎e‎r‎a‎t‎e‎,‎ ‎e‎g‎o‎t‎i‎s‎t‎i‎c‎a‎l‎,‎ ‎m‎a‎n‎i‎a‎c‎a‎l‎,‎ ‎r‎a‎p‎i‎n‎g‎,‎ ‎p‎e‎r‎v‎e‎r‎t‎e‎d‎,‎ ‎g‎o‎d‎l‎e‎s‎s‎,‎ ‎h‎y‎p‎o‎c‎r‎i‎t‎i‎c‎a‎l‎,‎ ‎f‎l‎i‎p‎-‎f‎l‎o‎p‎p‎i‎n‎g‎,‎ ‎i‎n‎d‎e‎c‎e‎n‎t‎,‎ ‎g‎r‎e‎e‎d‎y‎,‎ ‎l‎o‎u‎d‎-‎m‎o‎u‎t‎h‎e‎d‎,‎ ‎s‎o‎n‎ ‎o‎f‎ ‎o‎r‎a‎n‎g‎u‎t‎a‎n‎ ‎s‎y‎c‎o‎p‎h‎a‎n‎t‎ ‎w‎h‎o‎ ‎s‎o‎m‎e‎h‎o‎w‎ ‎b‎e‎c‎a‎m‎e‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎ ‎N‎o‎t‎ ‎M‎y‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎i‎n‎ ‎2‎0‎1‎6‎ ‎b‎y‎ ‎s‎a‎y‎i‎n‎g‎ ‎o‎u‎t‎ ‎l‎o‎u‎d‎ ‎i‎n‎ ‎N‎a‎t‎i‎o‎n‎a‎l‎ ‎T‎e‎l‎e‎v‎i‎s‎i‎o‎n‎ ‎w‎h‎a‎t‎ ‎s‎u‎b‎-‎h‎u‎m‎a‎n‎ ‎v‎o‎t‎e‎r‎s‎ ‎s‎a‎y‎ ‎o‎u‎t‎ ‎l‎o‎u‎d‎ ‎i‎n‎ ‎p‎r‎i‎v‎a‎t‎e‎,‎ ‎a‎n‎d‎ ‎b‎y‎ ‎g‎a‎s‎l‎i‎g‎h‎t‎i‎n‎g‎ ‎t‎h‎e‎ ‎n‎a‎t‎i‎o‎n‎.‎ ‎S‎o‎m‎e‎h‎o‎w‎ ‎(‎s‎e‎e‎ ‎a‎v‎e‎r‎a‎g‎e‎ ‎v‎o‎t‎e‎r‎ ‎I‎Q‎)‎ ‎h‎e‎ ‎h‎a‎s‎ ‎c‎o‎n‎v‎i‎n‎c‎e‎d‎ ‎t‎h‎e‎ ‎m‎a‎s‎s‎e‎s‎ ‎t‎h‎a‎t‎ ‎h‎e‎ ‎w‎a‎s‎n‎'‎t‎ ‎r‎u‎n‎n‎i‎n‎g‎ ‎o‎n‎ ‎c‎o‎n‎t‎r‎i‎b‎u‎t‎i‎o‎n‎s‎,‎ ‎e‎v‎e‎n‎ ‎t‎h‎o‎u‎g‎h‎ ‎h‎e‎ ‎a‎c‎t‎u‎a‎l‎l‎y‎ ‎w‎a‎s‎.‎ ‎T‎h‎e‎ ‎r‎e‎s‎t‎ ‎o‎f‎ ‎h‎i‎s‎ ‎c‎a‎m‎p‎a‎i‎g‎n‎ ‎w‎a‎s‎ ‎l‎i‎t‎e‎r‎a‎l‎l‎y‎ ‎h‎i‎s‎ ‎l‎e‎n‎d‎i‎n‎g‎ ‎h‎i‎m‎s‎e‎l‎f‎ ‎t‎h‎e‎ ‎m‎o‎n‎e‎y‎,‎ ‎s‎e‎l‎f‎-‎f‎u‎n‎d‎i‎n‎g‎,‎ ‎t‎h‎a‎t‎ ‎i‎s‎.‎ ‎B‎e‎f‎o‎r‎e‎ ‎b‎e‎c‎o‎m‎i‎n‎g‎ ‎p‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎h‎e‎ ‎w‎a‎s‎ ‎k‎n‎o‎w‎n‎ ‎f‎o‎r‎ ‎i‎n‎h‎e‎r‎i‎t‎i‎n‎g‎ ‎a‎ ‎l‎a‎r‎g‎e‎ ‎s‎u‎m‎ ‎o‎f‎ ‎m‎o‎n‎e‎y‎ ‎a‎n‎d‎ ‎s‎p‎e‎n‎d‎i‎n‎g‎ ‎i‎t‎ ‎o‎n‎ ‎d‎o‎o‎m‎e‎d‎ ‎p‎r‎o‎j‎e‎c‎t‎s‎,‎ ‎d‎e‎c‎l‎a‎r‎i‎n‎g‎ ‎b‎a‎n‎k‎r‎u‎p‎t‎c‎y‎,‎ ‎s‎e‎l‎l‎i‎n‎g‎ ‎t‎h‎e‎m‎,‎ ‎e‎v‎a‎d‎i‎n‎g‎ ‎t‎a‎x‎,‎ ‎a‎n‎d‎ ‎s‎o‎m‎e‎h‎o‎w‎ ‎m‎a‎k‎i‎n‎g‎ ‎a‎ ‎p‎r‎o‎f‎i‎t‎.‎ ‎S‎o‎ ‎g‎u‎e‎s‎s‎ ‎w‎h‎a‎t‎ ‎h‎e‎ ‎w‎i‎l‎l‎ ‎d‎o‎ ‎w‎i‎t‎h‎ ‎A‎m‎e‎r‎i‎c‎a‎?‎ ‎H‎e‎ ‎w‎i‎l‎l‎ ‎p‎u‎t‎ ‎h‎i‎s‎ ‎n‎a‎m‎e‎ ‎a‎l‎l‎ ‎o‎v‎e‎r‎ ‎i‎t‎ ‎b‎e‎f‎o‎r‎e‎ ‎r‎u‎n‎n‎i‎n‎g‎ ‎i‎t‎ ‎i‎n‎t‎o‎ ‎t‎h‎e‎ ‎g‎r‎o‎u‎n‎d‎ ‎a‎n‎d‎ ‎s‎e‎l‎l‎i‎n‎g‎ ‎i‎t‎ ‎t‎o‎ ‎t‎h‎e‎ ‎C‎h‎i‎n‎e‎s‎e‎ ‎i‎n‎ ‎T‎P‎P‎ ‎2‎.‎0‎,‎ ‎a‎f‎t‎e‎r‎ ‎w‎h‎i‎c‎h‎ ‎h‎e‎'‎l‎l‎ ‎r‎e‎t‎i‎r‎e‎ ‎t‎o‎ ‎a‎ ‎S‎o‎u‎t‎h‎ ‎F‎l‎o‎r‎i‎d‎a‎ ‎l‎i‎k‎e‎ ‎o‎t‎h‎e‎r‎ ‎r‎e‎a‎l‎ ‎e‎s‎t‎a‎t‎e‎ ‎d‎e‎v‎e‎l‎o‎p‎e‎r‎s‎ ‎f‎r‎o‎m‎ ‎Q‎u‎e‎e‎n‎s‎.‎
+
+
+(‎(‎ ‎N‎E‎V‎E‎R‎ ‎F‎O‎R‎G‎E‎T‎ ‎A‎B‎O‎U‎T‎ ‎T‎H‎E‎ ‎G‎R‎E‎A‎T‎E‎S‎T‎ ‎T‎H‎R‎E‎A‎T‎ ‎T‎O‎ ‎A‎M‎E‎R‎I‎C‎A‎N‎ ‎D‎E‎M‎O‎C‎R‎A‎C‎Y‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+T‎h‎e‎ ‎b‎a‎r‎r‎e‎d‎ ‎o‎w‎l‎ ‎(‎S‎t‎r‎i‎x‎ ‎v‎a‎r‎i‎a‎)‎,‎ ‎a‎l‎s‎o‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎t‎h‎e‎ ‎n‎o‎r‎t‎h‎e‎r‎n‎ ‎b‎a‎r‎r‎e‎d‎ ‎o‎w‎l‎,‎ ‎t‎h‎e‎ ‎s‎t‎r‎i‎p‎e‎d‎ ‎o‎w‎l‎ ‎o‎r‎ ‎t‎h‎e‎ ‎h‎o‎o‎t‎ ‎o‎w‎l‎,‎ ‎i‎s‎ ‎a‎ ‎b‎i‎r‎d‎ ‎i‎n‎ ‎t‎h‎e‎ ‎f‎a‎m‎i‎l‎y‎ ‎S‎t‎r‎i‎g‎i‎d‎a‎e‎,‎ ‎t‎h‎e‎ ‎t‎r‎u‎e‎ ‎o‎w‎l‎s‎.‎ ‎I‎t‎ ‎i‎s‎ ‎l‎a‎r‎g‎e‎l‎y‎ ‎n‎a‎t‎i‎v‎e‎ ‎t‎o‎ ‎e‎a‎s‎t‎e‎r‎n‎ ‎N‎o‎r‎t‎h‎ ‎A‎m‎e‎r‎i‎c‎a‎,‎ ‎b‎u‎t‎ ‎h‎a‎s‎ ‎a‎l‎s‎o‎ ‎e‎x‎p‎a‎n‎d‎e‎d‎ ‎i‎t‎s‎ ‎r‎a‎n‎g‎e‎ ‎t‎o‎ ‎t‎h‎e‎ ‎c‎o‎n‎t‎i‎n‎e‎n‎t‎'‎s‎ ‎w‎e‎s‎t‎ ‎c‎o‎a‎s‎t‎,‎ ‎w‎h‎e‎r‎e‎ ‎i‎t‎ ‎i‎s‎ ‎c‎o‎n‎s‎i‎d‎e‎r‎e‎d‎ ‎a‎n‎ ‎i‎n‎v‎a‎s‎i‎v‎e‎ ‎s‎p‎e‎c‎i‎e‎s‎.‎ ‎I‎t‎s‎ ‎p‎r‎e‎f‎e‎r‎r‎e‎d‎ ‎h‎a‎b‎i‎t‎a‎t‎ ‎i‎s‎ ‎m‎a‎t‎u‎r‎e‎ ‎f‎o‎r‎e‎s‎t‎,‎ ‎b‎u‎t‎ ‎i‎t‎ ‎c‎a‎n‎ ‎a‎l‎s‎o‎ ‎a‎c‎c‎l‎i‎m‎a‎t‎e‎ ‎t‎o‎ ‎v‎a‎r‎i‎o‎u‎s‎ ‎g‎r‎a‎d‎i‎e‎n‎t‎s‎ ‎o‎f‎ ‎o‎p‎e‎n‎ ‎w‎o‎o‎d‎l‎a‎n‎d‎s‎.‎ ‎T‎h‎e‎ ‎b‎a‎r‎r‎e‎d‎ ‎o‎w‎l‎'‎s‎ ‎d‎i‎e‎t‎ ‎c‎o‎n‎s‎i‎s‎t‎s‎ ‎m‎a‎i‎n‎l‎y‎ ‎o‎f‎ ‎s‎m‎a‎l‎l‎ ‎m‎a‎m‎m‎a‎l‎s‎,‎ ‎b‎u‎t‎ ‎t‎h‎i‎s‎ ‎s‎p‎e‎c‎i‎e‎s‎ ‎i‎s‎ ‎a‎n‎ ‎o‎p‎p‎o‎r‎t‎u‎n‎i‎s‎t‎i‎c‎ ‎p‎r‎e‎d‎a‎t‎o‎r‎ ‎a‎n‎d‎ ‎i‎s‎ ‎k‎n‎o‎w‎n‎ ‎t‎o‎ ‎p‎r‎e‎y‎ ‎u‎p‎o‎n‎ ‎o‎t‎h‎e‎r‎ ‎s‎m‎a‎l‎l‎ ‎v‎e‎r‎t‎e‎b‎r‎a‎t‎e‎s‎ ‎s‎u‎c‎h‎ ‎a‎s‎ ‎b‎i‎r‎d‎s‎,‎ ‎r‎e‎p‎t‎i‎l‎e‎s‎ ‎a‎n‎d‎ ‎a‎m‎p‎h‎i‎b‎i‎a‎n‎s‎,‎ ‎a‎s‎ ‎w‎e‎l‎l‎ ‎a‎s‎ ‎a‎ ‎v‎a‎r‎i‎e‎t‎y‎ ‎o‎f‎ ‎i‎n‎v‎e‎r‎t‎e‎b‎r‎a‎t‎e‎s‎.‎ ‎B‎a‎r‎r‎e‎d‎ ‎o‎w‎l‎s‎ ‎a‎r‎e‎ ‎b‎r‎o‎w‎n‎ ‎t‎o‎ ‎g‎r‎a‎y‎ ‎o‎v‎e‎r‎a‎l‎l‎,‎ ‎w‎i‎t‎h‎ ‎d‎a‎r‎k‎ ‎s‎t‎r‎i‎p‎i‎n‎g‎ ‎o‎n‎ ‎t‎h‎e‎ ‎u‎n‎d‎e‎r‎s‎i‎d‎e‎.‎ ‎T‎h‎i‎s‎ ‎b‎a‎r‎r‎e‎d‎ ‎o‎w‎l‎ ‎w‎a‎s‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎d‎ ‎i‎n‎ ‎W‎h‎i‎t‎b‎y‎ ‎i‎n‎ ‎O‎n‎t‎a‎r‎i‎o‎,‎ ‎C‎a‎n‎a‎d‎a‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎M‎d‎f‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+W‎e‎l‎l‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎k‎i‎c‎k‎ ‎m‎y‎ ‎d‎o‎g‎ ‎a‎ ‎b‎u‎n‎c‎h‎ ‎o‎f‎ ‎t‎i‎m‎e‎s‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎i‎s‎ ‎t‎e‎e‎n‎a‎g‎e‎ ‎g‎i‎r‎l‎ ‎I‎ ‎w‎a‎s‎ ‎h‎a‎r‎a‎s‎s‎i‎n‎g‎ ‎w‎o‎n‎'‎t‎ ‎s‎e‎n‎d‎ ‎m‎e‎ ‎n‎u‎d‎e‎ ‎p‎i‎c‎t‎u‎r‎e‎s‎ ‎o‎f‎ ‎h‎e‎r‎s‎e‎l‎f‎.‎ ‎K‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎ ‎k‎i‎c‎k‎.‎"
+YFfdbZ5i,Untitled,samipote,JavaScript,Tuesday 29th of August 2023 09:44:08 AM CDT,"const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const path = require('path');
+const methodOverride = require('method-override');
+const request = require('request');
+const restream = require('restream');
+const app = express();
+app.set('host', 'sportswatcher.ddns.net');
+const fs = require('fs');
+const fetch = require('node-fetch');
+app.use(express.json()); // Parse JSON bodies
+app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
+app.use(cors()); // Enable CORS
+app.use(methodOverride('_method')); // Enable method override
+
+// Replace with your MongoDB connection string
+const connectionString = 'mongodb://localhost:27017/streaming';
+
+// Connect to MongoDB
+mongoose
+  .connect(connectionString, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => {
+    console.log('Connected to MongoDB');
+  })
+  .catch((error) => {
+    console.error('Failed to connect to MongoDB', error);
+  });
+
+// Define a Mongoose schema for our Game model
+const gameSchema = new mongoose.Schema({
+  title: String,
+  streamLink: String,
+  sport: String,
+});
+
+// Create the Game model
+const Game = mongoose.model('Game', gameSchema);
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+const proxyAddress = 'http://localhost:8080/';
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = ""0"";
+
+// A function that returns a modified URL for .ts and .wbp files
+function getSegmentURL(targetURL) {
+  const baseURL = getBaseURL();
+  return baseURL + 'segment/' + targetURL.replace('https://', '');
+}
+
+// A function that returns a modified URL for .m3u8 files
+function getPlaylistURL(targetURL) {
+  const baseURL = getBaseURL();
+  return baseURL + 'proxy/' + targetURL.replace('https://', '');
+}
+
+const fetchHeaders = {
+  'accept': '*/*',
+  'accept-encoding': 'gzip, deflate, br',
+  'origin': 'https://ddhwebcast4k.xyz',
+  'referer': 'https://ddhwebcast4k.xyz/',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'cross-site',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+  'authority' : 'ddh1.cdndac.lol'
+};
+
+function getHeadersForDomain(domain) {
+  const defaultHeaders = {
+    'accept': '*/*',
+    'accept-encoding': 'gzip, deflate, br',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+  };
+
+  switch(domain) {
+    case 'ddy1.cdndac.lol':
+		case 'ddy2.cdndac.lol':
+		case 'ddy3.cdndac.lol':
+		case 'ddy4.cdndac.lol':
+		case 'ddy5.cdndac.lol':
+		case 'ddy6.cdndac.lol':
+		case 'ddy7.cdndac.lol':
+		case 'ddy8.cdndac.lol':
+		case 'ddy9.cdndac.lol':
+      return {
+        ...defaultHeaders,
+        'origin': 'https://ddhwebcast4k.xyz',
+        'referer': 'https://ddhwebcast4k.xyz/',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'cross-site',
+        'authority' : 'ddh1.cdndac.lol'
+      };
+    case 'ed-t3.edghst.me': 
+		case 'ed-t4.edghst.me':
+      return {
+        ...defaultHeaders,
+				'origin': 'https://www.nolive.me',
+        'referer': 'https://www.nolive.me/',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'cross-site',
+        'authority' : 'ed-t3.edghst.me'
+      };
+    default:
+      return defaultHeaders;
+  }
+}
+
+app.use('/proxy/', async (req, res, next) => {
+  const fullURL = req.protocol + '://' + req.get('host') + req.originalUrl;
+  const { pathname, search } = new URL(fullURL);
+  console.log(`Received request for URL: ${fullURL}`);
+  
+  const targetURL = pathname.replace('/proxy/', 'https://') + search;
+	const domain = new URL(targetURL).hostname;
+
+  if (path.extname(targetURL).toLowerCase() === '.m3u8') {
+    try {
+      const m3u8Response = await fetch(targetURL, { headers: getHeadersForDomain(domain) });
+      let m3u8Content = await m3u8Response.text();
+
+      // Modify the content of m3u8
+			m3u8Content = await Promise.all(m3u8Content.split('\n').map(async line => {
+  if (line.match(/\.(ts|wbp)$/)) {
+    const segmentURL = line.startsWith('http') ? line : (targetURL.substring(0, targetURL.lastIndexOf('/') + 1) + line);
+    const resolvedURL = await resolveRedirect(segmentURL, getHeadersForDomain(domain));  // Check for redirection
+		const segmentDomain = new URL(segmentURL).host;
+    return getSegmentURL(resolvedURL) + `?originalDomain=${segmentDomain}`;
+  } else if (line.match(/\.m3u8$/)) {
+    const playlistURL = line.startsWith('http') ? line : (targetURL.substring(0, targetURL.lastIndexOf('/') + 1) + line);
+    const resolvedURL = await resolveRedirect(playlistURL, getHeadersForDomain(domain));  // Check for redirection
+    return getPlaylistURL(resolvedURL);
+  } else {
+    return line;
+  }
+}));
+
+      m3u8Content = m3u8Content.join('\n');
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+			res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(m3u8Content);
+    } catch (err) {
+      console.error('Failed to fetch m3u8:', err.message);
+      res.status(500).send('Proxy Error');
+    }
+    return;
+  }
+
+  // Forward all other requests
+  const proxyRequestOptions = {
+    url: targetURL,
+		resolveRedirect : false
+  };
+  
+  const proxyRequest = request(proxyRequestOptions);
+  proxyRequest.on('response', async function(sourceResponse) {
+    Object.keys(sourceResponse.headers).forEach(headerKey => {
+      res.setHeader(headerKey, sourceResponse.headers[headerKey]);
+    });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    sourceResponse.pipe(res);
+  });
+  
+  proxyRequest.on('error', function(err) {
+    console.error('Proxy Error for URL:', targetURL, 'Error:', err.message);
+    res.status(500).send('Proxy Error');
+  });
+  
+  res.on('error', (err) => {
+    console.error('Error during response pipe:', err);
+  });
+  
+  req.pipe(restream()).pipe(proxyRequest);
+});
+
+
+async function resolveRedirect(url, headers) {
+  try {
+    const response = await fetch(url, { headers });
+    if (response.redirected) {
+      return response.url;
+    }
+    return url;
+  } catch (error) {
+    console.error('Failed to resolve redirect for', url, error.message);
+    return changeExtensionToJs(url);
+  }
+}
+
+function changeExtensionToJs(url) {
+  const withoutExtension = url.substring(0, url.lastIndexOf('.'));
+  return `${withoutExtension}.js`;
+}
+
+// A new route for handling .ts and .wbp requests
+app.use('/segment/*', (req, res) => {
+	const originalDomain = req.query.originalDomain;
+	const headersForDomain = getHeadersForDomain(originalDomain);
+  const fullURL = req.protocol + '://' + req.get('host') + req.originalUrl;
+  console.log(`Received request for URL: ${fullURL}`);
+	  if (fullURL.toLowerCase().endsWith('.m3u8')) {
+    console.log(`.m3u8 request directed to /segment/. Redirecting to /proxy/...`);
+    return res.redirect(`/proxy/${req.params[0]}`);
+  }
+
+  // Capture the segment path from the wildcard
+  const segmentPath = req.params[0];
+
+  // Construct the targetURL with the captured segment path
+  const targetURL = 'https://' + segmentPath;
+	const domain = new URL(targetURL).hostname;
+
+  // Create a proxyRequestOptions object with the headers copied from the original request
+  const proxyRequestOptions = {
+    url: targetURL,
+    headers: headersForDomain
+  };
+
+  // Set the host header to match the target URL's host
+  proxyRequestOptions.headers.host = new URL(targetURL).host;
+
+  const proxyRequest = request(proxyRequestOptions);
+  
+  proxyRequest.on('response', function(sourceResponse) {
+    Object.keys(sourceResponse.headers).forEach(headerKey => {
+      res.setHeader(headerKey, sourceResponse.headers[headerKey]);
+    });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+		res.setHeader('Content-Type', 'video/MP2T');
+    sourceResponse.pipe(res);
+  });
+  proxyRequest.on('error', function(err) {
+    console.error('Proxy Error for URL:', targetURL, 'Error:', err.message);
+    res.status(500).send('Proxy Error');
+  });
+  res.on('error', (err) => {
+    console.error('Error during response pipe:', err);
+  });
+  req.pipe(restream()).pipe(proxyRequest);
+});
+
+function getBaseURL() {
+  return `http://${app.get('host')}/`;
+}
+
+app.get('/', (req, res) => {
+  res.render('main.ejs');
+});
+
+// Route for serving the admin panel
+app.get('/admin', async (req, res) => {
+  try {
+    const games = await Game.find();
+    res.render('admin.ejs', { videos: games });
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// Route for getting all games
+app.get('/games', async (req, res) => {
+  try {
+    const games = await Game.find();
+    res.send(games);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// Route for creating a new game
+app.post('/games', async (req, res) => {
+  try {
+    const game = new Game(req.body);
+    await game.save();
+    res.redirect('/admin');
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+app.put('/games/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, streamLink, sport } = req.body;
+    const updatedGame = await Game.findByIdAndUpdate(id, { title, streamLink, sport }, { new: true });
+    res.redirect('/admin');
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// Route for deleting a game
+app.delete('/games/:id', async (req, res) => {
+  try {
+    await Game.deleteOne({ _id: req.params.id });
+    res.redirect('/admin');
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// Start the server
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server running on port ${port}`));"
+ZXqqzkjv,Untitled,Rofyda_Elghadban1,C++,Tuesday 29th of August 2023 09:19:26 AM CDT," int t;
+ cin>>t;
+ while(t--){
+  int n,l=0,r=0,idx1=0;
+  cin>>n;
+  vector<int>v(n);
+  cin(v);
+  if(n==1){
+    cout<<1<<""\n"";
+  }else if(n==2){
+    swap(v[0],v[1]);
+    cout(v);
+    cout<<""\n"";
+  }else if(v[n-1]==n){
+    cout<<v[n-1]<<"" "";
+    v.pop_back();
+    cout(v);
+    cout<<""\n"";
+  }else if(v[0]==n){
+    for(int i=1;i<n;i++){
+      if(l<v[i]){
+        l=max(l,v[i]);
+        idx1=i;
+      }
+    }
+    for(int i=idx1;i<n;i++){
+      cout<<v[i]<<"" "";
+    }cout<<v[idx1-1]<<"" "";
+    for(int i=0;i<idx1-1;i++){
+      cout<<v[i]<<"" "";
+    }cout<<""\n"";
+  }
+ }"
+ugdpgxuB,Piyo custom,circlejourney,HTML 5,Tuesday 29th of August 2023 09:14:53 AM CDT,"<!-- 
+        PLACEHOLDER COLOURS (use Ctrl + F to replace)
+        Theme colour: #C5D9F2 (used for main background)
+        Accent colour: #9ab6dd (used for Font Awesome flair icons)
+-->
+
+<div class=""container"">
+    <div class=""card border-0"" style=""background-color: #C5D9F2;"">
+        
+        <!-- Header background image (change the link inside the brackets to change the header background) -->
+        <div class=""card-header p-3 border-0 justify-content-center""
+            style=""background-image: url(https://media.discordapp.net/attachments/1145603288885112852/1146047336796143706/image.png?width=662&height=662);"">
+            
+            <div class=""card border-0 p-4 text-center"">
+                <div class=""display-4 text-center d-flex align-items-center"">
+                    
+                    <!-- Header name and icon flair -->
+                    <i class=""fad fa-bird"" style=""color: #9ab6dd;""></i>
+                    <span class=""px-2""> Charactername Lastname </span>
+                    <i class=""fad fa-bird"" style=""color: #9ab6dd;""></i>
+                    
+                </div>
+                
+                <div class=""text-muted text-center"">
+                    
+                    <!-- HEADER QUOTE -->
+                    &ldquo;
+                    Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+                    &rdquo;
+                    
+                </div>
+            </div>
+        </div>
+        
+        <div class=""row p-4"">
+            
+            <div class=""col-12 col-lg-6"">
+            
+                <!-- ""Before"" card -->
+                <div class=""card border-0 h-100"" style=""overflow: hidden;"">
+                    <div class=""row no-gutters"">
+                        
+                        <!-- ""Before"" info column -->
+                        <div class=""col-12 col-lg-6 text-center p-3 flex-column justify-content-around"">
+                            
+                            <!-- ""Before"" column title -->
+                            <div class=""text-uppercase text-primary"" style=""font-size: 20pt;"">
+                                <i class=""fa fa-undo""></i> Before
+                            </div>
+                            
+                            
+                            <!-- ""Before"" info blocks start -->
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Name
+                                </div>
+                                <div>
+                                    My name
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Age
+                                </div>
+                                <div>
+                                    My age
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Job
+                                </div>
+                                <div>
+                                    My job
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Partner
+                                </div>
+                                <div>
+                                    My partner
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Personality
+                                </div>
+                                <div>
+                                    My personality
+                                </div>
+                            </div>
+                            <!-- ""Before"" info blocks end -->
+                            
+                        </div>
+                        
+                        
+                        <!-- ""Before"" image (change the link in the brackets to change the image) -->
+                        <div class=""col-12 col-lg-6""
+                            style=""background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/watermarks/69536099_slIz7OnQa.png);
+                                background-size: cover;
+                                background-position: top;
+                                min-height: 30rem;""
+                        >
+                        </div>
+                        
+                    </div>
+                </div>
+            </div>
+            
+            
+            <!-- Hourglass divider -->
+            <div class=""d-none d-lg-flex flex-column col-auto p-0 justify-content-center"">
+                <div class=""rounded-circle d-flex align-items-center justify-content-center bg-faded"" style=""font-size: 30pt; line-height: 0; margin: -2.5rem; z-index: 2; width: 5rem; height: 5rem; border: 5px solid #C5D9F2; color: #C5D9F2;"">
+                    <i class=""fas fa-hourglass""></i>
+                </div>
+            </div>
+            
+            
+            <!-- ""After"" card -->
+            <div class=""col-12 col-md-6 mt-2 mt-lg-0"">
+                <div class=""card border-0 h-100"" style=""overflow: hidden;"">
+                    
+                    <div class=""row no-gutters"">
+                        
+                        <!-- ""After"" image (change the link in the brackets to change the image) -->
+                        <div class=""col-12 col-lg-6 order-1 order-lg-0""
+                            style=""background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/watermarks/69404844_HB1OQ8Yux.jpg);
+                                background-size: cover;
+                                background-position: top;
+                                min-height: 30rem;""
+                        >
+                        </div>
+                        
+                        
+                        <!-- ""After"" info column -->
+                        <div class=""col-12 col-lg-6 text-center p-3 flex-column justify-content-around"">
+                            
+                            
+                            <!-- ""After"" column title -->
+                            <div class=""text-uppercase text-primary"" style=""font-size: 20pt;"">
+                                After <i class=""fa fa-redo""></i>
+                            </div>
+                            
+                            
+                            <!-- ""After"" info blocks start -->
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Name
+                                </div>
+                                <div>
+                                    My name
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Age
+                                </div>
+                                <div>
+                                    My age
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Job
+                                </div>
+                                <div>
+                                    My job
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Partner
+                                </div>
+                                <div>
+                                    My partner
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class=""font-weight-bold text-uppercase text-primary"">
+                                    Personality
+                                </div>
+                                <div>
+                                    My personality
+                                </div>
+                            </div>
+                            <!-- ""After"" info blocks end -->
+                            
+                        </div>
+                        
+                    </div>
+                    
+                </div>
+            </div>
+            <!-- ""After"" card end -->
+            
+            
+            <!-- Tabs begin -->
+            <div class=""col-12"">
+                
+                <!-- Tab bar -->
+                <ul class=""nav nav-tabs mt-3 flex-wrap text-center"" id=""tabs""style=""font-size: 16pt;"">
+                    
+                    <li class=""nav-item flex-grow-1"">
+                        <a class=""nav-link show active border-0"" href=""#tab-1"" data-toggle=""tab"">Story</a>
+                    </li>
+                    
+                    <li class=""nav-item flex-grow-1"">
+                        <a class=""nav-link border-0"" href=""#tab-2"" data-toggle=""tab"">Info</a>
+                    </li>
+                    
+                    <li class=""nav-item flex-grow-1"">
+                        <a class=""nav-link border-0"" href=""#tab-3"" data-toggle=""tab"">Tab 3</a>
+                    </li>
+                    
+                </ul>
+                
+                
+                <!-- Tab panes -->
+                <div class=""tab-content card border-0"" style=""border-top-left-radius: 0; border-top-right-radius: 0; height: 60vh; overflow-y: auto;"">
+                    
+                    
+                    <!-- Tab 1 -->
+                    <div class=""card-block tab-pane fade show active"" id=""tab-1"">
+                        <h4 class=""text-uppercase text-muted"">Heading</h4> <hr class=""mt-0"">
+                        <p>This is tab 1.</p>
+                        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis sollicitudin elit sed tellus blandit viverra sed eget odio. Donec accumsan tempor lacus, et venenatis elit feugiat non. Duis porta eros et velit blandit dapibus. Curabitur ac finibus eros. Duis placerat velit vitae massa sodales, eget mattis nibh pellentesque.</p>
+                        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis sollicitudin elit sed tellus blandit viverra sed eget odio.</p>
+                        
+                        <h4 class=""text-uppercase text-muted"">Heading</h4> <hr class=""mt-0"">
+                        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis sollicitudin elit sed tellus blandit viverra sed eget odio. Donec accumsan tempor lacus, et venenatis elit feugiat non. Duis porta eros et velit blandit dapibus. Curabitur ac finibus eros. Duis placerat velit vitae massa sodales, eget mattis nibh pellentesque.</p>
+                    </div>
+                    
+                    
+                    <!-- Tab 2 -->
+                    <div class=""card-block tab-pane fade"" id=""tab-2"">
+                        <h4 class=""text-uppercase text-muted"">Heading</h4> <hr class=""mt-0"">
+                        This is tab 2.
+                    </div>
+                    
+                    
+                    <!-- Tab 3 -->
+                    <div class=""card-block tab-pane fade"" id=""tab-3"">
+                        <h4 class=""text-uppercase text-muted"">Heading</h4> <hr class=""mt-0"">
+                        This is tab 3.
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer background image (change the link inside the brackets to change the header background) -->
+        <div class=""card-footer border-0 justify-content-center"" style=""background-image: url(https://media.discordapp.net/attachments/1145603288885112852/1146047336796143706/image.png?width=662&height=662);"">
+            
+            <div class=""card border-0 p-4 text-center bg-faded"">
+                <div class=""display-4 text-center"">
+                    <!-- Footer icon flair -->
+                    <i class=""fad fa-bird"" style=""color: #9ab6dd;""></i>
+                    <i class=""fad fa-bird"" style=""color: #9ab6dd;""></i>
+                    <i class=""fad fa-bird"" style=""color: #9ab6dd;""></i>
+                    
+                </div>
+            </div>
+        </div>
+        
+    </div>
+</div>"
+cPBzwtEn,Untitled,Rofyda_Elghadban1,C++,Tuesday 29th of August 2023 09:09:17 AM CDT,"else if(v[0]==n){
+    for(int i=1;i<n;i++){
+      if(l<v[i]){
+        l=max(l,v[i]);
+        idx1=i;
+      }
+    }
+    for(int i=idx1;i<n;i++){
+      cout<<v[i]<<"" "";
+    }cout<<v[idx1-1]<<"" "";
+    for(int i=0;i<idx1-1;i++){
+      cout<<v[i]<<"" "";
+    }cout<<""\n"";
+  }"
+XeWNTRTg,https://stackoverflow.com/questions/76999557/opencv-format-equivalent-to-gstreamer-gray16-be?noredir,dan-masek,C++,Tuesday 29th of August 2023 08:56:33 AM CDT,"#include <opencv2/opencv.hpp>
+
+int main(int argc, char* argv[])
+{
+    uint32_t input[8] = {
+        0x01020304, 0x05060708
+        , 0x11121314, 0x15161718
+        , 0x21222324, 0x25262728
+        , 0x31323334, 0x35363738
+    };
+
+    { // 16-bit byteswap
+        // View the input array as pairs of bytes...
+        cv::Mat byte_view(4, 4, CV_8UC2, input);
+        std::cout << byte_view << ""\n"";
+
+        // Destination array
+        cv::Mat result = cv::Mat::zeros(4, 4, CV_16UC1);
+        // Temporary view of the data owned by result compatible with byte_view
+        cv::Mat out_view(4, 4, CV_8UC2, result.data);
+        int ch[] = { 1, 0, 0, 1 };
+        cv::mixChannels(&byte_view, 1, &out_view, 1, ch, 2);
+
+        std::cout << out_view << ""\n"";
+        std::cout << result << ""\n"";
+    }
+
+    { // 32-bit byteswap
+        // View the input array as 4-tuples of bytes...
+        cv::Mat byte_view(4, 2, CV_8UC4, input);
+        std::cout << byte_view << ""\n"";
+
+        cv::Mat result = cv::Mat::zeros(4, 4, CV_16UC1);
+        // Temporary view of the data owned by result compatible with byte_view
+        cv::Mat out_view(4, 2, CV_8UC4, result.data);
+        int ch[] = { 0, 3, 1, 2, 2, 1, 3, 0 };
+        cv::mixChannels(&byte_view, 1, &out_view, 1, ch, 4);
+
+        std::cout << out_view << ""\n"";
+        std::cout << result << ""\n"";
+    }
+
+    return 0;
+}
+
+"
+waQKd0Jk,Untitled,riky_quellovero,C++,Tuesday 29th of August 2023 08:52:19 AM CDT,"#include <coroutine>
+#include <iostream>
+
+struct returnObject //oggetto di ritorno della coroutine
+{
+	//returnObject() = default;
+	struct promise_type //promise type utilizzato dalla coroutine. deve avere questo nome ed essere dentro il return type
+	{
+		int val_;
+		//abbiamo bisogno di:
+		//promise_type() = default; //un costruttore
+		std::suspend_never initial_suspend() { return {}; } //una f con questo nome che ritorni un waiter obj
+		//viene chiamato prima di eseguire la coroutine
+		std::suspend_never final_suspend() noexcept { return {}; } //stessa cosa ma deve essere noexcept
+		//viene eseguito alla fine della coroutine
+		returnObject get_return_object() { return returnObject{ std::coroutine_handle<promise_type>::from_promise(*this)}; }
+		//f con questo nome che ritorni il parent type quindi returnObject. costruisce la coroutine
+		void unhandled_exception() {}  
+		//usato per prendere le exception non gestite
+		void return_value() {}
+		std::suspend_always yield_value(auto val) 
+		{
+			this->val_ = val;
+			return std::suspend_always();
+		}
+ 	};
+	std::coroutine_handle<promise_type> handle; //tipo per interagire con la coroutine
+	returnObject(std::coroutine_handle<promise_type> handle_) : handle(handle_) {}
+};
+
+//std::suspend_always ferma la coroutine
+//std::suspend_never  non feramre la coroutine
+
+returnObject foo() //viene considerata coroutines dal compilatore in presenza di un co_...
+{
+	//std::cout << ""a"" << std::endl;
+	//co_await std::suspend_always();
+	////operatore unario che prende un oggetto waitable
+	//std::cout << ""b"" << std::endl;
+	for (int i = 0; i < 10; i++) { co_yield i; }
+	std::cout << ""fine\n"";
+}
+
+//quando messa in pausa lo stackframe della coroutine viene spostato nella memoria heap e tolto dallo stack delle call
+
+int main()
+{
+	returnObject retObj = foo(); //costruzione. in pausa di base | returno il valore di get_return_object
+	////posso anche usare solo l'handle type
+	//retObj.handle.resume(); //faccio partire la coroutine | operator () ha la stexsa funzione
+	//retObj.handle.done(); //controlla se ha finito
+	////retObj.handle.destroy(); //distrugge la coroutine
+	//retObj.handle.promise(); //accedo alla promise della coroutine
+	while (!retObj.handle.done())
+	{
+		std::cout << retObj.handle.promise().val_ << ""\n"";
+        retObj.handle.resume();
+	}
+}"
+W6Tz0LNT,Untitled,zavyalov79,Ruby,Tuesday 29th of August 2023 08:50:02 AM CDT,"require 'workbook'
+
+class Teck::Report
+  def initialize
+    protocol_id = Configuration.find_by(name: 'TECK_PROTOCOL_ID')&.value
+    protocol = ::Health::Protocol.find(protocol_id.to_i) if protocol_id
+    @cognitive_assessment = protocol.assessments.find { |assessment| assessment.assessment_type_cognitive? }
+
+    clinic_admin_id = Configuration.find_by(name: 'TECK_CLINIC_ADMIN_ID')&.value
+    @clinic_admin = ::Health::ClinicAdmin.find(clinic_admin_id.to_i) if clinic_admin_id
+  end
+
+
+  def report!
+  	return if @clinic_admin.nil? || @cognitive_assessment.nil?
+
+
+		book = Workbook::Book.new()
+		book.title = 'Teck Report'
+
+		patients.find_each do |patient|
+			patient_sessions = sessions_scope.where(admin_user_id: patient.id)
+
+			next if patient_sessions.empty?
+
+		  sheet = Workbook::Sheet.new
+		  sheet.name = patient.client_id
+		  table = sheet.table
+
+		  table << csv_titles
+		  patient_sessions.each do |patient_session|
+		  	report_data = Report::Renderer::Pilot::TeckRenderer.new(patient_session.protocol_session_uuid).report_data
+		  	row = [patient_session.completed_at.strftime(""%b #{patient_session.completed_at.day.ordinalize}, %Y"")]
+
+		  	tests.each do |test|
+		  		percentile = report_data.find{ |data| data[:test_id] == test.id }[:score_data][:adjusted_percentile]
+		  		row << (percentile * 100).round(2)
+		  	end
+		  	table << row
+		  end
+
+		  sheet.table.each do |row|
+		    row.each do |cell|
+		      cell.format[:width] = 20
+		    end
+		  end
+
+		  book.push sheet
+		end
+
+		tmp_filename = 'teck_report.xls'
+		tmp_file = book.write_to_xls(""tmp/#{tmp_filename}"")
+
+		media_file = MediaFile.find_or_create_by(name: 'TECK Report', admin_user_id: 1)
+		media_file.update!(
+		  asset: File.open(tmp_file),
+		  asset_file_name: tmp_filename,
+		  allow_others_to_copy: NO,
+		  public: false,
+		  category: :admin_report
+		)
+		File.delete(""tmp/#{tmp_filename}"")
+
+		media_file.path
+  end
+
+  private
+
+  def tests
+  	@tests ||= @cognitive_assessment.tests
+  end
+
+  def csv_titles
+  	@csv_titles ||= ['Date'] + tests.map(&:name)
+  end
+
+  def sessions_scope
+  	BatchSession.status_complete.where(batch_id: @cognitive_assessment.id).order(:completed_at)
+  end
+
+  def patients
+  	@clinic_admin.patients
+  end
+end"
+esHqmBUg,GA4 - purchase - Whoowine,CharlotteVDB,JavaScript,Tuesday 29th of August 2023 08:28:24 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+   event: 'purchase',  			// name of the event. In this case, it always must be purchase
+   ecommerce: {
+currency: 'EUR',
+	  value: '56.70',
+	  shipping: '4.95'
+	  transaction_id: '1758', 					// insert an actual transaction ID
+ 	  customer_email: 'test@example.com',           // customer email
+	  customer_telephone: '+32494222436',           // customer telephone number (must always contain country code)   
+	  coupon: 'blackfriday',    
+	items: [{							
+      item_name: 'Mesquida Mora - Sincronia Negre 2019', 	// insert a product name
+	  item_id: '7967292883170',			// insert an actual product ID
+      price: '38.80',					// insert an actual product price.
+      item_brand: 'Whoowine',			
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Rood',			// wijnsoort
+  	  item_category3: 'Spanje',			// wijnland	
+      quantity: '1'						
+    },{
+      item_name: 'La Tordera - Alnè Extra Brut',         // insert a product name
+      item_id: '7967292883171',       // insert an actual product ID
+      price: '12.95',  				 // insert an actual product price.
+      item_brand: 'Whoowine',           
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Mousserend',  // wijnsoort
+  	  item_category3: 'Italië',		// wijnland	
+      quantity: '1'						               
+    }]
+  }
+});"
+bXzZnkpC,GA4 - begin_checkout - Whoowine,CharlotteVDB,JavaScript,Tuesday 29th of August 2023 08:24:49 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+   event: 'begin_checkout',  			// name of the event. In this case, it always must be begin_checkout
+   ecommerce: {
+    items: [{							
+      item_name: 'Mesquida Mora - Sincronia Negre 2019', 	// insert a product name
+	  item_id: '7967292883170',			// insert an actual product ID
+      price: '38.80',					// insert an actual product price.
+      item_brand: 'Whoowine',			
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Rood',			// wijnsoort
+  	  item_category3: 'Spanje',			// wijnland	
+      quantity: '1'						
+    },{
+      item_name: 'La Tordera - Alnè Extra Brut',         // insert a product name
+      item_id: '7967292883171',       // insert an actual product ID
+      price: '12.95',  				 // insert an actual product price.
+      item_brand: 'Whoowine',           
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Mousserend',  // wijnsoort
+  	  item_category3: 'Italië',		// wijnland	
+      quantity: '1'						               
+    }]
+  }
+});"
+6SyndebP,GA4 - add_to_cart - Whoowine,CharlotteVDB,JavaScript,Tuesday 29th of August 2023 08:22:11 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+   event: 'add_to_cart',  			// name of the event. In this case, it always must be view_item
+   ecommerce: {
+    items: [{							
+      item_name: 'Mesquida Mora - Sincronia Negre 2019', 			// insert a product name
+	  item_id: '7967292883170',										// insert an actual product ID
+      price: '38.80',					// insert an actual product price.
+      item_brand: 'Whoowine',			
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Rood',			// wijnsoort
+  	  item_category3: 'Spanje',			// wijnland	
+      quantity: '1'						// always '1'
+    }]
+  }
+});"
+Uds7i7ve,GA4 - view_item_list - Whoowine,CharlotteVDB,JavaScript,Tuesday 29th of August 2023 08:20:03 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+   event: 'view_item_list',  			// name of the event. In this case, it always must be view_item_list
+   ecommerce: {
+    items: [{							
+      item_name: 'Mesquida Mora - Sincronia Negre 2019', 	// insert a product name
+	  item_id: '7967292883170',			// insert an actual product ID
+      price: '38.80',					// insert an actual product price.
+      item_brand: 'Whoowine',			
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Rood',			// wijnsoort
+  	  item_category3: 'Spanje',			// wijnland	
+      quantity: '1'						
+    },{
+      item_name: 'La Tordera - Alnè Extra Brut',         // insert a product name
+      item_id: '7967292883171',       // insert an actual product ID
+      price: '12.95',  				 // insert an actual product price.
+      item_brand: 'Whoowine',           
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Mousserend',  // wijnsoort
+  	  item_category3: 'Italië',		// wijnland	
+      quantity: '1'						               
+    }]
+  }
+});"
+keJTigMb,newest monster snowybot,coinwalk,JavaScript,Tuesday 29th of August 2023 08:15:58 AM CDT,"var bigusdicus = parseFloat($('#pct_balance').val());
+var beatbet = ((bigusdicus/144000).toFixed(8));
+var bolbet = beatbet;
+var target = 50000;
+var ten = (beatbet*10);
+var serv = (beatbet*6.1);
+var eight = (beatbet*7.9);
+var buggzie = bigusdicus;
+var zimple = bigusdicus;
+var blowzy = false;
+var smick = ((Math.floor(bigusdicus/ten))*ten);
+var dude = ((Math.floor(bigusdicus/ten))*ten);
+var brother = document.getElementById('me').firstChild.lastChild.firstChild.children[5].innerText;
+var homer = document.getElementById('me').firstChild.lastChild.firstChild.children[5].innerText;
+var getld = 0;
+var boon = true;
+var tuber = ((Math.floor(bigusdicus/ten))*ten);
+var razzle;
+var final = document.getElementById('me').firstChild.lastChild.firstChild.children[7].innerText;
+var oldegener = 0;
+var yikes = 1;
+ 
+ 
+function get(){
+console.clear();
+buggzie = $('#pct_balance').val();
+var bog = ((buggzie-bigusdicus).toFixed(8));
+console.log(""profit:"");
+console.log(bog);
+if ((buggzie>(((Math.floor(buggzie/ten))*ten)+serv))&&(buggzie<(((Math.floor(buggzie/ten))*ten)+eight))&&(buggzie != oldegener)&&(buggzie>dude)){
+    bolbet = bolbet*2;
+    oldegener = parseFloat(buggzie);
+}
+if ((buggzie>(((Math.floor(buggzie/ten))*ten)+serv))&&(buggzie<(((Math.floor(buggzie/ten))*ten)+eight))&&(buggzie != oldegener)&&(buggzie<dude)){
+    bolbet = bolbet*2;
+	yikes = 0;
+    oldegener = parseFloat(buggzie);
+}
+if ((buggzie>=(dude+(ten*yikes)))&&(buggzie<(((Math.floor(buggzie/ten))*ten)+serv))){
+    bolbet = beatbet;
+    oldegener = 0;
+    yikes = 1;
+    dude = ((Math.floor(buggzie/ten))*ten);
+	}
+if (buggzie>=target){
+console.log(""snowybot rocks"");
+return;
+}
+homer = document.getElementById('me').firstChild.lastChild.firstChild.children[5].innerText;
+var coldbet = document.getElementById('me').firstChild.lastChild.firstChild.children[5].innerText;
+var milk = document.getElementById('me').firstChild.lastChild.firstChild.children[11].innerText;
+if ((milk==razzle)&&(getld>=1)&&(homer>brother)&&(!boon)){
+final = document.getElementById('me').firstChild.lastChild.firstChild.children[7].innerText;
+brother = parseFloat(homer);
+boon = true;
+}
+if ((final<49.5000)&&(blowzy)&&(getld>=1)){
+zimple = zimple+bolbet
+blowzy = false;
+}
+if ((final>=49.5000)&&(blowzy)&&(getld>=1)){
+zimple = zimple-bolbet;
+blowzy = false;
+}
+var ficked = ((zimple*1).toFixed(7));
+var migg = ((buggzie*1).toFixed(7));
+if (((milk!=razzle)&&(getld>=1)&&(homer>brother))||((ficked!=migg)&&(blowzy))){
+console.log(""hacker attacked you with"");
+console.log(milk);
+console.log(""bet number of attack:"");
+console.log(coldbet);
+return;
+}
+if ((homer==brother)&&(boon)){
+razzle = ((bolbet*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(razzle);
+$('#a_lo').click();
+getld = getld+1;
+blowzy = true;
+boon = false;
+homer = 0;
+} 
+setTimeout(() => get(), 1);
+}
+get();
+
+"
+BRcLzTZk,GA4 - view_item - Whoowine,CharlotteVDB,JavaScript,Tuesday 29th of August 2023 08:11:54 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+   event: 'view_item',  			// name of the event. In this case, it always must be view_item
+   ecommerce: {
+    items: [{							
+      item_name: 'Mesquida Mora - Sincronia Negre 2019', 			// insert a product name
+	  item_id: '7967292883170',										// insert an actual product ID
+      price: '38.80',					// insert an actual product price.
+      item_brand: 'Whoowine',			
+      item_category: 'Wijnfles',		// overkoepelende wijncategorie
+	  item_category2: 'Rood',			// wijnsoort
+  	  item_category3: 'Spanje',			// wijnland	
+      quantity: '1'						// always '1'
+    }]
+  }
+});"
+L5sZ7kgm,Knapsack 1,LEGEND2004,C++,Tuesday 29th of August 2023 07:58:10 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+#define int long long
+const int mod = 1e9 + 7;
+const int N = 1e5 + 5;
+
+int n , w;
+int dp[N];
+int a[N];
+int b[N];
+
+signed main()
+{
+    cin >> n >> w;
+    for(int i = 0; i < n; i++){
+        cin >> a[i] >> b[i];
+    }
+    dp[0] = 0;
+    for(int j = 0; j < n; j++){
+        for(int i = w; i >= 1; i--){
+            if(i < a[j])
+                continue;
+            dp[i] = max(dp[i] , dp[i - a[j]] + b[j]);
+        }
+    }
+    cout << dp[w] << endl;
+
+}"
+wBBidJ4w,Netmiko Multiples devices,joand3512004,Python,Tuesday 29th of August 2023 07:55:38 AM CDT,"#O script está lendo 2 listas, uma com os endereços de IP, e outra com os comandos. E por algum motivo, ele só está lendo o primento switch do arquivo (tenho 3 switches no meu lab). 
+
+my_devices = open(""device_list.txt"")
+comandos = open(""cli.txt"")
+devyces = list()
+'''data = time.strftime(""%Y%m%d"")'''
+
+for device_ip in my_devices:
+    device = {
+        ""device_type"": 'cisco_ios',
+        ""ip"": device_ip,
+        ""username"": 'admin',
+        ""password"": 'password',
+}    
+    devyces.append(device)      
+
+for cada_ip in devyces:
+     for comand in comandos:
+         net_connect = ConnectHandler(**cada_ip, session_timeout=30)
+         #net_connect.enable()
+         '''time.sleep(3)'''
+         print(f'\n Conectando no Switch:{cada_ip[""ip""]}')
+         output = net_connect.send_command(comand)
+         print (f'\n Enviando o comando: *{comand}*\n')
+         #print(output)
+         print(f'\n Fechando a conexão de {cada_ip[""ip""]}')
+         continue    
+net_connect.disconnect()"
+q3Zux7Ua,ModIo : GetDownloadResponse() based on UnityWebRequest,manutoo,C#,Tuesday 29th of August 2023 07:48:58 AM CDT,"		public class CMyDownloadHandler : UnityEngine.Networking.DownloadHandlerScript
+		{
+			public Stream m_DownloadStream;
+			public ulong m_TotalSize;
+			public long m_ReceivedLenght, m_TotalReceived;
+
+			public CMyDownloadHandler(Stream DownloadStream)
+			{
+				m_DownloadStream = DownloadStream;
+			}
+
+			protected override void ReceiveContentLengthHeader(ulong ContentLength)
+			{
+				m_TotalSize = ContentLength;
+			}
+
+			protected override bool ReceiveData(byte[] data, int DataLength)
+			{
+				m_DownloadStream.Write(data, 0, DataLength);
+
+				m_ReceivedLenght += DataLength;
+				m_TotalReceived += DataLength;
+
+				return true;
+			}
+		}
+
+		static async Task<WebResponse> GetDownloadResponse(this WebRequest request, Stream downloadStream, ProgressHandle progressHandle)
+		{
+			// Send request
+			UnityEngine.Networking.UnityWebRequest www = UnityEngine.Networking.UnityWebRequest.Get(request.RequestUri);
+
+			www.method = UnityEngine.Networking.UnityWebRequest.kHttpVerbGET;
+			CMyDownloadHandler MyDownloader = new CMyDownloadHandler(downloadStream);
+			www.downloadHandler = MyDownloader;
+
+			//yield return www.SendWebRequest();
+			www.SendWebRequest();
+
+			Stopwatch progressMeasure = new Stopwatch();
+			progressMeasure.Start();
+
+			while (www.result == UnityEngine.Networking.UnityWebRequest.Result.InProgress)
+			{
+				if (progressHandle != null)
+				{
+					if (progressMeasure.ElapsedMilliseconds >= 100) //TOO:0)
+					{
+						progressHandle.Progress = (MyDownloader.m_TotalSize != 0) ? (float)(MyDownloader.m_TotalReceived / (double)MyDownloader.m_TotalSize) : 0.0f;
+						progressHandle.BytesPerSecond = (long)(MyDownloader.m_ReceivedLenght * (progressMeasure.ElapsedMilliseconds / 1000f));
+
+						//UnityEngine.Debug.LogFormat(""Speed = {0:0.0}MB/s ; Progress = {1}%"", progressHandle.BytesPerSecond / (1024 * 1024), (int)(progressHandle.Progress * 100));
+
+						MyDownloader.m_ReceivedLenght = 0;
+						progressMeasure.Restart();
+					}
+				}
+
+				await Task.Yield();
+			}
+
+			if (www.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+			{
+				return null;
+			}
+
+			return await request.GetResponseAsync();     //TOO: Not super efficient, but need a WebResponse
+		}"
+LHA2wHNz,Discord+SQL Tutorial,NaroxEG,Python,Tuesday 29th of August 2023 07:47:16 AM CDT,"import discord
+from discord.ext import commands
+from discord import app_commands
+import mysql.connector
+
+intents = discord.Intents.default()
+client = commands.Bot(command_prefix=""-"", intents=intents)
+tree = client.tree
+
+@client.event
+async def on_ready():
+    synced = await tree.sync()
+    print(f""Synced {len(synced)} Command(s)"")
+
+db = mysql.connector.connect(
+    host=""localhost"",
+    user=""root"",
+    password="""",
+    database=""test""
+)
+cursor = db.cursor(dictionary=True)
+
+@tree.command(name=""set"", description=""sets user balance"")
+@app_commands.describe(balance=""amount of money"")
+async def set(interaction: discord.Interaction, balance: int):
+    sql = ""INSERT INTO users (ID, BALANCE) VALUES (%s, %s)""
+    val = (interaction.user.id, balance)
+
+    cursor.execute(sql, val)
+    db.commit()
+
+    await interaction.response.send_message(""Done"")
+
+@tree.command(name=""update"", description=""updates user balance"")
+@app_commands.describe(balance=""amount of money"")
+async def update(interaction: discord.Interaction, balance: int):
+    sql = ""UPDATE users SET BALANCE=%s WHERE ID=%s""
+    val = (balance, interaction.user.id)
+    cursor.execute(sql, val)
+    db.commit()
+    await interaction.response.send_message(""Done"")
+
+
+@tree.command(name=""check"", description=""checks user balance"")
+async def check(interaction:discord.Interaction):
+    sql = f""SELECT BALANCE FROM users WHERE ID={interaction.user.id}""
+    cursor.execute(sql)
+
+    rows = cursor.fetchall()
+    # [{'BALANCE': '150'}]
+    for row in rows:
+        balance = row[""BALANCE""]
+        await interaction.response.send_message(balance)
+
+
+
+
+
+client.run(""TOKEN"")"
+wedvVYK1,Vacation,LEGEND2004,C++,Tuesday 29th of August 2023 07:40:02 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+#define int long long
+const int mod = 1e9 + 7;
+const int N = 1e5 + 5;
+int n;
+int dp[N][5];
+int a[N];
+int b[N];
+int c[N];
+
+signed main()
+{
+    cin >> n;
+    for(int i = 1; i <= n; i++){
+        cin >> a[i] >> b[i] >> c[i];
+    }
+    dp[1][1] = a[1];
+    dp[1][2] = b[1];
+    dp[1][3] = c[1];
+
+    for(int i = 2; i <= n; i++){
+        dp[i][1] = max(dp[i - 1][2] , dp[i - 1][3]) + a[i];
+        dp[i][2] = max(dp[i - 1][1] , dp[i - 1][3]) + b[i];
+        dp[i][3] = max(dp[i - 1][1] , dp[i - 1][2]) + c[i];
+        //cout << dp[i][1] << "" "" << dp[i][2] << "" "" << dp[i][3] << endl;
+    }
+    cout << max(max(dp[n][1] , dp[n][2]) , dp[n][3]) << endl;
+}
+"
+PjFfZP6J,Untitled,Ahlushko,JSON,Tuesday 29th of August 2023 07:13:51 AM CDT,"{
+  ""client_id"": ""3586"",
+  ""lead_id"": ""13176"",
+  ""updated"": true,
+  ""position"": 1,
+  ""accounting_code"": """",
+  ""bundles_services"": 0,
+  ""quantity_old"": 1,
+  ""old_qty"": 1,
+  ""is_product"": 1,
+  ""is_bundle"": 0,
+  ""service"": {
+    ""is_product"": 1,
+    ""is_bundle"": 0,
+    ""service_markup"": 0,
+    ""service_name"": ""ProductTreeUnselected"",
+    ""service_id"": 293
+  },
+  ""service_id"": 293,
+  ""isOptional"": ""Opt. selected"",
+  ""service_priority"": 0,
+  ""service_name"": ""ProductTreeUnselected"",
+  ""service_description"": ""ProductTreeUnselected"",
+  ""service_price"": ""450"",
+  ""estimate_service_ti_title"": """",
+  ""tree_inventory_service"": false,
+  ""ties_cost"": 0,
+  ""ties_stump"": 0,
+  ""ties_number"": 0,
+  ""ties_type"": ""undefined"",
+  ""ties_work_types"": ""[]"",
+  ""serviceIndex"": 0,
+  ""noTax"": false,
+  ""serviceimages"": [],
+  ""cost"": 450,
+  ""quantity"": 1,
+  ""menuPopup"": false,
+  ""parentIndex"": 0,
+  ""optional"": 1,
+  ""service_status"": 0,
+  ""service_class_id"": 48,
+  ""equipments"": [],
+  ""non_taxable"": false
+}"
+H5nn27vH,infinite zoom for comfy (spaghetti nodes!),Satscape,JSON,Tuesday 29th of August 2023 06:53:28 AM CDT,"{
+  ""last_node_id"": 89,
+  ""last_link_id"": 166,
+  ""nodes"": [
+    {
+      ""id"": 4,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        785,
+        -20
+      ],
+      ""size"": [
+        75,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 9,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 4
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""VAE"",
+          ""type"": ""VAE"",
+          ""links"": [
+            8,
+            12
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 18,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        753,
+        -62
+      ],
+      ""size"": [
+        140.8,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 11,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 19
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            20
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 46,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        1650,
+        -190
+      ],
+      ""size"": [
+        90.4,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 22,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 73,
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            72
+          ]
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 5,
+      ""type"": ""CLIPTextEncode"",
+      ""pos"": [
+        127,
+        391
+      ],
+      ""size"": {
+        ""0"": 400,
+        ""1"": 200
+      },
+      ""flags"": {},
+      ""order"": 8,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""clip"",
+          ""type"": ""CLIP"",
+          ""link"": 5,
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            6
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""CLIPTextEncode""
+      },
+      ""widgets_values"": [
+        ""text,watermark,logo,vignette\n""
+      ],
+      ""color"": ""#322"",
+      ""bgcolor"": ""#533""
+    },
+    {
+      ""id"": 20,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        1630,
+        -130
+      ],
+      ""size"": [
+        140.8,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 18,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 109
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            23
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 62,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        2455.165830078125,
+        64.59048400878908
+      ],
+      ""size"": [
+        140.8,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 16,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 137
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            109
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 27,
+      ""type"": ""SaveImage"",
+      ""pos"": [
+        1417,
+        77
+      ],
+      ""size"": {
+        ""0"": 346.2787780761719,
+        ""1"": 270
+      },
+      ""flags"": {},
+      ""order"": 26,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""images"",
+          ""type"": ""IMAGE"",
+          ""link"": 101
+        }
+      ],
+      ""properties"": {},
+      ""widgets_values"": [
+        ""hzoom""
+      ]
+    },
+    {
+      ""id"": 68,
+      ""type"": ""ImageSender"",
+      ""pos"": [
+        1786,
+        -35
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 294
+      },
+      ""flags"": {},
+      ""order"": 27,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""images"",
+          ""type"": ""IMAGE"",
+          ""link"": 119
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""ImageSender""
+      },
+      ""widgets_values"": [
+        ""ImgSender"",
+        0
+      ]
+    },
+    {
+      ""id"": 38,
+      ""type"": ""Note"",
+      ""pos"": [
+        180,
+        -160
+      ],
+      ""size"": {
+        ""0"": 213.02503967285156,
+        ""1"": 176.5100555419922
+      },
+      ""flags"": {},
+      ""order"": 0,
+      ""mode"": 0,
+      ""properties"": {
+        ""text"": """"
+      },
+      ""widgets_values"": [
+        ""Initial image needs the regular positive prompt AND the blank Latent connecting for frame 1.\nFrame two needs the looped conditioning and latent (RIGHT) connecting into the sampler to create the infinite closed loop\nBatch count:1 but tick the box below that to hit the button for you for infinity!""
+      ],
+      ""color"": ""#432"",
+      ""bgcolor"": ""#653""
+    },
+    {
+      ""id"": 69,
+      ""type"": ""ImageReceiver"",
+      ""pos"": [
+        497,
+        742
+      ],
+      ""size"": {
+        ""0"": 555.06640625,
+        ""1"": 574.1248168945312
+      },
+      ""flags"": {},
+      ""order"": 1,
+      ""mode"": 0,
+      ""outputs"": [
+        {
+          ""name"": ""IMAGE"",
+          ""type"": ""IMAGE"",
+          ""links"": [
+            120
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        },
+        {
+          ""name"": ""MASK"",
+          ""type"": ""MASK"",
+          ""links"": null,
+          ""shape"": 3
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""ImageReceiver""
+      },
+      ""widgets_values"": [
+        ""ImgSender_temp_bdpye_00001_.png [temp]"",
+        0
+      ]
+    },
+    {
+      ""id"": 70,
+      ""type"": ""Note"",
+      ""pos"": [
+        -58,
+        689
+      ],
+      ""size"": {
+        ""0"": 210,
+        ""1"": 58
+      },
+      ""flags"": {},
+      ""order"": 2,
+      ""mode"": 0,
+      ""properties"": {
+        ""text"": """"
+      },
+      ""widgets_values"": [
+        ""Connect this for the first frame only""
+      ],
+      ""color"": ""#432"",
+      ""bgcolor"": ""#653""
+    },
+    {
+      ""id"": 7,
+      ""type"": ""VAEDecode"",
+      ""pos"": [
+        1106,
+        20
+      ],
+      ""size"": {
+        ""0"": 210,
+        ""1"": 46
+      },
+      ""flags"": {},
+      ""order"": 25,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""samples"",
+          ""type"": ""LATENT"",
+          ""link"": 7
+        },
+        {
+          ""name"": ""vae"",
+          ""type"": ""VAE"",
+          ""link"": 8
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""IMAGE"",
+          ""type"": ""IMAGE"",
+          ""links"": [
+            101,
+            119
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""VAEDecode""
+      }
+    },
+    {
+      ""id"": 19,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        1600,
+        -71
+      ],
+      ""size"": [
+        140.8,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 14,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 20
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            137
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 2,
+      ""type"": ""KSampler"",
+      ""pos"": [
+        660,
+        165
+      ],
+      ""size"": {
+        ""0"": 329,
+        ""1"": 520
+      },
+      ""flags"": {},
+      ""order"": 24,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""model"",
+          ""type"": ""MODEL"",
+          ""link"": 1
+        },
+        {
+          ""name"": ""positive"",
+          ""type"": ""CONDITIONING"",
+          ""link"": 146,
+          ""slot_index"": 1
+        },
+        {
+          ""name"": ""negative"",
+          ""type"": ""CONDITIONING"",
+          ""link"": 6
+        },
+        {
+          ""name"": ""latent_image"",
+          ""type"": ""LATENT"",
+          ""link"": 145,
+          ""slot_index"": 3
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            7
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""KSampler""
+      },
+      ""widgets_values"": [
+        754552865725119,
+        ""randomize"",
+        20,
+        7,
+        ""euler"",
+        ""normal"",
+        1
+      ]
+    },
+    {
+      ""id"": 1,
+      ""type"": ""CheckpointLoaderSimple"",
+      ""pos"": [
+        -463,
+        65
+      ],
+      ""size"": {
+        ""0"": 475.8436279296875,
+        ""1"": 104.41825866699219
+      },
+      ""flags"": {},
+      ""order"": 3,
+      ""mode"": 0,
+      ""outputs"": [
+        {
+          ""name"": ""MODEL"",
+          ""type"": ""MODEL"",
+          ""links"": [
+            1
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        },
+        {
+          ""name"": ""CLIP"",
+          ""type"": ""CLIP"",
+          ""links"": [
+            3,
+            5
+          ],
+          ""shape"": 3,
+          ""slot_index"": 1
+        },
+        {
+          ""name"": ""VAE"",
+          ""type"": ""VAE"",
+          ""links"": [
+            4
+          ],
+          ""shape"": 3,
+          ""slot_index"": 2
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""CheckpointLoaderSimple""
+      },
+      ""widgets_values"": [
+        ""epicrealism_sd15.safetensors""
+      ]
+    },
+    {
+      ""id"": 37,
+      ""type"": ""ImageScale"",
+      ""pos"": [
+        1108,
+        641
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 130
+      },
+      ""flags"": {},
+      ""order"": 6,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""image"",
+          ""type"": ""IMAGE"",
+          ""link"": 120,
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""IMAGE"",
+          ""type"": ""IMAGE"",
+          ""links"": [
+            45
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""ImageScale""
+      },
+      ""widgets_values"": [
+        ""nearest-exact"",
+        512,
+        512,
+        ""disabled""
+      ]
+    },
+    {
+      ""id"": 8,
+      ""type"": ""EmptyLatentImage"",
+      ""pos"": [
+        161,
+        639
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 106
+      },
+      ""flags"": {},
+      ""order"": 4,
+      ""mode"": 0,
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""EmptyLatentImage""
+      },
+      ""widgets_values"": [
+        768,
+        768,
+        1
+      ]
+    },
+    {
+      ""id"": 3,
+      ""type"": ""CLIPTextEncode"",
+      ""pos"": [
+        128,
+        150
+      ],
+      ""size"": {
+        ""0"": 400,
+        ""1"": 200
+      },
+      ""flags"": {},
+      ""order"": 7,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""clip"",
+          ""type"": ""CLIP"",
+          ""link"": 3
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            19
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""CLIPTextEncode""
+      },
+      ""widgets_values"": [
+        ""horizon view:roof-top level,UK houses, fields, daytime, summertime""
+      ],
+      ""color"": ""#232"",
+      ""bgcolor"": ""#353""
+    },
+    {
+      ""id"": 24,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        560,
+        -170
+      ],
+      ""size"": [
+        90.4,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 23,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 72,
+          ""pos"": [
+            45.2,
+            0
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            145
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": true
+      },
+      ""shape"": 2
+    },
+    {
+      ""id"": 21,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        410,
+        -110
+      ],
+      ""size"": [
+        140.8,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 20,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 23,
+          ""pos"": [
+            70.4,
+            0
+          ]
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""CONDITIONING"",
+          ""type"": ""CONDITIONING"",
+          ""links"": [
+            146
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": true
+      }
+    },
+    {
+      ""id"": 12,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        1170,
+        370
+      ],
+      ""size"": [
+        75,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 12,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 12
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""VAE"",
+          ""type"": ""VAE"",
+          ""links"": [
+            150
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 85,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        1763,
+        426
+      ],
+      ""size"": [
+        75,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 15,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 150
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""VAE"",
+          ""type"": ""VAE"",
+          ""links"": [
+            161
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 26,
+      ""type"": ""Reroute"",
+      ""pos"": [
+        2684,
+        92
+      ],
+      ""size"": [
+        90.4,
+        26
+      ],
+      ""flags"": {},
+      ""order"": 21,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": """",
+          ""type"": ""*"",
+          ""link"": 164,
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            73
+          ],
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""showOutputText"": true,
+        ""horizontal"": false
+      }
+    },
+    {
+      ""id"": 88,
+      ""type"": ""LatentComposite"",
+      ""pos"": [
+        2502,
+        408
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 126
+      },
+      ""flags"": {},
+      ""order"": 19,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""samples_to"",
+          ""type"": ""LATENT"",
+          ""link"": 165
+        },
+        {
+          ""name"": ""samples_from"",
+          ""type"": ""LATENT"",
+          ""link"": 166
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            164
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""LatentComposite""
+      },
+      ""widgets_values"": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      ""id"": 87,
+      ""type"": ""SetLatentNoiseMask"",
+      ""pos"": [
+        2254,
+        411
+      ],
+      ""size"": {
+        ""0"": 210,
+        ""1"": 46
+      },
+      ""flags"": {},
+      ""order"": 13,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""samples"",
+          ""type"": ""LATENT"",
+          ""link"": 158
+        },
+        {
+          ""name"": ""mask"",
+          ""type"": ""MASK"",
+          ""link"": 159
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            165
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""SetLatentNoiseMask""
+      }
+    },
+    {
+      ""id"": 13,
+      ""type"": ""ImagePadForOutpaint"",
+      ""pos"": [
+        1579,
+        642
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 174
+      },
+      ""flags"": {},
+      ""order"": 10,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""image"",
+          ""type"": ""IMAGE"",
+          ""link"": 45,
+          ""slot_index"": 0
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""IMAGE"",
+          ""type"": ""IMAGE"",
+          ""links"": [
+            160
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        },
+        {
+          ""name"": ""MASK"",
+          ""type"": ""MASK"",
+          ""links"": [
+            159
+          ],
+          ""shape"": 3,
+          ""slot_index"": 1
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""ImagePadForOutpaint""
+      },
+      ""widgets_values"": [
+        256,
+        256,
+        256,
+        256,
+        124
+      ]
+    },
+    {
+      ""id"": 89,
+      ""type"": ""VAEEncode"",
+      ""pos"": [
+        2002,
+        729
+      ],
+      ""size"": {
+        ""0"": 210,
+        ""1"": 46
+      },
+      ""flags"": {},
+      ""order"": 17,
+      ""mode"": 0,
+      ""inputs"": [
+        {
+          ""name"": ""pixels"",
+          ""type"": ""IMAGE"",
+          ""link"": 160
+        },
+        {
+          ""name"": ""vae"",
+          ""type"": ""VAE"",
+          ""link"": 161
+        }
+      ],
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            166
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""VAEEncode""
+      }
+    },
+    {
+      ""id"": 71,
+      ""type"": ""EmptyLatentImage"",
+      ""pos"": [
+        1879,
+        404
+      ],
+      ""size"": {
+        ""0"": 315,
+        ""1"": 106
+      },
+      ""flags"": {},
+      ""order"": 5,
+      ""mode"": 0,
+      ""outputs"": [
+        {
+          ""name"": ""LATENT"",
+          ""type"": ""LATENT"",
+          ""links"": [
+            158
+          ],
+          ""shape"": 3,
+          ""slot_index"": 0
+        }
+      ],
+      ""properties"": {
+        ""Node name for S&R"": ""EmptyLatentImage""
+      },
+      ""widgets_values"": [
+        1024,
+        1024,
+        1
+      ]
+    }
+  ],
+  ""links"": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      ""MODEL""
+    ],
+    [
+      3,
+      1,
+      1,
+      3,
+      0,
+      ""CLIP""
+    ],
+    [
+      4,
+      1,
+      2,
+      4,
+      0,
+      ""*""
+    ],
+    [
+      5,
+      1,
+      1,
+      5,
+      0,
+      ""CLIP""
+    ],
+    [
+      6,
+      5,
+      0,
+      2,
+      2,
+      ""CONDITIONING""
+    ],
+    [
+      7,
+      2,
+      0,
+      7,
+      0,
+      ""LATENT""
+    ],
+    [
+      8,
+      4,
+      0,
+      7,
+      1,
+      ""VAE""
+    ],
+    [
+      12,
+      4,
+      0,
+      12,
+      0,
+      ""*""
+    ],
+    [
+      19,
+      3,
+      0,
+      18,
+      0,
+      ""*""
+    ],
+    [
+      20,
+      18,
+      0,
+      19,
+      0,
+      ""*""
+    ],
+    [
+      23,
+      20,
+      0,
+      21,
+      0,
+      ""*""
+    ],
+    [
+      45,
+      37,
+      0,
+      13,
+      0,
+      ""IMAGE""
+    ],
+    [
+      72,
+      46,
+      0,
+      24,
+      0,
+      ""*""
+    ],
+    [
+      73,
+      26,
+      0,
+      46,
+      0,
+      ""*""
+    ],
+    [
+      101,
+      7,
+      0,
+      27,
+      0,
+      ""IMAGE""
+    ],
+    [
+      109,
+      62,
+      0,
+      20,
+      0,
+      ""*""
+    ],
+    [
+      119,
+      7,
+      0,
+      68,
+      0,
+      ""IMAGE""
+    ],
+    [
+      120,
+      69,
+      0,
+      37,
+      0,
+      ""IMAGE""
+    ],
+    [
+      137,
+      19,
+      0,
+      62,
+      0,
+      ""*""
+    ],
+    [
+      145,
+      24,
+      0,
+      2,
+      3,
+      ""LATENT""
+    ],
+    [
+      146,
+      21,
+      0,
+      2,
+      1,
+      ""CONDITIONING""
+    ],
+    [
+      150,
+      12,
+      0,
+      85,
+      0,
+      ""*""
+    ],
+    [
+      158,
+      71,
+      0,
+      87,
+      0,
+      ""LATENT""
+    ],
+    [
+      159,
+      13,
+      1,
+      87,
+      1,
+      ""MASK""
+    ],
+    [
+      160,
+      13,
+      0,
+      89,
+      0,
+      ""IMAGE""
+    ],
+    [
+      161,
+      85,
+      0,
+      89,
+      1,
+      ""VAE""
+    ],
+    [
+      164,
+      88,
+      0,
+      26,
+      0,
+      ""*""
+    ],
+    [
+      165,
+      87,
+      0,
+      88,
+      0,
+      ""LATENT""
+    ],
+    [
+      166,
+      89,
+      0,
+      88,
+      1,
+      ""LATENT""
+    ]
+  ],
+  ""groups"": [],
+  ""config"": {},
+  ""extra"": {},
+  ""version"": 0.4
+}"
+jezRKTWW,solution,Zuneve,C++,Tuesday 29th of August 2023 06:40:56 AM CDT,"#include <bits/stdc++.h>
+typedef long long ll;
+using namespace std;
+bool c(pair<int, int> &a, pair <int ,int> &b) {
+    return a.second - a.first>=b.second-b.first;
+}
+int main() {
+    int t;
+    cin >> t;
+    while (t--) {
+        int n, m;
+        cin >> n >> m;
+        vector <pair <int, int>> hachi(n), vip, us;
+        for (int i = 0; i < n; i++) {
+            cin >> hachi[i].first >> hachi[i].second;
+            if (hachi[i].second>hachi[i].first) vip.emplace_back(hachi[i].first, hachi[i].second);
+            else us.emplace_back(hachi[i].first, hachi[i].second);
+        }
+        sort(vip.begin(), vip.end(), c);
+        ll k = us.size();
+        ll ans = 0;
+        if (k==1) {
+            if (!vip.empty()) {
+                if (m - vip.size()<2) {
+                    for (int i = 0; i<n; i++) {
+                        ans+=hachi[i].first;
+                    }
+                     cout << ans << '\n';
+                    continue;
+                } else {
+                    vector <pair <int, int>> cur_vip = vip;
+                    int left = cur_vip.size() - 1;
+                    ll cur_ans = us[0].first + cur_vip[left].first;
+                    cur_vip.erase(cur_vip.begin()+left);
+                    ll cnt = 2 * cur_vip.size() - m + 2;
+                    if (!cur_vip.empty() && cur_vip.size()-cnt>0) {
+                        for (int i = 0; i<cur_vip.size() - cnt; i++) {
+                            cur_ans+=cur_vip[i].second;
+                        } for (int i = cur_vip.size() - cnt; i<cur_vip.size(); i++) {
+                            cur_ans+=cur_vip[i].first;
+                        }
+                    }
+                    if (vip.size() * 2 + 1<=m) {
+                        for (int i = 0; i<vip.size(); i++) {
+                            ans+=vip[i].second;
+                        }cout << max(ans+us[0].second, cur_ans)<< '\n';
+                        continue;
+                    } else {
+                        vip.push_back(us[0]);
+                        sort(vip.begin(), vip.end(), c);
+                        k = 2 * n - m;
+                        if (n-k>0) {
+                            for (int i = 0; i<n-k; i++) {
+                                ans+=vip[i].second;
+                            } for (int i = n - k; i<n; i++) {
+                                ans+=vip[i].first;
+                            }
+                        }
+                        cout << max(ans, cur_ans) << '\n';
+                        continue;
+                    }
+                }
+            } else {
+                cout << us[0].second << '\n';
+                continue;
+            }
+        } else if (k!=0){
+            ll cnt = 2 * vip.size() + us.size() - m;
+            for (int i = 0; i<us.size(); i++) {
+                ans+=us[i].first;
+            } if (!vip.empty() && vip.size() - cnt>0) {
+                for (int i = 0; i<vip.size() - cnt; i++) {
+                    ans+=vip[i].second;
+                } for (int i = vip.size() - cnt; i<vip.size(); i++) {
+                    ans+=vip[i].first;
+                }
+            } cout << ans << '\n';
+        } else {
+            if (n*2-1<=m) {
+                for (int i = 0; i<vip.size(); i++) {
+                    ans+=vip[i].second;
+                } cout << ans << '\n';
+            } else {
+                ll k = 2 * n - m;
+                if (k==1 && n==1) {
+                    cout << hachi[0].second << '\n';
+                    continue;
+                } else if (k==1){
+                    int ind, mn = 1000000000;
+
+                    for (int i = 0; i<n; i++) {
+                        if (vip[i].second - vip[i].first < mn) {
+                            ind = i;
+                            mn = vip[i].second - vip[i].first;
+                        }
+                    }for (int i = 0; i<n; i++) {
+                        if (i == ind) {
+                            ans+=vip[i].first;
+                        } else {
+                            ans+=vip[i].second;
+                        }
+                    } cout << ans << '\n';
+                    continue;
+                } else {
+                    if (n-k>0) {
+                        for (int i = 0; i<n-k; i++) {
+                            ans+=vip[i].second;
+                        } for (int i = n - k; i<n; i++) {
+                            ans+=vip[i].first;
+                        }
+                    }
+                     cout << ans << '\n';
+                    continue;
+                }
+            }
+        }
+    }
+
+
+    return 0;
+}"
+Wx7LQ2aa,data679,TestGuy1,JSON,Tuesday 29th of August 2023 06:00:06 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '5c252f26bfa0adcbdb660e6f3eb9286225d17b3e131dd862d65db5287805ab9cc960dbc2d46991350dbfa7d17f645dab8e1bb0d0cb35f6f1281ff7711d992604546243dd3bd59a321ad4c826aae5611556178bc5d831a4c091ab99c3ffe6393da88564e99257cf2f70c84725fb2e44e517c23651e5dbe1658dc05730fb82a176',
+  otherdata: [
+    '5f2ce6538b2bbb096f756c504e5d3c77',
+    '984fd50f10c6ee4f7eac3433c6498a81',
+    'dde46a2ee91f3b66351e58e615ab1959',
+    'ced36b58c1199ba03d74aac93bb35f21',
+    '84c6dfc00d100fdfc860c3a924560c8b',
+    '54f015a115aa0866d842a617a91d8bc3',
+    '5fb5a75272b6461ef247acbd5ebd6595',
+    '738929939c54ed37281a186e13d4c65e'
+  ]
+}"

@@ -1,0 +1,4268 @@
+id,title,username,language,date,content
+HnAubJck,doors,LeviTheOtaku,Lua,Thursday 5th of October 2023 12:59:16 PM CDT,"print("":D"")
+
+local httprequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+
+local Version = ""1.6""
+local StartTick = tick()
+
+print(""ok"")
+
+-- < [2] Load services. >
+
+local LocalPlayer = game:GetService(""Players"").LocalPlayer
+local RunService = game:GetService(""RunService"")
+local Autothickness = true
+local MainGame = require(LocalPlayer.PlayerGui.MainUI.Initiator[""Main_Game""])
+local CurrentRooms = workspace.CurrentRooms
+local ProximityPromptService = game:GetService(""ProximityPromptService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local EntityInfo = ReplicatedStorage:WaitForChild(""EntityInfo"")
+local VirtualInputManager = game:GetService(""VirtualInputManager"")
+local MotorReplication = EntityInfo.MotorReplication
+local Heartbeating = false
+local Camera = workspace.CurrentCamera
+local Watermark
+local AnticheatBypassed = false
+
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local EntityNames = {
+	[""RushMoving""] = {Hide = true, Message = ""Hide! Rush has spawned.""},
+	[""AmbushMoving""] = {Hide = true, Message = ""Hide! Ambush has spawned.""},
+	[""Snare""] = {Hide = false},
+	[""Dread""] = {Hide = true, Message = ""Hide! Dread has spawned.""},
+}
+
+print(""Finding modules & scripts..."")
+
+local RequiredLocalScripts = {
+	[""Heartbeat""] = {LocalPlayer.PlayerGui:WaitForChild(""MainUI""):WaitForChild(""Initiator""):WaitForChild(""Main_Game""):WaitForChild(""Heartbeat"")},
+	[""Movement""] = {LocalPlayer.PlayerGui:WaitForChild(""MainUI""):WaitForChild(""Initiator""):WaitForChild(""Main_Game""):WaitForChild(""Movement"")}
+}
+
+print(""Finding remotes..."")
+
+local RequiredRemotes = {
+	[""ClutchHeartbeat""] = ReplicatedStorage:WaitForChild(""EntityInfo""):WaitForChild(""ClutchHeartbeat"")
+}
+
+print(""Remotes found!"")
+
+local ValidScripts = 0
+for _,v in pairs(RequiredLocalScripts) do
+	if v ~= nil then
+		ValidScripts += 1
+	end
+end
+
+print(tostring(ValidScripts) .. ""/2 found."")
+
+if ValidScripts < #RequiredLocalScripts then
+	warn(""WARNING! Not all functions required for script found. Please report this to a developer."")
+end
+
+print(""Getting screech connections..."")
+
+local ScreechConnections = {}
+
+for _,v in pairs(getconnections(EntityInfo.Screech.OnClientEvent)) do
+	table.insert(ScreechConnections,v)
+end
+
+print(""Found "" .. tostring(#ScreechConnections .. "" connections.""))
+
+-- < [3] Create functions. >
+
+local function GetDistanceFromCharacter(Position)
+	return (Camera.CFrame.Position - Position).Magnitude
+end
+
+local function SetPopup(Visible,Input)
+	if Visible then
+		InfoFrame.Visible = true
+		Text.Visible = true
+		Text.Text = Input
+	elseif Visible == false then
+		InfoFrame.Visible = false
+		Text.Visible = false
+	end
+end
+
+local IsFlooring = false
+
+local function isVisible(model)
+	local character = game.Players.LocalPlayer.Character
+	if character == nil then
+		return false
+	end
+
+	local head = character:FindFirstChild(""Head"")
+	if head == nil then
+		return false
+	end
+
+	local origin = head.CFrame.p
+	local direction = (model.PrimaryPart.CFrame.p - origin).unit
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {character}
+	local hitResult = game.Workspace:Raycast(origin, direction, raycastParams)
+
+	if hitResult and hitResult.Instance:IsDescendantOf(model) then
+		return true
+	end
+
+	return false
+end
+
+local function findClosestModel(models)
+	local character = game.Players.LocalPlayer.Character
+	if character == nil then
+		return nil
+	end
+
+	local head = character:FindFirstChild(""Head"")
+	if head == nil then
+		return nil
+	end
+
+	local origin = head.CFrame.p
+	local closestModel = nil
+	local closestDistance = math.huge
+
+	for _, model in pairs(models) do
+		if model:IsA(""Model"") and model ~= character then
+			local distance = (model.PrimaryPart.CFrame.p - origin).magnitude
+			if distance < closestDistance then
+				closestModel = model
+				closestDistance = distance
+			end
+		end
+	end
+
+	return closestModel
+end
+
+
+local FloorSelfBind
+
+local function FloorSelf(Bool)
+	local Character = LocalPlayer.Character
+	if Bool then
+		IsFlooring = true
+		if FloorSelfBind then
+			FloorSelfBind:Disconnect()
+			FloorSelfBind = nil
+		end
+		workspace.Gravity = 0
+		local TargetCF = CFrame.new(Character.HumanoidRootPart.Position + Vector3.new(0,30.5,0))
+		FloorSelfBind = RunService.Heartbeat:Connect(function()
+			Character:PivotTo(TargetCF)
+		end)
+	else
+		IsFlooring = false
+		if FloorSelfBind then
+			FloorSelfBind:Disconnect()
+			FloorSelfBind = nil
+		end
+		workspace.Gravity = 90
+		Character:PivotTo(CFrame.new(Character.HumanoidRootPart.Position - Vector3.new(0,25.5,0)))
+	end
+end
+
+local function SetHeadlight(Character,Enabled)
+	if not Character.Head:FindFirstChild(""SpotLight"") then
+		local Headlight = Instance.new(""SpotLight"")
+		Headlight.Brightness = 1
+		Headlight.Face = Enum.NormalId.Front
+		Headlight.Range = 90
+		Headlight.Parent = game.Players.LocalPlayer.Character.Head
+		Headlight.Enabled = Enabled
+	else
+		Character.Head.SpotLight.Enabled = Enabled
+	end
+end
+
+local function EntityHandler(Child)
+	wait()
+	if EntityNames[Child.Name] and Child.PrimaryPart then
+		local FalseFlag = Child.PrimaryPart.Position.Y < 1000
+		FloorSelf(true)
+		Child.Destroying:Wait()
+		FloorSelf(false)
+	end
+end
+
+
+local function DecipherCode()
+	local Paper = LocalPlayer.Character:FindFirstChild(""LibraryHintPaper"") or LocalPlayer.Backpack:FindFirstChild(""LibraryHintPaper"")
+	local Hints = LocalPlayer.PlayerGui:FindFirstChild(""PermUI"",1):FindFirstChild(""Hints"",1)
+
+	local code = {""#"",""#"",""#"",""#"",""#""}
+
+	if Paper and Hints then
+		for _, paper_ui in pairs(Paper.UI:GetChildren()) do
+			if paper_ui:IsA(""ImageLabel"") and paper_ui.Name ~= ""Image"" then
+				for _, hint in pairs(Hints:GetChildren()) do
+					if hint:IsA(""ImageLabel"") and paper_ui.ImageRectOffset == hint.ImageRectOffset and hint.Visible then
+						code[tonumber(paper_ui.Name)] = hint:FindFirstChild(""TextLabel"").Text
+					end
+				end
+			end
+		end
+	end
+
+	return table.concat(code, """")
+end
+
+local function SetupRoom(Room)
+	print(""Setting up room "" .. tostring(Room))
+
+	if Room.Name == ""51"" then
+		task.spawn(function()
+			LocalPlayer.Character:WaitForChild(""LibraryHintPaper"")
+			SetPopup(true,""Library Code - #####"")
+			local Code = ""#####""
+			repeat 
+				Code = DecipherCode() 
+				SetPopup(true,""Library Code - "" .. Code) 
+				wait(1)
+			until not string.find(Code,""#"")
+			wait(30)
+			SetPopup(false,"""")
+		end)
+	end
+
+	task.defer(function()
+		local Trigger = Room:WaitForChild(""TriggerEventCollision"",2)
+
+		if Trigger then
+			Trigger:Destroy() 
+		end
+	end)
+
+	for _,Child in pairs(Room:WaitForChild(""Assets"",5):GetDescendants()) do
+
+		if Child:IsA(""Light"") then
+			if Child.Enabled == false then
+				Child.Enabled = true
+				pcall(function()
+					Child.Parent.Parent.Material = Enum.Material.Neon
+				end)
+			end
+		end
+
+		if Child.Name == ""Gate"" then
+			local ThingToOpen = Child:WaitForChild(""ThingToOpen"", 5)
+			if ThingToOpen then
+				ThingToOpen.CanCollide = false
+			end
+		end
+	end
+
+	local CACON
+	CACON = Room.Assets.DescendantAdded:Connect(function(Child)
+
+
+		if Child.Name == ""Gate"" then
+			local ThingToOpen = Child:WaitForChild(""ThingToOpen"", 5)
+			if ThingToOpen then
+				ThingToOpen.CanCollide = false
+			end
+		end
+
+		if Child:IsA(""Light"") then
+			wait()
+			if Child.Enabled == false then
+				Child.Enabled = true
+				pcall(function()
+					Child.Parent.Parent.Material = Enum.Material.Neon
+				end)
+			end
+		end
+
+		wait()
+		if Child.Name == ""ChandelierObstruction"" then
+			Child:Remove()
+		elseif Child.Name == ""Seek_Arm"" then
+			Child:Remove()
+		elseif Child:findFirstChildOfClass(""TouchInterest"") then
+			Child:Remove()
+		end
+	end)
+
+	Room.Destroying:Once(function()
+		CACON:Disconnect()
+	end)
+end
+
+local function Round(num, numDecimalPlaces)
+	local mult = 10^(numDecimalPlaces or 0)
+	return math.floor(num * mult + 0.5) / mult
+end
+
+local function OnHeartbeatMinigameStart()
+	if not Heartbeating then
+
+		Heartbeating = true
+		local HeartbeatMinigameFrame = LocalPlayer.PlayerGui.MainUI.MainFrame.Heartbeat
+		local MainHeart = HeartbeatMinigameFrame.Heart
+		local ChildConnection
+
+		ChildConnection = MainHeart.ChildAdded:Connect(function(Child)
+			if Child.Name == 'LiveHalf' then
+				local ImageEqual = Child.Image == 'rbxassetid://8428304451'
+				local RandX = math.random(20,25)
+				repeat RunService.RenderStepped:wait() until math.abs(Child.AbsolutePosition.X - MainHeart.AbsolutePosition.X) <= RandX
+				local NewKeyCode = ImageEqual and Enum.KeyCode.Q or Enum.KeyCode.E
+				if not Child:GetAttribute(""KeyPressed"") == true then
+					print(math.abs(Child.AbsolutePosition.X - MainHeart.AbsolutePosition.X))
+					Child:SetAttribute(""KeyPressed"",true)
+					VirtualInputManager:SendKeyEvent(true,NewKeyCode,false,game)
+					VirtualInputManager:SendKeyEvent(false,NewKeyCode,false,game)
+				end
+			end
+		end)
+
+		local VisibleConnection
+		VisibleConnection = HeartbeatMinigameFrame.Changed:Connect(function()
+			if HeartbeatMinigameFrame.Visible == false then
+				print(""AutoHeartbeatEnded"")
+				Heartbeating = false
+				VisibleConnection:Disconnect()
+				ChildConnection:Disconnect()
+			end
+		end)
+
+	end
+end
+
+local function PlayGlobalSound(ID)
+	local Sound = Instance.new(""Sound"",workspace)
+	Sound.SoundId = ID
+	Sound.Volume = 1
+	Sound:Play()
+	Sound.Ended:Once(function()
+		wait()
+		Sound:Destroy()
+	end)
+end
+
+local VisualPointsFolder = Instance.new(""Folder"",workspace)
+VisualPointsFolder.Name = ""VisualPoints""
+
+local RoomNodes = {
+	[""Hotel_PreLibraryEntrance""] = {
+		Vector3.new(0, 0, -3.845785140991211),
+		Vector3.new(-1.6612396240234375, 0, -13.02124309539795),
+		Vector3.new(-0.546905517578125, 0, -32.218448638916016),
+		Vector3.new(1.1776580810546875, 0, -46.614173889160156),
+		Vector3.new(7.051445007324219, 0, -48.653968811035156),
+		Vector3.new(15.525882720947266, 0, -49.897499084472656),
+		Vector3.new(27.587413787841797, 0, -50.475799560546875),
+		Vector3.new(36.673118591308594, 0, -48.31147766113281),
+		Vector3.new(41.19118118286133, 0, -47.28938293457031),
+		Vector3.new(44.839866638183594, 0, -49.95335388183594),
+		Vector3.new(43.878509521484375, 0, -55.965171813964844),
+		Vector3.new(43.21472930908203, 0, -64.9736328125),
+		Vector3.new(41.343135833740234, 0, -69.84690856933594),
+		Vector3.new(41.343135833740234, 0, -78.04531860351562),
+		Vector3.new(43.541969299316406, 0, -84.85281372070312),
+		Vector3.new(44.98603439331055, 0, -95.1502914428711),
+	},
+	[""Hotel_SkinnyHallway""] = {
+		Vector3.new(0, 0, -3.845785140991211),
+		Vector3.new(-1.6612396240234375, 0, -13.02124309539795),
+		Vector3.new(-0.546905517578125, 0, -32.218448638916016),
+		Vector3.new(1.1776580810546875, 0, -46.614173889160156),
+		Vector3.new(7.051445007324219, 0, -48.653968811035156),
+		Vector3.new(15.525882720947266, 0, -49.897499084472656),
+		Vector3.new(27.587413787841797, 0, -50.475799560546875),
+		Vector3.new(36.673118591308594, 0, -48.31147766113281),
+		Vector3.new(41.19118118286133, 0, -47.28938293457031),
+		Vector3.new(44.839866638183594, 0, -49.95335388183594),
+		Vector3.new(43.878509521484375, 0, -55.965171813964844),
+		Vector3.new(43.21472930908203, 0, -64.9736328125),
+		Vector3.new(41.343135833740234, 0, -69.84690856933594),
+		Vector3.new(41.343135833740234, 0, -78.04531860351562),
+		Vector3.new(43.541969299316406, 0, -84.85281372070312),
+		Vector3.new(44.98603439331055, 0, -95.1502914428711),
+	},
+}
+
+local function CreatePathfindingLinks(part, positions)
+	local attachments = {}
+
+	for i, position in ipairs(positions) do
+		local attachment = Instance.new(""Attachment"")
+		attachment.Name = ""Attachment"" .. tostring(i)
+		attachment.Position = position
+		attachment.Parent = part
+		attachment.Visible = true
+		table.insert(attachments, attachment)
+	end
+
+	for i = 1, #attachments - 1 do
+		local link = Instance.new(""PathfindingLink"")
+		link.Name = ""PathfindingLink"" .. tostring(i)
+		link.Attachment0 = attachments[i]
+		link.Attachment1 = attachments[i+1]
+		link.IsBidirectional = true
+		link.Label = ""NodeLink""
+		link.Parent = part
+	end
+end
+
+local function CreateVisualPoint(Position)
+	local A = Instance.new(""Part"",VisualPointsFolder)
+	local B = Instance.new(""SelectionSphere"")
+	A.Anchored = true
+	A.CanCollide = false
+	A.Size = Vector3.new(0.001,0.001,0.001)
+	A.Name = tostring(Position)
+	A.Position = Position + Vector3.new(0,2,0)
+	A.Transparency = 1
+	B.Transparency = 0
+	B.Parent = A
+	B.Adornee = A
+	B.Color3 = Color3.new(1, 0.984313, 0)
+	return A
+end
+
+local function UpdateVisualPoint(Point,ColorOrDestroy)
+	local VisualPoint = Point:FindFirstChild(""SelectionSphere"")
+	assert(VisualPoint, ""[871] Missing SelectionSphere"")
+
+	if ColorOrDestroy == true then
+		Point:Destroy()
+	elseif typeof(ColorOrDestroy) == ""Color3"" then
+		VisualPoint.Color3 = ColorOrDestroy
+	end
+end
+
+local function ClearVisualPoints()
+	VisualPointsFolder:ClearAllChildren()
+end
+
+local function IsPartMoving(Part)
+	local OldPosition = Part.Position
+	task.wait(0.1)
+
+	if (OldPosition - Part.Position).Magnitude < 0.1 then
+		return false
+	else
+		return true
+	end
+end
+
+local function MoveCharacterToPoint(TargetPoint, Speed, MaxRadius)
+	local Character = LocalPlayer.Character
+	Character:PivotTo(CFrame.new(TargetPoint))
+	--[[
+	local CurrentPosition = Character.HumanoidRootPart.Position
+	local DistanceToTarget = (TargetPoint - CurrentPosition).Magnitude
+	local TimeToReachTarget = DistanceToTarget / Speed
+
+	local StartTime = tick()
+	local EndTime = StartTime + TimeToReachTarget
+
+	if MaxRadius then
+		while tick() < EndTime and (Character.HumanoidRootPart.Position - TargetPoint).Magnitude < MaxRadius do
+			if IsFlooring then
+				print(""IsFlooring | Yielding MoveCharacterToPoint."")
+				repeat wait(0.1) until not IsFlooring
+				wait(1)
+				MoveCharacterToPoint(TargetPoint,Speed,MaxRadius)
+				break
+			end
+			local ElapsedTime = tick() - StartTime
+			local LerpAmount = ElapsedTime / TimeToReachTarget
+			Character:PivotTo(CFrame.new(CurrentPosition:Lerp(TargetPoint, LerpAmount)))
+			RunService.Heartbeat:Wait()
+		end
+	else
+		while tick() < EndTime do
+			if IsFlooring then
+				print(""IsFlooring | Yielding MoveCharacterToPoint."")
+				repeat wait(0.1) until not IsFlooring
+				wait(1)
+				MoveCharacterToPoint(TargetPoint,Speed)
+				break
+			end
+			local ElapsedTime = tick() - StartTime
+			local LerpAmount = ElapsedTime / TimeToReachTarget
+			Character:PivotTo(CFrame.new(CurrentPosition:Lerp(TargetPoint, LerpAmount)))
+			RunService.Heartbeat:Wait()
+		end
+	end
+	]]
+end
+
+local function AutoPilotHandler(RoomValue)
+	if true then -- auto pilot
+
+		local Room = CurrentRooms:WaitForChild(tostring(RoomValue),5)
+
+		ClearVisualPoints()
+
+		wait(1)
+
+		local RoomName = Room:GetAttribute(""OriginalName"")
+
+		local Exit = Room:WaitForChild(""RoomExit"",3)
+
+		local Checkpoints = RoomNodes[RoomName]
+
+		if Checkpoints then
+			print(""Building Manual Nodes."")
+			CreatePathfindingLinks(Room.PrimaryPart,Checkpoints)
+		end
+
+		local CameraScript = LocalPlayer.PlayerGui.MainUI.Initiator[""Main_Game""].Camera
+		local Character = LocalPlayer.Character
+		local HumanoidRootPart = Character:FindFirstChild(""HumanoidRootPart"")
+		local Humanoid = Character:FindFirstChild(""Humanoid"")
+
+		assert(HumanoidRootPart, ""HumanoidRootPart cannot be found."")
+		assert(Humanoid, ""Humanoid cannot be found."")
+
+		if Room and Exit then
+			if (Character.HumanoidRootPart.Position - Room.RoomEntrance.Position).Magnitude > 10 then
+				print(""CurrentRoom is not actually current room? Yielding."")
+				repeat wait() until (Character.HumanoidRootPart.Position - Room.RoomEntrance.Position).Magnitude < 10
+			end
+
+			local Door = Room:WaitForChild(""Door"",3)
+
+			assert(Door,""A valid door cannot be found! Room #"" .. tostring(RoomValue))
+			local Lock = Door:FindFirstChild(""Lock"")
+
+			local RoomObstructed = false
+
+			for i,v in pairs(Room:GetDescendants()) do
+				if v.Name == ""LiveObstructionNew"" then
+					RoomObstructed = true
+				end
+			end
+			
+			local Part = ""FakeDoor""
+			local femboy = game:GetDescendants()
+			for i = 1, #femboy do local v = femboy[i]
+				if v.Name == Part then
+					v:Destroy()
+				end
+			end
+			
+			
+			local NextRoom = CurrentRooms:WaitForChild(tostring(RoomValue + 1),5)
+			if Lock and NextRoom and not NextRoom.Door:FindFirstChild(""Lock"") then
+				Door:Destroy()
+				print(""Skipping locked door. RIP BOZO!"")
+				ReplicatedStorage.GameData.LatestRoom.Value = ReplicatedStorage.GameData.LatestRoom.Value + 1
+			end
+			
+				if RoomObstructed then
+					LocalPlayer.Character:PivotTo(CFrame.new(LocalPlayer.Character.HumanoidRootPart.Position + Vector3.new(0,15,0)))
+					MoveCharacterToPoint(Room.RoomExit.Position + Vector3.new(0,12,0), 100)
+				else
+					MoveCharacterToPoint(Room.RoomExit.Position, 100)
+				end
+			--end
+
+		end
+	end
+end
+
+
+if game.PlaceId == 6516141723 then
+	warn(""Please execute in game, not the lobby!"",3)
+	return
+end
+
+
+AnticheatBypassed = true
+local FakePre = EntityInfo.PreRunShop:Clone()
+EntityInfo.PreRunShop:Destroy()
+FakePre.Parent = EntityInfo
+LocalPlayer.PlayerGui.MainUI.Initiator[""Main_Game""].RemoteListener.Disabled = true
+print(""NO CLICK CONFIRM"")
+local StarterElevator = workspace.CurrentRooms[""0""].StarterElevator
+
+StarterElevator.DoorHitbox.BillboardGui.Enabled = false
+
+StarterElevator.DoorHitbox.DoorBell:Play()
+wait(StarterElevator.DoorHitbox.DoorBell.TimeLength - 1.7)
+StarterElevator.DoorHitbox.DoorMove:Play()
+for i,v in pairs(StarterElevator:GetChildren()) do
+	if v:IsA(""PrismaticConstraint"") then
+		v.TargetPosition = 5
+	end
+end
+StarterElevator.DoorHitbox.CanCollide = false
+wait(StarterElevator.DoorHitbox.DoorMove.TimeLength * 0.35)
+for i,v in pairs(StarterElevator:GetChildren()) do
+	if v:IsA(""PrismaticConstraint"") then
+		v.TargetPosition = 0
+	end
+end
+
+
+RequiredRemotes.ClutchHeartbeat.OnClientEvent:Connect(OnHeartbeatMinigameStart)
+
+RunService.Heartbeat:Connect(function(deltaTime)
+	local Multiplier = 1
+	if AnticheatBypassed then
+		Multiplier = 3
+	end
+
+	LocalPlayer.Character:TranslateBy(LocalPlayer.Character.Humanoid.MoveDirection * 16 * deltaTime * Multiplier)
+
+end)
+
+
+ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+	if true then
+		fireproximityprompt(prompt)
+	end
+end)
+
+workspace.ChildAdded:Connect(EntityHandler)
+
+ReplicatedStorage.GameData.LatestRoom.Changed:Connect(AutoPilotHandler)
+
+CurrentRooms.ChildAdded:Connect(SetupRoom)
+
+for i,v in pairs(CurrentRooms:GetChildren()) do
+	SetupRoom(v)
+end
+
+local oldnamecall; oldnamecall = hookmetamethod(game, '__namecall', function(self, ...)
+	local Args = {...}
+
+	if game.FindFirstChild(workspace, ""Eyes"") and self == MotorReplication then
+		Args[2] = -65
+		return oldnamecall(self, table.unpack(Args))
+	end
+
+	return oldnamecall(self, ...)
+end)"
+0qAnh7BX,People with Balance Higher Than,dragonbs,T-SQL,Thursday 5th of October 2023 12:59:02 PM CDT,"CREATE OR ALTER PROC usp_GetHoldersWithBalanceHigherThan(@balanceTreshold MONEY)
+AS
+BEGIN
+	SELECT [FirstName][First Name], [LastName][Last Name]
+	FROM [AccountHolders][ah]
+	LEFT JOIN [Accounts][a] ON [ah].[Id] = [a].[AccountHolderId]
+	GROUP BY [ah].[Id], [ah].[FirstName], [ah].[LastName]
+	HAVING SUM([a].[Balance]) > @balanceTreshold
+	ORDER BY [First Name], [Last Name]
+END"
+DdcVAuY8,LeetCode 238 - Product of Array Except Self - NeetCode solution,nathanwailes,Python,Thursday 5th of October 2023 12:58:52 PM CDT,"class Solution:
+    def productExceptSelf(self, nums: List[int]) -> List[int]:
+        res = [1] * (len(nums))
+
+        prefix = 1
+        for i in range(len(nums)):
+            res[i] = prefix
+            prefix *= nums[i]
+        postfix = 1
+        for i in range(len(nums) - 1, -1, -1):
+            res[i] *= postfix
+            postfix *= nums[i]
+        return res"
+fDMc4q4A,LeetCode 238 - Product of Array Except Self - 2023.10.06 solution,nathanwailes,Python,Thursday 5th of October 2023 12:54:50 PM CDT,"class Solution:
+    def productExceptSelf(self, nums: List[int]) -> List[int]:
+        """""" Solution: Have one list of the products going from R->L.
+        Then work through the list, just keeping a variable for
+        the L->R product.
+        Then, for each index, multiply the value at i in the R->L list
+        with the variable storing the L->R product.
+        """"""
+
+        r_to_l = [None for n in nums]
+        for i in range(len(nums)-1, -1, -1):
+            if i == len(nums)-1:
+                r_to_l[i] = 1
+            else:
+                r_to_l[i] = r_to_l[i+1] * nums[i+1]
+        l_to_r = 1
+
+        products = []
+        for i in range(len(nums)):
+            products.append(l_to_r * r_to_l[i])
+            l_to_r *= nums[i]
+        return products"
+0TQCV1N5,Untitled,Josif_tepe,C++,Thursday 5th of October 2023 12:46:25 PM CDT,"#include <queue>
+#include <iostream>
+#include <vector>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <cstring>
+#include <stack>
+#include <algorithm>
+#include <map>
+#include <cmath>
+//#include <bits/stdc++.h>
+using namespace std;
+typedef long long ll;
+const int maxn = 1e6 + 10;
+const ll INF = 3e16 + 10;
+const int max_point = 10000000;
+int segment_tree[3 * maxn];
+void build_tree(int L, int R, int node) {
+    if(L == R) {
+        segment_tree[node] = 0;
+    }
+    else {
+        int mid = (L + R) / 2;
+        build_tree(L, mid, 2 * node);
+        build_tree(mid + 1, R, 2 * node + 1);
+        segment_tree[node] = segment_tree[2 * node] + segment_tree[2 * node + 1];
+    }
+}
+void update(int L, int R, int node, int idx, int new_value) {
+    if(L == R) {
+        segment_tree[node] = new_value;
+        return;
+    }
+    int mid = (L + R) / 2;
+    if(idx <= mid) {
+        update(L, mid, 2 * node, idx, new_value);
+    }
+    else {
+        update(mid + 1, R, 2 * node + 1, idx, new_value);
+    }
+    segment_tree[node] = segment_tree[2 * node] + segment_tree[2 * node + 1];
+}
+int query(int L, int R, int node, int i, int j) {
+    // L R i L R j L R
+    if(i <= L and R <= j) {
+        return segment_tree[node];
+    }
+    if(R < i or j < L) {
+        return 0;
+    }
+    int mid = (L + R) / 2;
+    return query(L, mid, 2 * node, i, j) + query(mid + 1, R, 2 * node + 1, i, j);
+}
+int main() {
+    ios_base::sync_with_stdio(false);
+    int n;
+    cin >> n;
+    build_tree(0, n, 1);
+    vector<int> v(n);
+    for(int i = 0; i < n; i++) {
+        cin >> v[i];
+    }
+    
+    ll res = 0;
+    for(int i = n - 1; i >= 0; i--) {
+        update(0, n, 1, v[i], 1);
+        res += query(0, n, 1, 0, v[i] - 1);
+    }
+    cout << res << endl;
+    return 0;
+}
+"
+hsCydTEU,Untitled,possebon,PHP,Thursday 5th of October 2023 12:40:35 PM CDT,"# Upstreams
+#upstream backend_mainroute_portfolio {
+#    server api.marcotextil.com.br;
+#}
+
+
+server {
+  listen       80 ;
+  listen       [::]:80;
+  listen *:443 ssl;
+  server_name api.marcotextil.com.br;
+  client_max_body_size 300M;
+
+  access_log  /var/log/nginx/api.marcotextil.com.br/access.log  main;
+  error_log  /var/log/nginx/api.marcotextil.com.br/error.log;
+
+  ssl on;
+  ssl_certificate /etc/letsencrypt/live/marcotextil.com.br/fullchain.pem; # managed by Certbot
+  ssl_certificate_key /etc/letsencrypt/live/marcotextil.com.br/privkey.pem; # managed by Certbot
+  # ssl_dhparam /etc/ssl/certs/dhparams.pem;
+  ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+  ssl_session_timeout 1d;
+  ssl_session_cache shared:SSL:50m;
+  ssl_stapling on;
+  ssl_stapling_verify on;
+  ssl_ciphers 'ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:DHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:AES:CAMELLIA:DES-CBC3-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!aECDH:!EDH-DSS-DES-CBC3-SHA:!EDH-RSA-DES-CBC3-SHA:!KRB5-DES-CBC3-SHA';
+
+  ssl_prefer_server_ciphers on;
+
+  #add_header X-Frame-Options DENY;
+  add_header X-Content-Type-Options nosniff;
+  add_header Strict-Transport-Security max-age=15768000;
+
+
+  location / {
+
+    allow all;
+
+
+    proxy_http_version 1.1;
+    #proxy_buffering off;
+    #proxy_redirect off;
+    proxy_set_header Accept-Encoding """";
+    #proxy_set_header Host $host;
+    proxy_set_header Host api.marcotextil.com.br;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection ""upgrade"";
+    proxy_set_header X-Real-IP $remote_addr;
+    #proxy_set_header X-Forwarded-Proto http;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #access_log off;
+
+    #proxy_set_header      X-Forwarded-Proto https;
+    #proxy_set_header      X-Forwarded-Port 443;
+
+    #proxy_hide_header X-Frame-Options;
+    proxy_hide_header 'x-frame-options';
+
+    proxy_redirect off;
+
+    #proxy_set_header Host $host;
+    proxy_set_header X-Nginx-Proxy true;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://10.171.161.32:8091;
+
+    #proxy_redirect off;
+
+  }
+
+}"
+taTFfr4H,dungeon,teodor966,JavaScript,Thursday 5th of October 2023 12:28:00 PM CDT,"function dungeon(arr) {
+
+    let health = 100;
+    let coins = 0;
+    let bestRoom = 1;
+
+    let dungRooms = arr[0].split('|');
+    for(currRoom of dungRooms) {
+
+        let tokens = currRoom.split(' ');
+        let command = tokens[0];
+        let num = Number(tokens[1]);
+
+        if (command == 'potion') {
+            health += num
+            if(health > 100) {
+                let usedPotion =(health - 100) - num;
+                health = 100;
+                console.log(`You healed for ${Math.abs(usedPotion)} hp.`);
+                console.log(`Current health: ${health} hp.`);
+            } else {
+                console.log(`You healed for ${num} hp.`);
+                console.log(`Current health: ${health} hp.`);
+            }
+
+        } else if (command == 'chest'){
+            console.log(`You found ${num} coins.`);
+            coins += num;
+        } else {
+            health -= num;
+            if(health > 0) {
+                console.log(`You slayed ${command}.`);
+            }else {
+                console.log(`You died! Killed by ${command}.`);
+                console.log(`Best room: ${bestRoom}`);
+                return;
+                
+            }
+        }
+        bestRoom++;
+        }
+        console.log(""You've made it!"");
+        console.log(`Coins: ${coins}`);
+        console.log(`Health: ${health}`);
+}
+dungeon([""rat 10|bat 20|potion 10|rat 10|chest 100|boss 70|chest 1000""])"
+584P9tsc,Untitled,AlexCoder12345,C++,Thursday 5th of October 2023 12:03:07 PM CDT,"#include ""single_list_front.h""
+#include ""single_list_back.h""
+#include ""sorted_single_list.h""
+#include ""sorted_double_list.h""
+#include ""multi_sorted_single_list.h""
+#include ""tree.h""
+#include <bits/stdc++.h>
+using namespace std;
+
+template<typename T>
+struct tree;
+
+int main() {
+    tree<int> tree;
+    tree.insert(5);
+    tree.insert(7);
+    tree.insert(1);
+    tree.print_inorder();
+    tree.remove(5);
+    tree.print_inorder();
+    tree.print_postorder();
+    tree.clear();
+    tree.print_inorder();
+}"
+jZDMffnj,hw1p4,maruma,C++,Thursday 5th of October 2023 11:59:31 AM CDT,"using ll =long long;
+#define format pair<ll, ll>
+#define f first
+#define s second
+ll rec(format v[], int l, int r){//[l, r)
+	if(l >= r)return LLONG_MAX; //error
+	if(r - l < 3){ //brute
+		ll m = LLONG_MAX;
+		for(int i = l; i < r; i++){
+			for(int j = 1; i + j < r; j++){
+                ll cur = (v[i].f - v[i + j].f) * (v[i].f - v[i + j].f) +
+					(v[i].s - v[i + j].s) * (v[i].s - v[i + j].s);
+				if( cur < m)m = cur;
+			}
+		}
+		return m;
+	}
+	int m = (l + r) >> 1;
+	ll min_v = min(rec(v, l, m), rec(v, m, r));
+    double cri;//generate border line
+	if((r - l) & 1)cri = v[m].f;
+	else cri = 1.0 * (v[m - 1].f + v[m].f) / 2;
+	vector<format> temp; //strip zone
+	for(int i = l; i < r; i++)
+		if(abs(v[i].f - cri) < min_v)
+			temp.push_back({v[i].s, v[i].f}); //swap to sort
+	sort(temp.begin(), temp.end());
+	for(int i = 0; i < temp.size(); i++){ // check 7 times
+		for(int j = 1; i + j < temp.size() && j < 8; j++){
+			/* 
+				if using && temp[i + j].f - temp[i].f <= sqrt(min_v) instead of && j<8 
+				will get tle for other but correct for 2-157; if not, only 2-157 
+				will get wa.
+			*/
+			ll cur = (temp[i + j].f - temp[i].f) * (temp[i + j].f - temp[i].f) +
+				(temp[i + j].s - temp[i].s) * (temp[i + j].s - temp[i].s);
+            if( cur < min_v)min_v = cur;
+		}
+	}
+	return min_v;
+}
+int main(){
+	cin.tie(nullptr);
+	cout.tie(nullptr);
+	ios::sync_with_stdio(false);
+	int n; rit(n);
+	format v[n+1];
+	v[0] = {0, 0};
+	int input;
+	ll sum = 0;
+	for(int i = 1; i <= n; i++){
+		rit(input);
+		sum += input;
+		v[i] = {sum, i};
+	}
+    sort(v, v + n + 1);
+	ll ans = rec(v, 0, n + 1);
+	wit(ans);
+}"
+QVEcgacX,Untitled,Josif_tepe,C++,Thursday 5th of October 2023 11:59:26 AM CDT,"#include <queue>
+#include <iostream>
+#include <vector>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <cstring>
+#include <stack>
+#include <algorithm>
+#include <map>
+#include <cmath>
+//#include <bits/stdc++.h>
+using namespace std;
+typedef long long ll;
+const int maxn = 1e5 + 10;
+const ll INF = 3e16 + 10;
+const int max_point = 10000000;
+vector<int> graph[maxn];
+
+void dfs(int node, int parent) {
+    cout << node + 1 << endl;
+    for(int i = 0; i < (int) graph[node].size(); i++) {
+        int neighbour = graph[node][i];
+        if(neighbour != parent) {
+            dfs(neighbour, node);
+        }
+    }
+}
+int main() {
+    ios_base::sync_with_stdio(false);
+    int n;
+    cin >> n;
+    
+    for(int i = 0; i < n - 1; i++) {
+        int a, b;
+        cin >> a >> b;
+        graph[a].push_back(b);
+        graph[b].push_back(a);
+        
+    }
+    dfs(0, -1);
+    return 0;
+}
+/*
+ 1: 10, 40
+ 3: 20
+ 
+ 
+ **/
+"
+bKLtmmtE,Untitled,AlexCoder12345,C++,Thursday 5th of October 2023 11:54:40 AM CDT,"#ifndef LAB2_TREE_H
+#define LAB2_TREE_H
+
+template<typename T>
+struct tree{
+    struct tree_node{
+        T val;
+
+        tree_node* parent;
+        tree_node* left;
+        tree_node* right;
+
+        tree_node(T _val);
+    };
+
+    tree_node* root;
+
+    tree();
+
+    bool empty();
+
+    void insert(T _val);
+
+    void _insert(T _val, tree_node*& _root);
+
+    void remove(T _val);
+
+    tree_node* _min(tree_node* _root);
+
+    tree_node* _max(tree_node* _root);
+
+    void _remove(T _val, tree_node*& _root);
+
+    bool find(T _val);
+
+    bool _find(T _val, tree_node* _root);
+
+    void print_inorder();
+
+    void _inorder(tree_node* _root);
+
+    void print_postorder();
+
+    void _postorder(tree_node* _root);
+
+    void clear();
+};
+
+#endif LAB2_TREE_H
+"
+GTXt9CAB,Untitled,AlexCoder12345,C++,Thursday 5th of October 2023 11:54:07 AM CDT,"#include ""tree.h""
+#include <bits/stdc++.h>
+using namespace std;
+
+template<typename T>
+struct tree{
+    struct tree_node{
+        T val;
+
+        tree_node* parent;
+        tree_node* left;
+        tree_node* right;
+
+        tree_node(T _val) : val(_val), parent(nullptr), left(nullptr), right(nullptr){}
+    };
+
+    tree_node* root;
+
+    tree() : root(nullptr){}
+
+    bool empty(){
+        return root == nullptr;
+    }
+
+    void insert(T _val){
+        _insert(_val,root);
+    }
+
+    void _insert(T _val, tree_node*& _root){
+        if (_root == nullptr){
+            _root = new tree_node(_val);
+        } else if (_val < _root->val){
+            _insert(_val,_root->left);
+        } else if (_val > _root->val){
+            _insert(_val, _root->right);
+        }
+    }
+
+    void remove(T _val){
+        _remove(_val,root);
+    }
+
+    tree_node* _min(tree_node* _root){
+        if (_root->left == nullptr) return _root;
+        _min(_root->left);
+    }
+
+    tree_node* _max(tree_node* _root){
+        if (_root->right == nullptr) return _root;
+        _min(_root->right);
+    }
+
+    void _remove(T _val, tree_node*& _root){
+        if (_root == nullptr){
+            return;
+        }
+
+        if (_val < _root->val){
+            _remove(_val,_root->left);
+        } else if (_val > _root->val){
+            _remove(_val,_root->right);
+        }
+
+        if (_root->left != nullptr && _root->right != nullptr){
+            tree_node* minimum = _min(_root->right);
+            _root->val = minimum->val;
+            _remove(_root->val,_root->right);
+        } else if (_root->left != nullptr){
+            _root = _root->left;
+        } else if (_root->right != nullptr){
+            _root = _root->right;
+        } else {
+            _root = nullptr;
+        }
+    }
+
+    bool find(T _val){
+        _find(_val,root);
+    }
+
+    bool _find(T _val, tree_node* _root){
+        if (_root == nullptr){
+            return false;
+        }
+
+        if (_root->val == _val){
+            return true;
+        } else if (_val < _root->val){
+            return _find(_val,_root->left);
+        } else {
+            return _find(_val, _root->right);
+        }
+    }
+
+    void print_inorder(){
+        _inorder(root);
+        cout << endl;
+    }
+
+    void _inorder(tree_node* _root){
+        if (_root != nullptr){
+            _inorder(_root->left);
+            cout << _root->val << ' ';
+            _inorder(_root->right);
+        }
+    }
+
+    void print_postorder(){
+        _postorder(root);
+        cout << endl;
+    }
+
+    void _postorder(tree_node* _root){
+        if (_root != nullptr){
+            _postorder(_root->right);
+            cout << _root->val << ' ';
+            _postorder(_root->left);
+        }
+    }
+
+    void clear(){
+        root = nullptr;
+    }
+};"
+7mWxzCzJ,Untitled,Josif_tepe,C++,Thursday 5th of October 2023 11:42:59 AM CDT,"#include <queue>
+#include <iostream>
+#include <vector>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <cstring>
+#include <stack>
+#include <algorithm>
+#include <map>
+#include <cmath>
+//#include <bits/stdc++.h>
+using namespace std;
+typedef long long ll;
+const int maxn = 1e5 + 10;
+const ll INF = 3e16 + 10;
+const int max_point = 10000000;
+int x[maxn], y[maxn], v[maxn];
+vector<int> x_cordinates[max_point];
+vector<pair<int, int> > queries[max_point];
+int y1_query[maxn], y2_query[maxn];
+ll segment_tree[ max_point] = {0};
+void update(int idx, int x) {
+    for(; idx <= max_point; idx += idx & -idx) {
+        segment_tree[idx] += x;
+    }
+}
+ll sum(int i) {
+    ll res = 0;
+    for(; i >= 1; i -= i & -i)
+    {
+        res += segment_tree[i];
+    }
+    return res;
+}
+ll query(int i, int j) {
+    return sum(j) - sum(i - 1);
+}
+ll result[maxn];
+int main() {
+    ios_base::sync_with_stdio(false);
+    int n;
+    cin >> n;
+    for(int i = 0; i < n; i++) {
+        cin >> x[i] >> y[i] >> v[i];
+x[i]++;y[i]++;
+        x_cordinates[x[i]].push_back(i);
+    }
+    int k;
+    cin >> k;
+    for(int i = 0; i < k; i++) {
+        int x1, x2;
+        cin >> x1 >> y1_query[i] >> x2 >> y2_query[i];
+        x1++;
+        x2++;
+        y1_query[i]++;
+        y2_query[i]++;
+        
+        queries[x1 - 1].push_back(make_pair(i, 0));
+        queries[x2].push_back(make_pair(i, 1));
+    }
+    
+    for(int X = 0; X < max_point; X++) {
+        for(int i = 0; i < x_cordinates[X].size(); i++) {
+            int cord = x_cordinates[X][i];
+            update(y[cord], v[cord]);
+        }
+        
+        for(int i = 0; i < (int)queries[X].size(); i++) {
+            pair<int, int> tmp = queries[X][i];
+            if(tmp.second == 0) {
+                result[tmp.first] -= query( y1_query[tmp.first],y2_query[tmp.first]);
+            }
+            else {
+                result[tmp.first] += query( y1_query[tmp.first], y2_query[tmp.first]);
+            }
+                                             
+                                                    
+        }
+    }
+    
+    
+                 for(int i = 0; i < k; i++) {
+                                                                  cout << result[i] << endl      ;
+                                                                  }
+    return 0;
+}
+/*
+ 1: 10, 40
+ 3: 20
+ 
+ 
+ **/
+"
+eA430qNj,Define Function,dragonbs,T-SQL,Thursday 5th of October 2023 11:37:16 AM CDT,"CREATE OR ALTER FUNCTION ufn_IsWordComprised(@setOfLetters VARCHAR(20), @word VARCHAR(20)) 
+RETURNS BIT
+AS
+BEGIN
+    DECLARE @i INT = 1;
+    DECLARE @Checker BIT = 0;
+ 
+    WHILE @i <= LEN(@word)
+    BEGIN
+        DECLARE @SetLetter CHAR(1) = SUBSTRING(@word, @i, 1);
+ 
+        DECLARE @j INT = 1;
+ 
+        WHILE @j <= LEN(@setOfLetters)
+        BEGIN
+            DECLARE @WordLetter CHAR(1) = SUBSTRING(@setOfLetters, @j, 1);
+ 
+            IF @SetLetter = @WordLetter
+            BEGIN
+                SET @Checker = 1;
+                BREAK;
+            END
+            SET @j += 1;
+            SET @Checker = 0;
+        END
+ 
+        IF(@Checker = 0)
+            RETURN 0;
+        SET @i +=1;
+    END
+ 
+    RETURN 1;
+END"
+jmyfpQfT,MANUTENÇÃO 00 10 2023,LELEOTV,JSON,Thursday 5th of October 2023 11:34:32 AM CDT,"{
+  ""00-10-2023"": ""false"",
+  ""msg"": ""manutenção""
+}"
+up3HbiLX,Manage Flutter,Justman10000,Bash,Thursday 5th of October 2023 11:31:14 AM CDT,"// To install
+# The Flutter version
+version=3.13.6
+
+wget https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_$version-stable.tar.xz
+unxz flutter_linux_$version-stable.tar.xz
+tar xvf flutter_linux_$version-stable.tar
+mv flutter /usr/local
+[ ! -f /usr/bin/dart ] && ln -s /usr/local/flutter/bin/dart /usr/bin
+[ ! -f /usr/bin/flutter ] && ln -s /usr/local/flutter/bin/flutter /usr/bin
+
+// To uninstall
+rm -r /usr/local/flutter /usr/bin/flutter /usr/bin/dart"
+UueWiBXq,Email with Keyword SPECIAL CHARACTERS,wheresTheAnyKey,C,Thursday 5th of October 2023 11:19:37 AM CDT,"Pasted at: 05/10/2023 17:19
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3 for TESTING PURPOSE ONLY
+
+DATA_ID_TESTDATATOFIND NOEXCLUDES
+
+Cooper.Kleine@findmetesting.co.uk 
+Mariquilla.Evenden@findmetesting.co.uk 
+Noll.Ingolotti@findmetesting.co.uk  
+Grove.Feldbaum@findmetesting.co.uk
+Mack.Osment@findmetesting.co.uk 
+Trisha.Zanicchelli@findmetesting.co.uk
+Jack.Gorriessen@findmetesting.co.uk 
+Nefen.Malec@findme-testing.co.uk 
+Birdie-Gemmill@findmetesting.co.uk
+Rosabella.Nias@findmetesting.co.uk
+Ellerey.Fanti@findmetesting.cn
+Antonina.Carsey@findmetesting.cn
+Valry.Shead@findmetesting.cn 
+Conrade.Ferrarone@findmetesting.cn
+Neysa.Fazakerley@findmetesting.cn
+Cristobal.Primak@findmetesting.cn
+Wakefield.Kent@findmetesting.cn
+findme.Cheales@findmetesting.cn
+Nert.Roddamr@findmetesting.cn 
+Richy.Raft@findmetesting.cn
+Berget.Kermannes@findmetesting.ie 
+Shelden.Tregea@findmetesting.ie 
+Allsun.Badrick@findmetesting.ie 
+Hortense.Ivkovic@findmetesting.ie
+Carolin.Potte@findmetesting.ie
+Benjie.Trumble@findmetesting.ie
+Andrew.Hadgkiss@findmetesting.ie
+Trula.Kuna@findmetesting.ie
+Tommie.Maytum@findmetesting.ie
+Langsdon.Pakes@findmetesting.ie
+Porty.Tooth@findmetesting.au
+Rozella.Siggefindmetesting.au
+Nolie.Tumultyfindmetesting.au
+Dud.Caustonfindmetesting.au
+Alvinia.Brameldfindmetesting.au
+Meridel.Lymbournefindmetesting.au
+Elvis.Maleckfindmetesting.au
+Brett.Oughtonfindmetesting.au
+Rickard.Clemfindmetesting.au
+Prue.Firemanfindmetesting.au
+Uriel.Rozenbaum@findmetesting25.com
+Cindie.Greeson@findmetesting25.com
+Laurette.Puckham@findmetesting25.com
+Eldredge.Ricket@findmetesting25.com
+Alanah.Rapper@findmetesting25.com
+Ash.Le.Prevost@findmetesting25.com
+Galvin.Purchon@findmetesting25.com
+Lauryn.Ilson@findmetesting25.com
+findme.Graffin@findmetesting25.com
+Edithe.Trehearne@findmetesting25.com
+Den.Cancutt@findmetesting10.com
+Wernher.Spatoni@findmetesting10.com
+Malchy.Ion@findmetesting10.com
+Leona.Whitby@findmetesting10.com
+Alphonse.Goodlake@findmetesting10.com
+Gran.Standen@findmetesting10.com
+Barnie.Gilffilland@findmetesting10.com
+Kaylyn.Ditchfield@findmetesting10.com
+Dorotea.Kohlerman@findmetesting10.com
+Gillan.Lampel@findmetesting10.com
+Patrica.Mannakee@findustesting.com
+Pippo.Sewart@findustesting.com
+Lanae.Cousin@findustesting.com
+Porter.Glaysher@findustesting.com
+Herschel.Yaakov@findustesting.com
+findme.Parsand@findustesting.com
+Lucho.Cosh@findustesting.com
+Cullie.Powlesland@findustesting.com
+Edy.Burkart@findustesting.com
+Christophorus.Ackeroyd@findustesting.com
+Arvy.Rowson@findUStesting.com
+Arlan.Ivanilov@findustesting.com
+Tawnya.Waslin@findustesting.com
+Inigo.Gyrgorcewicx@findustesting.com
+Sharity.Stoodley@findustesting.com
+Ginger.Dresse@findustesting.com
+Deck.Jouannot@findustesting.com
+Deny.Soanes@findustesting.com
+james@findmetesting.com
+
+Wenona.Moverley@findqatesting.com
+Jerry.Poynter@findqatesting.com
+Drugi.Neeson@findqatesting.com
+Winny.Binfield@findqatesting.com
+Darill.Greenshiels@findqatesting.com
+Ethelin.Pinchen@findqatesting.com
+Tanney.Ballendine@findqatesting.com
+Ariadne.Wincott@findqatesting.com
+Winnie.Domm@findqatesting.com
+Rogerio.Cudbird@findqatesting.com
+Yu@findmetesting.com
+
+RIGHT OF @
+findme@findme.testing.com
+wildcard@findme*testing.com
+dash@findme-testing.com
+slash@findme/testing.com
+questionmark@findme?testing.com
+
+ACCENTS
+Pål@findmetesting.com
+Magdalène@findmetesting.com
+Anaël@findmetesting.com
+Lén@findmetesting.com
+Loïs@findmetesting.com
+Thérèsa@findmetesting.com
+Valérie@findmetesting.com
+Görel@findmetesting.com
+Mélia@findmetesting.com
+Joséphine@findmetesting.com
+Loïc@findmetesting.com
+findme@findmetesting.com
+Méghane@findmetesting.com
+Nuó@findmetesting.com
+Lén@findmetesting.com
+Eliès@findmetesting.com
+André@findmetesting.com
+Mahélie@findmetesting.com
+Méthode@findmetesting.com
+Rachèle@findmetesting.com
+Mélina@findmetesting.com
+Gaëlle@findmetesting.com
+Céline@findmetesting.com
+Bérangère@findmetesting.com
+Françoise@findmetesting.com
+Séverine@findmetesting.com
+Måns@findmetesting.com
+Adèle@findmetesting.com
+Aimée@findmetesting.com
+Mélia@findmetesting.com
+Gösta@findmetesting.com
+Laurène@findmetesting.com
+Gisèle@findmetesting.com
+Mélinda@findmetesting.com
+Bécassine@findmetesting.com
+Ruì@findmetesting.com
+Zoé@findmetesting.com
+Maëline@findmetesting.com
+Aimée@findmetesting.com
+Andréanne@findmetesting.com
+Adélaïde@findmetesting.com
+Laurène@findmetesting.com
+Anaé@findmetesting.com
+Noëlla@findmetesting.com
+Anaël@findmetesting.com
+Maëlyss@findmetesting.com
+Lucrèce@findmetesting.com
+Lén@findmetesting.com
+Marie-thérèse@findmetesting.com
+Maéna@findmetesting.com
+Hélène@findmetesting.com
+Hélèna@findmetesting.com
+Méng@findmetesting.com
+Crééz@findmetesting.com
+Mélanie@findmetesting.com
+Frédérique@findmetesting.com
+Médiamass@findmetesting.com
+André@findmetesting.com
+Cinéma@findmetesting.com
+Mégane@findmetesting.com
+Amélie@findmetesting.com
+Nadège@findmetesting.com
+Rébecca@findmetesting.com
+Médiamass@findmetesting.com
+Céline@findmetesting.com
+Maïly@findmetesting.com
+Maï@findmetesting.com
+Maëlann@findmetesting.com
+Noëlla@findmetesting.com
+Laurélie@findmetesting.com
+Ruì@findmetesting.com
+Chloé@findmetesting.com
+Gaëlle@findmetesting.com
+Vénus@findmetesting.com
+Frédérique@findmetesting.com
+Amélie@findmetesting.com
+Loïs@findmetesting.com
+Marlène@findmetesting.com
+Stévina@findmetesting.com
+Clémentine@findmetesting.com
+Mégane@findmetesting.com
+Méng@findmetesting.com
+André@findmetesting.com
+Crééz@findmetesting.com
+Aí@findmetesting.com
+Uò@findmetesting.com
+Yú@findmetesting.com
+Marie-françoise@findmetesting.com
+Uò@findmetesting.com
+Inès@findmetesting.com
+Océane@findmetesting.com
+Marie-ève@findmetesting.com
+Rébecca@findmetesting.com
+Zoé@findmetesting.com
+Lài@findmetesting.com
+Rachèle@findmetesting.com
+Cécile@findmetesting.com
+Maïlys@findmetesting.com
+Garçon@findmetesting.com
+hereiam@testing.com
+
+It's a game of per%entage percentage.
+Findme#testing Findme testing.
+Over&over&over Over over over.
+[findmeinbrackets], findmeinbrackets
+(findmeinbrackets), findmeinbrackets
+<findmeinbrackets>, findmeinbrackets
+{findmeinbrackets>}, findmeinbrackets
+http://findme-testing.here.com
+http:\\findme-testing.here.com
+
+Vestibulum ante ipsum primis in faucibus orci luctus et ultrices Garçon@findmetesting.com cubilia Curae; Mauris viverra diam vitae quam. Suspendisse potenti. 
+Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Ellerey.Fanti@findmetesting.cn risus. Praesent lectus.
+
+Vivamus metus arcu, adipiscing findmetesting@findmetesting.com, hendrerit at, vulputate vitae, nisl.
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH"
+yaAGqtkY,Nigerian scammers [5-10-1/2023],bombaires,HTML,Thursday 5th of October 2023 10:53:49 AM CDT,"<a href=""mailto:info@boa-bank.com"">info@boa-bank.com</a>
+<a href=""mailto:werfeldaniel@inbox.eu"">werfeldaniel@inbox.eu</a>
+<a href=""mailto:malpassdavid512@gmail.com"">malpassdavid512@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.sda.v.i.d512@gmail.com"">m.a.l.p.as.sda.v.i.d512@gmail.com</a>
+<a href=""mailto:ma.l.p.a.s.s.d.a.v.i.d.5.12@gmail.com"">ma.l.p.a.s.s.d.a.v.i.d.5.12@gmail.com</a>
+<a href=""mailto:m.alpa.s.s.da.vid.512@gmail.com"">m.alpa.s.s.da.vid.512@gmail.com</a>
+<a href=""mailto:malp.assd.avi.d.51.2@gmail.com"">malp.assd.avi.d.51.2@gmail.com</a>
+<a href=""mailto:ma.lp.a.ss.da.v.id.5.12@gmail.com"">ma.lp.a.ss.da.v.id.5.12@gmail.com</a>
+<a href=""mailto:ma.l.pa.s.sdavid.51.2@gmail.com"">ma.l.pa.s.sdavid.51.2@gmail.com</a>
+<a href=""mailto:mal.p.as.sd.av.id5.1.2@gmail.com"">mal.p.as.sd.av.id5.1.2@gmail.com</a>
+<a href=""mailto:mal.p.a.ssda.v.id.51.2@gmail.com"">mal.p.a.ssda.v.id.51.2@gmail.com</a>
+<a href=""mailto:mal.p.as.s.d.a.vid5.12@gmail.com"">mal.p.as.s.d.a.vid5.12@gmail.com</a>
+<a href=""mailto:m.a.l.p.a.s.s.david51.2@gmail.com"">m.a.l.p.a.s.s.david51.2@gmail.com</a>
+<a href=""mailto:malpas.s.david.512@gmail.com"">malpas.s.david.512@gmail.com</a>
+<a href=""mailto:mal.p.as.sd.a.v.id51.2@gmail.com"">mal.p.as.sd.a.v.id51.2@gmail.com</a>
+<a href=""mailto:m.al.p.as.s.d.av.id5.12@gmail.com"">m.al.p.as.s.d.av.id5.12@gmail.com</a>
+<a href=""mailto:malp.a.ss.d.av.id5.12@gmail.com"">malp.a.ss.d.av.id5.12@gmail.com</a>
+<a href=""mailto:m.a.l.pas.s.d.avid51.2@gmail.com"">m.a.l.pas.s.d.avid51.2@gmail.com</a>
+<a href=""mailto:m.a.lpa.ss.da.v.i.d5.12@gmail.com"">m.a.lpa.ss.da.v.i.d5.12@gmail.com</a>
+<a href=""mailto:ma.lpassd.avi.d5.12@gmail.com"">ma.lpassd.avi.d5.12@gmail.com</a>
+<a href=""mailto:ma.lp.assda.v.id.5.12@gmail.com"">ma.lp.assda.v.id.5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.ssda.v.i.d.5.1.2@gmail.com"">m.al.p.a.ssda.v.i.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lp.ass.d.a.v.id.512@gmail.com"">m.a.lp.ass.d.a.v.id.512@gmail.com</a>
+<a href=""mailto:m.alpas.sdavi.d.51.2@gmail.com"">m.alpas.sdavi.d.51.2@gmail.com</a>
+<a href=""mailto:m.alp.ass.d.a.vi.d51.2@gmail.com"">m.alp.ass.d.a.vi.d51.2@gmail.com</a>
+<a href=""mailto:m.alpass.dav.id512@gmail.com"">m.alpass.dav.id512@gmail.com</a>
+<a href=""mailto:ma.l.passdav.i.d.512@gmail.com"">ma.l.passdav.i.d.512@gmail.com</a>
+<a href=""mailto:m.a.lpas.sdav.i.d.51.2@gmail.com"">m.a.lpas.sdav.i.d.51.2@gmail.com</a>
+<a href=""mailto:m.a.l.pass.d.a.v.i.d.5.12@gmail.com"">m.a.l.pass.d.a.v.i.d.5.12@gmail.com</a>
+<a href=""mailto:m.alpas.s.d.av.id.51.2@gmail.com"">m.alpas.s.d.av.id.51.2@gmail.com</a>
+<a href=""mailto:malpa.s.s.dav.i.d512@gmail.com"">malpa.s.s.dav.i.d512@gmail.com</a>
+<a href=""mailto:m.alpass.da.vi.d.5.1.2@gmail.com"">m.alpass.da.vi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.al.p.a.ss.d.a.v.id51.2@gmail.com"">m.al.p.a.ss.d.a.v.id51.2@gmail.com</a>
+<a href=""mailto:m.a.lpas.sdav.id.512@gmail.com"">m.a.lpas.sdav.id.512@gmail.com</a>
+<a href=""mailto:m.alp.as.s.davi.d.5.12@gmail.com"">m.alp.as.s.davi.d.5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.ss.da.v.i.d51.2@gmail.com"">m.al.p.a.ss.da.v.i.d51.2@gmail.com</a>
+<a href=""mailto:m.a.l.pa.ss.dav.i.d5.12@gmail.com"">m.a.l.pa.ss.dav.i.d5.12@gmail.com</a>
+<a href=""mailto:malpas.sda.vid.5.12@gmail.com"">malpas.sda.vid.5.12@gmail.com</a>
+<a href=""mailto:m.a.l.pa.s.s.davi.d.5.12@gmail.com"">m.a.l.pa.s.s.davi.d.5.12@gmail.com</a>
+<a href=""mailto:m.a.lpa.ss.d.a.vid512@gmail.com"">m.a.lpa.ss.d.a.vid512@gmail.com</a>
+<a href=""mailto:m.al.p.a.s.sd.a.v.i.d5.1.2@gmail.com"">m.al.p.a.s.sd.a.v.i.d5.1.2@gmail.com</a>
+<a href=""mailto:m.a.l.passd.av.i.d51.2@gmail.com"">m.a.l.passd.av.i.d51.2@gmail.com</a>
+<a href=""mailto:m.alpa.s.s.da.vi.d.5.1.2@gmail.com"">m.alpa.s.s.da.vi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.a.l.p.ass.da.vid5.12@gmail.com"">m.a.l.p.ass.da.vid5.12@gmail.com</a>
+<a href=""mailto:m.a.l.pa.s.sd.a.v.id.512@gmail.com"">m.a.l.pa.s.sd.a.v.id.512@gmail.com</a>
+<a href=""mailto:m.a.lpa.ssda.vid.51.2@gmail.com"">m.a.lpa.ssda.vid.51.2@gmail.com</a>
+<a href=""mailto:ma.lp.a.s.sdavi.d.5.1.2@gmail.com"">ma.lp.a.s.sdavi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.al.p.a.ssda.vi.d5.12@gmail.com"">m.al.p.a.ssda.vi.d5.12@gmail.com</a>
+<a href=""mailto:malp.a.s.sd.a.vid5.12@gmail.com"">malp.a.s.sd.a.vid5.12@gmail.com</a>
+<a href=""mailto:m.alp.as.s.d.av.i.d5.1.2@gmail.com"">m.alp.as.s.d.av.i.d5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.pa.ss.d.a.v.i.d.512@gmail.com"">ma.l.pa.ss.d.a.v.i.d.512@gmail.com</a>
+<a href=""mailto:m.al.passdav.i.d512@gmail.com"">m.al.passdav.i.d512@gmail.com</a>
+<a href=""mailto:malp.a.s.sdav.id5.1.2@gmail.com"">malp.a.s.sdav.id5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lpa.s.sdavi.d5.1.2@gmail.com"">m.a.lpa.s.sdavi.d5.1.2@gmail.com</a>
+<a href=""mailto:malp.ass.da.vid5.12@gmail.com"">malp.ass.da.vid5.12@gmail.com</a>
+<a href=""mailto:malp.ass.d.a.vi.d.5.1.2@gmail.com"">malp.ass.d.a.vi.d.5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.passda.v.i.d5.12@gmail.com"">ma.l.passda.v.i.d5.12@gmail.com</a>
+<a href=""mailto:ma.l.pas.s.dav.id5.1.2@gmail.com"">ma.l.pas.s.dav.id5.1.2@gmail.com</a>
+<a href=""mailto:m.alp.assd.avi.d.5.12@gmail.com"">m.alp.assd.avi.d.5.12@gmail.com</a>
+<a href=""mailto:malp.a.s.s.d.a.v.id.512@gmail.com"">malp.a.s.s.d.a.v.id.512@gmail.com</a>
+<a href=""mailto:m.a.l.p.ass.d.avid51.2@gmail.com"">m.a.l.p.ass.d.avid51.2@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.s.d.a.v.id.512@gmail.com"">m.a.l.p.as.s.d.a.v.id.512@gmail.com</a>
+<a href=""mailto:m.a.l.p.assdavi.d512@gmail.com"">m.a.l.p.assdavi.d512@gmail.com</a>
+<a href=""mailto:mal.pas.s.d.avid.5.1.2@gmail.com"">mal.pas.s.d.avid.5.1.2@gmail.com</a>
+<a href=""mailto:m.alp.as.sd.a.vid51.2@gmail.com"">m.alp.as.sd.a.vid51.2@gmail.com</a>
+<a href=""mailto:ma.l.p.a.s.s.dav.id512@gmail.com"">ma.l.p.a.s.s.dav.id512@gmail.com</a>
+<a href=""mailto:mal.pa.ssd.av.id.51.2@gmail.com"">mal.pa.ssd.av.id.51.2@gmail.com</a>
+<a href=""mailto:mal.pa.ss.d.a.v.i.d5.12@gmail.com"">mal.pa.ss.d.a.v.i.d5.12@gmail.com</a>
+<a href=""mailto:ma.lpa.s.sd.a.vid512@gmail.com"">ma.lpa.s.sd.a.vid512@gmail.com</a>
+<a href=""mailto:ma.lpass.dav.id512@gmail.com"">ma.lpass.dav.id512@gmail.com</a>
+<a href=""mailto:m.al.passdavid5.12@gmail.com"">m.al.passdavid5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.ss.d.a.v.i.d512@gmail.com"">m.al.p.a.ss.d.a.v.i.d512@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.sda.v.i.d.5.12@gmail.com"">m.a.l.p.as.sda.v.i.d.5.12@gmail.com</a>
+<a href=""mailto:malp.as.sda.vi.d.5.12@gmail.com"">malp.as.sda.vi.d.5.12@gmail.com</a>
+<a href=""mailto:ma.l.p.as.s.davi.d5.12@gmail.com"">ma.l.p.as.s.davi.d5.12@gmail.com</a>
+<a href=""mailto:ma.lpas.sd.av.id5.12@gmail.com"">ma.lpas.sd.av.id5.12@gmail.com</a>
+<a href=""mailto:m.a.l.pa.ss.dav.id.5.12@gmail.com"">m.a.l.pa.ss.dav.id.5.12@gmail.com</a>
+<a href=""mailto:ma.l.p.as.sd.av.i.d.512@gmail.com"">ma.l.p.as.sd.av.i.d.512@gmail.com</a>
+<a href=""mailto:m.a.l.pa.ss.david.51.2@gmail.com"">m.a.l.pa.ss.david.51.2@gmail.com</a>
+<a href=""mailto:mal.pa.s.sda.vid.5.12@gmail.com"">mal.pa.s.sda.vid.5.12@gmail.com</a>
+<a href=""mailto:m.a.l.p.a.s.sd.av.id512@gmail.com"">m.a.l.p.a.s.sd.av.id512@gmail.com</a>
+<a href=""mailto:malpa.s.sdavid512@gmail.com"">malpa.s.sdavid512@gmail.com</a>
+<a href=""mailto:ma.l.p.assdav.i.d5.12@gmail.com"">ma.l.p.assdav.i.d5.12@gmail.com</a>
+<a href=""mailto:malpas.s.davi.d.51.2@gmail.com"">malpas.s.davi.d.51.2@gmail.com</a>
+<a href=""mailto:ma.lp.a.ssdavid51.2@gmail.com"">ma.lp.a.ssdavid51.2@gmail.com</a>
+<a href=""mailto:m.a.l.pa.s.s.dav.i.d512@gmail.com"">m.a.l.pa.s.s.dav.i.d512@gmail.com</a>
+<a href=""mailto:mal.p.assd.av.id51.2@gmail.com"">mal.p.assd.av.id51.2@gmail.com</a>
+<a href=""mailto:m.alp.a.ss.d.avid.5.12@gmail.com"">m.alp.a.ss.d.avid.5.12@gmail.com</a>
+<a href=""mailto:mal.p.as.s.d.avi.d5.1.2@gmail.com"">mal.p.as.s.d.avi.d5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lpass.dav.id.51.2@gmail.com"">m.a.lpass.dav.id.51.2@gmail.com</a>
+<a href=""mailto:ma.l.p.a.s.sdavi.d.5.1.2@gmail.com"">ma.l.p.a.s.sdavi.d.5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.p.as.s.dav.id5.1.2@gmail.com"">ma.l.p.as.s.dav.id5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.p.ass.d.av.i.d.512@gmail.com"">ma.l.p.ass.d.av.i.d.512@gmail.com</a>
+<a href=""mailto:mal.p.a.ssd.a.v.id.5.12@gmail.com"">mal.p.a.ssd.a.v.id.5.12@gmail.com</a>
+<a href=""mailto:ma.lp.as.s.da.vid5.1.2@gmail.com"">ma.lp.as.s.da.vid5.1.2@gmail.com</a>
+<a href=""mailto:ma.lp.a.s.s.d.avi.d5.1.2@gmail.com"">ma.lp.a.s.s.d.avi.d5.1.2@gmail.com</a>
+<a href=""mailto:ma.lpa.ssd.avi.d.5.12@gmail.com"">ma.lpa.ssd.avi.d.5.12@gmail.com</a>
+<a href=""mailto:m.alpa.s.sda.vi.d.51.2@gmail.com"">m.alpa.s.sda.vi.d.51.2@gmail.com</a>
+<a href=""mailto:ma.lpass.da.vi.d.512@gmail.com"">ma.lpass.da.vi.d.512@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.s.david.51.2@gmail.com"">m.a.l.p.as.s.david.51.2@gmail.com</a>
+<a href=""mailto:m.a.lp.a.s.s.david.51.2@gmail.com"">m.a.lp.a.s.s.david.51.2@gmail.com</a>
+<a href=""mailto:ma.lp.as.s.da.v.id5.1.2@gmail.com"">ma.lp.as.s.da.v.id5.1.2@gmail.com</a>
+<a href=""mailto:ma.lpas.sdav.i.d5.12@gmail.com"">ma.lpas.sdav.i.d5.12@gmail.com</a>
+<a href=""mailto:m.alp.a.ssd.a.vid5.12@gmail.com"">m.alp.a.ssd.a.vid5.12@gmail.com</a>
+<a href=""mailto:m.a.lpas.s.da.vi.d.512@gmail.com"">m.a.lpas.s.da.vi.d.512@gmail.com</a>
+<a href=""mailto:m.alpas.s.david512@gmail.com"">m.alpas.s.david512@gmail.com</a>
+<a href=""mailto:m.alp.assd.av.id.51.2@gmail.com"">m.alp.assd.av.id.51.2@gmail.com</a>
+<a href=""mailto:ma.l.pa.s.sd.a.v.id.51.2@gmail.com"">ma.l.pa.s.sd.a.v.id.51.2@gmail.com</a>
+<a href=""mailto:malpa.s.sd.a.v.id512@gmail.com"">malpa.s.sd.a.v.id512@gmail.com</a>
+<a href=""mailto:mal.passd.avi.d5.12@gmail.com"">mal.passd.avi.d5.12@gmail.com</a>
+<a href=""mailto:m.al.pa.s.sd.av.id.5.1.2@gmail.com"">m.al.pa.s.sd.av.id.5.1.2@gmail.com</a>
+<a href=""mailto:malpa.s.sdavi.d512@gmail.com"">malpa.s.sdavi.d512@gmail.com</a>
+<a href=""mailto:malpa.s.sda.v.id.51.2@gmail.com"">malpa.s.sda.v.id.51.2@gmail.com</a>
+<a href=""mailto:mal.p.a.ss.da.vid51.2@gmail.com"">mal.p.a.ss.da.vid51.2@gmail.com</a>
+<a href=""mailto:malp.as.sd.av.id.512@gmail.com"">malp.as.sd.av.id.512@gmail.com</a>
+<a href=""mailto:mal.p.a.ssdavid5.1.2@gmail.com"">mal.p.a.ssdavid5.1.2@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.sda.v.id.51.2@gmail.com"">m.a.l.p.as.sda.v.id.51.2@gmail.com</a>
+<a href=""mailto:m.al.p.ass.dav.id5.1.2@gmail.com"">m.al.p.ass.dav.id5.1.2@gmail.com</a>
+<a href=""mailto:m.al.pass.d.avi.d.512@gmail.com"">m.al.pass.d.avi.d.512@gmail.com</a>
+<a href=""mailto:ma.l.p.as.s.d.a.vi.d512@gmail.com"">ma.l.p.as.s.d.a.vi.d512@gmail.com</a>
+<a href=""mailto:m.a.lpas.s.davi.d.5.1.2@gmail.com"">m.a.lpas.s.davi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.alp.assda.v.id.5.12@gmail.com"">m.alp.assda.v.id.5.12@gmail.com</a>
+<a href=""mailto:ma.l.pa.ss.d.avid.5.1.2@gmail.com"">ma.l.pa.ss.d.avid.5.1.2@gmail.com</a>
+<a href=""mailto:m.alpas.sdavi.d.512@gmail.com"">m.alpas.sdavi.d.512@gmail.com</a>
+<a href=""mailto:mal.p.a.ssd.a.v.id.51.2@gmail.com"">mal.p.a.ssd.a.v.id.51.2@gmail.com</a>
+<a href=""mailto:m.a.lp.a.s.sd.av.id5.1.2@gmail.com"">m.a.lp.a.s.sd.av.id5.1.2@gmail.com</a>
+<a href=""mailto:m.al.pas.sd.av.id.5.1.2@gmail.com"">m.al.pas.sd.av.id.5.1.2@gmail.com</a>
+<a href=""mailto:ma.lpa.s.sdav.i.d5.1.2@gmail.com"">ma.lpa.s.sdav.i.d5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lp.as.s.da.vid5.1.2@gmail.com"">m.a.lp.as.s.da.vid5.1.2@gmail.com</a>
+<a href=""mailto:malp.a.ssd.av.id.5.1.2@gmail.com"">malp.a.ssd.av.id.5.1.2@gmail.com</a>
+<a href=""mailto:m.a.l.p.as.sda.vi.d5.1.2@gmail.com"">m.a.l.p.as.sda.vi.d5.1.2@gmail.com</a>
+<a href=""mailto:malpa.s.s.da.v.id5.1.2@gmail.com"">malpa.s.s.da.v.id5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.p.ass.d.av.id512@gmail.com"">ma.l.p.ass.d.av.id512@gmail.com</a>
+<a href=""mailto:m.a.lp.a.s.s.dav.id512@gmail.com"">m.a.lp.a.s.s.dav.id512@gmail.com</a>
+<a href=""mailto:m.alpas.sd.a.vi.d.512@gmail.com"">m.alpas.sd.a.vi.d.512@gmail.com</a>
+<a href=""mailto:malp.as.s.da.v.i.d.5.12@gmail.com"">malp.as.s.da.v.i.d.5.12@gmail.com</a>
+<a href=""mailto:m.alpa.ss.dav.i.d.51.2@gmail.com"">m.alpa.ss.dav.i.d.51.2@gmail.com</a>
+<a href=""mailto:ma.lpa.s.sda.vid.5.1.2@gmail.com"">ma.lpa.s.sda.vid.5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.p.assdav.id512@gmail.com"">ma.l.p.assdav.id512@gmail.com</a>
+<a href=""mailto:m.alpa.ss.dav.id.5.1.2@gmail.com"">m.alpa.ss.dav.id.5.1.2@gmail.com</a>
+<a href=""mailto:m.alp.assd.a.v.id51.2@gmail.com"">m.alp.assd.a.v.id51.2@gmail.com</a>
+<a href=""mailto:m.a.lpas.s.da.vi.d5.12@gmail.com"">m.a.lpas.s.da.vi.d5.12@gmail.com</a>
+<a href=""mailto:malp.a.ss.da.v.i.d5.1.2@gmail.com"">malp.a.ss.da.v.i.d5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lpas.s.dav.i.d5.12@gmail.com"">m.a.lpas.s.dav.i.d5.12@gmail.com</a>
+<a href=""mailto:malp.a.ssdavid.512@gmail.com"">malp.a.ssdavid.512@gmail.com</a>
+<a href=""mailto:m.al.pas.sda.v.id51.2@gmail.com"">m.al.pas.sda.v.id51.2@gmail.com</a>
+<a href=""mailto:ma.lpas.s.da.v.id.51.2@gmail.com"">ma.lpas.s.da.v.id.51.2@gmail.com</a>
+<a href=""mailto:ma.lp.a.ssd.avid.5.12@gmail.com"">ma.lp.a.ssd.avid.5.12@gmail.com</a>
+<a href=""mailto:m.a.lpassd.avi.d512@gmail.com"">m.a.lpassd.avi.d512@gmail.com</a>
+<a href=""mailto:ma.lpass.da.vid.51.2@gmail.com"">ma.lpass.da.vid.51.2@gmail.com</a>
+<a href=""mailto:m.alp.a.ssd.av.id512@gmail.com"">m.alp.a.ssd.av.id512@gmail.com</a>
+<a href=""mailto:m.alpass.d.av.id.51.2@gmail.com"">m.alpass.d.av.id.51.2@gmail.com</a>
+<a href=""mailto:m.al.p.as.sda.vi.d.5.1.2@gmail.com"">m.al.p.as.sda.vi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.alpa.s.sd.a.v.id51.2@gmail.com"">m.alpa.s.sd.a.v.id51.2@gmail.com</a>
+<a href=""mailto:m.alp.a.s.sda.v.id.5.12@gmail.com"">m.alp.a.s.sda.v.id.5.12@gmail.com</a>
+<a href=""mailto:mal.p.a.ssdavid5.12@gmail.com"">mal.p.a.ssdavid5.12@gmail.com</a>
+<a href=""mailto:m.a.lp.as.sdavid51.2@gmail.com"">m.a.lp.as.sdavid51.2@gmail.com</a>
+<a href=""mailto:m.alp.as.sd.avid5.1.2@gmail.com"">m.alp.as.sd.avid5.1.2@gmail.com</a>
+<a href=""mailto:ma.lpa.s.sd.a.vid.512@gmail.com"">ma.lpa.s.sd.a.vid.512@gmail.com</a>
+<a href=""mailto:mal.p.as.sda.v.i.d.5.1.2@gmail.com"">mal.p.as.sda.v.i.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.a.l.p.assd.avi.d.5.1.2@gmail.com"">m.a.l.p.assd.avi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.al.p.as.s.da.v.id.5.12@gmail.com"">m.al.p.as.s.da.v.id.5.12@gmail.com</a>
+<a href=""mailto:m.a.lp.a.s.s.d.avi.d.5.1.2@gmail.com"">m.a.lp.a.s.s.d.avi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.al.p.as.sd.a.vi.d5.1.2@gmail.com"">m.al.p.as.sd.a.vi.d5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lp.ass.d.a.vid512@gmail.com"">m.a.lp.ass.d.a.vid512@gmail.com</a>
+<a href=""mailto:m.alpas.sda.vid5.1.2@gmail.com"">m.alpas.sda.vid5.1.2@gmail.com</a>
+<a href=""mailto:m.al.pa.ssd.av.id5.12@gmail.com"">m.al.pa.ssd.av.id5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.ssdavid5.1.2@gmail.com"">m.al.p.a.ssdavid5.1.2@gmail.com</a>
+<a href=""mailto:ma.l.pa.s.sda.v.i.d51.2@gmail.com"">ma.l.pa.s.sda.v.i.d51.2@gmail.com</a>
+<a href=""mailto:m.alpass.da.vi.d51.2@gmail.com"">m.alpass.da.vi.d51.2@gmail.com</a>
+<a href=""mailto:malpas.sd.avi.d.512@gmail.com"">malpas.sd.avi.d.512@gmail.com</a>
+<a href=""mailto:m.alpas.sdavi.d51.2@gmail.com"">m.alpas.sdavi.d51.2@gmail.com</a>
+<a href=""mailto:mal.p.a.ssd.av.i.d512@gmail.com"">mal.p.a.ssd.av.i.d512@gmail.com</a>
+<a href=""mailto:mal.p.a.s.s.d.a.v.id5.12@gmail.com"">mal.p.a.s.s.d.a.v.id5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.s.sda.v.id.5.12@gmail.com"">m.al.p.a.s.sda.v.id.5.12@gmail.com</a>
+<a href=""mailto:m.a.lpassda.v.i.d512@gmail.com"">m.a.lpassda.v.i.d512@gmail.com</a>
+<a href=""mailto:ma.l.pa.ssd.a.v.i.d51.2@gmail.com"">ma.l.pa.ssd.a.v.i.d51.2@gmail.com</a>
+<a href=""mailto:mal.pass.d.avid5.1.2@gmail.com"">mal.pass.d.avid5.1.2@gmail.com</a>
+<a href=""mailto:m.al.p.a.ss.d.avi.d.5.1.2@gmail.com"">m.al.p.a.ss.d.avi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.a.lpas.s.d.avi.d5.12@gmail.com"">m.a.lpas.s.d.avi.d5.12@gmail.com</a>
+<a href=""mailto:m.al.p.a.s.s.dav.i.d5.1.2@gmail.com"">m.al.p.a.s.s.dav.i.d5.1.2@gmail.com</a>
+<a href=""mailto:m.alpa.s.s.dav.id.5.12@gmail.com"">m.alpa.s.s.dav.id.5.12@gmail.com</a>
+<a href=""mailto:m.alp.as.sdavid512@gmail.com"">m.alp.as.sdavid512@gmail.com</a>
+<a href=""mailto:m.a.lpa.s.sd.avi.d.5.1.2@gmail.com"">m.a.lpa.s.sd.avi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.alp.a.ssda.v.i.d5.12@gmail.com"">m.alp.a.ssda.v.i.d5.12@gmail.com</a>
+<a href=""mailto:malp.a.s.s.d.a.vi.d.51.2@gmail.com"">malp.a.s.s.d.a.vi.d.51.2@gmail.com</a>
+<a href=""mailto:m.a.lpass.da.v.i.d.512@gmail.com"">m.a.lpass.da.v.i.d.512@gmail.com</a>
+<a href=""mailto:m.a.l.p.assda.v.id.5.1.2@gmail.com"">m.a.l.p.assda.v.id.5.1.2@gmail.com</a>
+<a href=""mailto:ma.lpassda.vi.d.51.2@gmail.com"">ma.lpassda.vi.d.51.2@gmail.com</a>
+<a href=""mailto:mal.pa.s.s.d.a.v.id512@gmail.com"">mal.pa.s.s.d.a.v.id512@gmail.com</a>
+<a href=""mailto:m.a.lpa.ssd.a.v.i.d.512@gmail.com"">m.a.lpa.ssd.a.v.i.d.512@gmail.com</a>
+<a href=""mailto:ma.l.passdav.i.d.5.1.2@gmail.com"">ma.l.passdav.i.d.5.1.2@gmail.com</a>
+<a href=""mailto:ma.lp.ass.da.v.i.d5.1.2@gmail.com"">ma.lp.ass.da.v.i.d5.1.2@gmail.com</a>
+<a href=""mailto:mal.pas.s.d.a.vi.d512@gmail.com"">mal.pas.s.d.a.vi.d512@gmail.com</a>
+<a href=""mailto:ma.l.pa.ss.d.a.vid.5.1.2@gmail.com"">ma.l.pa.ss.d.a.vid.5.1.2@gmail.com</a>
+<a href=""mailto:mal.pas.s.d.avi.d51.2@gmail.com"">mal.pas.s.d.avi.d51.2@gmail.com</a>
+<a href=""mailto:malp.a.ss.da.vi.d512@gmail.com"">malp.a.ss.da.vi.d512@gmail.com</a>
+<a href=""mailto:malp.assda.vi.d.5.1.2@gmail.com"">malp.assda.vi.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.al.pass.da.vi.d512@gmail.com"">m.al.pass.da.vi.d512@gmail.com</a>
+<a href=""mailto:m.alp.as.s.d.av.id.51.2@gmail.com"">m.alp.as.s.d.av.id.51.2@gmail.com</a>
+<a href=""mailto:m.al.pas.s.da.v.i.d.5.1.2@gmail.com"">m.al.pas.s.da.v.i.d.5.1.2@gmail.com</a>
+<a href=""mailto:m.alpa.s.sd.a.vid.5.12@gmail.com"">m.alpa.s.sd.a.vid.5.12@gmail.com</a>
+<a href=""mailto:m.alpa.ss.davi.d512@gmail.com"">m.alpa.ss.davi.d512@gmail.com</a>
+<a href=""mailto:jons63255@gmail.com"">jons63255@gmail.com</a>
+<a href=""mailto:jon.s.63255@gmail.com"">jon.s.63255@gmail.com</a>
+<a href=""mailto:jo.ns.632.5.5@gmail.com"">jo.ns.632.5.5@gmail.com</a>
+<a href=""mailto:j.o.ns6.3.25.5@gmail.com"">j.o.ns6.3.25.5@gmail.com</a>
+<a href=""mailto:j.ons.6.3.25.5@gmail.com"">j.ons.6.3.25.5@gmail.com</a>
+<a href=""mailto:jons632.55@gmail.com"">jons632.55@gmail.com</a>
+<a href=""mailto:jons6.3.2.55@gmail.com"">jons6.3.2.55@gmail.com</a>
+<a href=""mailto:j.o.ns63.255@gmail.com"">j.o.ns63.255@gmail.com</a>
+<a href=""mailto:j.o.n.s.6325.5@gmail.com"">j.o.n.s.6325.5@gmail.com</a>
+<a href=""mailto:j.o.ns.6.3.25.5@gmail.com"">j.o.ns.6.3.25.5@gmail.com</a>
+<a href=""mailto:jo.n.s6325.5@gmail.com"">jo.n.s6325.5@gmail.com</a>
+<a href=""mailto:j.on.s.6.3255@gmail.com"">j.on.s.6.3255@gmail.com</a>
+<a href=""mailto:j.o.ns6.3.255@gmail.com"">j.o.ns6.3.255@gmail.com</a>
+<a href=""mailto:j.on.s6325.5@gmail.com"">j.on.s6325.5@gmail.com</a>
+<a href=""mailto:j.o.ns6.325.5@gmail.com"">j.o.ns6.325.5@gmail.com</a>
+<a href=""mailto:jo.ns.6.325.5@gmail.com"">jo.ns.6.325.5@gmail.com</a>
+<a href=""mailto:jo.ns63255@gmail.com"">jo.ns63255@gmail.com</a>
+<a href=""mailto:j.on.s.63.2.5.5@gmail.com"">j.on.s.63.2.5.5@gmail.com</a>
+<a href=""mailto:j.ons.632.55@gmail.com"">j.ons.632.55@gmail.com</a>
+<a href=""mailto:j.on.s6.3.2.55@gmail.com"">j.on.s6.3.2.55@gmail.com</a>
+<a href=""mailto:jon.s6.3255@gmail.com"">jon.s6.3255@gmail.com</a>
+<a href=""mailto:jon.s.6.3.255@gmail.com"">jon.s.6.3.255@gmail.com</a>
+<a href=""mailto:jo.ns6.32.5.5@gmail.com"">jo.ns6.32.5.5@gmail.com</a>
+<a href=""mailto:j.on.s6.325.5@gmail.com"">j.on.s6.325.5@gmail.com</a>
+<a href=""mailto:j.o.n.s63.2.55@gmail.com"">j.o.n.s63.2.55@gmail.com</a>
+<a href=""mailto:jo.ns63.25.5@gmail.com"">jo.ns63.25.5@gmail.com</a>
+<a href=""mailto:jons6.3.25.5@gmail.com"">jons6.3.25.5@gmail.com</a>
+<a href=""mailto:j.ons6.325.5@gmail.com"">j.ons6.325.5@gmail.com</a>
+<a href=""mailto:jo.ns6325.5@gmail.com"">jo.ns6325.5@gmail.com</a>
+<a href=""mailto:jo.ns.6.3255@gmail.com"">jo.ns.6.3255@gmail.com</a>
+<a href=""mailto:jons.6.3255@gmail.com"">jons.6.3255@gmail.com</a>
+<a href=""mailto:jo.ns.63255@gmail.com"">jo.ns.63255@gmail.com</a>
+<a href=""mailto:jo.n.s63.2.5.5@gmail.com"">jo.n.s63.2.5.5@gmail.com</a>
+<a href=""mailto:j.o.ns6.32.55@gmail.com"">j.o.ns6.32.55@gmail.com</a>
+<a href=""mailto:jons6.3.255@gmail.com"">jons6.3.255@gmail.com</a>
+<a href=""mailto:j.o.n.s6.3255@gmail.com"">j.o.n.s6.3255@gmail.com</a>
+<a href=""mailto:j.on.s.6.3.25.5@gmail.com"">j.on.s.6.3.25.5@gmail.com</a>
+<a href=""mailto:j.ons.6.3.255@gmail.com"">j.ons.6.3.255@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.3.25.5@gmail.com"">j.o.n.s.6.3.25.5@gmail.com</a>
+<a href=""mailto:j.o.n.s632.5.5@gmail.com"">j.o.n.s632.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s63.25.5@gmail.com"">j.o.n.s63.25.5@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.3.255@gmail.com"">j.o.n.s.6.3.255@gmail.com</a>
+<a href=""mailto:jon.s6325.5@gmail.com"">jon.s6325.5@gmail.com</a>
+<a href=""mailto:j.o.ns63.25.5@gmail.com"">j.o.ns63.25.5@gmail.com</a>
+<a href=""mailto:jons.63.255@gmail.com"">jons.63.255@gmail.com</a>
+<a href=""mailto:j.o.ns.6.3.2.55@gmail.com"">j.o.ns.6.3.2.55@gmail.com</a>
+<a href=""mailto:jons6.32.55@gmail.com"">jons6.32.55@gmail.com</a>
+<a href=""mailto:j.ons632.5.5@gmail.com"">j.ons632.5.5@gmail.com</a>
+<a href=""mailto:jo.ns6.32.55@gmail.com"">jo.ns6.32.55@gmail.com</a>
+<a href=""mailto:j.ons6.3255@gmail.com"">j.ons6.3255@gmail.com</a>
+<a href=""mailto:jon.s6.3.255@gmail.com"">jon.s6.3.255@gmail.com</a>
+<a href=""mailto:jon.s63.255@gmail.com"">jon.s63.255@gmail.com</a>
+<a href=""mailto:jons.6325.5@gmail.com"">jons.6325.5@gmail.com</a>
+<a href=""mailto:j.on.s.632.5.5@gmail.com"">j.on.s.632.5.5@gmail.com</a>
+<a href=""mailto:jo.ns632.5.5@gmail.com"">jo.ns632.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.32.55@gmail.com"">j.o.n.s.6.32.55@gmail.com</a>
+<a href=""mailto:j.on.s6.32.5.5@gmail.com"">j.on.s6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.ns6.3.255@gmail.com"">jo.ns6.3.255@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.3.2.55@gmail.com"">j.o.n.s.6.3.2.55@gmail.com</a>
+<a href=""mailto:jons6.3255@gmail.com"">jons6.3255@gmail.com</a>
+<a href=""mailto:jons.6.3.255@gmail.com"">jons.6.3.255@gmail.com</a>
+<a href=""mailto:j.o.ns6.32.5.5@gmail.com"">j.o.ns6.32.5.5@gmail.com</a>
+<a href=""mailto:j.on.s632.55@gmail.com"">j.on.s632.55@gmail.com</a>
+<a href=""mailto:jons6.32.5.5@gmail.com"">jons6.32.5.5@gmail.com</a>
+<a href=""mailto:j.on.s.632.55@gmail.com"">j.on.s.632.55@gmail.com</a>
+<a href=""mailto:j.on.s.6.3.255@gmail.com"">j.on.s.6.3.255@gmail.com</a>
+<a href=""mailto:j.o.n.s6.3.2.5.5@gmail.com"">j.o.n.s6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jon.s6.3.2.5.5@gmail.com"">jon.s6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jo.ns6.325.5@gmail.com"">jo.ns6.325.5@gmail.com</a>
+<a href=""mailto:jons.63.25.5@gmail.com"">jons.63.25.5@gmail.com</a>
+<a href=""mailto:j.o.ns632.5.5@gmail.com"">j.o.ns632.5.5@gmail.com</a>
+<a href=""mailto:jon.s.63.2.55@gmail.com"">jon.s.63.2.55@gmail.com</a>
+<a href=""mailto:jo.n.s6.3.255@gmail.com"">jo.n.s6.3.255@gmail.com</a>
+<a href=""mailto:jon.s.632.5.5@gmail.com"">jon.s.632.5.5@gmail.com</a>
+<a href=""mailto:j.on.s63.255@gmail.com"">j.on.s63.255@gmail.com</a>
+<a href=""mailto:j.o.n.s.63.2.55@gmail.com"">j.o.n.s.63.2.55@gmail.com</a>
+<a href=""mailto:j.o.ns6325.5@gmail.com"">j.o.ns6325.5@gmail.com</a>
+<a href=""mailto:j.o.ns.63.255@gmail.com"">j.o.ns.63.255@gmail.com</a>
+<a href=""mailto:j.ons.63.255@gmail.com"">j.ons.63.255@gmail.com</a>
+<a href=""mailto:jo.ns63.2.5.5@gmail.com"">jo.ns63.2.5.5@gmail.com</a>
+<a href=""mailto:j.on.s6.32.55@gmail.com"">j.on.s6.32.55@gmail.com</a>
+<a href=""mailto:jons.6.32.55@gmail.com"">jons.6.32.55@gmail.com</a>
+<a href=""mailto:jo.ns6.3.25.5@gmail.com"">jo.ns6.3.25.5@gmail.com</a>
+<a href=""mailto:jo.n.s.63.2.55@gmail.com"">jo.n.s.63.2.55@gmail.com</a>
+<a href=""mailto:j.ons.6325.5@gmail.com"">j.ons.6325.5@gmail.com</a>
+<a href=""mailto:jons6.325.5@gmail.com"">jons6.325.5@gmail.com</a>
+<a href=""mailto:jo.ns6.3255@gmail.com"">jo.ns6.3255@gmail.com</a>
+<a href=""mailto:j.ons6.3.2.5.5@gmail.com"">j.ons6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jon.s.6.325.5@gmail.com"">jon.s.6.325.5@gmail.com</a>
+<a href=""mailto:jo.n.s6.325.5@gmail.com"">jo.n.s6.325.5@gmail.com</a>
+<a href=""mailto:jons.632.55@gmail.com"">jons.632.55@gmail.com</a>
+<a href=""mailto:j.ons6.32.55@gmail.com"">j.ons6.32.55@gmail.com</a>
+<a href=""mailto:j.ons.63255@gmail.com"">j.ons.63255@gmail.com</a>
+<a href=""mailto:j.on.s.6325.5@gmail.com"">j.on.s.6325.5@gmail.com</a>
+<a href=""mailto:j.on.s.63.2.55@gmail.com"">j.on.s.63.2.55@gmail.com</a>
+<a href=""mailto:jon.s.63.2.5.5@gmail.com"">jon.s.63.2.5.5@gmail.com</a>
+<a href=""mailto:j.on.s63255@gmail.com"">j.on.s63255@gmail.com</a>
+<a href=""mailto:j.on.s.63255@gmail.com"">j.on.s.63255@gmail.com</a>
+<a href=""mailto:jo.n.s6.32.5.5@gmail.com"">jo.n.s6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s.63255@gmail.com"">jo.n.s.63255@gmail.com</a>
+<a href=""mailto:j.o.ns6.3255@gmail.com"">j.o.ns6.3255@gmail.com</a>
+<a href=""mailto:j.ons.6.32.5.5@gmail.com"">j.ons.6.32.5.5@gmail.com</a>
+<a href=""mailto:j.on.s.63.25.5@gmail.com"">j.on.s.63.25.5@gmail.com</a>
+<a href=""mailto:j.o.ns.63.2.55@gmail.com"">j.o.ns.63.2.55@gmail.com</a>
+<a href=""mailto:jo.n.s.6.3.2.55@gmail.com"">jo.n.s.6.3.2.55@gmail.com</a>
+<a href=""mailto:j.on.s.63.255@gmail.com"">j.on.s.63.255@gmail.com</a>
+<a href=""mailto:jons632.5.5@gmail.com"">jons632.5.5@gmail.com</a>
+<a href=""mailto:jon.s.6.3.2.5.5@gmail.com"">jon.s.6.3.2.5.5@gmail.com</a>
+<a href=""mailto:j.ons.6.3255@gmail.com"">j.ons.6.3255@gmail.com</a>
+<a href=""mailto:jo.ns.63.2.5.5@gmail.com"">jo.ns.63.2.5.5@gmail.com</a>
+<a href=""mailto:jons6325.5@gmail.com"">jons6325.5@gmail.com</a>
+<a href=""mailto:jons.632.5.5@gmail.com"">jons.632.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s.6.325.5@gmail.com"">jo.n.s.6.325.5@gmail.com</a>
+<a href=""mailto:jo.ns6.3.2.5.5@gmail.com"">jo.ns6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jon.s6.3.25.5@gmail.com"">jon.s6.3.25.5@gmail.com</a>
+<a href=""mailto:j.o.ns.6.32.5.5@gmail.com"">j.o.ns.6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.ns.6.32.55@gmail.com"">jo.ns.6.32.55@gmail.com</a>
+<a href=""mailto:j.on.s6.3.25.5@gmail.com"">j.on.s6.3.25.5@gmail.com</a>
+<a href=""mailto:jon.s.6.3255@gmail.com"">jon.s.6.3255@gmail.com</a>
+<a href=""mailto:jo.n.s63.255@gmail.com"">jo.n.s63.255@gmail.com</a>
+<a href=""mailto:j.o.ns6.3.2.55@gmail.com"">j.o.ns6.3.2.55@gmail.com</a>
+<a href=""mailto:jons.6.3.25.5@gmail.com"">jons.6.3.25.5@gmail.com</a>
+<a href=""mailto:j.o.n.s.63.2.5.5@gmail.com"">j.o.n.s.63.2.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s.632.5.5@gmail.com"">j.o.n.s.632.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s.63.2.5.5@gmail.com"">jo.n.s.63.2.5.5@gmail.com</a>
+<a href=""mailto:j.ons.6.32.55@gmail.com"">j.ons.6.32.55@gmail.com</a>
+<a href=""mailto:jo.n.s.6.32.5.5@gmail.com"">jo.n.s.6.32.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s6325.5@gmail.com"">j.o.n.s6325.5@gmail.com</a>
+<a href=""mailto:jo.n.s.63.255@gmail.com"">jo.n.s.63.255@gmail.com</a>
+<a href=""mailto:jo.ns632.55@gmail.com"">jo.ns632.55@gmail.com</a>
+<a href=""mailto:j.on.s6.3.2.5.5@gmail.com"">j.on.s6.3.2.5.5@gmail.com</a>
+<a href=""mailto:j.o.ns.6.325.5@gmail.com"">j.o.ns.6.325.5@gmail.com</a>
+<a href=""mailto:j.ons.63.25.5@gmail.com"">j.ons.63.25.5@gmail.com</a>
+<a href=""mailto:j.on.s6.3.255@gmail.com"">j.on.s6.3.255@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.3.2.5.5@gmail.com"">j.o.n.s.6.3.2.5.5@gmail.com</a>
+<a href=""mailto:j.ons.6.3.2.55@gmail.com"">j.ons.6.3.2.55@gmail.com</a>
+<a href=""mailto:j.o.ns.6.3.2.5.5@gmail.com"">j.o.ns.6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s.6325.5@gmail.com"">jo.n.s.6325.5@gmail.com</a>
+<a href=""mailto:j.on.s6.3255@gmail.com"">j.on.s6.3255@gmail.com</a>
+<a href=""mailto:jo.n.s.632.5.5@gmail.com"">jo.n.s.632.5.5@gmail.com</a>
+<a href=""mailto:jo.ns.63.255@gmail.com"">jo.ns.63.255@gmail.com</a>
+<a href=""mailto:jon.s.6325.5@gmail.com"">jon.s.6325.5@gmail.com</a>
+<a href=""mailto:j.o.n.s632.55@gmail.com"">j.o.n.s632.55@gmail.com</a>
+<a href=""mailto:jon.s6.32.55@gmail.com"">jon.s6.32.55@gmail.com</a>
+<a href=""mailto:j.on.s.6.32.55@gmail.com"">j.on.s.6.32.55@gmail.com</a>
+<a href=""mailto:jo.ns63.2.55@gmail.com"">jo.ns63.2.55@gmail.com</a>
+<a href=""mailto:jons.63255@gmail.com"">jons.63255@gmail.com</a>
+<a href=""mailto:jon.s63.2.55@gmail.com"">jon.s63.2.55@gmail.com</a>
+<a href=""mailto:jo.ns.6.32.5.5@gmail.com"">jo.ns.6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s6.3.2.55@gmail.com"">jo.n.s6.3.2.55@gmail.com</a>
+<a href=""mailto:jo.ns.63.25.5@gmail.com"">jo.ns.63.25.5@gmail.com</a>
+<a href=""mailto:jo.ns.6325.5@gmail.com"">jo.ns.6325.5@gmail.com</a>
+<a href=""mailto:jons63.25.5@gmail.com"">jons63.25.5@gmail.com</a>
+<a href=""mailto:jon.s.6.32.5.5@gmail.com"">jon.s.6.32.5.5@gmail.com</a>
+<a href=""mailto:jons6.3.2.5.5@gmail.com"">jons6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jon.s.6.32.55@gmail.com"">jon.s.6.32.55@gmail.com</a>
+<a href=""mailto:j.on.s.6.325.5@gmail.com"">j.on.s.6.325.5@gmail.com</a>
+<a href=""mailto:jon.s63.25.5@gmail.com"">jon.s63.25.5@gmail.com</a>
+<a href=""mailto:j.o.ns.63.25.5@gmail.com"">j.o.ns.63.25.5@gmail.com</a>
+<a href=""mailto:jons.6.3.2.55@gmail.com"">jons.6.3.2.55@gmail.com</a>
+<a href=""mailto:j.o.n.s6.3.2.55@gmail.com"">j.o.n.s6.3.2.55@gmail.com</a>
+<a href=""mailto:j.on.s.6.3.2.55@gmail.com"">j.on.s.6.3.2.55@gmail.com</a>
+<a href=""mailto:jo.n.s63.2.55@gmail.com"">jo.n.s63.2.55@gmail.com</a>
+<a href=""mailto:j.ons63.25.5@gmail.com"">j.ons63.25.5@gmail.com</a>
+<a href=""mailto:jon.s6.32.5.5@gmail.com"">jon.s6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.n.s.6.3.255@gmail.com"">jo.n.s.6.3.255@gmail.com</a>
+<a href=""mailto:jon.s.63.255@gmail.com"">jon.s.63.255@gmail.com</a>
+<a href=""mailto:j.o.ns.63.2.5.5@gmail.com"">j.o.ns.63.2.5.5@gmail.com</a>
+<a href=""mailto:jons.63.2.55@gmail.com"">jons.63.2.55@gmail.com</a>
+<a href=""mailto:j.o.n.s6.32.5.5@gmail.com"">j.o.n.s6.32.5.5@gmail.com</a>
+<a href=""mailto:jo.ns.63.2.55@gmail.com"">jo.ns.63.2.55@gmail.com</a>
+<a href=""mailto:j.ons6.32.5.5@gmail.com"">j.ons6.32.5.5@gmail.com</a>
+<a href=""mailto:j.o.ns.6.3.255@gmail.com"">j.o.ns.6.3.255@gmail.com</a>
+<a href=""mailto:jo.n.s.632.55@gmail.com"">jo.n.s.632.55@gmail.com</a>
+<a href=""mailto:j.o.n.s6.325.5@gmail.com"">j.o.n.s6.325.5@gmail.com</a>
+<a href=""mailto:jo.n.s632.55@gmail.com"">jo.n.s632.55@gmail.com</a>
+<a href=""mailto:j.o.ns.6.3255@gmail.com"">j.o.ns.6.3255@gmail.com</a>
+<a href=""mailto:j.o.ns.63255@gmail.com"">j.o.ns.63255@gmail.com</a>
+<a href=""mailto:jo.n.s.6.3.25.5@gmail.com"">jo.n.s.6.3.25.5@gmail.com</a>
+<a href=""mailto:jo.n.s.63.25.5@gmail.com"">jo.n.s.63.25.5@gmail.com</a>
+<a href=""mailto:j.o.ns.632.55@gmail.com"">j.o.ns.632.55@gmail.com</a>
+<a href=""mailto:j.ons632.55@gmail.com"">j.ons632.55@gmail.com</a>
+<a href=""mailto:j.ons6325.5@gmail.com"">j.ons6325.5@gmail.com</a>
+<a href=""mailto:j.o.n.s6.3.255@gmail.com"">j.o.n.s6.3.255@gmail.com</a>
+<a href=""mailto:jon.s632.5.5@gmail.com"">jon.s632.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s.6.3255@gmail.com"">j.o.n.s.6.3255@gmail.com</a>
+<a href=""mailto:jons63255@gmail.com"">jons63255@gmail.com</a>
+<a href=""mailto:jons.6.32.5.5@gmail.com"">jons.6.32.5.5@gmail.com</a>
+<a href=""mailto:j.o.n.s63.255@gmail.com"">j.o.n.s63.255@gmail.com</a>
+<a href=""mailto:jons.6.325.5@gmail.com"">jons.6.325.5@gmail.com</a>
+<a href=""mailto:j.ons63255@gmail.com"">j.ons63255@gmail.com</a>
+<a href=""mailto:j.on.s.6.3.2.5.5@gmail.com"">j.on.s.6.3.2.5.5@gmail.com</a>
+<a href=""mailto:jo.ns63.255@gmail.com"">jo.ns63.255@gmail.com</a>
+<a href=""mailto:jons63.2.5.5@gmail.com"">jons63.2.5.5@gmail.com</a>
+<a href=""mailto:j.on.s.6.32.5.5@gmail.com"">j.on.s.6.32.5.5@gmail.com</a>
+<a href=""mailto:jon.s6.325.5@gmail.com"">jon.s6.325.5@gmail.com</a>
+<a href=""mailto:jo.n.s6.3.2.5.5@gmail.com"">jo.n.s6.3.2.5.5@gmail.com</a>
+<a href=""mailto:j.ons.632.5.5@gmail.com"">j.ons.632.5.5@gmail.com</a>
+<a href=""mailto:j.ons.63.2.55@gmail.com"">j.ons.63.2.55@gmail.com</a>
+<a href=""mailto:jo.n.s63255@gmail.com"">jo.n.s63255@gmail.com</a>
+<a href=""mailto:j.ons63.2.55@gmail.com"">j.ons63.2.55@gmail.com</a>
+<a href=""mailto:bd3314284@gmail.com"">bd3314284@gmail.com</a>
+<a href=""mailto:bd.33.1428.4@gmail.com"">bd.33.1428.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.428.4@gmail.com"">b.d.3.31.428.4@gmail.com</a>
+<a href=""mailto:bd3.31.4.2.84@gmail.com"">bd3.31.4.2.84@gmail.com</a>
+<a href=""mailto:b.d.3.3142.8.4@gmail.com"">b.d.3.3142.8.4@gmail.com</a>
+<a href=""mailto:b.d3.31.4.28.4@gmail.com"">b.d3.31.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.3.3.1.4.284@gmail.com"">b.d.3.3.1.4.284@gmail.com</a>
+<a href=""mailto:b.d.3.3142.84@gmail.com"">b.d.3.3142.84@gmail.com</a>
+<a href=""mailto:bd331.4.2.84@gmail.com"">bd331.4.2.84@gmail.com</a>
+<a href=""mailto:bd.331.4.284@gmail.com"">bd.331.4.284@gmail.com</a>
+<a href=""mailto:bd.33.1.42.84@gmail.com"">bd.33.1.42.84@gmail.com</a>
+<a href=""mailto:bd3.3142.8.4@gmail.com"">bd3.3142.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.4.28.4@gmail.com"">b.d.3.31.4.28.4@gmail.com</a>
+<a href=""mailto:bd.3.3.1.4.2.84@gmail.com"">bd.3.3.1.4.2.84@gmail.com</a>
+<a href=""mailto:bd3.3.1.4.2.8.4@gmail.com"">bd3.3.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.4.2.84@gmail.com"">b.d.3.31.4.2.84@gmail.com</a>
+<a href=""mailto:bd3.3.1.4.28.4@gmail.com"">bd3.3.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d331.42.84@gmail.com"">b.d331.42.84@gmail.com</a>
+<a href=""mailto:b.d.3.3.1.4.28.4@gmail.com"">b.d.3.3.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.33.14284@gmail.com"">b.d.33.14284@gmail.com</a>
+<a href=""mailto:b.d33.1.4.2.84@gmail.com"">b.d33.1.4.2.84@gmail.com</a>
+<a href=""mailto:b.d331.4284@gmail.com"">b.d331.4284@gmail.com</a>
+<a href=""mailto:b.d.33.1.4.2.8.4@gmail.com"">b.d.33.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:b.d331.4.284@gmail.com"">b.d331.4.284@gmail.com</a>
+<a href=""mailto:b.d.331.4.28.4@gmail.com"">b.d.331.4.28.4@gmail.com</a>
+<a href=""mailto:bd.3.3.14.2.8.4@gmail.com"">bd.3.3.14.2.8.4@gmail.com</a>
+<a href=""mailto:b.d3.3142.8.4@gmail.com"">b.d3.3142.8.4@gmail.com</a>
+<a href=""mailto:b.d.331.4.2.8.4@gmail.com"">b.d.331.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd.33.14.28.4@gmail.com"">bd.33.14.28.4@gmail.com</a>
+<a href=""mailto:b.d.33.1.4.28.4@gmail.com"">b.d.33.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d3.3.142.84@gmail.com"">b.d3.3.142.84@gmail.com</a>
+<a href=""mailto:bd.3.3.1428.4@gmail.com"">bd.3.3.1428.4@gmail.com</a>
+<a href=""mailto:b.d.33.1.428.4@gmail.com"">b.d.33.1.428.4@gmail.com</a>
+<a href=""mailto:b.d33.14.28.4@gmail.com"">b.d33.14.28.4@gmail.com</a>
+<a href=""mailto:bd.33.1.4.284@gmail.com"">bd.33.1.4.284@gmail.com</a>
+<a href=""mailto:b.d.3.3.142.8.4@gmail.com"">b.d.3.3.142.8.4@gmail.com</a>
+<a href=""mailto:b.d.33.1428.4@gmail.com"">b.d.33.1428.4@gmail.com</a>
+<a href=""mailto:bd.33.1.4.2.84@gmail.com"">bd.33.1.4.2.84@gmail.com</a>
+<a href=""mailto:bd.33.14.2.84@gmail.com"">bd.33.14.2.84@gmail.com</a>
+<a href=""mailto:bd3.31.4.284@gmail.com"">bd3.31.4.284@gmail.com</a>
+<a href=""mailto:bd33.1.428.4@gmail.com"">bd33.1.428.4@gmail.com</a>
+<a href=""mailto:b.d.33.14.2.8.4@gmail.com"">b.d.33.14.2.8.4@gmail.com</a>
+<a href=""mailto:b.d3.3.1.42.84@gmail.com"">b.d3.3.1.42.84@gmail.com</a>
+<a href=""mailto:b.d.331.4.2.84@gmail.com"">b.d.331.4.2.84@gmail.com</a>
+<a href=""mailto:b.d331.4.2.8.4@gmail.com"">b.d331.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd.33.1.4.28.4@gmail.com"">bd.33.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.3.314284@gmail.com"">b.d.3.314284@gmail.com</a>
+<a href=""mailto:b.d3.31.42.8.4@gmail.com"">b.d3.31.42.8.4@gmail.com</a>
+<a href=""mailto:bd.33.1.4284@gmail.com"">bd.33.1.4284@gmail.com</a>
+<a href=""mailto:bd33.1428.4@gmail.com"">bd33.1428.4@gmail.com</a>
+<a href=""mailto:bd.3.3.142.8.4@gmail.com"">bd.3.3.142.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.3.14284@gmail.com"">b.d.3.3.14284@gmail.com</a>
+<a href=""mailto:bd3.3.1.4284@gmail.com"">bd3.3.1.4284@gmail.com</a>
+<a href=""mailto:b.d331.4.28.4@gmail.com"">b.d331.4.28.4@gmail.com</a>
+<a href=""mailto:bd3.314.28.4@gmail.com"">bd3.314.28.4@gmail.com</a>
+<a href=""mailto:bd.3.3.1.42.84@gmail.com"">bd.3.3.1.42.84@gmail.com</a>
+<a href=""mailto:b.d.3.3.14.2.84@gmail.com"">b.d.3.3.14.2.84@gmail.com</a>
+<a href=""mailto:b.d.3.31.4.2.8.4@gmail.com"">b.d.3.31.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd33.1.4.28.4@gmail.com"">bd33.1.4.28.4@gmail.com</a>
+<a href=""mailto:bd.3.314.28.4@gmail.com"">bd.3.314.28.4@gmail.com</a>
+<a href=""mailto:b.d3.31.4.2.84@gmail.com"">b.d3.31.4.2.84@gmail.com</a>
+<a href=""mailto:bd.3.3.1.4284@gmail.com"">bd.3.3.1.4284@gmail.com</a>
+<a href=""mailto:bd.331.4284@gmail.com"">bd.331.4284@gmail.com</a>
+<a href=""mailto:b.d3.3.14.2.84@gmail.com"">b.d3.3.14.2.84@gmail.com</a>
+<a href=""mailto:bd3.3.1.42.84@gmail.com"">bd3.3.1.42.84@gmail.com</a>
+<a href=""mailto:bd3.3.1.4.2.84@gmail.com"">bd3.3.1.4.2.84@gmail.com</a>
+<a href=""mailto:b.d3.314284@gmail.com"">b.d3.314284@gmail.com</a>
+<a href=""mailto:bd3.3.142.84@gmail.com"">bd3.3.142.84@gmail.com</a>
+<a href=""mailto:b.d33.142.8.4@gmail.com"">b.d33.142.8.4@gmail.com</a>
+<a href=""mailto:bd.3314.284@gmail.com"">bd.3314.284@gmail.com</a>
+<a href=""mailto:b.d3.3.1.42.8.4@gmail.com"">b.d3.3.1.42.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.3.1.428.4@gmail.com"">b.d.3.3.1.428.4@gmail.com</a>
+<a href=""mailto:b.d.3.314.28.4@gmail.com"">b.d.3.314.28.4@gmail.com</a>
+<a href=""mailto:bd3.3.1428.4@gmail.com"">bd3.3.1428.4@gmail.com</a>
+<a href=""mailto:bd33.1.4.2.8.4@gmail.com"">bd33.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd.3.3.14.28.4@gmail.com"">bd.3.3.14.28.4@gmail.com</a>
+<a href=""mailto:bd.3.3.142.84@gmail.com"">bd.3.3.142.84@gmail.com</a>
+<a href=""mailto:b.d.3.314.2.84@gmail.com"">b.d.3.314.2.84@gmail.com</a>
+<a href=""mailto:b.d33.1.42.84@gmail.com"">b.d33.1.42.84@gmail.com</a>
+<a href=""mailto:bd33.142.8.4@gmail.com"">bd33.142.8.4@gmail.com</a>
+<a href=""mailto:b.d33142.8.4@gmail.com"">b.d33142.8.4@gmail.com</a>
+<a href=""mailto:bd.3314.2.84@gmail.com"">bd.3314.2.84@gmail.com</a>
+<a href=""mailto:b.d33.1.42.8.4@gmail.com"">b.d33.1.42.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.3.142.84@gmail.com"">b.d.3.3.142.84@gmail.com</a>
+<a href=""mailto:b.d3314.2.84@gmail.com"">b.d3314.2.84@gmail.com</a>
+<a href=""mailto:b.d.331.4.284@gmail.com"">b.d.331.4.284@gmail.com</a>
+<a href=""mailto:bd33.1.42.84@gmail.com"">bd33.1.42.84@gmail.com</a>
+<a href=""mailto:bd3.3.1.4.284@gmail.com"">bd3.3.1.4.284@gmail.com</a>
+<a href=""mailto:bd.3.3.14.2.84@gmail.com"">bd.3.3.14.2.84@gmail.com</a>
+<a href=""mailto:b.d.331.4284@gmail.com"">b.d.331.4284@gmail.com</a>
+<a href=""mailto:b.d3.31.4.284@gmail.com"">b.d3.31.4.284@gmail.com</a>
+<a href=""mailto:b.d.3.31.42.84@gmail.com"">b.d.3.31.42.84@gmail.com</a>
+<a href=""mailto:b.d3.31.4.2.8.4@gmail.com"">b.d3.31.4.2.8.4@gmail.com</a>
+<a href=""mailto:b.d.33.142.84@gmail.com"">b.d.33.142.84@gmail.com</a>
+<a href=""mailto:bd33142.8.4@gmail.com"">bd33142.8.4@gmail.com</a>
+<a href=""mailto:bd.3.3.1.42.8.4@gmail.com"">bd.3.3.1.42.8.4@gmail.com</a>
+<a href=""mailto:bd.331.42.8.4@gmail.com"">bd.331.42.8.4@gmail.com</a>
+<a href=""mailto:b.d3314.28.4@gmail.com"">b.d3314.28.4@gmail.com</a>
+<a href=""mailto:bd.33142.8.4@gmail.com"">bd.33142.8.4@gmail.com</a>
+<a href=""mailto:b.d331.428.4@gmail.com"">b.d331.428.4@gmail.com</a>
+<a href=""mailto:b.d3.3.14284@gmail.com"">b.d3.3.14284@gmail.com</a>
+<a href=""mailto:bd.331428.4@gmail.com"">bd.331428.4@gmail.com</a>
+<a href=""mailto:b.d.331.428.4@gmail.com"">b.d.331.428.4@gmail.com</a>
+<a href=""mailto:b.d3.3.1.428.4@gmail.com"">b.d3.3.1.428.4@gmail.com</a>
+<a href=""mailto:b.d3.31.42.84@gmail.com"">b.d3.31.42.84@gmail.com</a>
+<a href=""mailto:b.d33.1.4.28.4@gmail.com"">b.d33.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.4.284@gmail.com"">b.d.3.31.4.284@gmail.com</a>
+<a href=""mailto:b.d.3.3.1.4.2.84@gmail.com"">b.d.3.3.1.4.2.84@gmail.com</a>
+<a href=""mailto:bd.3.31.4.2.84@gmail.com"">bd.3.31.4.2.84@gmail.com</a>
+<a href=""mailto:b.d331428.4@gmail.com"">b.d331428.4@gmail.com</a>
+<a href=""mailto:b.d3.3.142.8.4@gmail.com"">b.d3.3.142.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.314.2.8.4@gmail.com"">b.d.3.314.2.8.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.4284@gmail.com"">b.d.3.31.4284@gmail.com</a>
+<a href=""mailto:bd3.3.1.42.8.4@gmail.com"">bd3.3.1.42.8.4@gmail.com</a>
+<a href=""mailto:bd3.31428.4@gmail.com"">bd3.31428.4@gmail.com</a>
+<a href=""mailto:bd.3.31.4.28.4@gmail.com"">bd.3.31.4.28.4@gmail.com</a>
+<a href=""mailto:bd.3314284@gmail.com"">bd.3314284@gmail.com</a>
+<a href=""mailto:b.d.3.3.14.2.8.4@gmail.com"">b.d.3.3.14.2.8.4@gmail.com</a>
+<a href=""mailto:b.d33.1428.4@gmail.com"">b.d33.1428.4@gmail.com</a>
+<a href=""mailto:b.d.33.14.2.84@gmail.com"">b.d.33.14.2.84@gmail.com</a>
+<a href=""mailto:bd3314.2.8.4@gmail.com"">bd3314.2.8.4@gmail.com</a>
+<a href=""mailto:bd.3314.28.4@gmail.com"">bd.3314.28.4@gmail.com</a>
+<a href=""mailto:bd331.4.284@gmail.com"">bd331.4.284@gmail.com</a>
+<a href=""mailto:b.d.33.14.284@gmail.com"">b.d.33.14.284@gmail.com</a>
+<a href=""mailto:b.d3.314.284@gmail.com"">b.d3.314.284@gmail.com</a>
+<a href=""mailto:bd.3.31.4284@gmail.com"">bd.3.31.4284@gmail.com</a>
+<a href=""mailto:b.d.33.1.42.8.4@gmail.com"">b.d.33.1.42.8.4@gmail.com</a>
+<a href=""mailto:bd.3.31.42.8.4@gmail.com"">bd.3.31.42.8.4@gmail.com</a>
+<a href=""mailto:bd.331.4.2.84@gmail.com"">bd.331.4.2.84@gmail.com</a>
+<a href=""mailto:b.d33.1.428.4@gmail.com"">b.d33.1.428.4@gmail.com</a>
+<a href=""mailto:b.d.331.42.84@gmail.com"">b.d.331.42.84@gmail.com</a>
+<a href=""mailto:bd.3.314.2.84@gmail.com"">bd.3.314.2.84@gmail.com</a>
+<a href=""mailto:b.d3.3.1.4.28.4@gmail.com"">b.d3.3.1.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.3.31428.4@gmail.com"">b.d.3.31428.4@gmail.com</a>
+<a href=""mailto:bd3.314.2.84@gmail.com"">bd3.314.2.84@gmail.com</a>
+<a href=""mailto:bd.33.1.42.8.4@gmail.com"">bd.33.1.42.8.4@gmail.com</a>
+<a href=""mailto:b.d33.14.2.84@gmail.com"">b.d33.14.2.84@gmail.com</a>
+<a href=""mailto:bd33.142.84@gmail.com"">bd33.142.84@gmail.com</a>
+<a href=""mailto:bd3.314.284@gmail.com"">bd3.314.284@gmail.com</a>
+<a href=""mailto:b.d3.314.2.8.4@gmail.com"">b.d3.314.2.8.4@gmail.com</a>
+<a href=""mailto:b.d3.3.1.4284@gmail.com"">b.d3.3.1.4284@gmail.com</a>
+<a href=""mailto:b.d3.31428.4@gmail.com"">b.d3.31428.4@gmail.com</a>
+<a href=""mailto:b.d331.4.2.84@gmail.com"">b.d331.4.2.84@gmail.com</a>
+<a href=""mailto:b.d3.3142.84@gmail.com"">b.d3.3142.84@gmail.com</a>
+<a href=""mailto:bd.33.14.284@gmail.com"">bd.33.14.284@gmail.com</a>
+<a href=""mailto:bd33.14.2.8.4@gmail.com"">bd33.14.2.8.4@gmail.com</a>
+<a href=""mailto:bd3.3.1.428.4@gmail.com"">bd3.3.1.428.4@gmail.com</a>
+<a href=""mailto:b.d.3.31.42.8.4@gmail.com"">b.d.3.31.42.8.4@gmail.com</a>
+<a href=""mailto:b.d3.31.4284@gmail.com"">b.d3.31.4284@gmail.com</a>
+<a href=""mailto:b.d.33.14.28.4@gmail.com"">b.d.33.14.28.4@gmail.com</a>
+<a href=""mailto:bd3.3.14.28.4@gmail.com"">bd3.3.14.28.4@gmail.com</a>
+<a href=""mailto:bd.3.3.1.428.4@gmail.com"">bd.3.3.1.428.4@gmail.com</a>
+<a href=""mailto:bd331.4284@gmail.com"">bd331.4284@gmail.com</a>
+<a href=""mailto:b.d3.314.2.84@gmail.com"">b.d3.314.2.84@gmail.com</a>
+<a href=""mailto:b.d.3.3.1428.4@gmail.com"">b.d.3.3.1428.4@gmail.com</a>
+<a href=""mailto:bd.331.42.84@gmail.com"">bd.331.42.84@gmail.com</a>
+<a href=""mailto:bd3.31.42.8.4@gmail.com"">bd3.31.42.8.4@gmail.com</a>
+<a href=""mailto:bd.331.4.2.8.4@gmail.com"">bd.331.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd.3.314284@gmail.com"">bd.3.314284@gmail.com</a>
+<a href=""mailto:b.d.3.3.1.4.2.8.4@gmail.com"">b.d.3.3.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd3314.28.4@gmail.com"">bd3314.28.4@gmail.com</a>
+<a href=""mailto:bd3.3142.84@gmail.com"">bd3.3142.84@gmail.com</a>
+<a href=""mailto:b.d3314.284@gmail.com"">b.d3314.284@gmail.com</a>
+<a href=""mailto:b.d3.3.14.284@gmail.com"">b.d3.3.14.284@gmail.com</a>
+<a href=""mailto:bd33.14.28.4@gmail.com"">bd33.14.28.4@gmail.com</a>
+<a href=""mailto:bd3.3.14.2.84@gmail.com"">bd3.3.14.2.84@gmail.com</a>
+<a href=""mailto:bd3314284@gmail.com"">bd3314284@gmail.com</a>
+<a href=""mailto:bd3314.284@gmail.com"">bd3314.284@gmail.com</a>
+<a href=""mailto:b.d.3.3.14.284@gmail.com"">b.d.3.3.14.284@gmail.com</a>
+<a href=""mailto:bd.33.142.84@gmail.com"">bd.33.142.84@gmail.com</a>
+<a href=""mailto:b.d.3314284@gmail.com"">b.d.3314284@gmail.com</a>
+<a href=""mailto:b.d.33.142.8.4@gmail.com"">b.d.33.142.8.4@gmail.com</a>
+<a href=""mailto:bd3.3.14.284@gmail.com"">bd3.3.14.284@gmail.com</a>
+<a href=""mailto:b.d33.1.4.284@gmail.com"">b.d33.1.4.284@gmail.com</a>
+<a href=""mailto:b.d.331428.4@gmail.com"">b.d.331428.4@gmail.com</a>
+<a href=""mailto:bd3.314284@gmail.com"">bd3.314284@gmail.com</a>
+<a href=""mailto:b.d3.3.1.4.2.84@gmail.com"">b.d3.3.1.4.2.84@gmail.com</a>
+<a href=""mailto:bd3.31.428.4@gmail.com"">bd3.31.428.4@gmail.com</a>
+<a href=""mailto:bd.3.31.42.84@gmail.com"">bd.3.31.42.84@gmail.com</a>
+<a href=""mailto:b.d331.42.8.4@gmail.com"">b.d331.42.8.4@gmail.com</a>
+<a href=""mailto:b.d3314284@gmail.com"">b.d3314284@gmail.com</a>
+<a href=""mailto:bd33.1.4284@gmail.com"">bd33.1.4284@gmail.com</a>
+<a href=""mailto:b.d.33142.8.4@gmail.com"">b.d.33142.8.4@gmail.com</a>
+<a href=""mailto:bd331.4.28.4@gmail.com"">bd331.4.28.4@gmail.com</a>
+<a href=""mailto:b.d3.31.428.4@gmail.com"">b.d3.31.428.4@gmail.com</a>
+<a href=""mailto:bd3.31.42.84@gmail.com"">bd3.31.42.84@gmail.com</a>
+<a href=""mailto:bd3.31.4.28.4@gmail.com"">bd3.31.4.28.4@gmail.com</a>
+<a href=""mailto:b.d.3314.2.8.4@gmail.com"">b.d.3314.2.8.4@gmail.com</a>
+<a href=""mailto:b.d.3314.28.4@gmail.com"">b.d.3314.28.4@gmail.com</a>
+<a href=""mailto:b.d3.3.1428.4@gmail.com"">b.d3.3.1428.4@gmail.com</a>
+<a href=""mailto:bd.3.31428.4@gmail.com"">bd.3.31428.4@gmail.com</a>
+<a href=""mailto:bd.3.314.2.8.4@gmail.com"">bd.3.314.2.8.4@gmail.com</a>
+<a href=""mailto:bd331.428.4@gmail.com"">bd331.428.4@gmail.com</a>
+<a href=""mailto:bd.3.3.1.4.2.8.4@gmail.com"">bd.3.3.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd3.3.14284@gmail.com"">bd3.3.14284@gmail.com</a>
+<a href=""mailto:b.d.33.1.4284@gmail.com"">b.d.33.1.4284@gmail.com</a>
+<a href=""mailto:bd.3.3142.84@gmail.com"">bd.3.3142.84@gmail.com</a>
+<a href=""mailto:b.d3.3.1.4.2.8.4@gmail.com"">b.d3.3.1.4.2.8.4@gmail.com</a>
+<a href=""mailto:bd331428.4@gmail.com"">bd331428.4@gmail.com</a>
+<a href=""mailto:bd.3.3.14.284@gmail.com"">bd.3.3.14.284@gmail.com</a>
+<a href=""mailto:bd33.1.42.8.4@gmail.com"">bd33.1.42.8.4@gmail.com</a>
+<a href=""mailto:web4million@gmail.com"">web4million@gmail.com</a>
+<a href=""mailto:w.e.b.4.mi.l.l.i.on@gmail.com"">w.e.b.4.mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:web.4.m.il.lion@gmail.com"">web.4.m.il.lion@gmail.com</a>
+<a href=""mailto:we.b4.m.il.l.i.o.n@gmail.com"">we.b4.m.il.l.i.o.n@gmail.com</a>
+<a href=""mailto:web.4mill.ion@gmail.com"">web.4mill.ion@gmail.com</a>
+<a href=""mailto:we.b.4m.illio.n@gmail.com"">we.b.4m.illio.n@gmail.com</a>
+<a href=""mailto:we.b4.m.il.l.ion@gmail.com"">we.b4.m.il.l.ion@gmail.com</a>
+<a href=""mailto:web4m.i.ll.i.on@gmail.com"">web4m.i.ll.i.on@gmail.com</a>
+<a href=""mailto:w.eb.4.mil.l.i.on@gmail.com"">w.eb.4.mil.l.i.on@gmail.com</a>
+<a href=""mailto:we.b.4.m.i.ll.ion@gmail.com"">we.b.4.m.i.ll.ion@gmail.com</a>
+<a href=""mailto:w.e.b4.m.illi.o.n@gmail.com"">w.e.b4.m.illi.o.n@gmail.com</a>
+<a href=""mailto:we.b.4.m.i.llio.n@gmail.com"">we.b.4.m.i.llio.n@gmail.com</a>
+<a href=""mailto:w.eb.4.mi.l.l.ion@gmail.com"">w.eb.4.mi.l.l.ion@gmail.com</a>
+<a href=""mailto:w.e.b4.m.i.l.li.o.n@gmail.com"">w.e.b4.m.i.l.li.o.n@gmail.com</a>
+<a href=""mailto:we.b.4m.ill.ion@gmail.com"">we.b.4m.ill.ion@gmail.com</a>
+<a href=""mailto:we.b.4m.ill.i.on@gmail.com"">we.b.4m.ill.i.on@gmail.com</a>
+<a href=""mailto:w.eb4m.il.lio.n@gmail.com"">w.eb4m.il.lio.n@gmail.com</a>
+<a href=""mailto:web.4m.il.li.o.n@gmail.com"">web.4m.il.li.o.n@gmail.com</a>
+<a href=""mailto:web.4m.ill.ion@gmail.com"">web.4m.ill.ion@gmail.com</a>
+<a href=""mailto:web4.mil.li.o.n@gmail.com"">web4.mil.li.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4.mi.ll.i.o.n@gmail.com"">w.e.b4.mi.ll.i.o.n@gmail.com</a>
+<a href=""mailto:we.b4m.illi.on@gmail.com"">we.b4m.illi.on@gmail.com</a>
+<a href=""mailto:w.eb.4mi.llio.n@gmail.com"">w.eb.4mi.llio.n@gmail.com</a>
+<a href=""mailto:we.b4m.i.llion@gmail.com"">we.b4m.i.llion@gmail.com</a>
+<a href=""mailto:web.4.mi.l.lion@gmail.com"">web.4.mi.l.lion@gmail.com</a>
+<a href=""mailto:we.b.4.m.i.l.l.i.on@gmail.com"">we.b.4.m.i.l.l.i.on@gmail.com</a>
+<a href=""mailto:w.e.b4.mi.llion@gmail.com"">w.e.b4.mi.llion@gmail.com</a>
+<a href=""mailto:we.b.4.mi.llion@gmail.com"">we.b.4.mi.llion@gmail.com</a>
+<a href=""mailto:w.e.b4.milli.o.n@gmail.com"">w.e.b4.milli.o.n@gmail.com</a>
+<a href=""mailto:w.eb4.mil.lion@gmail.com"">w.eb4.mil.lion@gmail.com</a>
+<a href=""mailto:w.e.b4.mi.lli.on@gmail.com"">w.e.b4.mi.lli.on@gmail.com</a>
+<a href=""mailto:web.4.m.il.li.on@gmail.com"">web.4.m.il.li.on@gmail.com</a>
+<a href=""mailto:w.e.b4.mil.lion@gmail.com"">w.e.b4.mil.lion@gmail.com</a>
+<a href=""mailto:we.b4.m.ill.io.n@gmail.com"">we.b4.m.ill.io.n@gmail.com</a>
+<a href=""mailto:we.b4.mill.i.o.n@gmail.com"">we.b4.mill.i.o.n@gmail.com</a>
+<a href=""mailto:web4m.i.l.l.ion@gmail.com"">web4m.i.l.l.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4m.il.l.ion@gmail.com"">w.e.b.4m.il.l.ion@gmail.com</a>
+<a href=""mailto:we.b4m.illi.o.n@gmail.com"">we.b4m.illi.o.n@gmail.com</a>
+<a href=""mailto:we.b.4.m.i.l.lio.n@gmail.com"">we.b.4.m.i.l.lio.n@gmail.com</a>
+<a href=""mailto:w.eb4.mi.llio.n@gmail.com"">w.eb4.mi.llio.n@gmail.com</a>
+<a href=""mailto:w.e.b4.mi.l.l.i.o.n@gmail.com"">w.e.b4.mi.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.eb4.mi.l.l.i.on@gmail.com"">w.eb4.mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:web4m.i.l.lion@gmail.com"">web4m.i.l.lion@gmail.com</a>
+<a href=""mailto:web4.mill.io.n@gmail.com"">web4.mill.io.n@gmail.com</a>
+<a href=""mailto:w.e.b4mi.ll.i.o.n@gmail.com"">w.e.b4mi.ll.i.o.n@gmail.com</a>
+<a href=""mailto:w.eb4m.ill.i.o.n@gmail.com"">w.eb4m.ill.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4.m.il.lion@gmail.com"">w.e.b4.m.il.lion@gmail.com</a>
+<a href=""mailto:w.eb.4million@gmail.com"">w.eb.4million@gmail.com</a>
+<a href=""mailto:w.e.b4.m.il.li.on@gmail.com"">w.e.b4.m.il.li.on@gmail.com</a>
+<a href=""mailto:we.b.4.mi.l.l.i.on@gmail.com"">we.b.4.mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:w.eb4.milli.on@gmail.com"">w.eb4.milli.on@gmail.com</a>
+<a href=""mailto:w.eb.4mi.llion@gmail.com"">w.eb.4mi.llion@gmail.com</a>
+<a href=""mailto:web.4mi.l.l.i.o.n@gmail.com"">web.4mi.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:web4m.ill.ion@gmail.com"">web4m.ill.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.i.lli.on@gmail.com"">w.e.b.4.m.i.lli.on@gmail.com</a>
+<a href=""mailto:w.eb4.mil.l.i.o.n@gmail.com"">w.eb4.mil.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4.mill.i.o.n@gmail.com"">w.e.b4.mill.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4mi.l.lio.n@gmail.com"">w.e.b4mi.l.lio.n@gmail.com</a>
+<a href=""mailto:w.eb.4.mill.i.o.n@gmail.com"">w.eb.4.mill.i.o.n@gmail.com</a>
+<a href=""mailto:web.4.mi.l.l.i.on@gmail.com"">web.4.mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:we.b4mi.llion@gmail.com"">we.b4mi.llion@gmail.com</a>
+<a href=""mailto:w.eb.4mill.i.on@gmail.com"">w.eb.4mill.i.on@gmail.com</a>
+<a href=""mailto:web.4mil.lio.n@gmail.com"">web.4mil.lio.n@gmail.com</a>
+<a href=""mailto:web.4mi.l.li.on@gmail.com"">web.4mi.l.li.on@gmail.com</a>
+<a href=""mailto:web.4mi.ll.io.n@gmail.com"">web.4mi.ll.io.n@gmail.com</a>
+<a href=""mailto:w.e.b4mil.l.i.on@gmail.com"">w.e.b4mil.l.i.on@gmail.com</a>
+<a href=""mailto:w.eb4.m.i.l.l.ion@gmail.com"">w.eb4.m.i.l.l.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4.mil.l.i.o.n@gmail.com"">w.e.b.4.mil.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.eb4m.i.l.l.ion@gmail.com"">w.eb4m.i.l.l.ion@gmail.com</a>
+<a href=""mailto:web4mi.l.l.i.o.n@gmail.com"">web4mi.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.mi.lli.on@gmail.com"">w.e.b.4.mi.lli.on@gmail.com</a>
+<a href=""mailto:web.4mil.l.i.o.n@gmail.com"">web.4mil.l.i.o.n@gmail.com</a>
+<a href=""mailto:web4mill.ion@gmail.com"">web4mill.ion@gmail.com</a>
+<a href=""mailto:w.eb.4m.i.lli.on@gmail.com"">w.eb.4m.i.lli.on@gmail.com</a>
+<a href=""mailto:we.b4.m.i.lli.on@gmail.com"">we.b4.m.i.lli.on@gmail.com</a>
+<a href=""mailto:w.e.b4m.i.l.lio.n@gmail.com"">w.e.b4m.i.l.lio.n@gmail.com</a>
+<a href=""mailto:we.b4.mi.l.li.on@gmail.com"">we.b4.mi.l.li.on@gmail.com</a>
+<a href=""mailto:w.e.b4mi.l.li.on@gmail.com"">w.e.b4mi.l.li.on@gmail.com</a>
+<a href=""mailto:w.e.b4m.il.lion@gmail.com"">w.e.b4m.il.lion@gmail.com</a>
+<a href=""mailto:w.e.b4m.il.l.ion@gmail.com"">w.e.b4m.il.l.ion@gmail.com</a>
+<a href=""mailto:we.b.4m.il.li.on@gmail.com"">we.b.4m.il.li.on@gmail.com</a>
+<a href=""mailto:w.e.b.4.mil.li.on@gmail.com"">w.e.b.4.mil.li.on@gmail.com</a>
+<a href=""mailto:w.eb4.m.i.l.li.on@gmail.com"">w.eb4.m.i.l.li.on@gmail.com</a>
+<a href=""mailto:w.e.b.4.milli.o.n@gmail.com"">w.e.b.4.milli.o.n@gmail.com</a>
+<a href=""mailto:web.4m.il.l.ion@gmail.com"">web.4m.il.l.ion@gmail.com</a>
+<a href=""mailto:web.4mi.ll.i.on@gmail.com"">web.4mi.ll.i.on@gmail.com</a>
+<a href=""mailto:web4.m.i.l.l.i.o.n@gmail.com"">web4.m.i.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4.mil.l.i.o.n@gmail.com"">w.e.b4.mil.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.eb4.m.il.l.i.on@gmail.com"">w.eb4.m.il.l.i.on@gmail.com</a>
+<a href=""mailto:web.4mi.ll.ion@gmail.com"">web.4mi.ll.ion@gmail.com</a>
+<a href=""mailto:we.b4m.i.ll.ion@gmail.com"">we.b4m.i.ll.ion@gmail.com</a>
+<a href=""mailto:web.4m.i.l.l.io.n@gmail.com"">web.4m.i.l.l.io.n@gmail.com</a>
+<a href=""mailto:w.eb4.mi.l.lio.n@gmail.com"">w.eb4.mi.l.lio.n@gmail.com</a>
+<a href=""mailto:we.b.4.m.il.li.on@gmail.com"">we.b.4.m.il.li.on@gmail.com</a>
+<a href=""mailto:w.e.b.4m.i.ll.io.n@gmail.com"">w.e.b.4m.i.ll.io.n@gmail.com</a>
+<a href=""mailto:w.eb4m.i.l.l.i.on@gmail.com"">w.eb4m.i.l.l.i.on@gmail.com</a>
+<a href=""mailto:we.b4.m.ill.ion@gmail.com"">we.b4.m.ill.ion@gmail.com</a>
+<a href=""mailto:w.eb.4mil.li.on@gmail.com"">w.eb.4mil.li.on@gmail.com</a>
+<a href=""mailto:w.eb.4m.ill.io.n@gmail.com"">w.eb.4m.ill.io.n@gmail.com</a>
+<a href=""mailto:we.b4.m.il.li.o.n@gmail.com"">we.b4.m.il.li.o.n@gmail.com</a>
+<a href=""mailto:w.e.b.4m.i.llion@gmail.com"">w.e.b.4m.i.llion@gmail.com</a>
+<a href=""mailto:we.b.4mi.ll.i.o.n@gmail.com"">we.b.4mi.ll.i.o.n@gmail.com</a>
+<a href=""mailto:we.b4mill.ion@gmail.com"">we.b4mill.ion@gmail.com</a>
+<a href=""mailto:w.e.b4.mil.lio.n@gmail.com"">w.e.b4.mil.lio.n@gmail.com</a>
+<a href=""mailto:we.b4mil.l.io.n@gmail.com"">we.b4mil.l.io.n@gmail.com</a>
+<a href=""mailto:we.b4.milli.on@gmail.com"">we.b4.milli.on@gmail.com</a>
+<a href=""mailto:web.4m.il.lion@gmail.com"">web.4m.il.lion@gmail.com</a>
+<a href=""mailto:we.b4m.i.llio.n@gmail.com"">we.b4m.i.llio.n@gmail.com</a>
+<a href=""mailto:web4.m.i.l.lion@gmail.com"">web4.m.i.l.lion@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.ill.io.n@gmail.com"">w.e.b.4.m.ill.io.n@gmail.com</a>
+<a href=""mailto:w.eb.4mi.l.l.i.on@gmail.com"">w.eb.4mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:w.e.b4.mi.l.li.o.n@gmail.com"">w.e.b4.mi.l.li.o.n@gmail.com</a>
+<a href=""mailto:web4m.illi.on@gmail.com"">web4m.illi.on@gmail.com</a>
+<a href=""mailto:w.e.b.4m.il.lio.n@gmail.com"">w.e.b.4m.il.lio.n@gmail.com</a>
+<a href=""mailto:web.4.m.i.l.l.i.on@gmail.com"">web.4.m.i.l.l.i.on@gmail.com</a>
+<a href=""mailto:w.eb4.mi.l.li.o.n@gmail.com"">w.eb4.mi.l.li.o.n@gmail.com</a>
+<a href=""mailto:w.eb.4mi.ll.io.n@gmail.com"">w.eb.4mi.ll.io.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.milli.on@gmail.com"">w.e.b.4.milli.on@gmail.com</a>
+<a href=""mailto:w.e.b4mil.lion@gmail.com"">w.e.b4mil.lion@gmail.com</a>
+<a href=""mailto:we.b4m.illio.n@gmail.com"">we.b4m.illio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4mil.l.io.n@gmail.com"">w.e.b.4mil.l.io.n@gmail.com</a>
+<a href=""mailto:w.eb4m.i.llion@gmail.com"">w.eb4m.i.llion@gmail.com</a>
+<a href=""mailto:we.b.4.m.il.li.o.n@gmail.com"">we.b.4.m.il.li.o.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.mi.llio.n@gmail.com"">w.e.b.4.mi.llio.n@gmail.com</a>
+<a href=""mailto:we.b.4m.i.ll.ion@gmail.com"">we.b.4m.i.ll.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4m.i.ll.i.o.n@gmail.com"">w.e.b.4m.i.ll.i.o.n@gmail.com</a>
+<a href=""mailto:we.b4mi.ll.io.n@gmail.com"">we.b4mi.ll.io.n@gmail.com</a>
+<a href=""mailto:web.4mi.l.l.i.on@gmail.com"">web.4mi.l.l.i.on@gmail.com</a>
+<a href=""mailto:web.4m.i.l.li.on@gmail.com"">web.4m.i.l.li.on@gmail.com</a>
+<a href=""mailto:web4.m.i.llio.n@gmail.com"">web4.m.i.llio.n@gmail.com</a>
+<a href=""mailto:w.eb.4m.illi.o.n@gmail.com"">w.eb.4m.illi.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4m.i.l.l.io.n@gmail.com"">w.e.b4m.i.l.l.io.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.i.llion@gmail.com"">w.e.b.4.m.i.llion@gmail.com</a>
+<a href=""mailto:web4.mil.l.i.on@gmail.com"">web4.mil.l.i.on@gmail.com</a>
+<a href=""mailto:we.b.4mi.ll.ion@gmail.com"">we.b.4mi.ll.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4.mi.llion@gmail.com"">w.e.b.4.mi.llion@gmail.com</a>
+<a href=""mailto:we.b.4.mi.l.lio.n@gmail.com"">we.b.4.mi.l.lio.n@gmail.com</a>
+<a href=""mailto:w.eb4m.illio.n@gmail.com"">w.eb4m.illio.n@gmail.com</a>
+<a href=""mailto:we.b.4mil.li.o.n@gmail.com"">we.b.4mil.li.o.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.mil.lion@gmail.com"">w.e.b.4.mil.lion@gmail.com</a>
+<a href=""mailto:we.b.4m.illion@gmail.com"">we.b.4m.illion@gmail.com</a>
+<a href=""mailto:web4.m.il.l.i.on@gmail.com"">web4.m.il.l.i.on@gmail.com</a>
+<a href=""mailto:web.4m.ill.i.on@gmail.com"">web.4m.ill.i.on@gmail.com</a>
+<a href=""mailto:we.b.4.m.il.l.io.n@gmail.com"">we.b.4.m.il.l.io.n@gmail.com</a>
+<a href=""mailto:we.b.4.mi.l.li.o.n@gmail.com"">we.b.4.mi.l.li.o.n@gmail.com</a>
+<a href=""mailto:w.eb.4.m.ill.i.o.n@gmail.com"">w.eb.4.m.ill.i.o.n@gmail.com</a>
+<a href=""mailto:we.b.4milli.o.n@gmail.com"">we.b.4milli.o.n@gmail.com</a>
+<a href=""mailto:w.eb.4m.illio.n@gmail.com"">w.eb.4m.illio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4mil.l.i.on@gmail.com"">w.e.b.4mil.l.i.on@gmail.com</a>
+<a href=""mailto:we.b.4m.i.l.l.io.n@gmail.com"">we.b.4m.i.l.l.io.n@gmail.com</a>
+<a href=""mailto:we.b4.m.i.ll.i.o.n@gmail.com"">we.b4.m.i.ll.i.o.n@gmail.com</a>
+<a href=""mailto:w.eb.4m.il.l.ion@gmail.com"">w.eb.4m.il.l.ion@gmail.com</a>
+<a href=""mailto:w.eb.4.m.ill.ion@gmail.com"">w.eb.4.m.ill.ion@gmail.com</a>
+<a href=""mailto:web.4.mill.ion@gmail.com"">web.4.mill.ion@gmail.com</a>
+<a href=""mailto:we.b4mi.l.li.on@gmail.com"">we.b4mi.l.li.on@gmail.com</a>
+<a href=""mailto:web4m.i.l.lio.n@gmail.com"">web4m.i.l.lio.n@gmail.com</a>
+<a href=""mailto:we.b.4m.i.ll.i.o.n@gmail.com"">we.b.4m.i.ll.i.o.n@gmail.com</a>
+<a href=""mailto:we.b.4million@gmail.com"">we.b.4million@gmail.com</a>
+<a href=""mailto:we.b4.m.i.l.lio.n@gmail.com"">we.b4.m.i.l.lio.n@gmail.com</a>
+<a href=""mailto:w.eb4.m.i.lli.on@gmail.com"">w.eb4.m.i.lli.on@gmail.com</a>
+<a href=""mailto:w.e.b.4.mi.l.l.ion@gmail.com"">w.e.b.4.mi.l.l.ion@gmail.com</a>
+<a href=""mailto:w.e.b4mi.llio.n@gmail.com"">w.e.b4mi.llio.n@gmail.com</a>
+<a href=""mailto:web.4.m.il.l.ion@gmail.com"">web.4.m.il.l.ion@gmail.com</a>
+<a href=""mailto:web4m.i.l.li.o.n@gmail.com"">web4m.i.l.li.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4mi.lli.o.n@gmail.com"">w.e.b4mi.lli.o.n@gmail.com</a>
+<a href=""mailto:web4.m.i.l.l.ion@gmail.com"">web4.m.i.l.l.ion@gmail.com</a>
+<a href=""mailto:web4.mi.lli.o.n@gmail.com"">web4.mi.lli.o.n@gmail.com</a>
+<a href=""mailto:we.b.4mill.io.n@gmail.com"">we.b.4mill.io.n@gmail.com</a>
+<a href=""mailto:web4mi.l.lio.n@gmail.com"">web4mi.l.lio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.million@gmail.com"">w.e.b.4.million@gmail.com</a>
+<a href=""mailto:w.e.b4m.illi.o.n@gmail.com"">w.e.b4m.illi.o.n@gmail.com</a>
+<a href=""mailto:w.eb.4.m.i.l.lio.n@gmail.com"">w.eb.4.m.i.l.lio.n@gmail.com</a>
+<a href=""mailto:web.4.millio.n@gmail.com"">web.4.millio.n@gmail.com</a>
+<a href=""mailto:w.e.b4milli.on@gmail.com"">w.e.b4milli.on@gmail.com</a>
+<a href=""mailto:w.eb.4.millio.n@gmail.com"">w.eb.4.millio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4mil.lion@gmail.com"">w.e.b.4mil.lion@gmail.com</a>
+<a href=""mailto:w.eb.4.m.illi.on@gmail.com"">w.eb.4.m.illi.on@gmail.com</a>
+<a href=""mailto:w.eb4m.i.ll.ion@gmail.com"">w.eb4m.i.ll.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.i.ll.ion@gmail.com"">w.e.b.4.m.i.ll.ion@gmail.com</a>
+<a href=""mailto:w.e.b.4mil.l.ion@gmail.com"">w.e.b.4mil.l.ion@gmail.com</a>
+<a href=""mailto:web.4.m.il.l.io.n@gmail.com"">web.4.m.il.l.io.n@gmail.com</a>
+<a href=""mailto:w.e.b.4m.i.l.l.i.on@gmail.com"">w.e.b.4m.i.l.l.i.on@gmail.com</a>
+<a href=""mailto:w.eb.4mil.lio.n@gmail.com"">w.eb.4mil.lio.n@gmail.com</a>
+<a href=""mailto:we.b.4.m.i.l.li.o.n@gmail.com"">we.b.4.m.i.l.li.o.n@gmail.com</a>
+<a href=""mailto:web4.m.ill.io.n@gmail.com"">web4.m.ill.io.n@gmail.com</a>
+<a href=""mailto:web4.mi.lli.on@gmail.com"">web4.mi.lli.on@gmail.com</a>
+<a href=""mailto:w.eb.4mil.lion@gmail.com"">w.eb.4mil.lion@gmail.com</a>
+<a href=""mailto:we.b4mi.l.l.i.o.n@gmail.com"">we.b4mi.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4mi.l.l.i.o.n@gmail.com"">w.e.b4mi.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4.m.i.ll.io.n@gmail.com"">w.e.b4.m.i.ll.io.n@gmail.com</a>
+<a href=""mailto:w.eb4.million@gmail.com"">w.eb4.million@gmail.com</a>
+<a href=""mailto:we.b.4millio.n@gmail.com"">we.b.4millio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.il.lio.n@gmail.com"">w.e.b.4.m.il.lio.n@gmail.com</a>
+<a href=""mailto:we.b.4mi.l.lio.n@gmail.com"">we.b.4mi.l.lio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.i.ll.i.o.n@gmail.com"">w.e.b.4.m.i.ll.i.o.n@gmail.com</a>
+<a href=""mailto:w.e.b4m.i.l.l.i.o.n@gmail.com"">w.e.b4m.i.l.l.i.o.n@gmail.com</a>
+<a href=""mailto:we.b.4m.i.llio.n@gmail.com"">we.b.4m.i.llio.n@gmail.com</a>
+<a href=""mailto:w.e.b.4.m.i.ll.io.n@gmail.com"">w.e.b.4.m.i.ll.io.n@gmail.com</a>
+<a href=""mailto:w.eb4mil.l.ion@gmail.com"">w.eb4mil.l.ion@gmail.com</a>
+<a href=""mailto:we.b4mi.l.li.o.n@gmail.com"">we.b4mi.l.li.o.n@gmail.com</a>
+<a href=""mailto:w.eb4.mill.io.n@gmail.com"">w.eb4.mill.io.n@gmail.com</a>"
+bKLfjpNk,ztest,eriapolova,Python,Thursday 5th of October 2023 10:47:04 AM CDT,"import pandas as pd
+import datetime as dt
+import numpy as np
+import scipy.stats as stats
+from statsmodels.stats.proportion import proportions_ztest
+from statsmodels.stats.multitest import multipletests
+
+def ztest_conversion_funnel(funnel, target_stages, alpha):
+    '''проверяет статистическую разницу долей на каждом этапе воронки z-критерием'''
+    pval_all = [] #список для p-values всех проверок
+    
+    for stage in target_stages:
+        # Конверсия в просмотры страниц товара
+        # Количество показов для контрольной группы
+        A_nobs = funnel.loc[(funnel['group']=='A')&(funnel['event']=='login'), 'count']
+        A_count = funnel.loc[(funnel['group']=='A')&(funnel['event']==stage), 'count']
+        # Количество показов для тестовой группы
+        B_nobs = funnel.loc[(funnel['group']=='B')&(funnel['event']=='login'), 'count']
+        B_count = funnel.loc[(funnel['group']=='B')&(funnel['event']==stage), 'count']
+        # «Успехи»
+        successes = [A_count, B_count]
+        # Показы
+        nobs = [A_nobs, B_nobs]
+
+        z_stat, pval = proportions_ztest(successes, nobs = nobs)
+        pval_all.append(pval)
+    
+    rejected, p_corrected, _, _ = multipletests(pval_all, alpha=alpha, method='bonferroni')
+  
+    i = 0
+
+    for p in p_corrected:
+        # вывод значения p-value на экран 
+        print('p-value:', p)
+        # условный оператор с выводом строки с ответом
+        if p < alpha:
+            print(f'Отвергаем нулевую гипотезу для события {target_stages[i]}.')
+            print(' ')
+        # если p-value окажется меньше него, отвергнем гипотезу
+        else:
+            print(f'Не получилось отвергнуть нулевую гипотезу для события {target_stages[i]}.')
+            print(' ')
+        i += 1
+        
+funnel = pd.DataFrame(data={'group': ['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B'], 
+                            'event': ['login', 'product_page', 'product_cart', 'purchase', 
+                                      'login', 'product_page', 'product_cart', 'purchase'],
+                            'count': [2604, 1685, 782, 833, 876, 493, 244, 249]})
+
+ztest_conversion_funnel(funnel, ['product_page','purchase'], .05)"
+u2siZTL0,WatchWinder,Narayan,C,Thursday 5th of October 2023 10:37:45 AM CDT,"#include <Stepper.h>
+
+#define GOT_HERE()  do {Serial.print('['); Serial.print(__LINE__); Serial.println(']'); Serial.flush();} while(0)
+
+const int steps_per_rev = 2038;  
+
+#define IN1 8
+#define IN2 9
+#define IN3 10
+#define IN4 11
+
+#define CCW 0
+#define CW  1
+
+#define QUARREV steps_per_rev / 4
+#define HALFREV steps_per_rev / 2
+#define FULLREV steps_per_rev
+
+#define CCW -1
+#define CW  1
+
+Stepper motor(steps_per_rev, IN1, IN3, IN2, IN4);
+
+void setup() {
+  motor.setSpeed(10);
+  Serial.begin(115200);
+}
+
+void WinderMotion(uint8_t dir, uint8_t dist, uint8_t speed){
+	motor.setSpeed(speed);
+    motor.step(dir * dist);
+}
+
+void loop() {
+	WinderMotion(CW, FULLREV, 17); 
+	delay(1000);
+}"
+67462KdM,Employees from Town,dragonbs,T-SQL,Thursday 5th of October 2023 10:29:02 AM CDT,"CREATE PROC usp_GetEmployeesFromTown (@townName NVARCHAR(MAX))
+AS
+BEGIN
+	SELECT 
+		[FirstName][First Name]
+		,[LastName][Last Name]
+	FROM [Employees][e]
+	LEFT JOIN [Addresses][a] ON [e].[AddressID] = [a].[AddressID]
+	LEFT JOIN [Towns][t] ON [a].[TownID] = [t].[TownID]
+	WHERE [t].[Name] LIKE @townName
+END"
+6dZiYQTT,Manage Dart,Justman10000,Bash,Thursday 5th of October 2023 10:05:41 AM CDT,"// To install
+# The version of Dart
+version=3.1.3
+
+wget https://storage.googleapis.com/dart-archive/channels/stable/release/$version/sdk/dartsdk-linux-x64-release.zip
+unzip dartsdk-linux-x64-release.zip
+rm -r dartsdk-linux-x64-release.zip
+mv dart-sdk /usr/local/dart
+ln -s /usr/local/dart/bin/dart /usr/bin
+
+// To uninstall
+rm -r /usr/local/dart /usr/bin/dart"
+WqYw6AX6,LeetCode 217 - Contains Duplicate - NeetCode solution,nathanwailes,Python,Thursday 5th of October 2023 09:07:34 AM CDT,"class Solution:
+    def containsDuplicate(self, nums: List[int]) -> bool:
+        hashset = set()
+        for n in nums:
+            if n in hashset:
+                return True
+            hashset.add(n)
+        return False
+"
+fHT42kYf,LeetCode 217 - Contains Duplicate - 2023.10.05 solution,nathanwailes,Python,Thursday 5th of October 2023 09:06:22 AM CDT,"class Solution:
+    def containsDuplicate(self, nums: List[int]) -> bool:
+        seen = set()
+        for n in nums:
+            if n in seen:
+                return True
+            seen.add(n)
+        return False
+"
+GpUFwstW,P0_O516495 [Дом 69],kirber,JSON,Thursday 5th of October 2023 09:05:53 AM CDT,"{
+   ""Source"":""crm"",
+   ""Message"":"""",
+   ""Id"":""7f932af6-479e-ed11-b833-005056b8c05c"",
+   ""Type"":""update"",
+   ""Time"":""2023-10-05T15:16:19"",
+   ""Attributes"":{
+      ""createdon"":""2023-01-27T16:39:17"",
+      ""smt_actual_change_recordid"":{
+         ""Id"":""8ecc2d81-0a61-ee11-b834-005056b8c05c"",
+         ""LogicalName"":""smt_change_record"",
+         ""Name"":""тест 02.10""
+      },
+      ""smt_address_number"":""2"",
+      ""smt_amount_min"":null,
+      ""smt_area_difference"":null,
+      ""smt_auction_typecode"":null,
+      ""smt_auctionbit"":false,
+      ""smt_balconies"":null,
+      ""smt_bathhousebit"":true,
+      ""smt_bathroom_separate"":null,
+      ""smt_bathroom_toilet"":null,
+      ""smt_bedrooms_quantity"":null,
+      ""smt_bti_balcony_area"":null,
+      ""smt_bti_ceiling_height"":null,
+      ""smt_bti_living_area"":null,
+      ""smt_bti_number_int"":null,
+      ""smt_bti_number_str"":null,
+      ""smt_bti_total_area"":null,
+      ""smt_bti_without_balcony_area"":null,
+      ""smt_build_year"":null,
+      ""smt_building_address_smt_construction_site_address"":null,
+      ""smt_building_address_smt_number"":null,
+      ""smt_building_address_smt_post_address"":null,
+      ""smt_building_addressid"":{
+         ""Id"":""efeb1cbc-219e-ed11-b827-005056b83cbb"",
+         ""LogicalName"":""smt_building_address"",
+         ""Name"":""(не использовать)Дмитров, МЖК 1, РнС 1, этап 2""
+      },
+      ""smt_cadastral_number"":null,
+      ""smt_ceiling_height"":null,
+      ""smt_code"":""ДМИ1/1/2-2.10/Д"",
+      ""smt_construction_projectid"":{
+         ""Id"":""a50f84e1-f290-ed11-b826-005056b83cbb"",
+         ""LogicalName"":""smt_construction_project"",
+         ""Name"":""ДМИТРОВ""
+      },
+      ""smt_construction_projectid_smt_construction_projectid"":""a50f84e1-f290-ed11-b826-005056b83cbb"",
+      ""smt_construction_projectid_smt_region"":null,
+      ""smt_construction_typecode"":100000000,
+      ""smt_cottage_village"":null,
+      ""smt_customer_agreementid"":null,
+      ""smt_dachabit"":true,
+      ""smt_description"":null,
+      ""smt_destination_typeid"":null,
+      ""smt_discount_price"":null,
+      ""smt_drainage_typecode"":null,
+      ""smt_drainagebit"":true,
+      ""smt_electricitybit"":true,
+      ""smt_finishingcode"":100000001,
+      ""smt_floor"":null,
+      ""smt_floor_quantity"":2,
+      ""smt_garagebit"":true,
+      ""smt_gas_typecode"":null,
+      ""smt_gasbit"":true,
+      ""smt_heatingcode"":null,
+      ""smt_hidden_basebit"":true,
+      ""smt_home_conditioncode"":null,
+      ""smt_house_typecode"":100000001,
+      ""smt_image1"":null,
+      ""smt_image2"":null,
+      ""smt_land_categorycode"":null,
+      ""smt_land_contractbit"":true,
+      ""smt_land_statuscode"":100000002,
+      ""smt_layout_url"":null,
+      ""smt_liqcode"":null,
+      ""smt_loggias"":null,
+      ""smt_modelcode"":null,
+      ""smt_object_sale_rentcode"":100000000,
+      ""smt_object_sales_typecode"":null,
+      ""smt_object_subtypecode"":100000012,
+      ""smt_object_typecode"":100000003,
+      ""smt_online_bookingbit"":true,
+      ""smt_online_dealbit"":true,
+      ""smt_owner_accountid_accountid"":""71ce03d4-3a9e-ed11-b827-005056b83cbb"",
+      ""smt_owner_accountid_smt_rightholder_typecode"":100000003,
+      ""smt_percentage_min"":null,
+      ""smt_phonebit"":true,
+      ""smt_planning_solution_typecode"":100000000,
+      ""smt_platform_number"":null,
+      ""smt_poolbit"":true,
+      ""smt_porch"":null,
+      ""smt_price_min"":null,
+      ""smt_primary_sale_agreementid"":null,
+      ""smt_projected_balcony_area"":null,
+      ""smt_projected_kitchen_area"":null,
+      ""smt_projected_living_area"":null,
+      ""smt_projected_number_int"":null,
+      ""smt_projected_number_str"":""2.10"",
+      ""smt_projected_total_area"":101.7400000000,
+      ""smt_projected_without_balcony_area"":null,
+      ""smt_ready_rental_business_description"":null,
+      ""smt_ready_rental_businessbit"":false,
+      ""smt_real_estate_objectid"":""7f932af6-479e-ed11-b833-005056b8c05c"",
+      ""smt_reale_state_object_featureid"":null,
+      ""smt_regionid_smt_name"":""Московская область"",
+      ""smt_related_real_estate_objectid"":{
+         ""Id"":""53942af6-479e-ed11-b833-005056b8c05c"",
+         ""LogicalName"":""smt_real_estate_object"",
+         ""Name"":""ДМИ1/1/2-2.10""
+      },
+      ""smt_rent_cost"":null,
+      ""smt_rent_price"":null,
+      ""smt_rent_to_ownbit"":false,
+      ""smt_repair_typecode"":null,
+      ""smt_room_quantity"":null,
+      ""smt_sale_cost"":200000.0000,
+      ""smt_sale_individual"":null,
+      ""smt_sale_legal_entity"":null,
+      ""smt_sale_price"":20348000.0000,
+      ""smt_sale_schemecode"":100000001,
+      ""smt_sectionid"":null,
+      ""smt_securitybit"":true,
+      ""smt_settlement_name"":null,
+      ""smt_smart_apartmentbit"":false,
+      ""smt_start_cost"":null,
+      ""smt_start_price"":null,
+      ""smt_strategic_reserveid"":null,
+      ""smt_studio_typecode"":null,
+      ""smt_supply_scheme_smt_name"":""ДМИ Контейнер ИЖС"",
+      ""smt_supply_scheme_smt_online_dealbit"":false,
+      ""smt_supply_scheme_smt_supply_schemeid"":""fb2fda2b-3b9e-ed11-b827-005056b83cbb"",
+      ""smt_technical_real_estate_object"":100000001,
+      ""smt_translate_lkbit"":null,
+      ""smt_translate_to_websitebit"":true,
+      ""smt_unit_quantity"":101.7400000000,
+      ""smt_vendor_accountid"":{
+         ""Id"":""71ce03d4-3a9e-ed11-b827-005056b83cbb"",
+         ""LogicalName"":""account"",
+         ""Name"":""ООО «СЗ «Самолет-Дмитров»""
+      },
+      ""smt_water_typecode"":null,
+      ""smt_waterbit"":true,
+      ""smt_wc_locationcode"":null,
+      ""statecode"":0,
+      ""statuscode"":100000002
+   },
+   ""LinkEntities"":{
+      ""smt_room"":[
+         {
+            ""Id"":""7ff21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:34"",
+               ""smt_room_typecode"":100000006,
+               ""smt_display_order"":1,
+               ""smt_name"":""1 этаж_Гостинная (По СП)"",
+               ""smt_roomid"":""7ff21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":20.6900000000
+            }
+         },
+         {
+            ""Id"":""81f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:34"",
+               ""smt_room_typecode"":100000012,
+               ""smt_display_order"":2,
+               ""smt_name"":""1 этаж_Кухня (По СП)"",
+               ""smt_roomid"":""81f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":14.6400000000
+            }
+         },
+         {
+            ""Id"":""83f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000015,
+               ""smt_display_order"":3,
+               ""smt_name"":""2 этаж_Спальня 3 (По СП)"",
+               ""smt_roomid"":""83f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":12.7400000000
+            }
+         },
+         {
+            ""Id"":""85f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000015,
+               ""smt_display_order"":4,
+               ""smt_name"":""2 этаж_Спальня 1 (По СП)"",
+               ""smt_roomid"":""85f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":10.5100000000
+            }
+         },
+         {
+            ""Id"":""87f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000015,
+               ""smt_display_order"":5,
+               ""smt_name"":""2 этаж_Спальня 2 (По СП)"",
+               ""smt_roomid"":""87f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":9.7600000000
+            }
+         },
+         {
+            ""Id"":""89f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000011,
+               ""smt_display_order"":6,
+               ""smt_name"":""1 этаж_Коридор 1 (По СП)"",
+               ""smt_roomid"":""89f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":7.6000000000
+            }
+         },
+         {
+            ""Id"":""8bf21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000003,
+               ""smt_display_order"":7,
+               ""smt_name"":""1 этаж_Теплогенераторная (По СП)"",
+               ""smt_roomid"":""8bf21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":5.8900000000
+            }
+         },
+         {
+            ""Id"":""8df21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000004,
+               ""smt_display_order"":8,
+               ""smt_name"":""2 этаж_Гардеробная (По СП)"",
+               ""smt_roomid"":""8df21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":5.8800000000
+            }
+         },
+         {
+            ""Id"":""8ff21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000011,
+               ""smt_display_order"":9,
+               ""smt_name"":""2 этаж_Коридор 1 (По СП)"",
+               ""smt_roomid"":""8ff21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":5.7600000000
+            }
+         },
+         {
+            ""Id"":""91f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000014,
+               ""smt_display_order"":10,
+               ""smt_name"":""2 этаж_Санузел 1 (По СП)"",
+               ""smt_roomid"":""91f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":4.0200000000
+            }
+         },
+         {
+            ""Id"":""93f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000009,
+               ""smt_display_order"":11,
+               ""smt_name"":""1 этаж_Кладовая 1 (По СП)"",
+               ""smt_roomid"":""93f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":2.3300000000
+            }
+         },
+         {
+            ""Id"":""95f21550-669e-ed11-b827-005056b83cbb"",
+            ""Attributes"":{
+               ""createdon"":""2023-01-27T20:16:35"",
+               ""smt_room_typecode"":100000014,
+               ""smt_display_order"":12,
+               ""smt_name"":""1 этаж_Санузел (По СП)"",
+               ""smt_roomid"":""95f21550-669e-ed11-b827-005056b83cbb"",
+               ""smt_projected_area"":1.9200000000
+            }
+         }
+      ]
+   },
+   ""ManyMany"":{
+      ""smt_realization_term"":[
+         ""308bf2a0-a85b-ee11-b834-005056b8c05c"",
+         ""1471680e-4b9e-ed11-b827-005056b83cbb"",
+         ""1671680e-4b9e-ed11-b827-005056b83cbb""
+      ]
+   }
+}"
+hLEfrvxR,News Oct5 23,Newscaster_Ned,Email,Thursday 5th of October 2023 08:59:55 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎y‎,‎ ‎g‎u‎y‎s‎.‎ ‎N‎e‎w‎s‎c‎a‎s‎t‎e‎r‎ ‎N‎e‎d‎ ‎h‎e‎r‎e‎ ‎j‎u‎s‎t‎ ‎s‎h‎o‎v‎i‎n‎g‎ ‎a‎ ‎n‎u‎c‎l‎e‎a‎r‎ ‎r‎e‎a‎c‎t‎o‎r‎ ‎u‎p‎ ‎y‎o‎u‎r‎ ‎a‎s‎s‎.‎ ‎A‎n‎y‎w‎a‎y‎,‎ ‎h‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎.‎
+
+V‎a‎n‎c‎e‎:‎ ‎T‎u‎r‎m‎o‎i‎l‎ ‎'‎S‎h‎o‎u‎l‎d‎ ‎S‎e‎r‎v‎e‎ ‎a‎s‎ ‎a‎ ‎W‎a‎k‎e‎-‎U‎p‎ ‎C‎a‎l‎l‎ ‎t‎o‎ ‎t‎h‎e‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎F‎i‎r‎s‎t‎ ‎C‎a‎u‎c‎u‎s‎'‎
+C‎a‎r‎d‎i‎n‎a‎l‎ ‎J‎o‎s‎e‎p‎h‎ ‎Z‎e‎n‎:‎ ‎‘‎T‎h‎e‎ ‎C‎h‎u‎r‎c‎h‎ ‎i‎n‎ ‎G‎e‎r‎m‎a‎n‎y‎ ‎I‎s‎ ‎D‎y‎i‎n‎g‎’‎
+J‎o‎b‎l‎e‎s‎s‎ ‎C‎l‎a‎i‎m‎s‎ ‎S‎t‎i‎l‎l‎ ‎L‎a‎g‎g‎i‎n‎g‎ ‎B‎e‎h‎i‎n‎d‎ ‎E‎x‎p‎e‎c‎t‎a‎t‎i‎o‎n‎s‎
+S‎e‎v‎e‎n‎ ‎C‎a‎l‎i‎f‎o‎r‎n‎i‎a‎ ‎D‎i‎s‎t‎r‎i‎c‎t‎s‎ ‎A‎d‎o‎p‎t‎ ‎P‎a‎r‎e‎n‎t‎a‎l‎ ‎N‎o‎t‎i‎f‎i‎c‎a‎t‎i‎o‎n‎ ‎o‎n‎ ‎'‎T‎r‎a‎n‎s‎ ‎K‎i‎d‎s‎'‎
+M‎e‎x‎i‎c‎a‎n‎ ‎C‎o‎p‎s‎ ‎F‎i‎n‎d‎ ‎A‎d‎v‎a‎n‎c‎e‎d‎ ‎C‎a‎r‎t‎e‎l‎ ‎S‎u‎r‎v‎e‎i‎l‎l‎a‎n‎c‎e‎ ‎C‎e‎n‎t‎e‎r‎ ‎i‎n‎ ‎J‎a‎l‎i‎s‎c‎o‎
+T‎h‎e‎ ‎B‎i‎g‎ ‎I‎n‎s‎u‎r‎a‎n‎c‎e‎ ‎C‎o‎n‎ ‎T‎h‎a‎t‎ ‎D‎r‎i‎v‎e‎s‎ ‎U‎p‎ ‎Y‎o‎u‎r‎ ‎D‎r‎u‎g‎ ‎P‎r‎i‎c‎e‎s‎ ‎a‎n‎d‎ ‎T‎h‎e‎i‎r‎ ‎P‎r‎o‎f‎i‎t‎s‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+S‎e‎n‎a‎t‎e‎ ‎D‎e‎m‎o‎c‎r‎a‎t‎:‎ ‎I‎’‎l‎l‎ ‎‘‎D‎e‎f‎i‎n‎i‎t‎e‎l‎y‎’‎ ‎S‎h‎u‎t‎ ‎D‎o‎w‎n‎ ‎G‎o‎v‎e‎r‎n‎m‎e‎n‎t‎ ‎i‎f‎ ‎W‎e‎ ‎D‎o‎n‎’‎t‎ ‎H‎a‎v‎e‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎M‎o‎n‎e‎y‎
+U‎k‎r‎a‎i‎n‎e‎ ‎-‎ ‎B‎e‎n‎n‎e‎t‎
+O‎n‎ ‎W‎e‎d‎n‎e‎s‎d‎a‎y‎’‎s‎ ‎b‎r‎o‎a‎d‎c‎a‎s‎t‎ ‎o‎f‎ ‎M‎S‎N‎B‎C‎’‎s‎ ‎“‎K‎a‎t‎y‎ ‎T‎u‎r‎ ‎R‎e‎p‎o‎r‎t‎s‎,‎”‎ ‎S‎e‎n‎.‎ ‎M‎i‎c‎h‎a‎e‎l‎ ‎B‎e‎n‎n‎e‎t‎ ‎(‎D‎-‎C‎O‎)‎ ‎s‎a‎i‎d‎ ‎t‎h‎a‎t‎ ‎h‎e‎ ‎i‎s‎ ‎“‎d‎e‎f‎i‎n‎i‎t‎e‎l‎y‎”‎ ‎w‎i‎l‎l‎i‎n‎g‎ ‎t‎o‎ ‎s‎h‎u‎t‎ ‎d‎o‎w‎n‎ ‎t‎h‎e‎ ‎g‎o‎v‎e‎r‎n‎m‎e‎n‎t‎ ‎i‎f‎ ‎a‎ ‎b‎i‎l‎l‎ ‎t‎o‎ ‎k‎e‎e‎p‎ ‎i‎t‎ ‎o‎p‎e‎n‎ ‎d‎o‎e‎s‎n‎’‎t‎ ‎i‎n‎c‎l‎u‎d‎e‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎f‎u‎n‎d‎i‎n‎g‎.‎ ‎H‎o‎s‎t‎ ‎K‎a‎t‎y‎ ‎T‎u‎r‎ ‎a‎s‎k‎e‎d‎,‎ ‎“‎A‎r‎e‎ ‎y‎o‎u‎
+
+R‎e‎p‎o‎r‎t‎:‎ ‎O‎p‎e‎n‎A‎I‎'‎s‎ ‎C‎h‎a‎t‎G‎P‎T‎ ‎M‎a‎i‎n‎t‎a‎i‎n‎s‎ ‎B‎l‎a‎c‎k‎l‎i‎s‎t‎ ‎o‎f‎ ‎S‎i‎t‎e‎s‎,‎ ‎I‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎
+R‎e‎p‎o‎r‎t‎:‎ ‎O‎p‎e‎n‎A‎I‎'‎s‎ ‎C‎h‎a‎t‎G‎P‎T‎ ‎M‎a‎i‎n‎t‎a‎i‎n‎s‎ ‎B‎l‎a‎c‎k‎l‎i‎s‎t‎ ‎o‎f‎ ‎S‎i‎t‎e‎s‎,‎ ‎I‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎
+1‎,‎5‎1‎9‎
+
+K‎e‎v‎i‎n‎ ‎M‎c‎C‎a‎r‎t‎h‎y‎:‎ ‎‘‎I‎ ‎W‎i‎l‎l‎ ‎N‎o‎t‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎S‎p‎e‎a‎k‎e‎r‎ ‎A‎g‎a‎i‎n‎’‎
+9‎,‎2‎6‎3‎
+R‎e‎p‎.‎ ‎L‎a‎w‎l‎e‎r‎:‎ ‎'‎N‎o‎ ‎Q‎u‎e‎s‎t‎i‎o‎n‎'‎ ‎G‎a‎e‎t‎z‎ ‎S‎h‎o‎u‎l‎d‎ ‎B‎e‎ ‎E‎x‎p‎e‎l‎l‎e‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎C‎o‎n‎f‎e‎r‎e‎n‎c‎e‎
+R‎e‎p‎.‎ ‎L‎a‎w‎l‎e‎r‎:‎ ‎'‎N‎o‎ ‎Q‎u‎e‎s‎t‎i‎o‎n‎'‎ ‎G‎a‎e‎t‎z‎ ‎S‎h‎o‎u‎l‎d‎ ‎B‎e‎ ‎E‎x‎p‎e‎l‎l‎e‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎C‎o‎n‎f‎e‎r‎e‎n‎c‎e‎
+9‎4‎9‎
+
+K‎e‎v‎i‎n‎ ‎M‎c‎C‎a‎r‎t‎h‎y‎ ‎W‎i‎l‎l‎ ‎N‎o‎t‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎H‎o‎u‎s‎e‎ ‎S‎p‎e‎a‎k‎e‎r‎ ‎A‎f‎t‎e‎r‎ ‎B‎e‎i‎n‎g‎ ‎O‎u‎s‎t‎e‎d‎ ‎
+4‎,‎3‎0‎6‎
+R‎e‎p‎o‎r‎t‎:‎ ‎B‎o‎b‎ ‎M‎e‎n‎e‎n‎d‎e‎z‎'‎s‎ ‎W‎i‎f‎e‎ ‎K‎i‎l‎l‎e‎d‎ ‎P‎e‎d‎e‎s‎t‎r‎i‎a‎n‎ ‎i‎n‎ ‎2‎0‎1‎8‎
+R‎e‎p‎o‎r‎t‎:‎ ‎B‎o‎b‎ ‎M‎e‎n‎e‎n‎d‎e‎z‎'‎s‎ ‎W‎i‎f‎e‎ ‎K‎i‎l‎l‎e‎d‎ ‎P‎e‎d‎e‎s‎t‎r‎i‎a‎n‎ ‎i‎n‎ ‎2‎0‎1‎8‎
+3‎7‎2‎
+M‎a‎t‎t‎ ‎G‎a‎e‎t‎z‎'‎s‎ ‎V‎o‎t‎e‎ ‎S‎u‎c‎c‎e‎e‎d‎s‎ ‎i‎n‎ ‎O‎u‎s‎t‎i‎n‎g‎ ‎K‎e‎v‎i‎n‎ ‎M‎c‎C‎a‎r‎t‎h‎y‎ ‎a‎s‎ ‎S‎p‎e‎a‎k‎e‎r‎
+M‎a‎t‎t‎ ‎G‎a‎e‎t‎z‎'‎s‎ ‎V‎o‎t‎e‎ ‎S‎u‎c‎c‎e‎e‎d‎s‎ ‎i‎n‎ ‎O‎u‎s‎t‎i‎n‎g‎ ‎K‎e‎v‎i‎n‎ ‎M‎c‎C‎a‎r‎t‎h‎y‎ ‎a‎s‎ ‎S‎p‎e‎a‎k‎e‎r‎
+9‎,‎1‎4‎8‎
+D‎e‎m‎ ‎S‎e‎n‎.‎ ‎B‎e‎n‎n‎e‎t‎:‎ ‎I‎'‎l‎l‎ ‎'‎D‎e‎f‎i‎n‎i‎t‎e‎l‎y‎'‎ ‎S‎h‎u‎t‎ ‎D‎o‎w‎n‎ ‎G‎o‎v‎e‎r‎n‎m‎e‎n‎t‎ ‎o‎v‎e‎r‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎M‎o‎n‎e‎y‎
+D‎e‎m‎ ‎S‎e‎n‎.‎ ‎B‎e‎n‎n‎e‎t‎:‎ ‎I‎'‎l‎l‎ ‎'‎D‎e‎f‎i‎n‎i‎t‎e‎l‎y‎'‎ ‎S‎h‎u‎t‎ ‎D‎o‎w‎n‎ ‎G‎o‎v‎e‎r‎n‎m‎e‎n‎t‎ ‎o‎v‎e‎r‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎M‎o‎n‎e‎y‎
+1‎,‎7‎3‎0‎
+R‎e‎p‎.‎ ‎S‎t‎e‎v‎e‎ ‎S‎c‎a‎l‎i‎s‎e‎ ‎A‎n‎n‎o‎u‎n‎c‎e‎s‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎S‎p‎e‎a‎k‎e‎r‎
+R‎e‎p‎.‎ ‎S‎t‎e‎v‎e‎ ‎S‎c‎a‎l‎i‎s‎e‎ ‎A‎n‎n‎o‎u‎n‎c‎e‎s‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎S‎p‎e‎a‎k‎e‎r‎
+4‎,‎8‎1‎1‎
+t‎r‎u‎m‎p‎ ‎l‎e‎a‎d‎s‎ ‎b‎i‎d‎e‎n‎
+P‎o‎l‎l‎:‎ ‎T‎r‎u‎m‎p‎ ‎T‎a‎k‎e‎s‎ ‎2‎-‎P‎o‎i‎n‎t‎ ‎L‎e‎a‎d‎ ‎o‎v‎e‎r‎ ‎B‎i‎d‎e‎n‎ ‎i‎n‎ ‎P‎e‎n‎n‎s‎y‎l‎v‎a‎n‎i‎a‎
+9‎3‎0‎
+S‎t‎r‎i‎k‎i‎n‎g‎ ‎A‎u‎t‎o‎ ‎W‎o‎r‎k‎e‎r‎s‎ ‎W‎a‎r‎n‎:‎ ‎B‎i‎d‎e‎n‎'‎s‎ ‎G‎r‎e‎e‎n‎ ‎A‎g‎e‎n‎d‎a‎ ‎'‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎W‎i‎p‎e‎ ‎U‎s‎ ‎O‎u‎t‎'‎
+S‎t‎r‎i‎k‎i‎n‎g‎ ‎A‎u‎t‎o‎ ‎W‎o‎r‎k‎e‎r‎s‎ ‎W‎a‎r‎n‎:‎ ‎B‎i‎d‎e‎n‎'‎s‎ ‎G‎r‎e‎e‎n‎ ‎A‎g‎e‎n‎d‎a‎ ‎'‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎W‎i‎p‎e‎ ‎U‎s‎ ‎O‎u‎t‎'‎
+
+N‎i‎g‎g‎a‎b‎i‎t‎c‎h‎ ‎S‎t‎a‎b‎s‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎ ‎P‎o‎s‎t‎ ‎E‎m‎p‎l‎o‎y‎e‎e‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎ ‎O‎v‎e‎r‎ ‎$‎1‎0‎.‎
+
+W‎e‎l‎l‎,‎ ‎n‎e‎g‎r‎o‎e‎s‎ ‎a‎r‎e‎ ‎c‎u‎l‎t‎u‎r‎e‎d‎,‎ ‎a‎n‎d‎ ‎t‎h‎a‎t‎ ‎e‎m‎p‎l‎o‎y‎e‎e‎ ‎g‎o‎t‎ ‎c‎u‎l‎t‎u‎r‎a‎l‎l‎y‎ ‎e‎n‎r‎i‎c‎h‎e‎d‎.‎
+
+
+S‎i‎l‎v‎e‎r‎b‎a‎c‎k‎ ‎W‎h‎o‎ ‎P‎o‎s‎e‎d‎ ‎a‎s‎ ‎J‎a‎n‎i‎t‎o‎r‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎S‎e‎x‎ ‎T‎r‎a‎f‎f‎i‎c‎k‎i‎n‎g‎ ‎i‎n‎ ‎V‎e‎g‎a‎s‎.‎
+
+
+C‎h‎i‎n‎k‎ ‎U‎S‎ ‎N‎a‎v‎y‎ ‎S‎o‎l‎d‎i‎e‎r‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎R‎e‎v‎e‎a‎l‎i‎n‎g‎ ‎S‎e‎n‎s‎i‎t‎i‎v‎e‎ ‎I‎n‎f‎o‎r‎m‎a‎t‎i‎o‎n‎ ‎A‎b‎o‎u‎t‎ ‎N‎a‎v‎y‎ ‎S‎h‎i‎p‎s‎ ‎t‎o‎ ‎C‎h‎i‎n‎e‎s‎e‎ ‎G‎o‎v‎e‎r‎n‎m‎e‎n‎t‎.‎
+
+
+H‎a‎l‎f‎-‎C‎a‎s‎t‎e‎ ‎F‎r‎e‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎B‎e‎i‎n‎g‎ ‎C‎a‎p‎t‎u‎r‎e‎d‎ ‎b‎y‎ ‎S‎a‎n‎d‎ ‎N‎i‎g‎g‎e‎r‎ ‎O‎r‎g‎a‎n‎i‎z‎a‎t‎i‎o‎n‎ ‎A‎f‎t‎e‎r‎ ‎H‎i‎s‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎M‎o‎m‎ ‎a‎n‎d‎ ‎N‎e‎g‎r‎o‎ ‎D‎a‎d‎ ‎W‎e‎n‎t‎ ‎t‎o‎ ‎H‎a‎i‎t‎i‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+F‎l‎o‎o‎d‎ ‎A‎d‎v‎i‎s‎o‎r‎y‎
+T‎o‎d‎a‎y‎
+A‎M‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎h‎o‎w‎e‎r‎s‎
+8‎3‎°‎
+/‎6‎7‎°‎
+1‎0‎0‎%‎
+N‎N‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎5‎ ‎|‎ ‎D‎a‎y‎
+8‎3‎°‎
+1‎0‎0‎%‎
+N‎N‎E‎
+1‎0‎
+ ‎
+m‎p‎h‎
+S‎h‎o‎w‎e‎r‎s‎ ‎a‎n‎d‎ ‎a‎ ‎p‎o‎s‎s‎i‎b‎l‎e‎ ‎t‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎ ‎d‎u‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎m‎o‎r‎n‎i‎n‎g‎ ‎w‎i‎l‎l‎ ‎g‎i‎v‎e‎ ‎w‎a‎y‎ ‎t‎o‎ ‎c‎l‎o‎u‎d‎y‎ ‎s‎k‎i‎e‎s‎ ‎t‎h‎i‎s‎ ‎a‎f‎t‎e‎r‎n‎o‎o‎n‎.‎ ‎P‎o‎t‎e‎n‎t‎i‎a‎l‎ ‎f‎o‎r‎ ‎h‎e‎a‎v‎y‎ ‎r‎a‎i‎n‎f‎a‎l‎l‎.‎ ‎H‎i‎g‎h‎ ‎8‎3‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎N‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎ ‎C‎h‎a‎n‎c‎e‎ ‎o‎f‎ ‎r‎a‎i‎n‎ ‎1‎0‎0‎%‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+8‎0‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+5‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎2‎5‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎1‎0‎ ‎p‎m‎
+T‎h‎u‎ ‎0‎5‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+6‎7‎°‎
+9‎%‎
+N‎
+7‎
+ ‎
+m‎p‎h‎
+O‎v‎e‎r‎c‎a‎s‎t‎.‎ ‎L‎o‎w‎ ‎6‎7‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+8‎2‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+1‎1‎:‎5‎9‎ ‎p‎m‎
+W‎a‎n‎i‎n‎g‎ ‎G‎i‎b‎b‎o‎u‎s‎
+M‎o‎o‎n‎s‎e‎t‎
+2‎:‎0‎0‎ ‎p‎m‎
+F‎r‎i‎ ‎0‎6‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎7‎°‎
+/‎6‎0‎°‎
+6‎%‎
+N‎N‎E‎ ‎1‎3‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎7‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎6‎°‎
+/‎5‎1‎°‎
+1‎%‎
+N‎N‎E‎ ‎1‎5‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎8‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+7‎9‎°‎
+/‎5‎3‎°‎
+1‎%‎
+S‎E‎ ‎5‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎6‎0‎°‎
+2‎%‎
+S‎W‎ ‎8‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎0‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎8‎°‎
+/‎6‎5‎°‎
+9‎%‎
+S‎ ‎9‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+9‎1‎°‎
+/‎6‎9‎°‎
+1‎4‎%‎
+S‎S‎E‎ ‎1‎3‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎2‎
+A‎M‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+9‎2‎°‎
+/‎6‎5‎°‎
+4‎0‎%‎
+S‎ ‎1‎1‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎2‎°‎
+/‎5‎8‎°‎
+1‎3‎%‎
+N‎ ‎1‎4‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎4‎
+S‎u‎n‎n‎y‎
+8‎0‎°‎
+/‎5‎7‎°‎
+1‎1‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎5‎
+S‎u‎n‎n‎y‎
+8‎4‎°‎
+/‎5‎7‎°‎
+3‎%‎
+E‎N‎E‎ ‎9‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎6‎
+S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎6‎1‎°‎
+5‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎7‎
+S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎5‎9‎°‎
+1‎2‎%‎
+E‎ ‎9‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎8‎
+S‎u‎n‎n‎y‎
+8‎3‎°‎
+/‎6‎1‎°‎
+2‎0‎%‎
+S‎E‎ ‎9‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎9‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎4‎°‎
+/‎6‎0‎°‎
+3‎3‎%‎
+S‎S‎W‎ ‎9‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎V‎a‎m‎p‎i‎r‎e‎s‎.‎ ‎🧛
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎r‎e‎n‎t‎o‎n‎ ‎T‎a‎r‎r‎a‎n‎t‎
+2‎0‎1‎9‎.‎ ‎J‎u‎s‎t‎ ‎w‎h‎e‎n‎ ‎w‎e‎ ‎t‎h‎o‎u‎g‎h‎t‎ ‎t‎h‎e‎ ‎y‎e‎a‎r‎ ‎w‎o‎u‎l‎d‎ ‎b‎e‎ ‎s‎h‎i‎t‎,‎ ‎A‎ ‎N‎E‎W‎ ‎C‎H‎A‎L‎L‎E‎N‎G‎E‎R‎ ‎A‎P‎P‎E‎A‎R‎S‎ ‎(‎+‎2‎ ‎o‎t‎h‎e‎r‎s‎!‎)‎:‎ ‎B‎r‎e‎n‎t‎o‎n‎ ‎T‎a‎r‎r‎a‎n‎t‎卐‎ ‎–‎ ‎i‎s‎ ‎a‎ ‎h‎e‎r‎o‎i‎c‎ ‎A‎u‎s‎s‎i‎e‎ ‎I‎R‎L‎ ‎t‎r‎o‎l‎l‎ ‎w‎h‎o‎ ‎t‎o‎o‎k‎ ‎i‎t‎ ‎u‎p‎o‎n‎ ‎h‎i‎m‎s‎e‎l‎f‎ ‎t‎o‎ ‎r‎e‎m‎o‎v‎e‎ ‎t‎h‎e‎ ‎M‎o‎o‎s‎l‎e‎m‎ ‎f‎i‎l‎t‎h‎ ‎f‎r‎o‎m‎ ‎a‎ ‎c‎o‎u‎n‎t‎r‎y‎ ‎w‎h‎o‎s‎e‎ ‎e‎x‎i‎s‎t‎e‎n‎c‎e‎ ‎w‎a‎s‎ ‎q‎u‎e‎s‎t‎i‎o‎n‎a‎b‎l‎e‎ ‎a‎t‎ ‎b‎e‎s‎t‎;‎ ‎b‎u‎t‎ ‎r‎e‎a‎l‎ ‎o‎r‎ ‎n‎o‎t‎ ‎a‎l‎l‎ ‎e‎x‎p‎e‎r‎t‎s‎ ‎a‎g‎r‎e‎e‎d‎ ‎i‎t‎ ‎w‎a‎s‎ ‎t‎h‎e‎ ‎l‎a‎s‎t‎ ‎p‎l‎a‎c‎e‎ ‎o‎n‎ ‎e‎a‎r‎t‎h‎ ‎m‎u‎s‎l‎i‎m‎s‎ ‎s‎h‎o‎u‎l‎d‎ ‎h‎a‎v‎e‎ ‎b‎e‎e‎n‎ ‎f‎o‎u‎n‎d‎.‎ ‎B‎e‎f‎o‎r‎e‎ ‎g‎o‎i‎n‎g‎ ‎o‎n‎ ‎h‎i‎s‎ ‎r‎a‎m‎p‎a‎g‎e‎ ‎B‎r‎e‎n‎t‎o‎n‎ ‎p‎o‎s‎t‎e‎d‎ ‎h‎i‎s‎ ‎m‎a‎n‎i‎f‎e‎s‎t‎o‎ ‎t‎o‎ ‎4‎c‎h‎a‎n‎ ‎a‎n‎d‎ ‎8‎c‎h‎a‎n‎;‎ ‎t‎h‎e‎r‎e‎,‎ ‎h‎e‎ ‎n‎a‎m‎e‎d‎r‎o‎p‎p‎e‎d‎ ‎f‎a‎m‎o‎u‎s‎ ‎S‎w‎e‎d‎i‎s‎h‎ ‎n‎e‎o‎n‎-‎n‎a‎z‎i‎ ‎P‎e‎w‎D‎i‎e‎P‎i‎e‎ ‎a‎n‎d‎ ‎N‎o‎r‎w‎e‎g‎i‎a‎n‎ ‎W‎o‎W‎ ‎a‎f‎i‎c‎i‎o‎n‎a‎d‎o‎ ‎A‎n‎d‎e‎r‎s‎ ‎B‎e‎h‎r‎i‎n‎g‎ ‎B‎r‎e‎i‎v‎i‎k‎ ‎a‎s‎ ‎i‎n‎s‎p‎i‎r‎a‎t‎i‎o‎n‎s‎.‎ ‎T‎h‎i‎s‎ ‎r‎e‎s‎u‎l‎t‎e‎d‎ ‎i‎n‎ ‎m‎a‎s‎s‎i‎v‎e‎ ‎a‎m‎o‎u‎n‎t‎s‎ ‎o‎f‎ ‎l‎u‎l‎z‎ ‎a‎n‎d‎ ‎b‎u‎t‎t‎h‎u‎r‎t‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎l‎a‎m‎e‎s‎t‎r‎e‎a‎m‎ ‎m‎e‎d‎i‎a‎ ‎w‎h‎o‎ ‎t‎o‎o‎k‎ ‎t‎h‎e‎ ‎m‎a‎s‎s‎i‎v‎e‎ ‎s‎h‎i‎t‎p‎o‎s‎t‎ ‎o‎f‎ ‎a‎ ‎m‎a‎n‎i‎f‎e‎s‎t‎o‎ ‎a‎t‎ ‎f‎a‎c‎e‎ ‎v‎a‎l‎u‎e‎,‎ ‎i‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎t‎h‎e‎ ‎e‎v‎e‎r‎-‎t‎r‎u‎s‎t‎w‎o‎r‎t‎h‎y‎ ‎(‎(‎(‎C‎N‎N‎)‎)‎)‎
+
+
+L‎i‎k‎e‎ ‎e‎v‎e‎r‎y‎ ‎o‎t‎h‎e‎r‎ ‎w‎h‎i‎t‎e‎ ‎d‎e‎v‎i‎l‎ ‎b‎e‎f‎o‎r‎e‎ ‎a‎n‎d‎ ‎a‎f‎t‎e‎r‎ ‎h‎i‎m‎,‎ ‎T‎a‎r‎r‎a‎n‎t‎ ‎l‎a‎c‎k‎e‎d‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎i‎t‎y‎,‎ ‎e‎l‎e‎c‎t‎i‎n‎g‎ ‎t‎o‎ ‎l‎a‎z‎i‎l‎y‎ ‎c‎o‎v‎e‎r‎ ‎t‎h‎e‎ ‎s‎a‎m‎e‎ ‎g‎r‎o‎u‎n‎d‎ ‎a‎s‎ ‎I‎S‎I‎S‎ ‎b‎y‎ ‎g‎u‎n‎n‎i‎n‎g‎ ‎d‎o‎w‎n‎ ‎a‎ ‎b‎u‎n‎c‎h‎ ‎o‎f‎ ‎u‎n‎a‎r‎m‎e‎d‎ ‎c‎i‎v‎i‎l‎i‎a‎n‎s‎ ‎i‎n‎ ‎a‎ ‎h‎o‎u‎s‎e‎ ‎o‎f‎ ‎w‎o‎r‎s‎h‎i‎p‎.‎ ‎P‎e‎r‎h‎a‎p‎s‎ ‎c‎o‎u‎n‎t‎e‎r‎i‎n‎t‎u‎i‎t‎i‎v‎e‎l‎y‎ ‎B‎r‎e‎n‎t‎o‎n‎ ‎T‎a‎r‎r‎a‎n‎t‎ ‎b‎e‎l‎i‎e‎v‎e‎d‎ ‎t‎h‎a‎t‎ ‎t‎h‎i‎s‎ ‎w‎o‎u‎l‎d‎ ‎s‎o‎m‎e‎h‎o‎w‎ ‎i‎n‎f‎l‎u‎e‎n‎c‎e‎ ‎t‎h‎e‎ ‎g‎u‎n‎ ‎l‎a‎w‎s‎ ‎i‎n‎ ‎a‎n‎ ‎e‎n‎t‎i‎r‎e‎l‎y‎ ‎d‎i‎f‎f‎e‎r‎e‎n‎t‎ ‎c‎o‎u‎n‎t‎r‎y‎ ‎c‎u‎l‎m‎i‎n‎a‎t‎i‎n‎g‎ ‎i‎n‎ ‎a‎ ‎c‎i‎v‎i‎l‎ ‎w‎a‎r‎ ‎t‎h‎a‎t‎ ‎w‎o‎u‎l‎d‎ ‎e‎n‎d‎ ‎w‎i‎t‎h‎ ‎h‎i‎s‎ ‎a‎s‎c‎e‎n‎s‎i‎o‎n‎ ‎t‎o‎ ‎t‎h‎e‎ ‎c‎o‎v‎e‎t‎e‎d‎ ‎r‎o‎l‎e‎ ‎o‎f‎ ‎K‎i‎n‎g‎ ‎o‎f‎ ‎t‎h‎e‎ ‎w‎h‎i‎t‎e‎ ‎p‎e‎o‎p‎l‎e‎.‎ ‎W‎h‎i‎l‎e‎ ‎m‎a‎n‎y‎ ‎m‎a‎y‎ ‎c‎o‎n‎s‎i‎d‎e‎r‎ ‎t‎h‎e‎ ‎l‎u‎c‎r‎a‎t‎i‎v‎e‎ ‎K‎e‎b‎a‎b‎ ‎r‎e‎m‎o‎v‎a‎l‎ ‎b‎u‎s‎i‎n‎e‎s‎s‎ ‎t‎o‎ ‎b‎e‎ ‎a‎ ‎w‎e‎l‎l‎-‎r‎e‎s‎p‎e‎c‎t‎e‎d‎ ‎t‎r‎a‎d‎e‎,‎ ‎t‎h‎i‎s‎ ‎k‎o‎a‎l‎a‎ ‎m‎o‎l‎e‎s‎t‎e‎r‎ ‎b‎r‎o‎u‎g‎h‎t‎ ‎s‎h‎a‎m‎e‎ ‎t‎o‎ ‎t‎h‎e‎ ‎p‎r‎o‎f‎e‎s‎s‎i‎o‎n‎ ‎b‎y‎ ‎p‎a‎i‎n‎t‎i‎n‎g‎ ‎a‎l‎l‎ ‎o‎v‎e‎r‎ ‎e‎a‎c‎h‎ ‎o‎f‎ ‎h‎i‎s‎ ‎g‎u‎n‎s‎ ‎w‎i‎t‎h‎ ‎a‎u‎t‎i‎s‎m‎a‎l‎ ‎w‎h‎i‎t‎e‎ ‎n‎a‎t‎i‎o‎n‎a‎l‎i‎s‎t‎ ‎s‎l‎o‎g‎a‎n‎s‎,‎ ‎t‎h‎e‎ ‎n‎a‎m‎e‎s‎ ‎o‎f‎ ‎s‎o‎m‎e‎ ‎d‎e‎a‎d‎ ‎E‎u‎r‎o‎p‎e‎a‎n‎ ‎a‎s‎s‎h‎o‎l‎e‎s‎,‎ ‎a‎n‎d‎ ‎m‎e‎m‎e‎s‎ ‎m‎o‎r‎e‎ ‎s‎t‎a‎l‎e‎ ‎t‎h‎a‎n‎ ‎t‎h‎e‎ ‎r‎i‎c‎e‎ ‎c‎a‎k‎e‎s‎ ‎i‎n‎ ‎y‎o‎u‎r‎ ‎g‎r‎a‎n‎d‎m‎a‎'‎s‎ ‎c‎u‎p‎b‎o‎a‎r‎d‎.‎ ‎L‎e‎a‎v‎e‎ ‎i‎t‎ ‎t‎o‎ ‎a‎n‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎n‎ ‎t‎o‎ ‎s‎h‎i‎t‎p‎o‎s‎t‎ ‎t‎h‎i‎s‎ ‎h‎a‎r‎d‎ ‎i‎n‎ ‎r‎e‎a‎l‎ ‎l‎i‎f‎e‎.‎
+
+
+(‎(‎ ‎S‎U‎B‎S‎C‎R‎I‎B‎E‎ ‎2‎ ‎P‎E‎W‎D‎I‎E‎P‎I‎E‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎i‎m‎e‎ ‎f‎o‎r‎ ‎t‎h‎o‎s‎e‎ ‎a‎s‎s‎ ‎p‎i‎r‎a‎t‎e‎s‎.‎ ‎#‎L‎R‎H‎:‎
+
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎h‎e‎h‎e‎ ‎<‎3‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎i‎s‎ ‎y‎o‎u‎ ‎c‎o‎z‎y‎ ‎j‎r‎r‎a‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎i‎s‎ ‎t‎h‎e‎ ‎m‎a‎t‎t‎r‎e‎s‎s‎ ‎t‎o‎o‎ ‎f‎i‎r‎m‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎o‎r‎ ‎t‎o‎o‎ ‎s‎o‎f‎f‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎j‎r‎r‎a‎>‎ ‎f‎i‎r‎m‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎w‎h‎a‎t‎ ‎w‎a‎s‎ ‎i‎t‎ ‎l‎i‎k‎e‎ ‎w‎h‎e‎n‎ ‎y‎o‎u‎ ‎a‎r‎r‎i‎v‎e‎d‎ ‎a‎t‎ ‎t‎h‎e‎ ‎a‎i‎r‎p‎o‎r‎t‎,‎ ‎d‎i‎d‎ ‎y‎o‎u‎r‎ ‎m‎u‎m‎m‎a‎ ‎p‎i‎c‎k‎ ‎y‎o‎u‎ ‎u‎p‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎j‎r‎r‎a‎>‎ ‎i‎ ‎t‎o‎l‎d‎ ‎h‎e‎r‎ ‎t‎o‎ ‎s‎t‎a‎y‎ ‎h‎o‎m‎e‎ ‎c‎u‎z‎ ‎s‎h‎e‎'‎s‎ ‎o‎l‎d‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎j‎r‎r‎a‎>‎ ‎i‎ ‎g‎o‎t‎ ‎a‎ ‎t‎a‎x‎i‎
+[‎0‎0‎:‎5‎7‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎f‎i‎r‎m‎ ‎w‎i‎l‎l‎ ‎s‎o‎r‎t‎ ‎y‎o‎u‎r‎ ‎b‎a‎c‎k‎ ‎o‎u‎t‎
+‎0‎2‎[‎0‎0‎:‎5‎8‎]‎ ‎*‎ ‎+‎W‎e‎b‎W‎y‎y‎z‎r‎d‎ ‎(‎u‎i‎d‎5‎6‎7‎8‎2‎1‎@‎i‎l‎k‎l‎e‎y‎.‎i‎r‎c‎c‎l‎o‎u‎d‎.‎c‎o‎m‎)‎ ‎Q‎u‎i‎t‎ ‎(‎Q‎u‎i‎t‎:‎ ‎C‎o‎n‎n‎e‎c‎t‎i‎o‎n‎ ‎c‎l‎o‎s‎e‎d‎ ‎f‎o‎r‎ ‎i‎n‎a‎c‎t‎i‎v‎i‎t‎y‎‎)‎
+‎0‎3‎[‎0‎0‎:‎5‎8‎]‎ ‎*‎ ‎D‎o‎n‎a‎l‎d‎ ‎(‎~‎D‎o‎n‎a‎l‎d‎@‎1‎7‎8‎.‎1‎9‎.‎8‎5‎.‎9‎0‎)‎ ‎h‎a‎s‎ ‎j‎o‎i‎n‎e‎d‎ ‎#‎L‎R‎H‎
+[‎0‎0‎:‎5‎9‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎s‎h‎e‎ ‎c‎a‎n‎t‎ ‎b‎e‎ ‎T‎H‎A‎T‎ ‎o‎l‎d‎
+[‎0‎0‎:‎5‎9‎]‎ ‎<‎+‎J‎i‎g‎s‎a‎w‎>‎ ‎T‎h‎e‎r‎e‎ ‎w‎i‎l‎l‎ ‎b‎e‎ ‎n‎o‎ ‎p‎u‎s‎h‎u‎p‎s‎ ‎t‎o‎m‎o‎r‎r‎o‎w‎ ‎
+‎0‎3‎[‎0‎0‎:‎5‎9‎]‎ ‎*‎ ‎d‎e‎m‎o‎g‎o‎r‎g‎o‎ ‎s‎e‎t‎s‎ ‎m‎o‎d‎e‎:‎ ‎-‎b‎ ‎*‎!‎*‎@‎c‎-‎6‎9‎-‎2‎5‎0‎-‎2‎3‎1‎-‎1‎1‎5‎.‎h‎s‎d‎1‎.‎v‎a‎.‎c‎o‎m‎c‎a‎s‎t‎.‎n‎e‎t‎
+[‎0‎0‎:‎5‎9‎]‎ ‎<‎+‎m‎i‎l‎k‎n‎e‎s‎s‎s‎>‎ ‎y‎o‎u‎ ‎w‎a‎n‎t‎e‎d‎ ‎t‎o‎ ‎b‎e‎ ‎a‎ ‎b‎e‎e‎g‎ ‎b‎o‎y‎ ‎a‎n‎d‎ ‎g‎e‎t‎ ‎y‎o‎u‎r‎s‎e‎l‎f‎ ‎h‎o‎m‎e‎ ‎d‎i‎d‎n‎t‎ ‎y‎o‎u‎ ‎:‎)‎
+[‎0‎0‎:‎5‎9‎]‎ ‎<‎+‎J‎i‎g‎s‎a‎w‎>‎ ‎I‎ ‎a‎m‎ ‎i‎n‎ ‎p‎a‎i‎n‎ ‎
+[‎0‎0‎:‎5‎9‎]‎ ‎<‎+‎J‎i‎g‎s‎a‎w‎>‎ ‎H‎e‎l‎p‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+	‎
+T‎h‎e‎ ‎y‎e‎l‎l‎o‎w‎-‎t‎h‎r‎o‎a‎t‎e‎d‎ ‎m‎i‎n‎e‎r‎ ‎(‎M‎a‎n‎o‎r‎i‎n‎a‎ ‎f‎l‎a‎v‎i‎g‎u‎l‎a‎)‎,‎ ‎a‎l‎s‎o‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎t‎h‎e‎ ‎w‎h‎i‎t‎e‎-‎r‎u‎m‎p‎e‎d‎ ‎m‎i‎n‎e‎r‎,‎ ‎i‎s‎ ‎a‎ ‎s‎p‎e‎c‎i‎e‎s‎ ‎o‎f‎ ‎c‎o‎l‎o‎n‎i‎a‎l‎ ‎h‎o‎n‎e‎y‎e‎a‎t‎e‎r‎ ‎e‎n‎d‎e‎m‎i‎c‎ ‎t‎o‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎.‎ ‎I‎t‎ ‎i‎s‎ ‎a‎ ‎m‎e‎d‎i‎u‎m‎-‎s‎i‎z‎e‎d‎,‎ ‎g‎r‎e‎y‎ ‎p‎a‎s‎s‎e‎r‎i‎n‎e‎ ‎b‎i‎r‎d‎ ‎w‎i‎t‎h‎ ‎y‎e‎l‎l‎o‎w‎ ‎t‎h‎r‎o‎a‎t‎ ‎m‎a‎r‎k‎i‎n‎g‎s‎,‎ ‎l‎e‎g‎s‎,‎ ‎a‎n‎d‎ ‎b‎a‎r‎e‎ ‎p‎a‎t‎c‎h‎e‎s‎ ‎a‎r‎o‎u‎n‎d‎ ‎t‎h‎e‎ ‎e‎y‎e‎.‎ ‎T‎h‎e‎ ‎c‎o‎m‎m‎o‎n‎ ‎n‎a‎m‎e‎ ‎m‎i‎n‎e‎r‎ ‎i‎s‎ ‎a‎n‎ ‎a‎l‎t‎e‎r‎n‎a‎t‎i‎v‎e‎ ‎s‎p‎e‎l‎l‎i‎n‎g‎ ‎o‎f‎ ‎t‎h‎e‎ ‎w‎o‎r‎d‎ ‎m‎y‎n‎a‎,‎ ‎a‎n‎d‎ ‎i‎s‎ ‎s‎h‎a‎r‎e‎d‎ ‎w‎i‎t‎h‎ ‎o‎t‎h‎e‎r‎ ‎m‎e‎m‎b‎e‎r‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎g‎e‎n‎u‎s‎ ‎M‎a‎n‎o‎r‎i‎n‎a‎.‎ ‎T‎h‎o‎u‎g‎h‎ ‎m‎i‎n‎e‎r‎s‎ ‎w‎e‎r‎e‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎l‎y‎ ‎n‎a‎m‎e‎d‎ ‎d‎u‎e‎ ‎t‎o‎ ‎t‎h‎e‎i‎r‎ ‎r‎e‎s‎e‎m‎b‎l‎a‎n‎c‎e‎ ‎t‎o‎ ‎t‎h‎e‎ ‎c‎o‎m‎m‎o‎n‎ ‎m‎y‎n‎a‎ ‎o‎f‎ ‎I‎n‎d‎i‎a‎ ‎t‎h‎a‎t‎ ‎s‎h‎a‎r‎e‎s‎ ‎s‎i‎m‎i‎l‎a‎r‎ ‎y‎e‎l‎l‎o‎w‎ ‎e‎y‎e‎-‎p‎a‎t‎c‎h‎ ‎a‎n‎d‎ ‎l‎e‎g‎s‎,‎ ‎c‎o‎m‎m‎o‎n‎ ‎m‎y‎n‎a‎s‎ ‎a‎r‎e‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎s‎t‎a‎r‎l‎i‎n‎g‎ ‎f‎a‎m‎i‎l‎y‎ ‎a‎n‎d‎ ‎a‎r‎e‎ ‎n‎o‎t‎ ‎c‎l‎o‎s‎e‎l‎y‎ ‎r‎e‎l‎a‎t‎e‎d‎ ‎t‎o‎ ‎t‎h‎e‎ ‎h‎o‎n‎e‎y‎e‎a‎t‎e‎r‎s‎.‎ ‎T‎h‎i‎s‎ ‎y‎e‎l‎l‎o‎w‎-‎t‎h‎r‎o‎a‎t‎e‎d‎ ‎m‎i‎n‎e‎r‎ ‎w‎a‎s‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎d‎ ‎i‎n‎ ‎S‎t‎u‎r‎t‎ ‎N‎a‎t‎i‎o‎n‎a‎l‎ ‎P‎a‎r‎k‎ ‎i‎n‎ ‎N‎e‎w‎ ‎S‎o‎u‎t‎h‎ ‎W‎a‎l‎e‎s‎,‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎J‎J‎ ‎H‎a‎r‎r‎i‎s‎o‎n‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎w‎a‎t‎c‎h‎ ‎P‎h‎a‎n‎t‎o‎m‎ ‎o‎f‎ ‎t‎h‎e‎ ‎O‎p‎r‎a‎h‎.‎ ‎"
+413PtBtW,MOK layout Jawi,dksetiavan,YAML,Thursday 5th of October 2023 08:40:16 AM CDT,"{
+""title"":""Jawi"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قوڠرتيَُِڤ"",
+""اسدفݢهجکل"",
+""[SHIFT]زڽچۏبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""أؤعظطئًٌٍث"",
+""ءشذإغحخكل"",
+""[SHIFT]ضصةىـّْ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+uqJ7tSPX,MOK layout Sorabe,dksetiavan,YAML,Thursday 5th of October 2023 08:38:49 AM CDT,"{
+""title"":""Sorabe"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ع[MC:وً]رتط[MC:يً]َُِ"",
+""اسدفغهجكل"",
+""[SHIFT]يْوبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""زةث[MC:رّ]ࢋئًٌٍ"",
+""ءشڊ[MC:فّ]ذحخق[MC:طّ]"",
+""[SHIFT][MC:يّ]ّـصضظ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+PmnXYTVG,MOK layout Sorani (reformed),dksetiavan,YAML,Thursday 5th of October 2023 08:36:18 AM CDT,"{
+""title"":""Soranî (reformed)"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قوەرتی[MC:وو]ێۆپ"",
+""اسدفگھجکل"",
+""[SHIFT]زخچڤبنمـ[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ةۊعڕطؽۇئۉث"",
+""ءشذْظحصضڵ"",
+""[SHIFT]ژغّڡٮ[XK:ًَ][XK:ٍِ][XK:ٌُ][DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+1ZusPR7S,Untitled,LemonNing,C++,Thursday 5th of October 2023 08:06:49 AM CDT,"#include <iostream>
+#include <cstdio>
+
+bool condition;
+
+struct C{
+    int n;
+    void *p;
+    explicit C(int _n): n(_n), p(this){
+        printf(""Constructed: %d\n"",n);
+    }
+
+    ~C(){
+        printf(""deleted! :%d\n"",n);
+        n = -114514;
+    }
+
+    C(C &_c): n(_c.n), p(_c.p){
+        printf(""Copied: %d\n"",n);
+    }
+
+    C(C &&_c): n(_c.n), p(_c.p){
+        _c.n = -1;
+        printf(""Moved: %d\n"",n);
+    }
+};
+
+C fun0(){
+    C c (114514);
+    printf(""-------in fun0---------\n"");
+    return std::move(c);
+}
+
+C fun1(){
+    C c(10);
+    printf(""-------in fun1---------\n"");
+    return c;
+}
+
+C fun2(){
+    C c(20);
+    printf(""-------in fun2---------\n"");
+    if (condition)
+        return c;
+    else
+        return C(-20);
+}
+
+C& fun3(){
+//    std::shared_ptr<C> pc (new C(1'145'141'919));
+    C c (30);
+    printf(""-------in fun3---------\n"");
+    return c;
+}
+
+C fun4(){
+    std::shared_ptr<C> pc (new C(40));
+    printf(""-------in fun4---------\n"");
+    return (*pc);
+}
+
+
+int main(){
+    condition = true;
+
+    C c_0{123};
+    C c_1 = c_0;
+    C c_2 = std::move(c_0);
+
+    printf(""\n-----test0-----\n"");
+    C c0  = fun0();
+    printf(""----------------\n"");
+    printf(""%d\n"",c0.n);
+
+    printf(""\n-----test1-----\n"");
+    C c1  = fun1();
+    printf(""----------------\n"");
+    printf(""%d\n"",c1.n);
+
+    printf(""\n-----test2-----\n"");
+    C c2  = fun2();
+    printf(""----------------\n"");
+    printf(""%d\n"",c2.n);
+
+    printf(""\n-----test3-----\n"");
+    C c3  = fun3();
+    printf(""----------------\n"");
+    printf(""%d\n"",c3.n);
+
+    printf(""\n-----test4-----\n"");
+    C c4 = fun4();
+    printf(""----------------\n"");
+    printf(""%d\n"",c4.n);
+
+    printf(""\n-----END-------\n\n"");
+    return 0;
+}
+
+/* OUTPUT:
+Constructed: 123
+Copied: 123
+Moved: 123
+
+-----test0-----
+Constructed: 114514
+-------in fun0---------
+Moved: 114514
+deleted! :-1
+----------------
+114514
+
+-----test1-----
+Constructed: 10
+-------in fun1---------
+----------------
+10
+
+-----test2-----
+Constructed: 20
+-------in fun2---------
+Moved: 20
+deleted! :-1
+----------------
+20
+
+-----test3-----
+Constructed: 30
+-------in fun3---------
+deleted! :30
+Copied: 1807265808
+----------------
+1807265808
+
+-----test4-----
+Constructed: 40
+-------in fun4---------
+Copied: 40
+deleted! :40
+----------------
+40
+
+-----END-------
+
+deleted! :40
+deleted! :1807265808
+deleted! :20
+deleted! :10
+deleted! :114514
+deleted! :123
+deleted! :123
+deleted! :-1
+*/
+
+/*OUTPUT disable return value optimization.
+Constructed: 123
+Copied: 123
+Moved: 123
+
+-----test0-----
+Constructed: 114514
+-------in fun0---------
+Moved: 114514
+deleted! :-1
+Moved: 114514
+deleted! :-1
+----------------
+114514
+
+-----test1-----
+Constructed: 10
+-------in fun1---------
+Moved: 10
+deleted! :-1
+Moved: 10
+deleted! :-1
+----------------
+10
+
+-----test2-----
+Constructed: 20
+-------in fun2---------
+Moved: 20
+deleted! :-1
+Moved: 20
+deleted! :-1
+----------------
+20
+
+-----test3-----
+Constructed: 30
+-------in fun3---------
+deleted! :30
+Copied: 1796517872
+----------------
+1796517872
+
+-----test4-----
+Constructed: 40
+-------in fun4---------
+Copied: 40
+deleted! :40
+Moved: 40
+deleted! :-1
+----------------
+40
+
+-----END-------
+
+deleted! :40
+deleted! :1796517872
+deleted! :20
+deleted! :10
+deleted! :114514
+deleted! :123
+deleted! :123
+deleted! :-1
+*/"
+pTEnMFAx,Word Boggle,jayati,C++,Thursday 5th of October 2023 07:33:36 AM CDT,"//{ Driver Code Starts
+// Initial template for C++
+
+#include <bits/stdc++.h>
+using namespace std;
+
+
+// } Driver Code Ends
+class Solution {
+public:
+     bool dfs(vector<vector<char> >& board, string &s, int i, int j, int n, int m, int idx){
+        
+       if(i<0 || i>=n||j<0||j>=m){
+           return false;
+       }
+        
+       if(s[idx]!= board[i][j]){
+           return false;
+       }
+       if(idx == s.size()-1){
+           return true;
+       }
+        
+       char temp = board[i][j];
+       board[i][j]='*';
+        
+       bool a = dfs(board,s,i,j+1,n,m,idx+1);
+       bool b= dfs(board,s,i,j-1,n,m,idx+1);
+       bool c = dfs(board,s,i+1,j,n,m,idx+1);
+       bool d = dfs(board,s,i-1,j,n,m,idx+1);
+       bool e = dfs(board,s,i+1,j+1,n,m,idx+1);
+       bool f = dfs(board,s,i-1,j+1,n,m,idx+1);
+       bool g = dfs(board,s,i+1,j-1,n,m,idx+1);
+       bool h = dfs(board,s,i-1,j-1,n,m,idx+1);
+        
+       board[i][j]=temp;
+       return a||b||c||e||f||g||h||d;
+        
+        
+   }
+   vector<string> wordBoggle(vector<vector<char> >& board, vector<string>& dictionary) {
+           int n= board.size();
+           int m = board[0].size();
+           vector<string> ans;
+           set<string> store;
+            for(int i=0;i<dictionary.size();i++){
+                string s = dictionary[i];
+                int l = s.size();
+                for(int j = 0 ; j < n;j++){
+                    for(int k=0;k<m;k++){
+                        if(dfs(board,s,j,k,n,m,0)){
+                            store.insert(s);
+                        }
+                    }
+                }
+            }
+             
+            for(auto i:store){
+                ans.push_back(i);
+            }
+            
+            return ans;
+     
+}
+ 
+};
+
+//{ Driver Code Starts.
+
+int main() {
+    int t;
+    cin >> t;
+    while (t--) {
+        int N;
+        cin >> N;
+        vector<string> dictionary;
+        for (int i = 0; i < N; ++i) {
+            string s;
+            cin >> s;
+            dictionary.push_back(s);
+        }
+        
+        int R, C;
+        cin >> R >> C;
+        vector<vector<char> > board(R);
+        for (int i = 0; i < R; i++) {
+            board[i].resize(C);
+            for (int j = 0; j < C; j++) cin >> board[i][j];
+        }
+        Solution obj;
+        vector<string> output = obj.wordBoggle(board, dictionary);
+        if (output.size() == 0)
+            cout << ""-1"";
+        else {
+            sort(output.begin(), output.end());
+            for (int i = 0; i < output.size(); i++) cout << output[i] << "" "";
+        }
+        cout << endl;
+    }
+}
+
+// } Driver Code Ends"
+wamqNSaQ,BASH PROMPT examples,metalx1000,Bash,Thursday 5th of October 2023 07:29:27 AM CDT,"#notes https://linuxconfig.org/bash-prompt-basics
+
+PS1=""[PROMPT] ""
+
+#current working directory
+PS1=""[\w]$ ""
+
+#host and user
+PS1=""[\h]$ ""
+PS1=""[\u]$ ""
+PS1=""[\u@\h]$ ""
+
+#multiline
+PS1=""[\u@\h]\n[\w]$ ""
+PS1=""╭─[\u@\h]\n╰─[\w]$ ""
+
+#date and time
+PS1=""╭─[\u@\h][\d \t]\n╰─[\w]$ ""
+
+#colors
+PS1=""\[\e[035m╭─[\u@\h]\n╰─[\w]$ ""
+#reset color
+PS1=""\[\e[035m╭─[\u@\h]\n╰─[\w]$ \[\033[00m\]""
+PS1=""\[\e[035m╭─\[\e[034m[\u@\h]\n\[\e[035m╰─[\w]$ \[\e[00m\]""
+PS1=""\[\e[035m╭─\[\e[034m[\u@\h]\n\[\e[035m╰─\[\e[036m[\w]$ \[\e[00m\]""
+PS1=""\[\e[035m╭─\[\e[034m[\u@\h] \[\e[031m[\d \t]\n\[\e[035m╰─\[\e[036m[\w]$ \[\e[00m\]""
+PS1=""\[\e[035m╭─\[\e[034m[\u@\h] \[\e[031m[\d \t]\n\[\e[035m╰─\[\e[036m[\w] \[\e[033m$ \[\e[00m\]""
+
+PS1=""\[\e[035m╭─\[\e[034m[\u@\h] \[\e[031m[\d \t]\n\[\e[035m╰─\[\e[036m[\w] \[\e[031m💀#\[\e[00m\] """
+rsq9JMav,jass KickPlayer,krot,JavaScript,Thursday 5th of October 2023 07:27:29 AM CDT,"function KickPlayer takes player p returns nothing
+    call RemovePlayer(p, PLAYER_GAME_RESULT_DEFEAT)
+    if GetLocalPlayer() == p then
+        call EndGame(false)
+    endif
+endfunction"
+KfVgQDz2,Untitled,blooming8,Python,Thursday 5th of October 2023 07:22:37 AM CDT,"import os
+
+
+# Ripulisce la cartella degli screenshot così da inviare più velocemente gli allegati su Teams #
+
+def program() -> None:
+
+    path = 'C:/Users/Alessio Li Veli\OneDrive - Bit srl\Immagini\Screenshot'
+
+    try:
+        if os.getcwd() != path:
+            os.chdir(path)
+
+        for _, _, files in os.walk(path):
+            for file in files:
+                os.remove(file)
+
+        input(""\nCartella Screnshot ripulita.\n"")
+
+    except Exception as exc:
+        print(exc)
+
+    return
+
+
+if __name__ == '__main__':
+    program()
+"
+DYU4cgmm,Download EPL Badges,cm12321,Python,Thursday 5th of October 2023 07:08:44 AM CDT,"import os
+import requests
+
+headers = {
+    ""referer"": ""https://www.premierleague.com/"",
+    ""origin"": ""https://www.premierleague.com""
+}
+
+with requests.Session() as s:
+    url = ""https://footballapi.pulselive.com/football/teams?pageSize=100&altIds=true&compSeasons=578""
+    r = s.get(url, headers=headers).json()[""content""]
+
+    if not os.path.exists(""badges""):
+        os.mkdir(""badges"")
+    teams = [(x[""name""], x[""altIds""][""opta""]) for x in r]
+    for team in teams:
+        url = f""https://resources.premierleague.com/premierleague/badges/{team[1]}.png""
+        data = s.get(url).content
+
+        with open(f""badges/{team[0]}.png"", ""wb"") as f:
+            f.write(data)
+"
+nkVcqdFD,"Configuración de ""yamllint""",luisg_muniz,YAML,Thursday 5th of October 2023 07:08:10 AM CDT,"---
+extends: default
+rules:
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  line-length:
+    max: 90
+    level: warning
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no']
+...
+"
+Wfebn1qL,Exercise,Griwin,C++,Thursday 5th of October 2023 06:41:26 AM CDT,"#include <iostream>
+using namespace std;
+
+class Student {
+public:
+    string name;
+    double grade;
+    int age;
+    Student(string n, double g, int a) : name(n), grade(g), age(a) {}
+
+};
+
+
+
+void averageAge(Student arr[], int size) {
+    int sum = 0;
+    
+    for (int i = 0; i < size; i++) {
+        sum = sum + arr[i].age;
+    }
+    int result = sum / size;
+    cout << ""The avg age is:""<< result <<endl;
+}
+
+int main() {
+    Student st1(""Chefo"", 5, 17);
+    Student st2(""Georgi"", 3, 17);
+    Student st3(""Atanas"", 6, 16);
+    Student st4(""Stefan"", 4, 17);
+    Student st5(""Ivan"", 5, 16);
+
+    Student students[5] = { st1, st2, st3 , st4, st5 };
+    int size = sizeof(students) / sizeof(students[0]);
+
+    averageAge(students, size);
+    
+    return 0;
+}
+
+"
+8Yeb2uFC,Blue Archive Suggestions,SandehBoi,HTML 5,Thursday 5th of October 2023 06:37:05 AM CDT,"-Bond level cap increased from 20 to 40 or 50 at 4 stars, otherwise 3 and 4 star characters accumulate bond experience at max bond and when they reach 5 stars they jump to the appropriate level (20->24)
+-Voice Replay-Add subs in other languages - Example: https://shorturl.at/mqwyK
+-""Final Episode"" changed to Final Volume - each section within a chapter are already referred to as episodes.
+-Add 2nd level to cafe/further expansion of cafe
+-Donating equipment-People can donate equipment to others through Clubs
+-PC port
+-Switching between Menus in Bounties/Commissions/Scrimmage for extra convenience
+-Jukebox function to listen to music in game
+-Combine 10 single pull tickets into a 10 pull ticket
+-Encyclopedia with trivia/information on mobs/sukeban/students (add 3D models and each of their animations)"
+swEV7k0N,amnis,ArceusX_Pastebim,Lua,Thursday 5th of October 2023 06:35:56 AM CDT,"
+-- Create the ScreenGui
+local gui = Instance.new(""ScreenGui"")
+gui.Name = ""CustomGUI""
+gui.Parent = game.Players.LocalPlayer.PlayerGui
+
+-- Create the Frame for the GUI
+local frame = Instance.new(""Frame"")
+frame.Name = ""CustomFrame""
+frame.Size = UDim2.new(0, 320, 0, 240)  -- Adjust the size as needed
+frame.Position = UDim2.new(0, 10, 0, 10) -- Adjust the position as needed
+frame.BackgroundColor3 = Color3.fromRGB(0, 0, 128) -- Dark blue
+frame.BorderSizePixel = 0
+frame.Draggable = true
+frame.Parent = gui
+
+-- Create the FOV button
+local fovButton = Instance.new(""TextButton"")
+fovButton.Name = ""FOVButton""
+fovButton.Size = UDim2.new(0, 140, 0, 30)
+fovButton.Position = UDim2.new(0, 10, 0, 10)
+fovButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+fovButton.Text = ""Change FOV to 120""
+fovButton.Parent = frame
+
+fovButton.MouseButton1Click:Connect(function()
+    game.Workspace.CurrentCamera.FieldOfView = 120
+end)
+
+-- Create the Speed button
+local speedButton = Instance.new(""TextButton"")
+speedButton.Name = ""SpeedButton""
+speedButton.Size = UDim2.new(0, 140, 0, 30)
+speedButton.Position = UDim2.new(0, 10, 0, 50)
+speedButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+speedButton.Text = ""Change Speed to 40""
+speedButton.Parent = frame
+
+speedButton.MouseButton1Click:Connect(function()
+    game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = 40
+end)
+
+-- Create the FPS button
+local fpsButton = Instance.new(""TextButton"")
+fpsButton.Name = ""FPSButton""
+fpsButton.Size = UDim2.new(0, 140, 0, 30)
+fpsButton.Position = UDim2.new(0, 170, 0, 10)
+fpsButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+fpsButton.Text = ""Cap FPS to 999""
+fpsButton.Parent = frame
+
+fpsButton.MouseButton1Click:Connect(function()
+    game:GetService(""RunService"").RenderStepped:Connect(function()
+        game:SetFPSCap(999)
+    end)
+end)
+
+-- Create the Reset FOV button
+local resetFovButton = Instance.new(""TextButton"")
+resetFovButton.Name = ""ResetFOVButton""
+resetFovButton.Size = UDim2.new(0, 140, 0, 30)
+resetFovButton.Position = UDim2.new(0, 170, 0, 50)
+resetFovButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+resetFovButton.Text = ""Reset FOV""
+resetFovButton.Parent = frame
+
+resetFovButton.MouseButton1Click:Connect(function()
+    game.Workspace.CurrentCamera.FieldOfView = 70 -- Change this to your normal FOV value
+end)
+
+-- Create the Set Speed to 16 button
+local setSpeed16Button = Instance.new(""TextButton"")
+setSpeed16Button.Name = ""SetSpeed16Button""
+setSpeed16Button.Size = UDim2.new(0, 140, 0, 30)
+setSpeed16Button.Position = UDim2.new(0, 10, 0, 90)
+setSpeed16Button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+setSpeed16Button.Text = ""Set Speed to 16""
+setSpeed16Button.Parent = frame
+
+setSpeed16Button.MouseButton1Click:Connect(function()
+    game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = 16
+end)
+"
+WjFpJ7Gy,Email with Keyword SPECIAL CHARACTERS,wheresTheAnyKey,C,Thursday 5th of October 2023 06:22:13 AM CDT,"Pasted at: 05/10/2023 12:22
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3 for TESTING PURPOSE ONLY
+
+DATA_ID_TESTDATATOFIND NOEXCLUDES
+
+Cooper.Kleine@findmetesting.co.uk 
+Mariquilla.Evenden@findmetesting.co.uk 
+Noll.Ingolotti@findmetesting.co.uk  
+Grove.Feldbaum@findmetesting.co.uk
+Mack.Osment@findmetesting.co.uk 
+Trisha.Zanicchelli@findmetesting.co.uk
+Jack.Gorriessen@findmetesting.co.uk 
+Nefen.Malec@findme-testing.co.uk 
+Birdie-Gemmill@findmetesting.co.uk
+Rosabella.Nias@findmetesting.co.uk
+Ellerey.Fanti@findmetesting.cn
+Antonina.Carsey@findmetesting.cn
+Valry.Shead@findmetesting.cn 
+Conrade.Ferrarone@findmetesting.cn
+Neysa.Fazakerley@findmetesting.cn
+Cristobal.Primak@findmetesting.cn
+Wakefield.Kent@findmetesting.cn
+findme.Cheales@findmetesting.cn
+Nert.Roddamr@findmetesting.cn 
+Richy.Raft@findmetesting.cn
+Berget.Kermannes@findmetesting.ie 
+Shelden.Tregea@findmetesting.ie 
+Allsun.Badrick@findmetesting.ie 
+Hortense.Ivkovic@findmetesting.ie
+Carolin.Potte@findmetesting.ie
+Benjie.Trumble@findmetesting.ie
+Andrew.Hadgkiss@findmetesting.ie
+Trula.Kuna@findmetesting.ie
+Tommie.Maytum@findmetesting.ie
+Langsdon.Pakes@findmetesting.ie
+Porty.Tooth@findmetesting.au
+Rozella.Siggefindmetesting.au
+Nolie.Tumultyfindmetesting.au
+Dud.Caustonfindmetesting.au
+Alvinia.Brameldfindmetesting.au
+Meridel.Lymbournefindmetesting.au
+Elvis.Maleckfindmetesting.au
+Brett.Oughtonfindmetesting.au
+Rickard.Clemfindmetesting.au
+Prue.Firemanfindmetesting.au
+Uriel.Rozenbaum@findmetesting25.com
+Cindie.Greeson@findmetesting25.com
+Laurette.Puckham@findmetesting25.com
+Eldredge.Ricket@findmetesting25.com
+Alanah.Rapper@findmetesting25.com
+Ash.Le.Prevost@findmetesting25.com
+Galvin.Purchon@findmetesting25.com
+Lauryn.Ilson@findmetesting25.com
+findme.Graffin@findmetesting25.com
+Edithe.Trehearne@findmetesting25.com
+Den.Cancutt@findmetesting10.com
+Wernher.Spatoni@findmetesting10.com
+Malchy.Ion@findmetesting10.com
+Leona.Whitby@findmetesting10.com
+Alphonse.Goodlake@findmetesting10.com
+Gran.Standen@findmetesting10.com
+Barnie.Gilffilland@findmetesting10.com
+Kaylyn.Ditchfield@findmetesting10.com
+Dorotea.Kohlerman@findmetesting10.com
+Gillan.Lampel@findmetesting10.com
+Patrica.Mannakee@findustesting.com
+Pippo.Sewart@findustesting.com
+Lanae.Cousin@findustesting.com
+Porter.Glaysher@findustesting.com
+Herschel.Yaakov@findustesting.com
+findme.Parsand@findustesting.com
+Lucho.Cosh@findustesting.com
+Cullie.Powlesland@findustesting.com
+Edy.Burkart@findustesting.com
+Christophorus.Ackeroyd@findustesting.com
+Arvy.Rowson@findUStesting.com
+Arlan.Ivanilov@findustesting.com
+Tawnya.Waslin@findustesting.com
+Inigo.Gyrgorcewicx@findustesting.com
+Sharity.Stoodley@findustesting.com
+Ginger.Dresse@findustesting.com
+Deck.Jouannot@findustesting.com
+Deny.Soanes@findustesting.com
+james@findmetesting.com
+
+Wenona.Moverley@findqatesting.com
+Jerry.Poynter@findqatesting.com
+Drugi.Neeson@findqatesting.com
+Winny.Binfield@findqatesting.com
+Darill.Greenshiels@findqatesting.com
+Ethelin.Pinchen@findqatesting.com
+Tanney.Ballendine@findqatesting.com
+Ariadne.Wincott@findqatesting.com
+Winnie.Domm@findqatesting.com
+Rogerio.Cudbird@findqatesting.com
+Yu@findmetesting.com
+
+RIGHT OF @
+findme@findme.testing.com
+wildcard@findme*testing.com
+dash@findme-testing.com
+slash@findme/testing.com
+questionmark@findme?testing.com
+
+ACCENTS
+Pål@findmetesting.com
+Magdalène@findmetesting.com
+Anaël@findmetesting.com
+Lén@findmetesting.com
+Loïs@findmetesting.com
+Thérèsa@findmetesting.com
+Valérie@findmetesting.com
+Görel@findmetesting.com
+Mélia@findmetesting.com
+Joséphine@findmetesting.com
+Loïc@findmetesting.com
+findme@findmetesting.com
+Méghane@findmetesting.com
+Nuó@findmetesting.com
+Lén@findmetesting.com
+Eliès@findmetesting.com
+André@findmetesting.com
+Mahélie@findmetesting.com
+Méthode@findmetesting.com
+Rachèle@findmetesting.com
+Mélina@findmetesting.com
+Gaëlle@findmetesting.com
+Céline@findmetesting.com
+Bérangère@findmetesting.com
+Françoise@findmetesting.com
+Séverine@findmetesting.com
+Måns@findmetesting.com
+Adèle@findmetesting.com
+Aimée@findmetesting.com
+Mélia@findmetesting.com
+Gösta@findmetesting.com
+Laurène@findmetesting.com
+Gisèle@findmetesting.com
+Mélinda@findmetesting.com
+Bécassine@findmetesting.com
+Ruì@findmetesting.com
+Zoé@findmetesting.com
+Maëline@findmetesting.com
+Aimée@findmetesting.com
+Andréanne@findmetesting.com
+Adélaïde@findmetesting.com
+Laurène@findmetesting.com
+Anaé@findmetesting.com
+Noëlla@findmetesting.com
+Anaël@findmetesting.com
+Maëlyss@findmetesting.com
+Lucrèce@findmetesting.com
+Lén@findmetesting.com
+Marie-thérèse@findmetesting.com
+Maéna@findmetesting.com
+Hélène@findmetesting.com
+Hélèna@findmetesting.com
+Méng@findmetesting.com
+Crééz@findmetesting.com
+Mélanie@findmetesting.com
+Frédérique@findmetesting.com
+Médiamass@findmetesting.com
+André@findmetesting.com
+Cinéma@findmetesting.com
+Mégane@findmetesting.com
+Amélie@findmetesting.com
+Nadège@findmetesting.com
+Rébecca@findmetesting.com
+Médiamass@findmetesting.com
+Céline@findmetesting.com
+Maïly@findmetesting.com
+Maï@findmetesting.com
+Maëlann@findmetesting.com
+Noëlla@findmetesting.com
+Laurélie@findmetesting.com
+Ruì@findmetesting.com
+Chloé@findmetesting.com
+Gaëlle@findmetesting.com
+Vénus@findmetesting.com
+Frédérique@findmetesting.com
+Amélie@findmetesting.com
+Loïs@findmetesting.com
+Marlène@findmetesting.com
+Stévina@findmetesting.com
+Clémentine@findmetesting.com
+Mégane@findmetesting.com
+Méng@findmetesting.com
+André@findmetesting.com
+Crééz@findmetesting.com
+Aí@findmetesting.com
+Uò@findmetesting.com
+Yú@findmetesting.com
+Marie-françoise@findmetesting.com
+Uò@findmetesting.com
+Inès@findmetesting.com
+Océane@findmetesting.com
+Marie-ève@findmetesting.com
+Rébecca@findmetesting.com
+Zoé@findmetesting.com
+Lài@findmetesting.com
+Rachèle@findmetesting.com
+Cécile@findmetesting.com
+Maïlys@findmetesting.com
+Garçon@findmetesting.com
+hereiam@testing.com
+
+It's a game of per%entage percentage.
+Findme#testing Findme testing.
+Over&over&over Over over over.
+[findmeinbrackets], findmeinbrackets
+(findmeinbrackets), findmeinbrackets
+<findmeinbrackets>, findmeinbrackets
+{findmeinbrackets>}, findmeinbrackets
+http://findme-testing.here.com
+http:\\findme-testing.here.com
+
+Vestibulum ante ipsum primis in faucibus orci luctus et ultrices Garçon@findmetesting.com cubilia Curae; Mauris viverra diam vitae quam. Suspendisse potenti. 
+Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Ellerey.Fanti@findmetesting.cn risus. Praesent lectus.
+
+Vivamus metus arcu, adipiscing findmetesting@findmetesting.com, hendrerit at, vulputate vitae, nisl.
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH"
+m8Q6ztym,data716,TestGuy1,JSON,Thursday 5th of October 2023 06:00:08 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'f80afd0259d649e1ab9b9de7fe1927e1c05c63edbb6a79be7d497f8347bac19ed19ce511406566b7d3ab4bc8a2931ad415c0a49d17f70764c81b6bb370aca721daacf5a954ed344f4702c749d2ab4823d0d914af5bda741adebadab5d87cd427ec231ccc381d6c42a9ff36ae6cf68f7dcd24d4bf9493371a64f67c3e9431366a',
+  otherdata: [
+    '5b716d51668a316aaeb1ba26ceaac1f7',
+    '63259ae11590086684b80f829b4e5a7b',
+    '384a0cb868fb784310446c4168c46f7d',
+    'f9d96bff20d16b6137e14840d0116f03',
+    'f537abdbcd69aad3a1c8f1f45ac08dda',
+    'dd0da83e4fbf519e594010101319e2da',
+    '4d5763bb8ad4c38afa3fa02cdd77dccc',
+    '075625268fc58a2aa547a0516801a842'
+  ]
+}"
+mxvr0Zha,ghd,crazy_programmer91,Python,Thursday 5th of October 2023 05:59:24 AM CDT,"
+def gcd (num1, num2):
+    while num2:
+        num1, num2 = num2, num1 % num2
+    return num1
+
+
+a = 3   # num1
+b = 5   # num2
+print(f' gcd of {a} and {b} is {gcd(a, b)}')
+"
+vE9RuCFk,Untitled,FenixDevelopment,Lua,Thursday 5th of October 2023 05:34:09 AM CDT,"Config.Menus = {
+    [""legal""] = {
+        marker = {
+            job = {""ambulance"", ""other""}, -- se false o non esiste può essere aperto da tutti
+            coords = {
+                vec3(0,0,0),
+                vec3(0,0,0)
+            }, 
+
+            -- altre customizzazioni del marker
+        },
+
+        can = {
+            ""removeorgans"", -- puo rimuovere tutti gli organi (si intende uno alla volta naturalmente)
+            ""addorgans"",    -- puo aggiungere tutti gli organi  (si intende uno alla volta naturalmente)
+            ""removeextra"",  -- puo rimuovere l oggetto misterioso se presenten nel corpo, nel nostro esempio la cocaina
+        },
+
+        usetrigger = true, 
+        --[[
+            TriggerEvent(""organs:openlegalmenu"") 
+            se false il trigger non deve poter essere usato, se true il trigger bypassa il controllo del job e funziona per chiunque triggera
+        ]]
+    },
+
+    [""illegal""] = {
+        marker = {
+            job = {""yakuza"", ""mafia""}, -- se false o non esiste può essere aperto da tutti
+            coords = {
+                vec3(0,0,0),
+                vec3(0,0,0)
+            }, 
+
+            -- altre customizzazioni del marker
+        },
+
+        can = {
+            ""removeorgans"", -- puo rimuovere tutti gli organi (si intende uno alla volta naturalmente)
+            ""addextra"",  -- puo aggiungere l oggetto misterioso nel corpo, nel nostro esempio la cocaina
+        },
+
+        usetrigger = true, 
+        --[[
+            TriggerEvent(""organs:openillegalmenu"") 
+            se false il trigger non deve poter essere usato, se true il trigger bypassa il controllo del job e funziona per chiunque triggera
+        ]]
+    },
+}"
+Fzeffh8Y,Untitled,FenixDevelopment,Lua,Thursday 5th of October 2023 05:18:05 AM CDT,"Config.Items = {
+    -- [[ Curare determinati organi ]]
+    [""pillolacuore""] = { -- nome item
+        organ = {""heart""}, -- nome dell organo/i
+        add = 0.5        -- valore aumento salute
+    },
+
+    [""pillolapolmone""] = { -- nome item
+        organ = {""rightlung"", ""leftlung""}, -- nome dell organo/i
+        add = 0.5        -- valore aumento salute
+    },
+
+    -- [[ Curare tutti gli organi ]]
+    [""pillolamagica""] = { -- nome item
+        organ = ""all"", -- nome dell organo/i
+        add = 0.5        -- valore aumento salute
+    },
+
+    -- [[ Item malevoli ]]
+    --- Rimuove salute ad determinati organi
+    [""velenocuore""] = { -- nome item
+        organ = {""heart""}, -- nome dell organo/i
+        remove = 0.5        -- valore aumento salute
+    },
+
+    --- Rimuove salute a tutti gli organi
+    [""veleno""] = { -- nome item
+        organ = ""all"",      -- nome dell organo/i
+        remove = 0.5        -- valore aumento salute
+    },
+}"
+VyS8j859,RSC in CSR,Piotoru,TypeScript,Thursday 5th of October 2023 05:09:00 AM CDT,"import { ReactNode, useContext } from 'react';
+
+import { darkMode } from 'constants/links';
+
+import { ModeContext } from 'providers/ModeProvider';
+import { MenuContext } from 'providers/MenuProvider';
+
+import { UserHeader } from 'components/organisms/UserHeader/UserHeader';
+import { Header } from 'components/organisms/Header/Header';
+import { Aside } from 'components/organisms/Aside/Aside';
+import HeadersWrapper from 'components/molecules/HeadersWrapper/HeadersWrapper';
+
+import styles from './SkeletonRootLayout.module.scss';
+
+export const SkeletonRootLayout = ({ children }: { children: ReactNode }) => {
+  const { isMode } = useContext(ModeContext);
+  const { isMenu } = useContext(MenuContext);
+
+  console.log('isMenu', isMenu);
+  return (
+    <div className={`${styles.whole__page} ${isMode === darkMode ? 'dark' : ''}`}>
+      <HeadersWrapper childrenWrapper={isMenu === 'true' ? <UserHeader /> : <Header />} />
+
+      <div className={styles.container}>
+        {isMenu === 'true' && <HeadersWrapper childrenWrapper={<Aside />} />}
+
+        <main
+          className={`
+            ${isMenu === 'true' ? styles.user__container : styles.main__container}
+            ${isMode === darkMode ? 'main__container--dark' : ''}
+          `}>
+          <section className={styles.workspace}>{children}</section>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+
+
+//ERROR
+
+./locales/server.ts
+'server-only' cannot be imported from a Client Component module. It should only be used from a Server Component.
+
+The error was caused by importing 'next-international/dist/app/server/index.js' in './locales/server.ts'.
+
+Import trace for requested module:
+  ./locales/server.ts
+  ./components/organisms/UserHeader/UserHeader.tsx
+  ./components/organisms/SkeletonRootLayout/SkeletonRootLayout.tsx
+  ./providers/GlobalProvider.tsx"
+aHAQx9Em,Untitled,yarin0600,C++,Thursday 5th of October 2023 04:35:13 AM CDT,"    int divide(int dividend, int divisor) {
+        if(dividend == INT_MIN && divisor == -1){
+            return INT_MAX;
+        }
+        long long dvd = labs(dividend), dvs = labs(divisor), result = 0;
+        int sign = (dividend > 0) ^ (divisor > 0) == 0 ? 1 : -1;
+        while(dvd >= dvs){
+            long long temp = dvs, mul = 1;
+            while(temp << 1 <= dvd){
+                temp <<= 1;
+                mul <<= 1;
+            }
+            dvd -= temp;
+            result += mul;
+        } 
+        return sign*result;
+    }"
+4Ss7W3NN,Untitled,desssssy,Python,Thursday 5th of October 2023 04:22:50 AM CDT,"checking_input = input()
+word = """"
+new_word = """"
+c_counter = 0
+o_counter = 0
+n_counter = 0
+
+while checking_input != ""End"":
+    if 'a' <= checking_input <= 'z' or 'A' <= checking_input <= 'Z':
+        if checking_input == ""c"" and c_counter == 0:
+            c_counter += 1
+        elif checking_input == ""o"" and o_counter == 0:
+            o_counter += 1
+        elif checking_input == ""n"" and n_counter == 0:
+            n_counter += 1
+        else:
+            word += checking_input
+
+    if c_counter == 1 and o_counter == 1 and n_counter == 1:
+        new_word = new_word + word + "" ""
+
+        word = """"
+        c_counter = 0
+        o_counter = 0
+        n_counter = 0
+
+    checking_input = input()
+
+print(new_word)"
+w08s8EeC,socat tests v001 NOT working,plirof2,Bash,Thursday 5th of October 2023 04:04:43 AM CDT,"socat - TCP4:www.example.com:80
+
+lab08-3gb-e8400-bl64
+
+socat - TCP4:lab08-3gb-e8400-bl64:80
+socat - TCP4:www.example.com:80
+socat - TCP4:www.example.com:80
+
+
+socat TCP4-LISTEN:81 TCP4:192.168.1.200:80
+
+
+
+
+socat /dev/ttyS2,b115200,raw,echo=0 TCP:192.168.1.200:7000
+
+
+
+
+
+socat STDIO TCP4:localhost:1234
+
+https://stackoverflow.com/questions/39723379/socat-run-script-in-bidirectional-tunnel
+socat TCP4:192.168.1.49:9090 SYSTEM:""leafpad 'socat' &""
+
+
+socat TCP4-L:3334,fork SYSTEM:""$INCOMING_STRING_OF_ARGS""
+socat TCP4:192.168.1.49:3334 SYSTEM:""leafpad 'out going string of args' &"""
+dthspSbR,Untitled,AlexCoder12345,C++,Thursday 5th of October 2023 04:04:12 AM CDT,"void insert_node(tree_node* _root, tree_node* _node){
+        while (_root != nullptr){
+            if (_node->val > _root->val){
+                if (_root->right != nullptr){
+                    _root = _root->right;
+                } else {
+                    _node->parent = _root;
+                    _root->right = _node;
+                    return;
+                }
+            } else if (_node->val < _root->val){
+                if (_root->left != nullptr){
+                    _root = _root->left;
+                } else {
+                    _node->parent = _root;
+                    _root->left = _node;
+                    return;
+                }
+            }
+        }
+    }"
+uEeNn6hW,DB init,rvdraws,MySQL,Thursday 5th of October 2023 03:57:31 AM CDT,"insert into insurer_tpa_master(id,tpa,parameter) values(1,'CARE','apiKey');
+insert into insurer_tpa_master(id,tpa,parameter) values(2,'CARE','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(3,'EASTWEST','emailId');
+insert into insurer_tpa_master(id,tpa,parameter) values(4,'EASTWEST','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(5,'FHPL','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(6,'FHPL','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(7,'MDINDIA','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(8,'MDINDIA','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(9,'MEDIASSIST','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(10,'MEDIASSIST','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(11,'RAKSHA','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(12,'RAKSHA','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(13,'SAFEWAY','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(14,'SAFEWAY','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(15,'VIDAL','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(16,'VIDAL','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(17,'FUTURE','STARTER');
+insert into insurer_tpa_master(id,tpa,parameter) values(18,'FUTURE','USERNAME');
+insert into insurer_tpa_master(id,tpa,parameter) values(19,'GODIGIT','imdCode');
+insert into insurer_tpa_master(id,tpa,parameter) values(20,'GODIGIT','Authorization');
+insert into insurer_tpa_master(id,tpa,parameter) values(21,'HealthIndia','AuthId');
+insert into insurer_tpa_master(id,tpa,parameter) values(22,'ICICI','username');
+insert into insurer_tpa_master(id,tpa,parameter) values(23,'ICICI','password');
+insert into insurer_tpa_master(id,tpa,parameter) values(24,'ICICI','client_id');
+insert into insurer_tpa_master(id,tpa,parameter) values(25,'ICICI','client_secret');
+insert into insurer_tpa_master(id,tpa,parameter) values(26,'Paramount','USERNAME');
+insert into insurer_tpa_master(id,tpa,parameter) values(27,'Paramount','PASSWORD');
+
+
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(31,now(),now(),2,'62dfcb6a70cc1',1);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(32,now(),now(),2,'Shiftrisk',2);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(94,now(),now(),2,'ShiftRiskUser',9);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(109,now(),now(),2,'SHiftRIsk&$!XEXgBr',10);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(141,now(),now(),2,'MTIzNDU=',17);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(142,now(),now(),2,'FGN5292',18);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(143,now(),now(),2,'1000012',19);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(144,now(),now(),2,'W3EPM5OICT8R86A4GLBCDHV1RULFARDC',20);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(145,now(),now(),2,'ysNwdGWs+iyc7KPjnzQnlvcOZLKP3NjaF6L9UORRwHg=',21);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(146,now(),now(),2,'ShiftriskInsure',22);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(147,now(),now(),2,'$hIftR!$k!nsur3',23);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(148,now(),now(),2,'ro.ShiftriskInsure',24);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(149,now(),now(),2,'ro.$hIftR!$k!nsur3',25);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(150,now(),now(),2,'IMT_CARE-ADMIN',26);
+insert into insurer_tpa_agent_config(id,created_date,last_updated,agent_id,value,insurer_tpa_master_id) values(151,now(),now(),2,'ADMIN-USER@430',27);
+
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (1,'476644EB','Left_Nav_Bar','Agents',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (2,'978351C0','Left_Nav_Bar','Clients',1,1,1,1,1);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (3,'7534F2CB','Left_Nav_Bar','Employees',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (4,'112DA3E0','Agent','Read',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (5,'7426557C','Agent','Create',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (6,'9411006B','Agent','Update',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (7,'4C9AFFF1','Agent','Delete',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (8,'73E50861','Agent','List',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (9,'AF16448F','Agent','Self_Profile_Read',1,1,1,1,1);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (10,'40530209','Agent','Self_Profile_Update',1,0,1,0,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (11,'95E8725B','User','Read',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (12,'91F3D00B','User','Create',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (13,'4079739E','User','Update',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (14,'2D925A32','User','Delete',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (15,'75272FE1','User','List',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (16,'D7BE5F45','User','Group_Create',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (17,'F026C835','User','Group_Delete',1,0,1,0,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (18,'3306E17A','User','Group_Read',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (19,'F535011E','User','Group_Update',1,1,1,1,2);
+insert into permission(id,uuid,resource,action,super_admin,admin,agent,agent_employee,sub_agent) values (20,'F4F2A00A','User','Group_List',1,1,1,1,2);
+
+insert into users(id,username,name,enabled,email_verified,user_id,user_type,dob,gender,parent_id,invite_accepted_on) values(1,'achiever.rachit@gmail.com','Rachit',1,1,'IUefkdlajwuds','ADMIN','2020-01-01','Male',null,'2020-01-01');
+    
+insert into login_lookup(id,type,value,password,verified,active,user_id) values(1,'EMAIL','achiever.rachit@gmail.com','password',1,1,1);
+
+insert into agent(id,uuid,ref_code,name,city,display_name,verified,scheme,domain,parent_agent_id,agent_type) values(1,'dadjqeqmjrR','ADMIN','ADMIN','Delhi','ADMIN',1,1,'https://app.imt.care',null,'SAAS');
+
+#insert into user_report_hierarchy(1,1,null);
+insert into user_report_hierarchy (id, user_id, reportee_id) values (1, 1, null);
+
+insert into user_entity_mapping(id,user_id,entity_type,entity_id,created_by,active) values(1,1,'AGENT','dadjqeqmjrR',1,1);
+
+ALTER TABLE agent MODIFY COLUMN agent_type varchar(15);
+
+
+"

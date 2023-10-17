@@ -1,0 +1,2938 @@
+id,title,username,language,date,content
+478qES2a,ya,ProtubDeni,C++,Thursday 12th of October 2023 12:49:01 AM CDT,"#include <cassert>
+#include <iostream>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+enum class QueryType {
+    NewBus,
+    BusesForStop,
+    StopsForBus,
+    AllBuses,
+};
+
+struct Query {
+    QueryType type;
+    string bus;
+    string stop;
+    vector<string> stops;
+};
+
+istream& operator>>(istream& is, Query& q) {
+    std::string temp;
+    is >> temp;
+    if (temp == ""ALL_BUSES""s) {
+        q.type = QueryType::AllBuses;
+    }
+    else if (temp == ""NEW_BUS""s) {
+        q.type = QueryType::NewBus;
+        is >> q.bus;
+        int count;
+        is >> count;
+        q.stops.clear();
+        q.stops.resize(count);
+        for (int i = 0; i < count; i++) {
+            is >> q.stops[i];
+        }
+    }
+    else if (temp == ""BUSES_FOR_STOP""s) {
+        q.type = QueryType::BusesForStop;
+        is >> q.stop;
+    }
+    else if (temp == ""STOPS_FOR_BUS""s) {
+        q.type = QueryType::StopsForBus;
+        is >> q.bus;
+    }
+
+    return is;
+}
+
+struct BusesForStopResponse {
+    string stop_;   //current name stop
+    vector<string> buses_; //vector of buses
+    BusesForStopResponse() {}
+    BusesForStopResponse(const string& stop, const vector<string>& buses) : stop_(stop), buses_(buses) {}
+};
+
+ostream& operator<<(ostream& os, const BusesForStopResponse& r) {
+    if (r.buses_.empty()) {
+        os << ""No stop""s;
+        return os;
+    }
+
+    bool first = true;
+    for (const string& bus : r.buses_) {
+        if (first) {
+            first = false;
+            os << bus;
+            continue;
+        }
+        os << "" ""s << bus;
+    }
+
+    return os;
+}
+//STOPS_FOR_BUS
+struct StopsForBusResponse {
+    string bus_;
+    vector<string> stops_;  //stops for buses...
+
+    map<string, vector<string>> stops_buses_;   //stops, and count of buses...
+    StopsForBusResponse() {}
+    StopsForBusResponse(const string& bus, const vector<string>& stops, const map<string, vector<string>>& stops_buses) {
+        bus_ = bus; //need to exclude bus
+        stops_ = stops;
+        stops_buses_ = stops_buses;
+    }
+};
+
+ostream& operator<<(ostream& os, const StopsForBusResponse& r) {
+    if (r.stops_.empty()) {
+        os << ""No bus""s;
+        return os;
+    }
+
+    int count = r.stops_.size();
+    for (const string& stop : r.stops_) {
+        count--;
+        os << ""Stop ""s << stop << "": ""s;
+        if (r.stops_buses_.at(stop).size() == 1) {
+            os << ""no interchange\n""s;
+            continue;
+        }
+
+        bool first = true;
+        for (const string& bus : r.stops_buses_.at(stop)) {
+            if (bus == r.bus_) {
+                continue;
+            }
+            if (first == true) {
+                first = false;
+                os << bus;
+                continue;
+            }
+            os  << "" ""s << bus;
+        }
+        if (count){
+            os << ""\n""s;
+        }
+    }
+
+    return os;
+}
+
+struct AllBusesResponse {
+    map<string, vector<string>> all_buses_;
+    AllBusesResponse() {}
+    AllBusesResponse(const map<string, vector<string>>& all_buses) : all_buses_(all_buses) {}
+};
+
+ostream& operator<<(ostream& os, const AllBusesResponse& r) {
+    if (r.all_buses_.empty()) {
+        os << ""No buses""s;
+        return os;
+    }
+
+    int count = r.all_buses_.size();
+    for (const auto& bus_info : r.all_buses_) {
+        count--;    //for detect last records...
+        os << ""Bus ""s << bus_info.first << "": ""s;
+        bool first = true;
+        for (const string& stop : bus_info.second) {
+            if (first == true) {
+                os << stop;
+                first = false;
+                continue;
+            }
+            os << "" ""s << stop;
+        }
+        if (count) {    //if last item don't put endl to os
+            os << ""\n""s;
+        }
+    }
+
+    return os;
+}
+
+class BusManager {
+private :
+    map<string, vector<string>> buses_stops_;   //bus, and vector of stops
+    map<string, vector<string>> stops_buses_;   //stop, and vector of stops for buses
+public:
+    void AddBus(const string& bus, const vector<string>& stops) {
+        // NEW_BUS
+        buses_stops_[bus] = stops;
+        for(const auto& stop : stops) {
+            stops_buses_[stop].push_back(bus);
+        }
+    }
+
+    BusesForStopResponse GetBusesForStop(const string& stop) const {
+        //BUSES_FOR_STOP
+        if (stops_buses_.count(stop) == 0) {
+            return BusesForStopResponse(stop, {});
+        }
+        return BusesForStopResponse(stop, stops_buses_.at(stop));
+    }
+
+    StopsForBusResponse GetStopsForBus(const string& bus) const {
+        //        STOPS_FOR_BUS
+        if (buses_stops_.count(bus) == 0) {
+            return StopsForBusResponse(bus, {}, {});
+        }
+        return StopsForBusResponse(bus, buses_stops_.at(bus), stops_buses_);
+
+    }
+
+    AllBusesResponse GetAllBuses() const {
+        // ALL_BUSES
+        return AllBusesResponse(buses_stops_);
+    }
+};
+
+void test_istream_query() {
+    {   //test ALL_BUSES
+        std::istringstream input;
+        input.str(""ALL_BUSES""s);
+        Query q;
+        input >> q;
+        assert(q.type == QueryType::AllBuses);
+        assert(q.stops.size() == 0);
+        assert(q.bus.size() == 0);
+        assert(q.stop.size() == 0);
+    }
+    {   //test NEW_BUS - ADD_BUS
+        std::istringstream input;
+        input.str(""NEW_BUS bus1 4 station1 station2 station3 station4""s);
+        Query q;
+        input >> q;
+        assert(q.type == QueryType::NewBus);
+        assert(q.bus == ""bus1""s);
+        vector<string> test = {""station1"", ""station2"", ""station3"", ""station4""s};
+        int i = 0;
+        for (auto& station : q.stops) {
+            assert(station == test[i]);
+            i++;
+        }
+    }
+    {   //test BUSES_FOR_STOP
+        std::istringstream input;
+        input.str(""BUSES_FOR_STOP station1""s);
+        Query q;
+        input >> q;
+        assert(q.type == QueryType::BusesForStop);
+        assert(q.stop == ""station1""s);
+    }
+    {   //test STOPS_FOR_BUS
+        std::istringstream input;
+        input.str(""STOPS_FOR_BUS bus1""s);
+        Query q;
+        input >> q;
+        assert(q.type == QueryType::StopsForBus);
+        assert(q.bus == ""bus1""s);
+    }
+}
+void test_bus_manager() {
+    //prepare data for class
+    std::istringstream input;
+    input.str(""NEW_BUS bus1 4 st1 st2 st3 st4""s);
+    Query q;
+    input >> q;
+    input.clear();
+    BusManager bus_manage;
+    bus_manage.AddBus(q.bus, q.stops);
+
+    input.str(""NEW_BUS bus2 4 st1 st4 st5 st6""s);
+    input >> q;
+    input.clear();
+    bus_manage.AddBus(q.bus, q.stops);
+
+    input.str(""NEW_BUS bus3 4 st4 st5 st6 st7""s);
+    input >> q;
+    input.clear();
+    bus_manage.AddBus(q.bus, q.stops);
+
+    //check GetBusesForStop(...)... partially test AddBus(...)
+    {
+        auto res = bus_manage.GetBusesForStop(""st1""s);
+        assert(res.buses_.size() == 2); //bus1, bus2
+        assert(res.buses_.at(0) == ""bus1""s);
+        assert(res.buses_.at(1) == ""bus2""s);
+        res = bus_manage.GetBusesForStop(""st7""s);
+        assert(res.buses_.size() == 1);    //bus3
+        assert(res.buses_.at(0) == ""bus3""s);
+
+        res = bus_manage.GetBusesForStop(""st4""s);
+        assert(res.buses_.size() == 3); //bus1, bus2, bus3
+        assert(res.buses_.at(0) == ""bus1""s);
+        assert(res.buses_.at(1) == ""bus2""s);
+        assert(res.buses_.at(2) == ""bus3""s);
+    }
+    //check GetStopsForBus(...) partially test AddBus(...)
+    {
+        vector<string> test_stops[3] = {{""st1""s, ""st2""s, ""st3""s, ""st4""s},
+                                        {""st1""s, ""st4""s, ""st5""s, ""st6""s},
+                                        {""st4""s, ""st5""s, ""st6""s, ""st7""s}};
+        {   //test bus1
+            auto res = bus_manage.GetStopsForBus(""bus1""s);
+            assert(res.bus_ == ""bus1""s);
+            int i = 0;
+            for (const auto& stop : res.stops_) {
+                assert(stop == test_stops[0][i]);
+                i++;
+            }
+        }
+        {   //test bus2
+            auto res = bus_manage.GetStopsForBus(""bus2""s);
+            assert(res.bus_ == ""bus2""s);
+            int i = 0;
+            for (const auto& stop : res.stops_) {
+                assert(stop == test_stops[1][i]);
+                i++;
+            }
+        }
+        {   //test bus3
+            auto res = bus_manage.GetStopsForBus(""bus3""s);
+            assert(res.bus_ == ""bus3""s);
+
+            int i = 0;
+            for (const auto& stop : res.stops_) {
+                assert(stop == test_stops[2][i]);
+                i++;
+            }
+        }
+        {   //test no bus
+            auto res = bus_manage.GetStopsForBus(""bus4""s);
+            assert(res.bus_ == ""bus4""s);
+            assert(res.stops_.size() == 0);
+        }
+    }
+    //check GetAllBuses(...)...
+    {
+        auto res = bus_manage.GetAllBuses();
+        assert(res.all_buses_.size() == 3);
+        map<string, vector<string>> test_buses = {
+            {""bus1""s, {""st1""s, ""st2""s, ""st3""s, ""st4""s}},
+            {""bus2""s, {""st1""s, ""st4""s, ""st5""s, ""st6""s}},
+            {""bus3""s, {""st4""s, ""st5""s, ""st6""s, ""st7""s}}
+        };
+        for (const auto& bus : res.all_buses_) {
+            int i = 0;
+            for (const auto& station : bus.second) {
+                assert(test_buses.at(bus.first).at(i) == station);
+                i++;
+            }
+        }
+    }
+}
+
+int main() {
+    test_istream_query();
+    test_bus_manager();
+    int query_count;
+    Query q;
+
+    cin >> query_count;
+
+    BusManager bm;
+    for (int i = 0; i < query_count; ++i) {
+        cin >> q;
+        switch (q.type) {
+        case QueryType::NewBus:
+            bm.AddBus(q.bus, q.stops);
+            break;
+        case QueryType::BusesForStop:
+            cout << bm.GetBusesForStop(q.stop) << endl;
+            break;
+        case QueryType::StopsForBus:
+            cout << bm.GetStopsForBus(q.bus) << endl;
+            break;
+        case QueryType::AllBuses:
+            cout << bm.GetAllBuses() << endl;
+            break;
+        }
+    }
+    return 0;
+}"
+TyCKnRH7,Bottom View of Binary Tree,jayati,C++,Thursday 12th of October 2023 12:42:12 AM CDT,"//{ Driver Code Starts
+#include <bits/stdc++.h>
+using namespace std;
+#define MAX_HEIGHT 100000
+
+// Tree Node
+struct Node
+{
+    int data;
+    Node* left;
+    Node* right;
+};
+
+// Utility function to create a new Tree Node
+Node* newNode(int val)
+{
+    Node* temp = new Node;
+    temp->data = val;
+    temp->left = NULL;
+    temp->right = NULL;
+
+    return temp;
+}
+
+
+vector <int> bottomView(Node *root);
+
+// Function to Build Tree
+Node* buildTree(string str)
+{
+    // Corner Case
+    if(str.length() == 0 || str[0] == 'N')
+        return NULL;
+
+    // Creating vector of strings from input
+    // string after spliting by space
+    vector<string> ip;
+
+    istringstream iss(str);
+    for(string str; iss >> str; )
+        ip.push_back(str);
+
+    // Create the root of the tree
+    Node* root = newNode(stoi(ip[0]));
+
+    // Push the root to the queue
+    queue<Node*> queue;
+    queue.push(root);
+
+    // Starting from the second element
+    int i = 1;
+    while(!queue.empty() && i < ip.size()) {
+
+        // Get and remove the front of the queue
+        Node* currNode = queue.front();
+        queue.pop();
+
+        // Get the current node's value from the string
+        string currVal = ip[i];
+
+        // If the left child is not null
+        if(currVal != ""N"") {
+
+            // Create the left child for the current node
+            currNode->left = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->left);
+        }
+
+        // For the right child
+        i++;
+        if(i >= ip.size())
+            break;
+        currVal = ip[i];
+
+        // If the right child is not null
+        if(currVal != ""N"") {
+
+            // Create the right child for the current node
+            currNode->right = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->right);
+        }
+        i++;
+    }
+
+    return root;
+}
+
+
+// } Driver Code Ends
+//Function to return a list containing the bottom view of the given tree.
+
+class Solution {
+  public:
+
+    vector <int> bottomView(Node *root) {
+        // Your Code Here
+        if(root==NULL)
+        {
+            return {};
+        }
+        vector<int> v;
+       map<int,int> m;
+       queue<pair<Node*,int>> q;
+       q.push({root,0});
+       
+       while(!q.empty())
+       {
+           auto it = q.front();
+           q.pop();
+           Node* node = it.first;
+           int line = it.second;
+           m[line] = node->data;
+           
+           if(node->left!=NULL)
+           {
+               q.push({node->left,line-1});
+           }
+            if(node->right!=NULL)
+           {
+               q.push({node->right,line+1});
+           }
+       }
+       for(auto u:m)
+       {
+           v.push_back(u.second);
+       }
+       return v;
+       
+    }
+};
+
+//{ Driver Code Starts.
+
+int main() {
+    int t;
+    string tc;
+    getline(cin, tc);
+    t=stoi(tc);
+    while(t--)
+    {
+        string s ,ch;
+        getline(cin, s);
+        Node* root = buildTree(s);
+        Solution ob;
+        vector <int> res = ob.bottomView(root);
+        for (int i : res) cout << i << "" "";
+        cout << endl;
+    }
+    return 0;
+}
+
+
+
+// } Driver Code Ends"
+vhkkfuK7,141. Linked List Cycle,micahbales,JavaScript,Thursday 12th of October 2023 12:01:51 AM CDT,"// 141. Linked List Cycle : https://leetcode.com/problems/linked-list-cycle/
+
+/**
+* Notes: 
+* The key here is knowing about fast & slow pointers pattern (Floyd's Cycle Detection Algorithm)
+* This solution has a time complexity of O(n) and a space complexity of O(1)
+*/
+
+/**
+ * Definition for singly-linked list.
+ * function ListNode(val) {
+ *     this.val = val;
+ *     this.next = null;
+ * }
+ */
+
+/**
+ * @param {ListNode} head
+ * @return {boolean}
+ */
+const hasCycle = function(head) {
+    let fast = head
+    let slow = head
+    while(slow && fast) {
+        fast = fast?.next?.next;
+        slow = slow?.next;
+        if (fast === slow) return true;
+    }
+    return false;
+};"
+CRP0uRTv,Podobné produkty v emailu objednávky,Fany_VanDaal,PHP,Wednesday 11th of October 2023 11:50:04 PM CDT,"// přidání relativních produktů do emailu o zpracovávání objednávky
+add_action( 'woocommerce_email_after_order_table', 'vandaal_add_product_grid_specific_email', 20, 4 );
+   
+function vandaal_add_product_grid_specific_email( $order, $sent_to_admin, $plain_text, $email ) {
+    
+   if ( $email->id == 'customer_processing_order' ) {
+       
+      $related = array();
+      foreach ( $order->get_items() as $item_id => $item ) {         
+         $related = array_merge( wc_get_related_products( $item->get_product_id() ), $related );
+      }
+      if ( ! $related ) return;
+      shuffle( $related );
+      $related = array_unique( $related );
+       
+      echo '<h2>Naše další zajímavé produkty</h2>';
+       
+      $html = '';
+      $col = 1;
+      $cols = 3;
+      $limit = 6;
+      $html .= '<div><table style=""table-layout:fixed;width:100%;""><tbody>';     
+      foreach ( array_slice( $related, 0, $limit ) as $product_id ) {
+         $product = wc_get_product( $product_id );
+         $html .= ( $col + $cols - 1 ) % $cols === 0 ? '<tr>' : '';
+         $html .= '<td style=""text-align:center;vertical-align:bottom"">';
+         $html .= $product->get_image();
+         $html .= '<h3 style=""text-align:center"">' . $product->get_title() . '</h3>';
+         $html .= '<p>' . $product->get_price_html() . '</p>';
+         $html .= '<p><a href=""' . get_permalink( $product_id ) . '"">' . __( 'Read more', 'woocommerce' ) . '</a></p></td>';
+         $html .= $col % $cols === 0 ? '</tr>' : '';
+         $col++;
+      }
+      $html .= '</tbody></table></div>';
+       
+      echo $html;
+       
+   }
+}"
+N91sVUxz,BYPASS,Artani,Lua,Wednesday 11th of October 2023 11:07:33 PM CDT,"PATH (ONLY NEED TO COPY AND PASTE INTO FIDDLER)
+https://www.roblox.com/mobileapi/check-app-version?appVersion=AppUWPV2.592.586
+
+UPGRADE.TXT (MAKE A NOTEPAD, PASTE THE FOLLOWING INTO IT, AND NAME IT  upgrade.txt )
+.txt : {""data"":{""UpgradeAction"":""None""}}
+
+FULL TUTORIAL HERE https://youtu.be/E8Y23UhZSBM"
+c7s9sJBq,Náhled Thank you,Fany_VanDaal,PHP,Wednesday 11th of October 2023 11:06:19 PM CDT,"// zobrazení děkovné stránky z detailu objednávky
+add_filter( 'woocommerce_order_actions', 'vandaal_show_thank_you_page_order_admin_actions', 9999, 2 );
+  
+function vandaal_show_thank_you_page_order_admin_actions( $actions, $order ) {
+   if ( $order->has_status( wc_get_is_paid_statuses() ) ) {
+      $actions['view_thankyou'] = 'Zobrazit děkovnou stránku';
+   }
+   return $actions;
+}
+  
+add_action( 'woocommerce_order_action_view_thankyou', 'vandaal_redirect_thank_you_page_order_admin_actions' );
+  
+function vandaal_redirect_thank_you_page_order_admin_actions( $order ) {
+   $url = add_query_arg( 'adm', $order->get_customer_id(), $order->get_checkout_order_received_url() );
+   add_filter( 'redirect_post_location', function() use ( $url ) {
+      return $url;
+   });
+}
+ 
+add_filter( 'determine_current_user', 'vandaal_admin_becomes_user_if_viewing_thank_you_page' );
+ 
+function vandaal_admin_becomes_user_if_viewing_thank_you_page( $user_id ) {
+   if ( ! empty( $_GET['adm'] ) ) {
+      $user_id = wc_clean( wp_unslash( $_GET['adm'] ) );
+   }
+   return $user_id;
+}"
+3H6nsp01,Email Nová objednávka podle země,Fany_VanDaal,PHP,Wednesday 11th of October 2023 10:36:23 PM CDT,"// zasílání emailu o nové objednávce na email podle fakturační země zákazníka
+// https://www.businessbloomer.com/woocommerce-new-order-email-recipient-based-on-billing-country/
+// PART 1
+// Lets define the array of 'country code' => 'email' pairs
+ 
+function bbloomer_location_admin( $location ) {
+   $admins = array(
+      'US' => 'usamanager@test.com', 
+      'CA' => 'canadamanager@test.com', 
+      // etc
+   );
+   return $admins[$location];
+}
+ 
+// PART 2
+// Lets set the new order email recipient
+ 
+add_filter( 'woocommerce_email_recipient_new_order', 'bbloomer_dynamic_recipient', 9999, 3 );
+  
+function bbloomer_dynamic_recipient( $email_recipient, $order_object, $email ) {
+   if ( is_admin() ) return $email_recipient;
+   if ( $order_object && $location = $order_object->get_billing_country() ) {
+      $email_recipient = bbloomer_location_admin( $location );
+   }
+   return $email_recipient;
+}"
+XUT0ZgkR,Shortcode pro zobrazení názvu produktu či příspěvku,Fany_VanDaal,PHP,Wednesday 11th of October 2023 10:32:19 PM CDT,"// shortcode pro zobrazení názvu produktu či příspěvku
+add_shortcode( 'post_title','get_the_title' );"
+6iwj5XUU,ArduinoShiftRegisters.ino,ripred,C++,Wednesday 11th of October 2023 09:28:28 PM CDT,"// ArduinoShiftRegisters.ino
+// 
+// for use at http://falstad.com/circuit/avr8js/
+// 
+// 
+#define  DUR       50LU
+#define  dataPin   8
+#define  clockPin  9
+#define  ActiveHi  true
+
+int pass;
+
+inline void clk() {
+  digitalWrite(clockPin, ActiveHi ? HIGH : LOW);
+  delayMicroseconds(DUR);
+  digitalWrite(clockPin, (!ActiveHi) ? HIGH : LOW);
+  delayMicroseconds(DUR);
+}
+
+inline void shift_bit(bool const val) {
+  digitalWrite(dataPin, val ? HIGH : LOW);
+  delayMicroseconds(DUR);
+ clk();
+}
+
+inline void shift_byte(uint8_t const val) {
+  for (register int8_t i=0; i < 8; i++) {
+    uint8_t bit = (val >> i) & 0x01;
+    shift_bit(bit);
+  }
+}
+
+inline void clear() {
+  Serial.print(""clearing.."");
+  for (int i=0; i < 7; i++) {
+    shift_byte(0);
+  }
+  Serial.println(""finished"");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // add external voltage (Javascript) with name ""pin n"" to access output pins
+  pinMode(clockPin, OUTPUT);
+  pinMode(dataPin, OUTPUT);
+
+  digitalWrite(clockPin, (!ActiveHi) ? HIGH : LOW);
+  delayMicroseconds(DUR);
+
+  clear();
+}
+
+void loop() {
+  Serial.print(""Pass "");
+  Serial.println(++pass);
+
+  shift_byte(0x3A);   // 'o'
+  shift_byte(0x2A);   // 'n'
+  shift_byte(0x20);   // 'i'
+  shift_byte(0x38);   // 'u'
+  shift_byte(0x7A);   // 'd'
+  shift_byte(0x0A);   // 'r'
+  shift_byte(0xEF);   // 'A'
+
+  delay(10);
+  clear();
+  // delay(50);
+}
+"
+cMbt7Lyv,Spid_rr's Data,azimuths,JSON,Wednesday 11th of October 2023 09:12:07 PM CDT,"{""Stats"":{""ConstructLog"":{""ObjectName"":""ConstructLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""MissionEXP"":{""ObjectName"":""MissionEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PrimaryCN"":{""ObjectName"":""PrimaryCN"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""mapmove1"":{""ObjectName"":""mapmove1"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""TrainingEXP"":{""ObjectName"":""TrainingEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SpecialTitle"":{""ObjectName"":""SpecialTitle"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key12"":{""ObjectName"":""Key12"",""ObjectClass"":""StringValue"",""ObjectValue"":""=""},""Blind"":{""ObjectName"":""Blind"",""ObjectClass"":""NumberValue"",""ObjectValue"":""0""},""Slot2"":{""ObjectName"":""Slot2"",""ObjectClass"":""StringValue"",""ObjectValue"":""Assault Rifle""},""TailedBeastLevel"":{""ObjectName"":""TailedBeastLevel"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CombatEXP"":{""ObjectName"":""CombatEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Personality"":{""ObjectName"":""Personality"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""GripCount"":{""ObjectName"":""GripCount"",""ObjectClass"":""IntValue"",""ObjectValue"":""2""},""Marking"":{""ObjectName"":""Marking"",""ObjectClass"":""IntValue"",""ObjectValue"":""69""},""SkinColor"":{""ObjectName"":""SkinColor"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""HideName"":{""ObjectName"":""HideName"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""ToggleAccessories"":{""ObjectName"":""ToggleAccessories"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""Slot11"":{""ObjectName"":""Slot11"",""ObjectClass"":""StringValue"",""ObjectValue"":""Clam""},""MSAbility1"":{""ObjectName"":""MSAbility1"",""ObjectClass"":""StringValue"",""ObjectValue"":""Time Stop""},""Key8"":{""ObjectName"":""Key8"",""ObjectClass"":""StringValue"",""ObjectValue"":""8""},""LINDAMINISTARTUP"":{""ObjectName"":""LINDAMINISTARTUP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot4"":{""ObjectName"":""Slot4"",""ObjectClass"":""StringValue"",""ObjectValue"":""Hozuki Rocket""},""Slot9"":{""ObjectName"":""Slot9"",""ObjectClass"":""StringValue"",""ObjectValue"":""Nine""},""Version"":{""ObjectName"":""Version"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""DateRecord"":{""ObjectName"":""DateRecord"",""ObjectClass"":""IntValue"",""ObjectValue"":""2515""},""Key4"":{""ObjectName"":""Key4"",""ObjectClass"":""StringValue"",""ObjectValue"":""4""},""CurseMarkLevel"":{""ObjectName"":""CurseMarkLevel"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key2"":{""ObjectName"":""Key2"",""ObjectClass"":""StringValue"",""ObjectValue"":""2""},""Genjutsu"":{""ObjectName"":""Genjutsu"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SwordSave"":{""ObjectName"":""SwordSave"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BijuuXP"":{""ObjectName"":""BijuuXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SeenDeaths"":{""ObjectName"":""SeenDeaths"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BonusSkillPoints"":{""ObjectName"":""BonusSkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CColorB"":{""ObjectName"":""CColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PosY"":{""ObjectName"":""PosY"",""ObjectClass"":""IntValue"",""ObjectValue"":""28""},""SPR"":{""ObjectName"":""SPR"",""ObjectClass"":""IntValue"",""ObjectValue"":""12""},""BijuuConvo"":{""ObjectName"":""BijuuConvo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""jincooldown"":{""ObjectName"":""jincooldown"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Ken"":{""ObjectName"":""Ken"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Scar"":{""ObjectName"":""Scar"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot12"":{""ObjectName"":""Slot12"",""ObjectClass"":""StringValue"",""ObjectValue"":""Hurricane""},""RecentTrainings"":{""ObjectName"":""RecentTrainings"",""ObjectClass"":""StringValue"",""ObjectValue"":""{}""},""EyeColorR"":{""ObjectName"":""EyeColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""177""},""HairColorG"":{""ObjectName"":""HairColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""47""},""RaidCD"":{""ObjectName"":""RaidCD"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot6"":{""ObjectName"":""Slot6"",""ObjectClass"":""StringValue"",""ObjectValue"":""Susanoo""},""HairColorB"":{""ObjectName"":""HairColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""43""},""Gender"":{""ObjectName"":""Gender"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""MSAbility2"":{""ObjectName"":""MSAbility2"",""ObjectClass"":""StringValue"",""ObjectValue"":""Absofusion""},""Kids"":{""ObjectName"":""Kids"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SecondaryWep"":{""ObjectName"":""SecondaryWep"",""ObjectClass"":""StringValue"",""ObjectValue"":""Kunai""},""PosZ"":{""ObjectName"":""PosZ"",""ObjectClass"":""IntValue"",""ObjectValue"":""-2809""},""PDWipes"":{""ObjectName"":""PDWipes"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""AkatsukiTrained"":{""ObjectName"":""AkatsukiTrained"",""ObjectClass"":""IntValue"",""ObjectValue"":""777""},""UnlockedCloak"":{""ObjectName"":""UnlockedCloak"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CloakTime"":{""ObjectName"":""CloakTime"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BijuuRelation"":{""ObjectName"":""BijuuRelation"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Prestige"":{""ObjectName"":""Prestige"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Elo"":{""ObjectName"":""Elo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PosX"":{""ObjectName"":""PosX"",""ObjectClass"":""IntValue"",""ObjectValue"":""-2280""},""Mangekyo"":{""ObjectName"":""Mangekyo"",""ObjectClass"":""IntValue"",""ObjectValue"":""2""},""LastGripped"":{""ObjectName"":""LastGripped"",""ObjectClass"":""IntValue"",""ObjectValue"":""184318582""},""LastAge"":{""ObjectName"":""LastAge"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key11"":{""ObjectName"":""Key11"",""ObjectClass"":""StringValue"",""ObjectValue"":""-""},""AwakenCD"":{""ObjectName"":""AwakenCD"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastStomach"":{""ObjectName"":""LastStomach"",""ObjectClass"":""IntValue"",""ObjectValue"":""594""},""ChakraArmorRGB"":{""ObjectName"":""ChakraArmorRGB"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""RaidXP"":{""ObjectName"":""RaidXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""WeaveSpeed"":{""ObjectName"":""WeaveSpeed"",""ObjectClass"":""IntValue"",""ObjectValue"":""20""},""WipeLog"":{""ObjectName"":""WipeLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot10"":{""ObjectName"":""Slot10"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key9"":{""ObjectName"":""Key9"",""ObjectClass"":""StringValue"",""ObjectValue"":""9""},""Slot5"":{""ObjectName"":""Slot5"",""ObjectClass"":""StringValue"",""ObjectValue"":""Snap Gelidus""},""Slot7"":{""ObjectName"":""Slot7"",""ObjectClass"":""StringValue"",""ObjectValue"":""Ribcage""},""RESTORE"":{""ObjectName"":""RESTORE"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""TailedBeast"":{""ObjectName"":""TailedBeast"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""ItemSave"":{""ObjectName"":""ItemSave"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""TimesRerolled"":{""ObjectName"":""TimesRerolled"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot8"":{""ObjectName"":""Slot8"",""ObjectClass"":""StringValue"",""ObjectValue"":""Water Bowl""},""TailedBeastEXP"":{""ObjectName"":""TailedBeastEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CurseMarkEXP"":{""ObjectName"":""CurseMarkEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""HBChoice"":{""ObjectName"":""HBChoice"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""WeaponSave"":{""ObjectName"":""WeaponSave"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""PrimaryWep"":{""ObjectName"":""PrimaryWep"",""ObjectClass"":""StringValue"",""ObjectValue"":""Kunai""},""OriginalVillage"":{""ObjectName"":""OriginalVillage"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""BijuuSealed"":{""ObjectName"":""BijuuSealed"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""IsExiled"":{""ObjectName"":""IsExiled"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key3"":{""ObjectName"":""Key3"",""ObjectClass"":""StringValue"",""ObjectValue"":""3""},""PrimaryAmmo"":{""ObjectName"":""PrimaryAmmo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Construct"":{""ObjectName"":""Construct"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Title"":{""ObjectName"":""Title"",""ObjectClass"":""StringValue"",""ObjectValue"":""Kage""},""KillStreak"":{""ObjectName"":""KillStreak"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""Parentq"":{""ObjectName"":""Parentq"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastChakra"":{""ObjectName"":""LastChakra"",""ObjectClass"":""IntValue"",""ObjectValue"":""10850""},""RP"":{""ObjectName"":""RP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PDLog"":{""ObjectName"":""PDLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""RU"":{""ObjectName"":""RU"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""KPos"":{""ObjectName"":""KPos"",""ObjectClass"":""IntValue"",""ObjectValue"":""2""},""MaxTails"":{""ObjectName"":""MaxTails"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot-"":{""ObjectName"":""Slot-"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key1"":{""ObjectName"":""Key1"",""ObjectClass"":""StringValue"",""ObjectValue"":""1""},""FamilyID"":{""ObjectName"":""FamilyID"",""ObjectClass"":""StringValue"",""ObjectValue"":""Itachi(1)760233""},""HandsignTraining"":{""ObjectName"":""HandsignTraining"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Migrated"":{""ObjectName"":""Migrated"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot3"":{""ObjectName"":""Slot3"",""ObjectClass"":""StringValue"",""ObjectValue"":""Sniper""},""TailedBeastMastered"":{""ObjectName"":""TailedBeastMastered"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Blindness"":{""ObjectName"":""Blindness"",""ObjectClass"":""NumberValue"",""ObjectValue"":""0""},""Mastered"":{""ObjectName"":""Mastered"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""AgeLimit"":{""ObjectName"":""AgeLimit"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BerserkTimes"":{""ObjectName"":""BerserkTimes"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SpentSkillPoints"":{""ObjectName"":""SpentSkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""-12""},""Slot="":{""ObjectName"":""Slot="",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key6"":{""ObjectName"":""Key6"",""ObjectClass"":""StringValue"",""ObjectValue"":""6""},""Deaths"":{""ObjectName"":""Deaths"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""EyeColorB"":{""ObjectName"":""EyeColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""85""},""Slot1"":{""ObjectName"":""Slot1"",""ObjectClass"":""StringValue"",""ObjectValue"":""Fimbulvetr""},""Bank"":{""ObjectName"":""Bank"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key10"":{""ObjectName"":""Key10"",""ObjectClass"":""StringValue"",""ObjectValue"":""0""},""BDAYS"":{""ObjectName"":""BDAYS"",""ObjectClass"":""StringValue"",""ObjectValue"":""0""},""MaxAge"":{""ObjectName"":""MaxAge"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""ParentID"":{""ObjectName"":""ParentID"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""berserkcheck"":{""ObjectName"":""berserkcheck"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Ryo"":{""ObjectName"":""Ryo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""EKLog"":{""ObjectName"":""EKLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""EyeColorG"":{""ObjectName"":""EyeColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""232""},""ResetPos"":{""ObjectName"":""ResetPos"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SkillPoints"":{""ObjectName"":""SkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""500""},""Rank"":{""ObjectName"":""Rank"",""ObjectClass"":""IntValue"",""ObjectValue"":""25""},""AnbuLog"":{""ObjectName"":""AnbuLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastKilledUser"":{""ObjectName"":""LastKilledUser"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Trauma"":{""ObjectName"":""Trauma"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""MissionSuccess"":{""ObjectName"":""MissionSuccess"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CurrentWep"":{""ObjectName"":""CurrentWep"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""CanRank"":{""ObjectName"":""CanRank"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""SecondaryAmmo"":{""ObjectName"":""SecondaryAmmo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""GrandParentID"":{""ObjectName"":""GrandParentID"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""RyoRES"":{""ObjectName"":""RyoRES"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""startnewlife"":{""ObjectName"":""startnewlife"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastHealth"":{""ObjectName"":""LastHealth"",""ObjectClass"":""IntValue"",""ObjectValue"":""1850""},""CColorR"":{""ObjectName"":""CColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key7"":{""ObjectName"":""Key7"",""ObjectClass"":""StringValue"",""ObjectValue"":""7""},""MaxRank"":{""ObjectName"":""MaxRank"",""ObjectClass"":""IntValue"",""ObjectValue"":""24""},""RightEye"":{""ObjectName"":""RightEye"",""ObjectClass"":""StringValue"",""ObjectValue"":""Sharingan"",""ObjectAttributes"":{""Progress"":""Eternal Mangekyo""}},""DefaultMouth"":{""ObjectName"":""DefaultMouth"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LoreTitle"":{""ObjectName"":""LoreTitle"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""HairColorR"":{""ObjectName"":""HairColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""58""},""LeftEye"":{""ObjectName"":""LeftEye"",""ObjectClass"":""StringValue"",""ObjectValue"":""Sharingan"",""ObjectAttributes"":{""Progress"":""Eternal Mangekyo""}},""Slot0"":{""ObjectName"":""Slot0"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""CColorG"":{""ObjectName"":""CColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""logcheck"":{""ObjectName"":""logcheck"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Age"":{""ObjectName"":""Age"",""ObjectClass"":""IntValue"",""ObjectValue"":""17""},""SusanooColor"":{""ObjectName"":""SusanooColor"",""ObjectClass"":""IntValue"",""ObjectValue"":""5""},""Village"":{""ObjectName"":""Village"",""ObjectClass"":""IntValue"",""ObjectValue"":""7""},""bald"":{""ObjectName"":""bald"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Name"":{""ObjectName"":""Name"",""ObjectClass"":""StringValue"",""ObjectValue"":""Deidara""},""Influence"":{""ObjectName"":""Influence"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SecondaryCN"":{""ObjectName"":""SecondaryCN"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""kek"":{""ObjectName"":""kek"",""ObjectClass"":""IntValue"",""ObjectValue"":""19""},""RaidCoins"":{""ObjectName"":""RaidCoins"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key5"":{""ObjectName"":""Key5"",""ObjectClass"":""StringValue"",""ObjectValue"":""5""}},""Skilltree"":{""3 Tomoe"":{""ObjectName"":""3 Tomoe"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Clone Jutsu"":{""ObjectName"":""Clone Jutsu"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Substitution"":{""ObjectName"":""Substitution"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Body Flicker"":{""ObjectName"":""Body Flicker"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Ribcage"":{""ObjectName"":""Ribcage"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Shadow Clone"":{""ObjectName"":""Shadow Clone"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Shadow Shuriken"":{""ObjectName"":""Shadow Shuriken"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Hydrification"":{""ObjectName"":""Hydrification"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Water Shotgun"":{""ObjectName"":""Water Shotgun"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Susanoo"":{""ObjectName"":""Susanoo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Water Gun"":{""ObjectName"":""Water Gun"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""}},""Copy"":[]}"
+fUgS9maP,NRF52DK_main,Mukmin039,C,Wednesday 11th of October 2023 08:37:15 PM CDT,"int esb_initialize(void)
+{
+	int err;
+	/* These are arbitrary default addresses. In end user products
+	 * different addresses should be used for each set of devices.
+	 */
+	uint8_t base_addr_0[4] = {0xe1, 0xe1};
+	uint8_t base_addr_1[4] = {0xC2, 0xC2, 0xC2, 0xC2};
+	uint8_t addr_prefix[8] = {0xe1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8};
+    esb_set_rf_channel(100);
+
+
+
+
+	struct esb_config config = ESB_DEFAULT_CONFIG;
+
+	config.protocol = ESB_PROTOCOL_ESB_DPL;
+	config.bitrate = ESB_BITRATE_2MBPS;
+	config.mode = ESB_MODE_PRX;
+	config.event_handler = event_handler;
+	config.selective_auto_ack = true;
+
+	err = esb_init(&config);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_base_address_0(base_addr_0);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_base_address_1(base_addr_1);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_prefixes(addr_prefix, ARRAY_SIZE(addr_prefix));
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_rf_channel(100);
+	if (err) {
+		return err;
+	}
+
+	return 0;
+}"
+B0Y1nz2z,NRF52DK_main,Mukmin039,C,Wednesday 11th of October 2023 08:34:16 PM CDT,"int esb_initialize(void)
+{
+	int err;
+	/* These are arbitrary default addresses. In end user products
+	 * different addresses should be used for each set of devices.
+	 */
+	uint8_t base_addr_0[4] = {0xe1, 0xe1};
+	uint8_t base_addr_1[4] = {0xC2, 0xC2, 0xC2, 0xC2};
+	uint8_t addr_prefix[8] = {0xe1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8};
+    esb_set_rf_channel(100);
+
+
+
+
+	struct esb_config config = ESB_DEFAULT_CONFIG;
+
+	config.protocol = ESB_PROTOCOL_ESB_DPL;
+	config.bitrate = ESB_BITRATE_2MBPS;
+	config.mode = ESB_MODE_PRX;
+	config.event_handler = event_handler;
+	config.selective_auto_ack = true;
+
+	err = esb_init(&config);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_base_address_0(base_addr_0);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_base_address_1(base_addr_1);
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_prefixes(addr_prefix, ARRAY_SIZE(addr_prefix));
+	if (err) {
+		return err;
+	}
+
+	err = esb_set_rf_channel(100);
+	if (err) {
+		return err;
+	}
+
+	return 0;
+}
+"
+jsD4NwP3,Date of Birth! PYTHON,estefani-adriano,Python,Wednesday 11th of October 2023 08:10:11 PM CDT,"day = input ('Day: ')
+month = input ('Month: ')
+year= input ('Year: ')
+
+print('You were born in {}/{}/{}!'.format(day, month, year))
+print('Thanks!')
+
+=D"
+RCND62By,Hello World! PYTHON,estefani-adriano,Python,Wednesday 11th of October 2023 08:04:45 PM CDT,"print('Hello World!')
+
+=D"
+tSKQFMNc,WeHome,AhmadXploit,Dart,Wednesday 11th of October 2023 07:57:06 PM CDT,"[
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691942620/Story/hamzah_j4glhq.webp"",
+    ""name"": ""The Lion of Allah: Hamza Ibn Abdul Mutalib (RA)"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   In the army of Islam there have been a number of brave and self-sacrificing officers and strong and powerful champions but the bravery of Hamzah bin Abdul Muttalib is recorded in the pages of history and in fact constitutes the golden leaves of the history of the battles of Islam. The Messenger of Allah, Muhammad (may Allah bless him and his Ahlel-Bayt), though safe under the protection of his uncle, Abu Talib, was not immune from harassment by the infidels. Whenever they found an opportunity for baiting him, they didn’t miss it. Hamza Ibn Abdul Mutalib Ibn Hashim Ibn Manaf was born in Mecca before the Prophet’s birth in two years so he was very close to the Prophet Muhammad (SAW) . ""
+  },
+  {
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691835269/Story/64d75aa254b70_uqppgk.png"",
+    ""name"": ""Bilal the Great African Muslim"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   Bilal is very lovingly remembered by all Muslims of the world as one of the earliest great African Muslim. He was born in a village in a mountainous place in Western Arabia. Bilal's father was called Rebah and his mother was known as Hamama. They had come to Arabia as slaves from Ethiopia. The father and mother were slaves of Ummayya bin Khalaf, a rich man from the tribe of Quraish. Bilal was therefore born in slavery and served as a housekeeper. ""
+  },
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691859328/Story/al_fateh_siovvh.png"",
+    ""name"": ""Muhammad al Fatih, The Conqueror of Constantinople"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   Muhammad al Fatih was born on the 27th of Rajab, year 835 H or 30th of March, 1432 AD in the city of Erdine, the capital of Uthmani kingdom at that time. He was the son of Sultan Murad II, the sixth king of the Uthmani kingdom. Sultan Murad II had a great concern for his son’s education. He forged his beloved child to be a great and tough leader later in his life. His concern was proven by how the little Muhammad had finished his memorization of the 30 parts of the Qur’an, learned hadith, comprehended the science of jurisprudence, studied mathematic, astronomy, and war strategy in his young age. Beside that, Muhammad also learned many kind of languages, such as Arabic, Persian, Latin, and Greek. No wonder that at the age of 21, Muhammad was very fluent in Arabic, Turkish, Persian, Hebrew, Latin and Greek.""
+  },
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691862067/Story/khaleed_mmalxl.png"",
+    ""name"": ""Sword of God: The story of Khalid Ibn Al-Walid"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   Khalid’s first military expedition under the Muslim banner was at Mu’ta (modern-day Jordan). The Muslim army, expecting to engage Byzantine-affiliated Arab tribesmen, instead encountered the Byzantine army proper. Outnumbered and outmaneuvered by the well-trained Roman forces, the Muslim army was on the verge of defeat. One Muslim commander after another was killed. Formations were breaking up. Foot soldiers were beginning to flee. At that point, Khalid assumed command. ""
+  },
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691916765/Story/Nabi_Nuh_ifxjze.png"",
+    ""name"": ""The Story of Abul Basyar (Prophet Noah)"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   The Muslims were left stranded following the death of Prophet Idris. Since, no other man from amongst them was chosen as a Prophet, people began to look to the pious companions of Idris for guidance. They respected and followed these righteous men and consulted them every time they were faced with a problem. Eventually, as time passed by, the pious men also had passed away leaving the Muslims again with no leader for guidance. They feared and were worried that they would stray from the path of Allah. Satan who watched on with shrewd eyes, approached the wailing men and women, disguised as a man, whispered in to their ears: ''If we make statues of these righteous men, it will be more pleasing to us in our worship and will remind us of them.""
+  },
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691921072/Story/uwais_gb1anb.png"",
+    ""name"": ""Uwais Al-Qarni: A Simple Man Honored By The Prophet"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   During the lifetime of Prophet Muhammad, may the mercy and blessings of God be upon him, a man named Uwais al-Qarni was living in Yemen. He embraced Islam at the hands of some of Prophet Muhammad’s companions. However, he is not considered to be a companion, rather, he is considered to be among the next generation, or those who came after. The companions of Prophet Muhammad and those who came after him are known as the best generations. ""
+  },
+{
+	""imgUrl"": ""https://res.cloudinary.com/dybvjvrib/image/upload/v1692101258/Story/Imam_syafi_izbwjw.png"",
+    ""name"": ""Nashih Al-Hadits : Imam Asy - Syafi'i"",
+	""author"": ""Anonymous"",
+	""actors"": ""Will Smith, Cillian Murphy"",
+	""score"": ""2.13"",
+	""review"": ""107.3"",
+	""view"": ""2.7"",
+    ""desc"": ""   Imam al-Shafi'i, full name Muhammad ibn Idris al-Shafi'i, was a prominent Islamic scholar and the founder of the Shafi'i school of jurisprudence. He was born in Gaza, Palestine, in the year 767 CE (150 AH). His upbringing was marked by a strong emphasis on education and the memorization of the Quran. At a young age, he displayed remarkable intelligence and an insatiable thirst for knowledge. From a young age, al-Shafi'i displayed an exceptional aptitude for learning and memorization.""
+  }
+]"
+NDsjyfNa,Left View of Binary Tree,jayati,C++,Wednesday 11th of October 2023 07:45:22 PM CDT,"//{ Driver Code Starts
+#include <bits/stdc++.h>
+using namespace std;
+
+// Tree Node
+struct Node
+{
+    int data;
+    Node* left;
+    Node* right;
+};
+
+vector<int> leftView(struct Node *root);
+
+// Utility function to create a new Tree Node
+Node* newNode(int val)
+{
+    Node* temp = new Node;
+    temp->data = val;
+    temp->left = NULL;
+    temp->right = NULL;
+
+    return temp;
+}
+
+
+// Function to Build Tree
+Node* buildTree(string str)
+{
+    // Corner Case
+    if(str.length() == 0 || str[0] == 'N')
+        return NULL;
+
+    // Creating vector of strings from input
+    // string after spliting by space
+    vector<string> ip;
+
+    istringstream iss(str);
+    for(string str; iss >> str; )
+        ip.push_back(str);
+
+    // for(string i:ip)
+    //     cout<<i<<"" "";
+    // cout<<endl;
+    // Create the root of the tree
+    Node* root = newNode(stoi(ip[0]));
+
+    // Push the root to the queue
+    queue<Node*> queue;
+    queue.push(root);
+
+    // Starting from the second element
+    int i = 1;
+    while(!queue.empty() && i < ip.size()) {
+
+        // Get and remove the front of the queue
+        Node* currNode = queue.front();
+        queue.pop();
+
+        // Get the current node's value from the string
+        string currVal = ip[i];
+
+        // If the left child is not null
+        if(currVal != ""N"") {
+
+            // Create the left child for the current node
+            currNode->left = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->left);
+        }
+
+        // For the right child
+        i++;
+        if(i >= ip.size())
+            break;
+        currVal = ip[i];
+
+        // If the right child is not null
+        if(currVal != ""N"") {
+
+            // Create the right child for the current node
+            currNode->right = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->right);
+        }
+        i++;
+    }
+
+    return root;
+}
+
+
+int main() {
+    int t;
+    scanf(""%d "",&t);
+    while(t--)
+    {
+        string s;
+        getline(cin,s);
+        Node* root = buildTree(s);
+        vector<int> vec = leftView(root);
+        for(int x : vec)
+        cout<<x<<"" "";
+        cout << endl;
+    }
+    return 0;
+}
+
+
+// } Driver Code Ends
+
+
+/* A binary tree node
+
+struct Node
+{
+    int data;
+    struct Node* left;
+    struct Node* right;
+    
+    Node(int x){
+        data = x;
+        left = right = NULL;
+    }
+};
+ */
+
+//Function to return a list containing elements of left view of the binary tree.
+
+void solve(Node* root, vector<int>&v,int lev){
+    if(!root){
+        return;
+    } 
+    if(lev == v.size()){
+        v.push_back(root->data);
+    }
+    // Go to the next level of the tree i.e.
+    solve(root->left, v, lev+1);//left subtree traversal
+    solve(root->right, v, lev+1);//Right subtree traversal
+}
+vector<int> leftView(Node *root)
+{
+    vector<int>v;
+    solve(root, v, 0);
+    return v;
+   
+}
+"
+vsNLpHYP,Remove Sponsored Ads From Facebook Marketplace -- Bookmarklet,onejdc,JavaScript,Wednesday 11th of October 2023 07:31:20 PM CDT,"javascript:(function(){let e=document.querySelectorAll(""span"");for(const o of e)o.textContent.includes(""Sponsored"")&&o.remove()})();"
+bE9KpyuG,Symmetric Tree,jayati,C++,Wednesday 11th of October 2023 07:19:40 PM CDT,"//{ Driver Code Starts
+//Initial Template for C++
+
+
+#include <bits/stdc++.h>
+using namespace std;
+#define MAX_HEIGHT 100000
+
+// Tree Node
+struct Node {
+    int data;
+    Node* left;
+    Node* right;
+};
+
+// Utility function to create a new Tree Node
+Node* newNode(int val) {
+    Node* temp = new Node;
+    temp->data = val;
+    temp->left = NULL;
+    temp->right = NULL;
+
+    return temp;
+}
+
+
+// Function to Build Tree
+Node* buildTree(string str) {
+    // Corner Case
+    if (str.length() == 0 || str[0] == 'N') return NULL;
+
+    // Creating vector of strings from input
+    // string after spliting by space
+    vector<string> ip;
+
+    istringstream iss(str);
+    for (string str; iss >> str;) ip.push_back(str);
+
+    // Create the root of the tree
+    Node* root = newNode(stoi(ip[0]));
+
+    // Push the root to the queue
+    queue<Node*> queue;
+    queue.push(root);
+
+    // Starting from the second element
+    int i = 1;
+    while (!queue.empty() && i < ip.size()) {
+
+        // Get and remove the front of the queue
+        Node* currNode = queue.front();
+        queue.pop();
+
+        // Get the current node's value from the string
+        string currVal = ip[i];
+
+        // If the left child is not null
+        if (currVal != ""N"") {
+
+            // Create the left child for the current node
+            currNode->left = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->left);
+        }
+
+        // For the right child
+        i++;
+        if (i >= ip.size()) break;
+        currVal = ip[i];
+
+        // If the right child is not null
+        if (currVal != ""N"") {
+
+            // Create the right child for the current node
+            currNode->right = newNode(stoi(currVal));
+
+            // Push it to the queue
+            queue.push(currNode->right);
+        }
+        i++;
+    }
+
+    return root;
+}
+
+
+// } Driver Code Ends
+/*
+Structure of the node of the tree is as
+struct Node {
+    int data;
+    Node *left;
+    Node *right;
+
+    Node(int val) {
+        data = val;
+        left = right = NULL;
+    }
+};
+*/
+class Solution{
+    public:
+    // return true/false denoting whether the tree is Symmetric or not
+    bool solve(Node* a,Node* b)
+    {
+         // Code here
+	    if(!a && !b)
+	    {
+	        return true;
+	    }
+        if(a && b)
+        {
+             if(a->data!=b->data)
+    	    {
+    	        return false;
+    	    }
+	    return solve(a->left,b->right) && solve(a->right,b->left);
+        }
+        return false;
+	   
+    }
+    bool isSymmetric(struct Node* root)
+    {
+	   if(root==NULL)
+	   {
+	       return true;
+	   }
+	   return solve(root->left,root->right);
+    }
+};
+
+//{ Driver Code Starts.
+
+/* Driver program to test size function*/
+
+  
+
+int main() {
+
+   
+    int t;
+    scanf(""%d "", &t);
+    while (t--) {
+        string s, ch;
+        getline(cin, s);
+        
+        Node* root = buildTree(s);
+
+        vector<int> ans;
+        Solution ob;
+        if(ob.isSymmetric(root)){
+            cout<<""True""<<endl;
+        }
+        else{ 
+            cout<<""False""<<endl;
+        }
+    }
+    return 0;
+}
+
+// } Driver Code Ends"
+V6ixDz77,Garou UID,Yoshin222,Lua,Wednesday 11th of October 2023 07:18:35 PM CDT,"local UID_Data = {
+	State_PTR = 0x00, --DWORD, LOOK IN TO THIS!!
+	Attack_Base_Ptr = 0x0C, --DWORD, blanking causes any hit to crash the game
+	Char_ID			= 0x11, --Byte? Look in to this. Blanking turns player in to Terry
+	X_Pos = 0x20, --WORD
+	X_Pos_SubPixel = 0x22, --WORD
+	Y_Pos = 0x28, --WORD
+	Y_Pos_SubPixel = 0x2A, --WORD
+--PROTO-253-P2.P2
+	--Terry Walk Speed
+	--0x03A8B9C
+	X_Vel = 0x34, --WORD
+	X_Vel_SubPixel = 0x36, --WORD
+	Y_Vel = 0x44, --WORD
+	Y_Vel_SubPixel = 0x46, --WORD
+	Y_Accel 	= 0x48, --DWORD?
+	Sprite_Offset_X = 0x54, --WORD
+	Sprite_Offset_Y = 0x56, --WORD
+	Anim_related	= 0x68, --These bytes are hyuckin weird, better investigate
+	Health = 0x8E, --WORD
+	Hitbox_ID		= 0xB8, --Byte
+	Meter			= 0xBE, --Byte
+	Attack_Data_PTR = 0xD4, --DWORD, LOOK IN TO THIS!!
+}"
+kLN8Y7hd,2023-10-11_stats.json,rdp_snitch,JSON,Wednesday 11th of October 2023 07:17:58 PM CDT,"{
+  ""ip"": {
+    ""190.85.232.116"": 42,
+    ""194.165.16.10"": 6,
+    ""106.116.169.71"": 6,
+    ""128.199.153.26"": 30,
+    ""122.3.71.174"": 24,
+    ""62.122.184.166"": 12,
+    ""62.122.184.168"": 12,
+    ""146.190.83.254"": 9,
+    ""62.204.41.145"": 12,
+    ""205.210.31.206"": 9,
+    ""45.227.254.48"": 18,
+    ""87.251.75.64"": 3,
+    ""87.251.75.145"": 6,
+    ""45.143.201.62"": 24,
+    ""185.170.144.3"": 3,
+    ""45.79.41.151"": 6,
+    ""87.251.75.120"": 3,
+    ""185.170.144.113"": 3,
+    ""94.232.41.205"": 3,
+    ""198.235.24.203"": 9,
+    ""141.98.81.39"": 3,
+    ""45.227.254.55"": 6,
+    ""111.61.253.55"": 3,
+    ""123.58.207.127"": 3,
+    ""193.142.146.17"": 9,
+    ""193.142.147.9"": 9,
+    ""58.218.204.183"": 9,
+    ""198.235.24.181"": 9,
+    ""45.140.17.16"": 3,
+    ""136.144.35.32"": 3,
+    ""198.235.24.120"": 9
+  },
+  ""asn"": {
+    ""AS14080"": 42,
+    ""AS48721"": 6,
+    ""AS4134"": 15,
+    ""AS14061"": 39,
+    ""AS9299"": 24,
+    ""AS57523"": 24,
+    ""AS59425"": 12,
+    ""AS396982"": 36,
+    ""AS267784"": 24,
+    ""AS208091"": 15,
+    ""AS210950"": 24,
+    ""AS197414"": 6,
+    ""AS63949"": 6,
+    ""AS209588"": 3,
+    ""AS24547"": 3,
+    ""AS135377"": 3,
+    ""AS208046"": 18,
+    ""AS198953"": 3,
+    ""AS396356"": 3
+  },
+  ""isp"": {
+    ""Telmex Colombia S.A."": 42,
+    ""Flyservers S.A."": 33,
+    ""Chinanet"": 15,
+    ""DigitalOcean, LLC"": 39,
+    ""Philippine Long Distance Telephone Co."": 24,
+    ""Chang Way Technologies Co. Limited"": 24,
+    ""Horizon LLC"": 12,
+    ""Google LLC"": 36,
+    ""Xhost Internet Solutions LP"": 21,
+    ""TOV E-RISHENNYA"": 24,
+    ""Akamai Technologies, Inc."": 6,
+    ""China Mobile communications corporation"": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""ColocationX Ltd."": 18,
+    ""Proton66 OOO"": 3,
+    ""Latitude.sh"": 3
+  },
+  ""org"": {
+    ""Telmex Colombia S.A"": 42,
+    ""Flyservers S.A"": 9,
+    ""Chinanet HE"": 6,
+    ""DigitalOcean, LLC"": 39,
+    ""Philippine Long Distance Telephone Company"": 24,
+    ""Chang Way Technologies Co. Limited"": 24,
+    ""Horizon LLC"": 12,
+    ""Palo Alto Networks, Inc"": 36,
+    ""UAB Host Baltic"": 24,
+    ""Xhost Internet Solutions"": 12,
+    ""TOV VAIZ PARTNER"": 24,
+    ""Xhostis"": 6,
+    ""Linode"": 6,
+    ""Dmitriy Panchenko"": 3,
+    ""China Mobile"": 3,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""ColocationX Ltd"": 9,
+    ""x33 Networks IBC"": 9,
+    ""Chinanet JS"": 9,
+    ""Proton66 LLC"": 3,
+    ""Panq B.V"": 3
+  },
+  ""regionName"": {
+    ""Bogota D.C."": 42,
+    ""Kaunas"": 6,
+    ""Hebei"": 9,
+    ""South West"": 30,
+    ""Ilocos"": 24,
+    ""Moscow"": 39,
+    ""Central Singapore"": 9,
+    ""California"": 36,
+    ""Vilnius"": 24,
+    ""England"": 15,
+    ""Kyiv City"": 24,
+    ""North Holland"": 15,
+    ""Texas"": 6,
+    ""Perm Krai"": 3,
+    ""Drenthe"": 3,
+    ""English River"": 9,
+    ""Jiangsu"": 9,
+    ""New Jersey"": 3
+  },
+  ""country"": {
+    ""Colombia"": 42,
+    ""Lithuania"": 30,
+    ""China"": 18,
+    ""Singapore"": 39,
+    ""Philippines"": 24,
+    ""Russia"": 42,
+    ""United States"": 45,
+    ""United Kingdom"": 15,
+    ""Ukraine"": 24,
+    ""Netherlands"": 18,
+    ""Seychelles"": 9
+  },
+  ""account"": {
+    ""hello"": 120,
+    ""Test"": 36,
+    ""(empty)"": 12,
+    ""Domain"": 60,
+    ""SVAhLsLfC"": 3,
+    ""EysRrt"": 3,
+    ""uMhbLF"": 3,
+    ""Administr"": 39,
+    ""oAKRRTsHK"": 3,
+    ""XYPqFQ"": 3,
+    ""ISWOiJ"": 3,
+    ""Administrator"": 3,
+    ""vSjpcKKcb"": 3,
+    ""OwhuRa"": 3,
+    ""AppaEZ"": 3,
+    ""kEHlaDuUt"": 3,
+    ""cfvbUr"": 3,
+    ""FylUqX"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 306
+  },
+  ""client_build"": {
+    ""Unknown"": 306
+  },
+  ""client_name"": {
+    ""Unknown"": 306
+  },
+  ""ip_type"": {
+    ""Unknown"": 216,
+    ""hosting"": 75,
+    ""hosting & proxy"": 9,
+    ""mobile"": 3,
+    ""proxy"": 3
+  }
+}"
+YeqteCcr,2023-10-11_stats.json,rdp_snitch,JSON,Wednesday 11th of October 2023 07:16:05 PM CDT,"{
+  ""ip"": {
+    ""190.85.232.116"": 28,
+    ""194.165.16.10"": 4,
+    ""106.116.169.71"": 4,
+    ""128.199.153.26"": 20,
+    ""122.3.71.174"": 16,
+    ""62.122.184.166"": 8,
+    ""62.122.184.168"": 8,
+    ""146.190.83.254"": 6,
+    ""62.204.41.145"": 8,
+    ""205.210.31.206"": 6,
+    ""45.227.254.48"": 12,
+    ""87.251.75.64"": 2,
+    ""87.251.75.145"": 4,
+    ""45.143.201.62"": 16,
+    ""185.170.144.3"": 2,
+    ""45.79.41.151"": 4,
+    ""87.251.75.120"": 2,
+    ""185.170.144.113"": 2,
+    ""94.232.41.205"": 2,
+    ""198.235.24.203"": 6,
+    ""141.98.81.39"": 2,
+    ""45.227.254.55"": 4,
+    ""111.61.253.55"": 2,
+    ""123.58.207.127"": 2,
+    ""193.142.146.17"": 6,
+    ""193.142.147.9"": 6,
+    ""58.218.204.183"": 6,
+    ""198.235.24.181"": 6,
+    ""45.140.17.16"": 2,
+    ""136.144.35.32"": 2,
+    ""198.235.24.120"": 6
+  },
+  ""asn"": {
+    ""AS14080"": 28,
+    ""AS48721"": 4,
+    ""AS4134"": 10,
+    ""AS14061"": 26,
+    ""AS9299"": 16,
+    ""AS57523"": 16,
+    ""AS59425"": 8,
+    ""AS396982"": 24,
+    ""AS267784"": 16,
+    ""AS208091"": 10,
+    ""AS210950"": 16,
+    ""AS197414"": 4,
+    ""AS63949"": 4,
+    ""AS209588"": 2,
+    ""AS24547"": 2,
+    ""AS135377"": 2,
+    ""AS208046"": 12,
+    ""AS198953"": 2,
+    ""AS396356"": 2
+  },
+  ""isp"": {
+    ""Telmex Colombia S.A."": 28,
+    ""Flyservers S.A."": 22,
+    ""Chinanet"": 10,
+    ""DigitalOcean, LLC"": 26,
+    ""Philippine Long Distance Telephone Co."": 16,
+    ""Chang Way Technologies Co. Limited"": 16,
+    ""Horizon LLC"": 8,
+    ""Google LLC"": 24,
+    ""Xhost Internet Solutions LP"": 14,
+    ""TOV E-RISHENNYA"": 16,
+    ""Akamai Technologies, Inc."": 4,
+    ""China Mobile communications corporation"": 2,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""ColocationX Ltd."": 12,
+    ""Proton66 OOO"": 2,
+    ""Latitude.sh"": 2
+  },
+  ""org"": {
+    ""Telmex Colombia S.A"": 28,
+    ""Flyservers S.A"": 6,
+    ""Chinanet HE"": 4,
+    ""DigitalOcean, LLC"": 26,
+    ""Philippine Long Distance Telephone Company"": 16,
+    ""Chang Way Technologies Co. Limited"": 16,
+    ""Horizon LLC"": 8,
+    ""Palo Alto Networks, Inc"": 24,
+    ""UAB Host Baltic"": 16,
+    ""Xhost Internet Solutions"": 8,
+    ""TOV VAIZ PARTNER"": 16,
+    ""Xhostis"": 4,
+    ""Linode"": 4,
+    ""Dmitriy Panchenko"": 2,
+    ""China Mobile"": 2,
+    ""Ucloud Information Technology (hk) Limited"": 2,
+    ""ColocationX Ltd"": 6,
+    ""x33 Networks IBC"": 6,
+    ""Chinanet JS"": 6,
+    ""Proton66 LLC"": 2,
+    ""Panq B.V"": 2
+  },
+  ""regionName"": {
+    ""Bogota D.C."": 28,
+    ""Kaunas"": 4,
+    ""Hebei"": 6,
+    ""South West"": 20,
+    ""Ilocos"": 16,
+    ""Moscow"": 26,
+    ""Central Singapore"": 6,
+    ""California"": 24,
+    ""Vilnius"": 16,
+    ""England"": 10,
+    ""Kyiv City"": 16,
+    ""North Holland"": 10,
+    ""Texas"": 4,
+    ""Perm Krai"": 2,
+    ""Drenthe"": 2,
+    ""English River"": 6,
+    ""Jiangsu"": 6,
+    ""New Jersey"": 2
+  },
+  ""country"": {
+    ""Colombia"": 28,
+    ""Lithuania"": 20,
+    ""China"": 12,
+    ""Singapore"": 26,
+    ""Philippines"": 16,
+    ""Russia"": 28,
+    ""United States"": 30,
+    ""United Kingdom"": 10,
+    ""Ukraine"": 16,
+    ""Netherlands"": 12,
+    ""Seychelles"": 6
+  },
+  ""account"": {
+    ""hello"": 80,
+    ""Test"": 24,
+    ""(empty)"": 8,
+    ""Domain"": 40,
+    ""SVAhLsLfC"": 2,
+    ""EysRrt"": 2,
+    ""uMhbLF"": 2,
+    ""Administr"": 26,
+    ""oAKRRTsHK"": 2,
+    ""XYPqFQ"": 2,
+    ""ISWOiJ"": 2,
+    ""Administrator"": 2,
+    ""vSjpcKKcb"": 2,
+    ""OwhuRa"": 2,
+    ""AppaEZ"": 2,
+    ""kEHlaDuUt"": 2,
+    ""cfvbUr"": 2,
+    ""FylUqX"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 204
+  },
+  ""client_build"": {
+    ""Unknown"": 204
+  },
+  ""client_name"": {
+    ""Unknown"": 204
+  },
+  ""ip_type"": {
+    ""Unknown"": 144,
+    ""hosting"": 50,
+    ""hosting & proxy"": 6,
+    ""mobile"": 2,
+    ""proxy"": 2
+  }
+}"
+CJwmPTTa,2023-10-11_stats.json,rdp_snitch,JSON,Wednesday 11th of October 2023 07:15:09 PM CDT,"{
+  ""ip"": {
+    ""190.85.232.116"": 14,
+    ""194.165.16.10"": 2,
+    ""106.116.169.71"": 2,
+    ""128.199.153.26"": 10,
+    ""122.3.71.174"": 8,
+    ""62.122.184.166"": 4,
+    ""62.122.184.168"": 4,
+    ""146.190.83.254"": 3,
+    ""62.204.41.145"": 4,
+    ""205.210.31.206"": 3,
+    ""45.227.254.48"": 6,
+    ""87.251.75.64"": 1,
+    ""87.251.75.145"": 2,
+    ""45.143.201.62"": 8,
+    ""185.170.144.3"": 1,
+    ""45.79.41.151"": 2,
+    ""87.251.75.120"": 1,
+    ""185.170.144.113"": 1,
+    ""94.232.41.205"": 1,
+    ""198.235.24.203"": 3,
+    ""141.98.81.39"": 1,
+    ""45.227.254.55"": 2,
+    ""111.61.253.55"": 1,
+    ""123.58.207.127"": 1,
+    ""193.142.146.17"": 3,
+    ""193.142.147.9"": 3,
+    ""58.218.204.183"": 3,
+    ""198.235.24.181"": 3,
+    ""45.140.17.16"": 1,
+    ""136.144.35.32"": 1,
+    ""198.235.24.120"": 3
+  },
+  ""asn"": {
+    ""AS14080"": 14,
+    ""AS48721"": 2,
+    ""AS4134"": 5,
+    ""AS14061"": 13,
+    ""AS9299"": 8,
+    ""AS57523"": 8,
+    ""AS59425"": 4,
+    ""AS396982"": 12,
+    ""AS267784"": 8,
+    ""AS208091"": 5,
+    ""AS210950"": 8,
+    ""AS197414"": 2,
+    ""AS63949"": 2,
+    ""AS209588"": 1,
+    ""AS24547"": 1,
+    ""AS135377"": 1,
+    ""AS208046"": 6,
+    ""AS198953"": 1,
+    ""AS396356"": 1
+  },
+  ""isp"": {
+    ""Telmex Colombia S.A."": 14,
+    ""Flyservers S.A."": 11,
+    ""Chinanet"": 5,
+    ""DigitalOcean, LLC"": 13,
+    ""Philippine Long Distance Telephone Co."": 8,
+    ""Chang Way Technologies Co. Limited"": 8,
+    ""Horizon LLC"": 4,
+    ""Google LLC"": 12,
+    ""Xhost Internet Solutions LP"": 7,
+    ""TOV E-RISHENNYA"": 8,
+    ""Akamai Technologies, Inc."": 2,
+    ""China Mobile communications corporation"": 1,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""ColocationX Ltd."": 6,
+    ""Proton66 OOO"": 1,
+    ""Latitude.sh"": 1
+  },
+  ""org"": {
+    ""Telmex Colombia S.A"": 14,
+    ""Flyservers S.A"": 3,
+    ""Chinanet HE"": 2,
+    ""DigitalOcean, LLC"": 13,
+    ""Philippine Long Distance Telephone Company"": 8,
+    ""Chang Way Technologies Co. Limited"": 8,
+    ""Horizon LLC"": 4,
+    ""Palo Alto Networks, Inc"": 12,
+    ""UAB Host Baltic"": 8,
+    ""Xhost Internet Solutions"": 4,
+    ""TOV VAIZ PARTNER"": 8,
+    ""Xhostis"": 2,
+    ""Linode"": 2,
+    ""Dmitriy Panchenko"": 1,
+    ""China Mobile"": 1,
+    ""Ucloud Information Technology (hk) Limited"": 1,
+    ""ColocationX Ltd"": 3,
+    ""x33 Networks IBC"": 3,
+    ""Chinanet JS"": 3,
+    ""Proton66 LLC"": 1,
+    ""Panq B.V"": 1
+  },
+  ""regionName"": {
+    ""Bogota D.C."": 14,
+    ""Kaunas"": 2,
+    ""Hebei"": 3,
+    ""South West"": 10,
+    ""Ilocos"": 8,
+    ""Moscow"": 13,
+    ""Central Singapore"": 3,
+    ""California"": 12,
+    ""Vilnius"": 8,
+    ""England"": 5,
+    ""Kyiv City"": 8,
+    ""North Holland"": 5,
+    ""Texas"": 2,
+    ""Perm Krai"": 1,
+    ""Drenthe"": 1,
+    ""English River"": 3,
+    ""Jiangsu"": 3,
+    ""New Jersey"": 1
+  },
+  ""country"": {
+    ""Colombia"": 14,
+    ""Lithuania"": 10,
+    ""China"": 6,
+    ""Singapore"": 13,
+    ""Philippines"": 8,
+    ""Russia"": 14,
+    ""United States"": 15,
+    ""United Kingdom"": 5,
+    ""Ukraine"": 8,
+    ""Netherlands"": 6,
+    ""Seychelles"": 3
+  },
+  ""account"": {
+    ""hello"": 40,
+    ""Test"": 12,
+    ""(empty)"": 4,
+    ""Domain"": 20,
+    ""SVAhLsLfC"": 1,
+    ""EysRrt"": 1,
+    ""uMhbLF"": 1,
+    ""Administr"": 13,
+    ""oAKRRTsHK"": 1,
+    ""XYPqFQ"": 1,
+    ""ISWOiJ"": 1,
+    ""Administrator"": 1,
+    ""vSjpcKKcb"": 1,
+    ""OwhuRa"": 1,
+    ""AppaEZ"": 1,
+    ""kEHlaDuUt"": 1,
+    ""cfvbUr"": 1,
+    ""FylUqX"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 102
+  },
+  ""client_build"": {
+    ""Unknown"": 102
+  },
+  ""client_name"": {
+    ""Unknown"": 102
+  },
+  ""ip_type"": {
+    ""Unknown"": 72,
+    ""hosting"": 25,
+    ""hosting & proxy"": 3,
+    ""mobile"": 1,
+    ""proxy"": 1
+  }
+}"
+5psZzsHi,test_input_serial DN22D08,hendriawan,Arduino,Wednesday 11th of October 2023 06:58:07 PM CDT,"//Pin connected to latch of Digital Tube Module
+int latchPin = A3;
+//Pin connected to clock of Digital Tube Module
+int clockPin = A4;
+//Pin connected to data of Digital Tube Module
+int dataPin = A5;
+//Pin connected to 595_OE of Digital Tube Module
+int OE_595 = A2;
+
+const int K1 = 12;
+const int K2 = 10;
+const int K3 = 8;
+const int K4 = A0;
+
+const int INPUT1 = 2;
+const int INPUT2 = 3;
+const int INPUT3 = 4;
+const int INPUT4 = 5;
+const int INPUT5 = 6;
+const int INPUT6 = 7;
+const int INPUT7 = 9;
+const int INPUT8 = 11;
+
+const int RS485_RD = A1;
+void setup() {
+  // put your setup code here, to run once:
+  //set pins to output because they are addressed in the main loop
+
+  // pinMode(RS485_RD, OUTPUT);
+  pinMode(K1, INPUT_PULLUP);
+  pinMode(K2, INPUT_PULLUP);
+  pinMode(K3, INPUT_PULLUP);
+  pinMode(K4, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  pinMode(INPUT1, INPUT);
+  pinMode(INPUT2, INPUT);
+  pinMode(INPUT3, INPUT);
+  pinMode(INPUT4, INPUT);
+  pinMode(INPUT5, INPUT);
+  pinMode(INPUT6, INPUT);
+  pinMode(INPUT7, INPUT);
+  pinMode(INPUT8, INPUT);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  if (!digitalRead(K1)) {
+    Serial.println(""tombol k1 ditekan"");
+  }
+
+  if (!digitalRead(K2)) {
+    Serial.println(""tombol k2 ditekan"");
+  }
+  if (!digitalRead(K3)) {
+    Serial.println(""tombol k3 ditekan"");
+  }
+  if (!digitalRead(K4)) {
+    Serial.println(""tombol k4 ditekan"");
+  }
+
+  if (!digitalRead(INPUT1)) {
+    Serial.println(""INPUT1"");
+  }
+
+  if (!digitalRead(INPUT2)) {
+    Serial.println(""INPUT2"");
+  }
+  if (!digitalRead(INPUT3)) {
+    Serial.println(""INPUT3"");
+  }
+  if (!digitalRead(INPUT4)) {
+    Serial.println(""INPUT4"");
+  }
+
+  if (!digitalRead(INPUT5)) {
+    Serial.println(""INPUT5"");
+  }
+
+  if (!digitalRead(INPUT6)) {
+    Serial.println(""INPUT6"");
+  }
+  if (!digitalRead(INPUT7)) {
+    Serial.println(""INPUT7"");
+  }
+  if (!digitalRead(INPUT8)) {
+    Serial.println(""INPUT8"");
+  }
+}
+"
+ZpnNFtzr,Config.py,taholmes160,Python,Wednesday 11th of October 2023 06:05:58 PM CDT,"class Config:
+    # Database configuration
+    DB_HOST = ""localhost""
+    DB_USER = ""root""
+    DB_PASSWORD = ""xxxxxxxxxxxxxxxxx""
+    DB_NAME = ""school2""
+"
+pjXXLwpn,App.py,taholmes160,Python,Wednesday 11th of October 2023 06:03:52 PM CDT,"# Import the necessary modules
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from flask import Flask, render_template, request, redirect, url_for
+from flask_wtf import FlaskForm
+from wtforms import StringField, SubmitField
+from wtforms.validators import DataRequired
+from models import db, Student
+from flask_sqlalchemy import SQLAlchemy
+import mysql.connector
+import secrets
+from config import Config
+from app import db
+
+# Access the SECRET_KEY environment variable
+secret_key = os.environ.get('SECRET_KEY')
+
+if not secret_key:
+    raise ValueError(""SECRET_KEY environment variable is not set"")
+
+# Configure the Flask app with the secret key
+app = Flask(__name__)
+app.config.from_object(Config)
+app.config['SECRET_KEY'] = secret_key  # Use the secret key from the environment variable
+
+# Configure the SQLAlchemy database URI
+app.config['SQLALCHEMY_DATABASE_URI'] = f""mysql://{Config.DB_USER}:{Config.DB_PASSWORD}@{Config.DB_HOST}/{Config.DB_NAME}""
+
+db.init_app(app)
+
+# Define a Flask-WTF form for the Create Student page
+class CreateStudentForm(FlaskForm):
+    Student_Fname = StringField('First Name', validators=[DataRequired()])
+    Student_Mname = StringField('Middle Name')
+    Student_Lname = StringField('Last Name', validators=[DataRequired()])
+    Student_Suffix = StringField('Suffix')
+    Student_GoesBy = StringField('Nickname')
+    Student_Grade = StringField('Grade')
+    Student_Age = StringField('Age')
+    Student_State = StringField('State')
+    Student_Birthday = StringField('Birthday')
+    Student_Campus = StringField('Campus')
+    submit = SubmitField('Submit')
+
+# Function to insert student data into the database
+def insert_student_data(Student_Fname, Student_Mname, Student_Lname, Student_Suffix, Student_Grade, Student_Age, Student_State, Student_GoesBy, Student_Birthday, Student_Campus):
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+
+        # Insert student data into the student_table
+        insert_query = ""INSERT INTO tbl_Student (Student_Fname, Student_Mname, Student_Lname, Student_Suffix, Student_Grade, Student_Age, Student_State, Student_GoesBy, Student_Birthday, Student_Campus) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""
+        data = (Student_Fname, Student_Mname, Student_Lname, Student_Suffix, Student_Grade, Student_Age, Student_State, Student_GoesBy, Student_Birthday, Student_Campus)
+        cursor.execute(insert_query, data)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    
+    except Exception as e:
+        print(f""Error inserting data: {str(e)}"")
+        return False
+
+# Create routes
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/add_student', methods=['GET', 'POST'])
+def create_student():
+    form = CreateStudentForm()
+
+    if form.validate_on_submit():
+        Student_Fname = form.Student_Fname.data
+        Student_Mname = form.Student_Mname.data
+        Student_Lname = form.Student_Lname.data
+        Student_Suffix = form.Student_Suffix.data
+        Student_Grade = form.Student_Grade.data
+        Student_Age = form.Student_Age.data
+        Student_State = form.Student_State.data
+        Student_GoesBy = form.Student_GoesBy.data
+        Student_Birthday = form.Student_Birthday.data
+        Student_Campus = form.Student_Campus.data
+
+        # Insert student data into the database
+        if insert_student_data(Student_Fname, Student_Mname, Student_Lname, Student_Suffix, Student_Grade, Student_Age, Student_State, Student_GoesBy, Student_Birthday, Student_Campus):
+            return redirect(url_for('success'))
+        else:
+            return redirect(url_for('error'))
+
+    return render_template('create_student.html', form=form)
+
+@app.route('/error')
+def error():
+    return render_template('error.html')
+
+@app.route('/success')
+def success():
+    return render_template('success.html')
+
+@app.route('/list_students', methods=['GET'])
+def list_students():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search_lastname = request.args.get('search_lastname', '')
+    search_grade = request.args.get('search_grade', '')
+    search_age = request.args.get('search_age', '')
+
+    # Query students with pagination and search filters
+    students = Student.query.filter(
+        Student.Student_Lname.ilike(f'%{search_lastname}%'),
+        Student.Student_Grade.ilike(f'%{search_grade}%'),
+        Student.Student_Age == (int(search_age) if search_age.isdigit() else Student.Student_Age)
+    ).paginate(page=page, per_page=per_page)
+
+    return render_template('list_students.html', students=students)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+"
+sjtmahSh,DookieGod's Data,azimuths,JSON,Wednesday 11th of October 2023 05:40:20 PM CDT,"{""Stats"":{""ConstructLog"":{""ObjectName"":""ConstructLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""MissionEXP"":{""ObjectName"":""MissionEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""100""},""PrimaryCN"":{""ObjectName"":""PrimaryCN"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""mapmove1"":{""ObjectName"":""mapmove1"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""TrainingEXP"":{""ObjectName"":""TrainingEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SpecialTitle"":{""ObjectName"":""SpecialTitle"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key12"":{""ObjectName"":""Key12"",""ObjectClass"":""StringValue"",""ObjectValue"":""=""},""Blind"":{""ObjectName"":""Blind"",""ObjectClass"":""NumberValue"",""ObjectValue"":""0""},""Slot2"":{""ObjectName"":""Slot2"",""ObjectClass"":""StringValue"",""ObjectValue"":""Waki Flash""},""TailedBeastLevel"":{""ObjectName"":""TailedBeastLevel"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""CombatEXP"":{""ObjectName"":""CombatEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""467""},""Personality"":{""ObjectName"":""Personality"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""GripCount"":{""ObjectName"":""GripCount"",""ObjectClass"":""IntValue"",""ObjectValue"":""4""},""Marking"":{""ObjectName"":""Marking"",""ObjectClass"":""IntValue"",""ObjectValue"":""69""},""SkinColor"":{""ObjectName"":""SkinColor"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""HideName"":{""ObjectName"":""HideName"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""IsExiled"":{""ObjectName"":""IsExiled"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot11"":{""ObjectName"":""Slot11"",""ObjectClass"":""StringValue"",""ObjectValue"":""Way of the Sword""},""MSAbility1"":{""ObjectName"":""MSAbility1"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key8"":{""ObjectName"":""Key8"",""ObjectClass"":""StringValue"",""ObjectValue"":""8""},""LINDAMINISTARTUP"":{""ObjectName"":""LINDAMINISTARTUP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot4"":{""ObjectName"":""Slot4"",""ObjectClass"":""StringValue"",""ObjectValue"":""Pommel Strike""},""Slot9"":{""ObjectName"":""Slot9"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Version"":{""ObjectName"":""Version"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""DateRecord"":{""ObjectName"":""DateRecord"",""ObjectClass"":""IntValue"",""ObjectValue"":""3870""},""EyeColorG"":{""ObjectName"":""EyeColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""24""},""CurseMarkLevel"":{""ObjectName"":""CurseMarkLevel"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key2"":{""ObjectName"":""Key2"",""ObjectClass"":""StringValue"",""ObjectValue"":""2""},""Genjutsu"":{""ObjectName"":""Genjutsu"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SwordSave"":{""ObjectName"":""SwordSave"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BijuuXP"":{""ObjectName"":""BijuuXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""100000""},""SeenDeaths"":{""ObjectName"":""SeenDeaths"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BonusSkillPoints"":{""ObjectName"":""BonusSkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CColorB"":{""ObjectName"":""CColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PosY"":{""ObjectName"":""PosY"",""ObjectClass"":""IntValue"",""ObjectValue"":""78""},""SPR"":{""ObjectName"":""SPR"",""ObjectClass"":""IntValue"",""ObjectValue"":""12""},""BijuuConvo"":{""ObjectName"":""BijuuConvo"",""ObjectClass"":""IntValue"",""ObjectValue"":""100000""},""jincooldown"":{""ObjectName"":""jincooldown"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Ken"":{""ObjectName"":""Ken"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Scar"":{""ObjectName"":""Scar"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot12"":{""ObjectName"":""Slot12"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""RecentTrainings"":{""ObjectName"":""RecentTrainings"",""ObjectClass"":""StringValue"",""ObjectValue"":""{}""},""EyeColorR"":{""ObjectName"":""EyeColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""80""},""HairColorG"":{""ObjectName"":""HairColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""70""},""RaidCD"":{""ObjectName"":""RaidCD"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot6"":{""ObjectName"":""Slot6"",""ObjectClass"":""StringValue"",""ObjectValue"":""Waki Eye""},""HairColorB"":{""ObjectName"":""HairColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""70""},""Gender"":{""ObjectName"":""Gender"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""MSAbility2"":{""ObjectName"":""MSAbility2"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Kids"":{""ObjectName"":""Kids"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""SecondaryWep"":{""ObjectName"":""SecondaryWep"",""ObjectClass"":""StringValue"",""ObjectValue"":""Kunai""},""PosZ"":{""ObjectName"":""PosZ"",""ObjectClass"":""IntValue"",""ObjectValue"":""-3368""},""PDWipes"":{""ObjectName"":""PDWipes"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""AkatsukiTrained"":{""ObjectName"":""AkatsukiTrained"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""UnlockedCloak"":{""ObjectName"":""UnlockedCloak"",""ObjectClass"":""IntValue"",""ObjectValue"":""10000""},""CloakTime"":{""ObjectName"":""CloakTime"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BijuuRelation"":{""ObjectName"":""BijuuRelation"",""ObjectClass"":""IntValue"",""ObjectValue"":""100000""},""Prestige"":{""ObjectName"":""Prestige"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""MaxAge"":{""ObjectName"":""MaxAge"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""TailedBeastMastered"":{""ObjectName"":""TailedBeastMastered"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Mangekyo"":{""ObjectName"":""Mangekyo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastGripped"":{""ObjectName"":""LastGripped"",""ObjectClass"":""IntValue"",""ObjectValue"":""39258193""},""LastAge"":{""ObjectName"":""LastAge"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key11"":{""ObjectName"":""Key11"",""ObjectClass"":""StringValue"",""ObjectValue"":""y""},""AwakenCD"":{""ObjectName"":""AwakenCD"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastStomach"":{""ObjectName"":""LastStomach"",""ObjectClass"":""IntValue"",""ObjectValue"":""564""},""ChakraArmorRGB"":{""ObjectName"":""ChakraArmorRGB"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""RaidXP"":{""ObjectName"":""RaidXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""WeaveSpeed"":{""ObjectName"":""WeaveSpeed"",""ObjectClass"":""IntValue"",""ObjectValue"":""20""},""WipeLog"":{""ObjectName"":""WipeLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot10"":{""ObjectName"":""Slot10"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key9"":{""ObjectName"":""Key9"",""ObjectClass"":""StringValue"",""ObjectValue"":""9""},""Slot5"":{""ObjectName"":""Slot5"",""ObjectClass"":""StringValue"",""ObjectValue"":""64 Palms""},""Slot7"":{""ObjectName"":""Slot7"",""ObjectClass"":""StringValue"",""ObjectValue"":""Waki Dash""},""RESTORE"":{""ObjectName"":""RESTORE"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""TailedBeast"":{""ObjectName"":""TailedBeast"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""ItemSave"":{""ObjectName"":""ItemSave"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""TimesRerolled"":{""ObjectName"":""TimesRerolled"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot8"":{""ObjectName"":""Slot8"",""ObjectClass"":""StringValue"",""ObjectValue"":""Air Palm""},""CurseMarkEXP"":{""ObjectName"":""CurseMarkEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""HBChoice"":{""ObjectName"":""HBChoice"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""WeaponSave"":{""ObjectName"":""WeaponSave"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""PrimaryWep"":{""ObjectName"":""PrimaryWep"",""ObjectClass"":""StringValue"",""ObjectValue"":""Kunai""},""OriginalVillage"":{""ObjectName"":""OriginalVillage"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""BijuuSealed"":{""ObjectName"":""BijuuSealed"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""KillStreak"":{""ObjectName"":""KillStreak"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""ToggleAccessories"":{""ObjectName"":""ToggleAccessories"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key3"":{""ObjectName"":""Key3"",""ObjectClass"":""StringValue"",""ObjectValue"":""3""},""Key4"":{""ObjectName"":""Key4"",""ObjectClass"":""StringValue"",""ObjectValue"":""4""},""Name"":{""ObjectName"":""Name"",""ObjectClass"":""StringValue"",""ObjectValue"":""Poke""},""Construct"":{""ObjectName"":""Construct"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Parentq"":{""ObjectName"":""Parentq"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastChakra"":{""ObjectName"":""LastChakra"",""ObjectClass"":""IntValue"",""ObjectValue"":""733""},""Slot="":{""ObjectName"":""Slot="",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""PrimaryAmmo"":{""ObjectName"":""PrimaryAmmo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""RU"":{""ObjectName"":""RU"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PDLog"":{""ObjectName"":""PDLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""logcheck"":{""ObjectName"":""logcheck"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot-"":{""ObjectName"":""Slot-"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key1"":{""ObjectName"":""Key1"",""ObjectClass"":""StringValue"",""ObjectValue"":""1""},""FamilyID"":{""ObjectName"":""FamilyID"",""ObjectClass"":""StringValue"",""ObjectValue"":""Poke(40)492919""},""RP"":{""ObjectName"":""RP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Migrated"":{""ObjectName"":""Migrated"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Slot3"":{""ObjectName"":""Slot3"",""ObjectClass"":""StringValue"",""ObjectValue"":""Waki Elegant Slash""},""HandsignTraining"":{""ObjectName"":""HandsignTraining"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Blindness"":{""ObjectName"":""Blindness"",""ObjectClass"":""NumberValue"",""ObjectValue"":""0""},""Mastered"":{""ObjectName"":""Mastered"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""AgeLimit"":{""ObjectName"":""AgeLimit"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""BerserkTimes"":{""ObjectName"":""BerserkTimes"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SpentSkillPoints"":{""ObjectName"":""SpentSkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""-24""},""TailedBeastEXP"":{""ObjectName"":""TailedBeastEXP"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key6"":{""ObjectName"":""Key6"",""ObjectClass"":""StringValue"",""ObjectValue"":""6""},""berserkcheck"":{""ObjectName"":""berserkcheck"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""EyeColorB"":{""ObjectName"":""EyeColorB"",""ObjectClass"":""IntValue"",""ObjectValue"":""152""},""Slot1"":{""ObjectName"":""Slot1"",""ObjectClass"":""StringValue"",""ObjectValue"":""Palm Rotation""},""ParentID"":{""ObjectName"":""ParentID"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Key10"":{""ObjectName"":""Key10"",""ObjectClass"":""StringValue"",""ObjectValue"":""t""},""BDAYS"":{""ObjectName"":""BDAYS"",""ObjectClass"":""StringValue"",""ObjectValue"":""0""},""Bank"":{""ObjectName"":""Bank"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""KPos"":{""ObjectName"":""KPos"",""ObjectClass"":""IntValue"",""ObjectValue"":""3""},""Elo"":{""ObjectName"":""Elo"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""EKLog"":{""ObjectName"":""EKLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""startnewlife"":{""ObjectName"":""startnewlife"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LastHealth"":{""ObjectName"":""LastHealth"",""ObjectClass"":""IntValue"",""ObjectValue"":""450""},""ResetPos"":{""ObjectName"":""ResetPos"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SkillPoints"":{""ObjectName"":""SkillPoints"",""ObjectClass"":""IntValue"",""ObjectValue"":""24""},""Rank"":{""ObjectName"":""Rank"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""PosX"":{""ObjectName"":""PosX"",""ObjectClass"":""IntValue"",""ObjectValue"":""-2506""},""LastKilledUser"":{""ObjectName"":""LastKilledUser"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Trauma"":{""ObjectName"":""Trauma"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""MissionSuccess"":{""ObjectName"":""MissionSuccess"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""CurrentWep"":{""ObjectName"":""CurrentWep"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""GrandParentID"":{""ObjectName"":""GrandParentID"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""CanRank"":{""ObjectName"":""CanRank"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""SecondaryAmmo"":{""ObjectName"":""SecondaryAmmo"",""ObjectClass"":""IntValue"",""ObjectValue"":""4""},""RyoRES"":{""ObjectName"":""RyoRES"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""AnbuLog"":{""ObjectName"":""AnbuLog"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Ryo"":{""ObjectName"":""Ryo"",""ObjectClass"":""IntValue"",""ObjectValue"":""48""},""CColorR"":{""ObjectName"":""CColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key7"":{""ObjectName"":""Key7"",""ObjectClass"":""StringValue"",""ObjectValue"":""7""},""MaxRank"":{""ObjectName"":""MaxRank"",""ObjectClass"":""IntValue"",""ObjectValue"":""24""},""RightEye"":{""ObjectName"":""RightEye"",""ObjectClass"":""StringValue"",""ObjectValue"":""Byakugan""},""DefaultMouth"":{""ObjectName"":""DefaultMouth"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""LoreTitle"":{""ObjectName"":""LoreTitle"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""Deaths"":{""ObjectName"":""Deaths"",""ObjectClass"":""IntValue"",""ObjectValue"":""1""},""HairColorR"":{""ObjectName"":""HairColorR"",""ObjectClass"":""IntValue"",""ObjectValue"":""76""},""LeftEye"":{""ObjectName"":""LeftEye"",""ObjectClass"":""StringValue"",""ObjectValue"":""Byakugan""},""Slot0"":{""ObjectName"":""Slot0"",""ObjectClass"":""StringValue"",""ObjectValue"":""""},""CColorG"":{""ObjectName"":""CColorG"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Age"":{""ObjectName"":""Age"",""ObjectClass"":""IntValue"",""ObjectValue"":""74""},""MaxTails"":{""ObjectName"":""MaxTails"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""Village"":{""ObjectName"":""Village"",""ObjectClass"":""IntValue"",""ObjectValue"":""9""},""bald"":{""ObjectName"":""bald"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""SecondaryCN"":{""ObjectName"":""SecondaryCN"",""ObjectClass"":""IntValue"",""ObjectValue"":""2""},""Influence"":{""ObjectName"":""Influence"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Title"":{""ObjectName"":""Title"",""ObjectClass"":""StringValue"",""ObjectValue"":""Academy Student""},""kek"":{""ObjectName"":""kek"",""ObjectClass"":""IntValue"",""ObjectValue"":""2""},""RaidCoins"":{""ObjectName"":""RaidCoins"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Key5"":{""ObjectName"":""Key5"",""ObjectClass"":""StringValue"",""ObjectValue"":""5""}},""Skilltree"":{""Waki Dash"":{""ObjectName"":""Waki Dash"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki"":{""ObjectName"":""Waki"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Gentle Fist"":{""ObjectName"":""Gentle Fist"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Substitution"":{""ObjectName"":""Substitution"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki Flash"":{""ObjectName"":""Waki Flash"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki Elegant Slash"":{""ObjectName"":""Waki Elegant Slash"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Byakugan"":{""ObjectName"":""Byakugan"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Palm Rotation"":{""ObjectName"":""Palm Rotation"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Air Palm"":{""ObjectName"":""Air Palm"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki Rising Slash"":{""ObjectName"":""Waki Rising Slash"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Way of the Sword"":{""ObjectName"":""Way of the Sword"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""64 Palms"":{""ObjectName"":""64 Palms"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Pommel Strike"":{""ObjectName"":""Pommel Strike"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki Slicer"":{""ObjectName"":""Waki Slicer"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""},""Waki Eye"":{""ObjectName"":""Waki Eye"",""ObjectClass"":""IntValue"",""ObjectValue"":""0""}},""Copy"":[]}"
+E8wwK9ua,tunnel.lua,cul8ter,Lua,Wednesday 11th of October 2023 05:02:44 PM CDT,"local util=dofile(""/turtle_utils.lua"")
+local args={...}
+if args==nil then
+    print(""you've gotta tell me how far to tunnel lol"")
+    return
+end
+local i=0
+for i=1,tonumber(args[1]) do
+    if turtle.getFuelLevel()<20 then
+        turtle.select(util.find(""minecraft:coal""))
+        turtle.refuel(64)
+    end
+    util.dig()
+    util.forward(1)
+    if not turtle.inspectDown() then
+        turtle.select(util.find(""minecraft:cobblestone"") or util.find(""minecraft:cobbled_deepslate"") or util.find(""minecraft:tuff""))
+        turtle.placeDown()
+    end
+    util.left(1)
+    util.dig()
+    util.right(2)
+    util.dig()
+    util.digup()
+    util.up(1)
+    util.dig()
+    util.left(2)
+    util.dig()
+    util.digup()
+    util.up(1)
+    util.dig()
+    util.right(2)
+    util.dig()
+    util.left(1)
+    util.down(2)
+end
+util.left(2)
+util.forward(tonumber(args[1]))
+turtle.digDown()
+turtle.down()
+turtle.digDown()
+local slot=util.find(""minecraft:cobblestone"") or util.find(""minecraft:cobbled_deepslate"")
+while slot do
+    turtle.select(slot)
+    turtle.dropDown(64)
+    slot=util.find(""minecraft:cobblestone"") or util.find(""minecraft:cobbled_deepslate"")
+end
+turtle.select(1)
+turtle.suckDown(16)
+turtle.up()
+turtle.placeDown()
+"
+byJ6siWn,turtle_utils.lua,cul8ter,Lua,Wednesday 11th of October 2023 05:01:44 PM CDT,"local util={}
+util.find=function(name)
+   for i=1,16 do
+       local item=turtle.getItemDetail(i)
+       if item and item.name==name then
+           return i
+       end
+   end
+end
+util.dig=function()
+    while turtle.inspect() do
+        turtle.dig()
+        os.sleep(0.2)
+    end
+end
+util.left=function(i)
+    for _=1,i do
+        turtle.turnLeft()
+    end
+end
+util.right=function(i)
+    for _=1,i do
+        turtle.turnRight()
+    end
+end
+util.forward=function(i)
+    for _=1,i do
+        turtle.forward()
+    end
+end
+util.back=function(i)
+    for _=1,i do
+        turtle.back()
+    end
+end
+util.digup=function()
+    while turtle.inspectUp() do
+        turtle.digUp()
+        os.sleep(0.2)
+    end
+end
+util.up=function(i)
+    for _=1,i do
+        turtle.up()
+    end
+end
+util.down=function(i)
+    for _=1,i do
+        turtle.down()
+    end
+end
+return util
+"
+gUvv4bB7,Untitled,sissou123,Python,Wednesday 11th of October 2023 04:40:56 PM CDT,"Python Packages: NumPy and Pandas Dataframe
+This course is designed to make you a more confident Python user, following your introduction to the fundamentals of Python.
+
+You’ll gain confidence using the Module, Packages and Libraries in Python, and use Python’s Date Time data, and Numpy and Pandas packages.
+for more:https://linkjust.com/mdyh1PjPUOvK7mC03fssdQKyPQ"
+26WYW4zF,Untitled,sissou123,Python,Wednesday 11th of October 2023 04:37:43 PM CDT," Data Analysis with Python: Zero to Pandas - Unleashing the Power of Data
+Introduction to Data Analysis with Python
+- Overview of Python's capabilities in data analysis
+- Introduction to pandas library and its role in data manipulation
+- Basic data analysis techniques using Python
+for more:https://www.up-4ever.net/qjkx38941sbh
+
+"
+ti80khBZ,utils.lua,hugohamon,Lua,Wednesday 11th of October 2023 04:31:10 PM CDT,"-- Utils file for early mining
+local utils = {}
+
+-- Constants
+local VERSION = ""0.1.0""
+
+-- isUpToDate: Check if the utils file is up to date with the latest version
+function utils.isUpToDate(utils_pastebin)
+    shell.run(""pastebin"", ""get"", utils_pastebin, ""update.lua"")
+    local file = fs.open(""update.lua"", ""r"")
+    local content = file.readAll()
+    file.close()
+    fs.delete(""update.lua"")
+    local version = string.match(content, ""local VERSION = \""%d+.%d+.%d+\"""")
+    version = string.match(version, ""%d+.%d+.%d+"")
+    return VERSION == version
+end
+
+return utils"
+yviqFGKh,early_mining.lua,hugohamon,Lua,Wednesday 11th of October 2023 04:30:10 PM CDT,-- Empty
+iFLbUk7C,Untitled,sissou123,Python,Wednesday 11th of October 2023 04:16:58 PM CDT,"Data Analysis with Python: Zero to Pandas
+""Data Analysis with Python: Zero to Pandas"" is a practical and beginner-friendly introduction to data analysis covering the basics of Python, Numpy, Pandas, Data Visualization, and Exploratory Data Analysis.
+for more:https://linkjust.com/d1JPxbFbpqd"
+3N26L84y,Config.lua,archosaur,Lua,Wednesday 11th of October 2023 04:14:27 PM CDT,"Device_type = ""Clock:Season""
+
+hight = 15 			-- hight for turtle to go up and down, hight of tunnel
+useChests = true 	-- can be True, False or Ender
+chestSlot = 15 		-- slot for chests
+wirelessChannel = 1 -- channel to comunicate over wireless network"
+V8CNxS7Y,Untitled,skimono,C++,Wednesday 11th of October 2023 04:06:55 PM CDT,"// clang-format off
+#pragma GCC optimize(""Ofast"")
+#pragma GCC optimize(""no-stack-protector"")
+#pragma GCC optimize(""unroll-loops"")
+#pragma GCC target(""sse,sse2,sse3,ssse3,popcnt,abm,mmx,tune=native"")
+#pragma GCC optimize(""fast-math"")
+#define _CRT_SECURE_NO_WARNINGS
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <stack>
+#include <iomanip>
+#include <fstream>
+#include <string>
+#include <set>
+#include <deque>
+#include <queue>
+#include <map>
+#include <bitset>
+#include <random>
+#include <list>
+#include <unordered_map>
+#include <unordered_set>
+#include <cassert>
+using namespace std;
+
+typedef long long ll;
+typedef short sh;
+typedef unsigned long long ull;
+typedef long double ld;
+typedef string str;
+//typedef __int128 ultraint;
+#define sqrt sqrtl
+#define F first
+#define S second
+#define endl '\n'
+#define all(vc666) vc666.begin(), vc666.end()
+#define allr(vc666) vc666.rbegin(), vc666.rend()
+//#define int long long
+#define degug(x) cerr (#x) << "" "" << (x) << endl;
+
+const ll INF = 1e18 + 3;
+const ll inf = 2e9 + 3;
+const ll ONE = 1, ZERO = 0;
+const ll mod = 998244353;
+const ll m1 = 1e9 + 575179;
+const ll m2 = 1e9 + 87;
+const ll LG = 21;
+//const ll k = 106033;
+//const ll k_sqrt = 400;
+const ll p = 106033;
+ld EPS = 1e-9;
+ld PI = 3.1415926535897932384;
+ld phi = (sqrt(5) + 1.0) / 2.0;
+mt19937 rnd(4906);
+
+const int N = 6e5 + 1;
+pair <int[30], ll[30]> tree[N];
+int a[N], bit;
+pair <int[30], ll[30]> elem;
+ll ans = 0;
+
+void build(int v, int l, int r) {
+    if (l == r) {
+        for (bit = 29; bit >= 0; bit--) {
+            if (a[l] & (1 << bit)) {
+                tree[v].first[bit] = min(tree[v].first[bit], a[l]);
+                tree[v].second[bit] += a[l];
+                break;
+            }
+        }
+    }
+    else {
+        int m = (l + r) / 2;
+        build(2 * v, l, m);
+        build(2 * v + 1, m + 1, r);
+        for (bit = 29; bit >= 0; bit--) {
+            tree[v].first[bit] = min(tree[2 * v].first[bit], tree[2 * v + 1].first[bit]);
+            tree[v].second[bit] = tree[2 * v].second[bit] + tree[2 * v + 1].second[bit];
+        }
+    }
+}
+
+void query(int v, int l, int r, int ql, int qr) {
+    if (qr < l || ql > r) {
+        return;
+    }
+    else if (ql <= l && qr >= r) {
+        for (bit = 0; bit < 30; bit++) {
+            elem.first[bit] = min(elem.first[bit], tree[v].first[bit]);
+            elem.second[bit] += tree[v].second[bit];
+        }
+        return;
+    }
+    else {
+        int m = (l + r) / 2;
+        query(2 * v, l, m, ql, qr);
+        query(2 * v + 1, m + 1, r, ql, qr);
+        return;
+    }
+}
+
+void solve() {
+    int n, m, i, l, r;
+    cin >> n >> m;
+    for (i = 0; i < n; i++) {
+        cin >> a[i];
+    }
+    for (i = 0; i < N; i++) {
+        for (bit = 0; bit < 30; bit++) {
+            tree[i].first[bit] = inf;
+            tree[i].second[bit] = 0;
+        }
+    }
+    build(1, 0, n - 1);
+    for (i = 0; i < m; i++) {
+        cin >> l >> r;
+        for (bit = 0; bit < 30; bit++) {
+            elem.first[bit] = inf;
+            elem.second[bit] = 0;
+        }
+        query(1, 0, n - 1, l - 1, r - 1);
+        ans = 0;
+        for (bit = 0; bit < 30; bit++) {
+            if (ans + ONE >= (ll)elem.first[bit]) {
+                ans += elem.second[bit];
+            }
+        }
+        cout << ans + ONE << endl;
+    }
+}
+
+signed main() {
+#ifdef _DEBUG
+    freopen(""input.txt"", ""r "", stdin);
+    freopen(""output.txt"", ""w"", stdout);
+#endif
+    ios_base::sync_with_stdio(0);
+    cin.tie(NULL);
+    cout.tie(NULL);
+    int t = 1;
+    //cin >> t;
+    while (t--) solve();
+}
+//Deisgned by skimono
+//РљР»СѓР± ""РљРѕР»СЊС†Р°(РЎРµСЂСЊРіРё)""
+"
+dW0RGDdm,Untitled,sissou123,Python,Wednesday 11th of October 2023 03:58:25 PM CDT,"The Complete Python Bootcamp From Zero to Hero in Python
+Learn Python like a Professional Start from the basics and go all the way to creating your own applications and games
+for more:https://linkjust.com/Zh9"
+hpF9euB8,"3. Mean, Median & Mode Discrete Series",tampurus,C,Wednesday 11th of October 2023 03:54:30 PM CDT,"#include <stdio.h>
+
+
+void Mean(int x[], int fre[], int n){
+    long long sum =0 , N=0;
+    
+    for(int i=0 ; i<n ; i++){
+        sum += (x[i] * fre[i]);
+        N +=fre[i];
+    }
+    
+    float mean = (float)sum / (float)N;
+    printf(""\nMean of given data is %.3f "",mean);
+}
+
+// void Median(int ci[MAX_SIZE][2], int fre[MAX_SIZE], int n ){
+    
+// }
+void Mode(int x[], int fre[], int n){
+    int mode=x[0],maxi = fre[0];
+    
+    for(int i=1 ; i<n ; i++){
+        if(maxi<fre[i]){
+            maxi = fre[i];
+            mode = x[i];
+        }
+    }
+    
+    printf(""\nMode of given dataset is %d "",mode);
+}
+int main()
+{
+    int n;
+    printf(""Enter the number of elements \n"");
+    scanf(""%d"",&n);
+    
+    int x[n],fre[n];
+    printf(""\nEnter value of X one by one \n"");
+    for(int i=0 ; i<n ; i++){
+            scanf(""%d"",&x[i]);
+    }
+    
+    printf(""\nNow enter the %d frequencies : \n"",n);
+    for(int i=0 ; i<n ; i++){
+        scanf(""%d"",&fre[i]);
+    }
+    
+    // now calling function which will print the mean
+    Mean(x, fre, n);
+    
+    // now callign function which will print the median of the given data 
+    // Median(ci, fre, n);
+    
+    // // now calling function which will print the mode of given data 
+    Mode(x, fre, n);
+
+    return 0;
+}
+"
+wBDvyUv5,Untitled,soyl,Java,Wednesday 11th of October 2023 03:40:51 PM CDT,"import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+public class Practicum {
+    private static final int PORT = 8080;
+
+    public static void main(String[] args) throws IOException {
+        HttpServer httpServer = HttpServer.create();
+
+        httpServer.bind(new InetSocketAddress(PORT), 0);
+        httpServer.createContext(""/hello"", new HelloHandler());
+        httpServer.start();
+        System.out.println(""HTTP-сервер запущен на "" + PORT + "" порту!"");
+        httpServer.stop(1);
+    }
+
+    static class HelloHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange httpExchange) throws IOException {
+            String response;
+
+            // извлеките метод из запроса
+            String method = httpExchange.getRequestMethod();
+
+            switch(method) {
+                // сформируйте ответ в случае, если был вызван POST-метод
+                case ""POST"":
+                    // извлеките тело запроса
+                    String body;
+
+
+                    String path = httpExchange.getRequestURI().getPath();
+                    String[] splitStrings = path.split(""/"");
+                    String profession = splitStrings[2];
+                    String name = splitStrings[3];
+
+                    // извлеките заголовок
+                    Headers requestHeaders = httpExchange.getRequestHeaders();
+                    List<String> wishGoodDay = requestHeaders.get(""X-Wish-Good-Day"");
+                    if ((wishGoodDay != null) && (wishGoodDay.contains(""true""))) {
+                        response = ""Доброе утро, "" + profession + "" "" + name + ""! Хорошего дня!"";
+                        break;
+                    }
+                    response = ""Здравствуйте, "" + profession + "" "" + name+""!"";
+                    break;
+
+                case ""GET"":
+                    response = ""Здравствуйте!"";
+                    break;
+
+                default:
+                    response = ""Некорректный метод!"";
+            }
+
+            httpExchange.sendResponseHeaders(200, 0);
+
+            try (OutputStream os = httpExchange.getResponseBody()) {
+                os.write(response.getBytes());
+            }
+        }
+    }
+}"
+MLzBvqB5,Untitled,Andre1314,C++,Wednesday 11th of October 2023 03:40:19 PM CDT,"#include <iostream>
+#include <vector>
+#include <set>
+#include <map>
+#include <queue>
+#include <math.h>
+
+#define ll long long
+#define ld long double
+#define pll pair<ll, ll>
+
+using namespace std;
+
+const double eps = 0.0001;
+
+ll xl, xr, r, n, xi, yi;
+vector<pll> pillars;
+
+class Graph {
+public:
+	vector<vector<ll>> adj;
+	
+	Graph(int v) {
+		adj.resize(v);
+	}
+
+	void addEdge(int u, int w) {
+		adj[u].push_back(w);
+	}
+};
+
+// R - радіус вазона, з яким ми хочемо пройти
+bool canFit(pll firstP, pll secondP, ld R) {
+	return sqrt(pow(secondP.first - firstP.first, 2) + pow(secondP.second - firstP.second, 2)) - 2 * r > R * 2;
+}
+
+// тут ми проходимося по колонам і дивимося де ми не можемо пройти між колонами або стінами
+// і будуємо граф з тих колон між якими не можна пройти
+bool checkGraph(ld R, ll s, ll e) {	
+	Graph g(n + 2);
+	for (int i = 0; i < n; i++) {
+		for (int j = 0; j < n; j++) {
+			if (i != j && !canFit(pillars[i], pillars[j], R)) {
+				g.addEdge(i, j);
+			}
+		}
+
+		if (pillars[i].first - r - xl <= R * 2) {
+			g.addEdge(i, n);
+			g.addEdge(n, i);
+		}
+
+		if (pillars[i].first + r + R * 2 >= xr) {
+			g.addEdge(i, n + 1);
+			g.addEdge(n + 1, i);
+		}
+	}
+
+	//перевіряємо чи є шлях від лівої до правої стіни
+
+	vector<bool> used(g.adj.size());
+	queue<ll> q;
+	used[s] = true;
+	q.push(s);
+
+	while (!q.empty()) {
+		ll cur = q.front();
+		q.pop();
+
+		for (ll i : g.adj[cur]) {
+			if (!used[i]) {
+				q.push(i);
+				used[i] = true;
+				if (i == e) return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+//бінарним пошуком ми просто перебираємо який радіус нам підійде для того аби пройти
+ld binSrch() {
+	ld lt = 0;
+	ld rt = abs(xr) + abs(xl);
+
+	while (rt - lt > eps) {
+		ld m = (rt + lt) / 2;
+		bool smaller = checkGraph(m, n, n + 1);
+
+		if (smaller) rt = m;
+		else lt = m;
+	}
+
+	return lt;
+}
+
+int main()
+{
+	cin >> xl >> xr; // координати лівої та правої стін коридору
+	cin >> r; // радіус колон у коридорі
+	cin >> n; // кількість колон
+
+	pillars.resize(n);
+
+	for (int i = 0; i < n; i++) {
+		cin >> xi >> yi;
+		pillars[i].first = xi;
+		pillars[i].second = yi;
+	}
+
+	cout << binSrch() * 2;
+
+	return 0;
+}
+"
+gUfq45Pv,Untitled,soyl,Java,Wednesday 11th of October 2023 03:39:49 PM CDT,"
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.*;
+import java.net.InetSocketAddress;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
+public class Praktikum {
+    private static final int PORT = 8080;
+    private static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
+
+    public static void main(String[] args) throws IOException {
+
+        HttpServer httpServer = HttpServer.create();
+        httpServer.bind(new InetSocketAddress(PORT), 0);
+        httpServer.createContext(""/posts"", new PostsHandler());
+        httpServer.start();
+
+        System.out.println(""HTTP-сервер запущен на "" + PORT + "" порту!"");
+    }
+
+    static class PostsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+
+            String ec = exchange.getRequestURI().getPath();
+            String ecc = exchange.getRequestMethod();
+            Endpoint endpoint = getEndpoint(ec,ecc);
+            switch (endpoint) {
+                case GET_POSTS: {
+                    writeResponse(exchange, ""Получен запрос на получение постов"", 200);
+                    break;
+                }
+                case GET_COMMENTS: {
+                    writeResponse(exchange, ""Получен запрос на получение комментариев"", 200);
+                    break;
+                }
+                case POST_COMMENT: {
+                    writeResponse(exchange, ""Получен запрос на добавление комментария"", 200);
+                    break;
+                }
+                default:
+                    writeResponse(exchange, ""Такого эндпоинта не существует"", 404);
+            }
+        }
+
+        private Endpoint getEndpoint(String requestPath, String requestMethod) {
+
+            String[] split = requestPath.split(""/"");
+            if(split[split.length-1].equals(""posts"")) {
+                return Endpoint.GET_POSTS;
+            }
+            else if (split[split.length-1].equals(""comments"") && split.length == 4){
+                if(requestMethod.equals(""GET"")) {
+                    return Endpoint.GET_COMMENTS;
+                }else{
+                    return Endpoint.POST_COMMENT;
+                }
+            }else {
+                return Endpoint.UNKNOWN;
+            }
+        }
+
+        private void writeResponse(HttpExchange exchange,
+                                   String responseString,
+                                   int responseCode) throws IOException {
+            /* Реализуйте отправку ответа, который содержит responseString в качестве тела ответа
+            и responseCode в качестве кода ответа.
+            Учтите, что если responseString — пустая строка, то её не нужно передавать в ответе. */
+            // ...
+            exchange.sendResponseHeaders(responseCode, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseString.getBytes());
+            }
+        }
+        enum Endpoint {GET_POSTS, GET_COMMENTS, POST_COMMENT, UNKNOWN}
+    }
+}"
+HZNdNxLE,take a chance on me,maryskins,HTML,Wednesday 11th of October 2023 03:38:51 PM CDT,"<link href=""//icons.cappuccicons.com/cpf.css"" rel=""stylesheet""><link rel=""preconnect"" href=""https://fonts.gstatic.com"" crossorigin>
+<link href=""https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&display=swap"" rel=""stylesheet""><link rel=""stylesheet"" href=""https://dl.dropbox.com/scl/fi/5n7f9zkiikcpcsdmgu520/takeachance.css?rlkey=o6abujwcgxz8k8uimfxhd2fbz&raw=1""><link href=""//dl.dropbox.com/s/7afzi55jzuv4za1/creditos.css"" rel=""stylesheet""/>
+
+<div id=""takeachance""><div class=""takehead""><i class=""cp cp-feather""></i>
+<b>Nombre del personaje</b>
+</div><div class=""takecabecera"">
+<div class=""takemini""><img src=""https://via.placeholder.com/80""></div>
+<p>Pequeña <i>frase</i> donde puedes destacar cosas.
+Por ejemplo, <b>esto</b> es especial.</p>
+</div>
+<div class=""takeseparador""></div>
+<div class=""takecontent2"">
+<input type=""radio"" name=""taketab"" id=""taketemas1"" checked/>
+<input type=""radio"" name=""taketab"" id=""taketemas2""/>
+<input type=""radio"" name=""taketab"" id=""taketemas3""/>
+<input type=""radio"" name=""taketab"" id=""taketemas4""/>
+ 
+<label for=""taketemas1""><i class=""cp cp-home""></i></label>
+<label for=""taketemas2""><i class=""cp cp-cheers""></i></label>
+<label for=""taketemas3""><i class=""cp cp-fire""></i></label>
+<label for=""taketemas4""><i class=""cp cp-forbidden""></i></label>
+ 
+<div class=""boxtake boxtake1"">
+<div class=""takerelist"">
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+ 
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+</div></div>
+ 
+<div class=""boxtake boxtake2"">
+<div class=""takerelist"">
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+ 
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+</div></div>
+
+<div class=""boxtake boxtake3"">
+<div class=""takerelist"">
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+ 
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+</div></div>
+
+<div class=""boxtake boxtake4"">
+<div class=""takerelist"">
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+ 
+<li class=""takepersona""><div class=""takepershead""><b>Nombre Apellido</b><i class=""cp cp-home""></i></div> <div class=""takepersimg"" style=""background:url('https://via.placeholder.com/70')""></div> <div class=""takeperstext""> <b>Relación</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse non massa at sapien venenatis fringilla. Donec tincidunt viverra luctus.</div></li>
+</div></div></div></div><div id=""creditosmary""><a href=""https://maryskins.tumblr.com/"">mary ✦ 2022</a></div>
+
+<style>#takeachance{--borde: #dcdcdc; --fondoclaro:#ffffff; --fondomedio:#fafafa; --fondoscuro:#f1f1f1; --acento:#bf99cc; --borde-acento:#a38eab; --fuente:'Montserrat'; --fuente-tam:12px; --fuente-color:#000000;}</style>"
+3iAWAr1N,AC_LAB1_EX4,varli_ketanpl,VeriLog,Wednesday 11th of October 2023 03:24:54 PM CDT,"module comp(
+    output lt, eq, gt,
+    input a, b);
+    
+    xnor x1(eq, a, b);
+    
+    wire o1, o2;
+    
+    not n1(o1, a);
+    not n2(o2, b);
+    
+    and nd1(lt, o1, b);
+    and nd2(gt, o2, a);
+endmodule"
+4ndWAWsz,"2. Mean, Median & Mode Continuous Series",tampurus,C,Wednesday 11th of October 2023 03:22:55 PM CDT,"#include <stdio.h>
+
+const int MAX_SIZE = 25;
+
+void Mean(int ci[][2], int fre[], int n){
+    int mid[n];
+    for(int i=0 ; i<n ; i++){
+        mid[i] = (ci[i][0]+ci[i][1])/2;
+    }
+    
+    long long int sum =0 , N=0;
+    for(int i=0 ; i<n ; i++){
+        sum += (fre[i]*mid[i]);
+        N += fre[i];
+    }
+    
+    float mean = (float)sum / (float)N ;
+    
+    printf(""\nMean for the given data is %.3f "",mean);
+}
+
+void Median(int ci[MAX_SIZE][2], int fre[MAX_SIZE], int n ){
+    int cf[n];
+    int size = ci[0][1] - ci[0][0];
+    long int N =0;
+    for(int i=0 ; i<n ; i++){
+        N+=fre[i];
+        cf[i] = N;
+    }
+    float Nby2 = (float)N/2;
+    float L,F,CF;
+    for(int i=0 ; i<n ; i++){
+        if(Nby2<cf[i]){
+            L = ci[i][0];
+            F = fre[i];
+            CF = cf[i-1];
+            break;
+        }
+    }
+    
+    float K = (Nby2 - CF)/ F;
+    float median = L + (K*size);
+    
+    printf(""\nMedian for this problem is %.3f"",median);
+    
+}
+void Mode(int ci[MAX_SIZE][2], int fre[MAX_SIZE], int n){
+    float f1=fre[0];
+    int index =0;
+    for(int i=1 ; i<n ; i++){
+        if(f1<fre[i]){
+            f1 = fre[i];
+            index = i;
+        }
+    }
+    
+    float f0 = fre[index-1] , f2= fre[index+1];
+    
+    float k = (f1-f0)/( (2*f1) - f2 - f0);
+    float size = ci[0][1] - ci[0][0];
+    float mode = ci[index][0] + (k*size);
+    
+    
+    printf(""\nMode of given data is %.3f \n"",mode);
+    
+}
+int main()
+{
+    int n;
+    int ci[MAX_SIZE][2],fre[MAX_SIZE];
+    printf(""Enter the number of elements \n"");
+    scanf(""%d"",&n);
+    
+    
+    printf(""\nEnter CI one by one \n"");
+    for(int i=0 ; i<n ; i++){
+        for(int j=0 ; j<2 ; j++){
+            scanf(""%d"",&ci[i][j]);
+        }
+    }
+    
+    printf(""\nNow enter the %d frequencies : \n"",n);
+    for(int i=0 ; i<n ; i++){
+        scanf(""%d"",&fre[i]);
+    }
+    
+    // now calling function which will print the mean
+    Mean(ci, fre, n);
+    
+    // now callign function which will print the median of the given data 
+    Median(ci, fre, n);
+    
+    // now calling function which will print the mode of given data 
+    Mode(ci, fre, n);
+
+    return 0;
+}
+"
+FnPD0DTZ,AC_LAB1_EX3,varli_ketanpl,VeriLog,Wednesday 11th of October 2023 03:18:55 PM CDT,"module add6(
+    output[6:0] sum,
+    input[5:0] a, b);
+    
+    wire c_in1, c_in2;
+    add4(sum[3:0], c_in1, a[3:0], b[3:0]);
+    full_adder f1(sum[4], c_in2, a[4], b[4], c_in1);
+    full_adder f2(sum[5], sum[6], a[5], b[5], c_in2);
+endmodule"
+M3dUiGPs,AC_LAB1_EX2,varli_ketanpl,VeriLog,Wednesday 11th of October 2023 03:15:24 PM CDT,"module add4(
+    output[3:0] sum,
+    output c_out,
+    input[3:0] a, b);
+    
+    wire c_in1, c_in2, c_in3;
+    full_adder f1(sum[0], c_in1, a[0], b[0], 0);
+    full_adder f2(sum[1], c_in2, a[1], b[1], c_in1);
+    full_adder f3(sum[2], c_in3, a[2], b[2], c_in2);
+    full_adder f4(sum[3], c_out, a[3], b[3], c_in3);
+endmodule"
+04JqE3SH,Untitled,geminilabs,PHP,Wednesday 11th of October 2023 03:15:19 PM CDT,"/**
+ * Exclude the Site Reviews star rating select from select2
+ */
+add_filter('site-reviews/field/rating', function ($field) {
+    $field['class'] .= ' hide';
+    return $field;
+});"
+DBrzKssX,Untitled,Rofyda_Elghadban1,C++,Wednesday 11th of October 2023 03:12:28 PM CDT," #include <bits/stdc++.h> 
+ #define ll long long
+ #define ull unsigned long long
+ #define pi 3.141592654
+ #define NUM 1e18
+ #define Mod  1'000'000'007
+ #define fixed(n) fixed<<setprecision(n)
+ #define cin(v) for(auto &i:v) cin >> i ;
+ #define cout(v) for(auto &i:v) cout << i  <<"" "";
+ #define vowel(x) (x=='e'||x=='a'||x=='i'||x=='o'||x=='u')
+ #define small(x) (x>=97&&x<=122)
+ #define capital(x) (x>=65&&x<=90)
+ #define Tolower(s) transform(s.begin(),s.end(),s.begin(),::tolower);
+ #define Toupper(s) transform(s.begin(),s.end(),s.begin(),::toupper); 
+ #define all(v) ((v).begin()), ((v).end())
+ #define allr(v) ((v).rbegin()), ((v).rend())
+ #define updmax(a,b) a=max(a,b)
+ #define updmin(a,b) a=min(a,b)
+ //#define ceil(a,b) ((a/b)+(a%b?1:0))
+ /* asc -> 1 2 3 ,des -> 3 2 1 */
+ /***********************************************************************************/
+ using namespace std;
+ void Rofyda_Elghadban(){
+  #ifndef ONLINE_JUDGE   
+    freopen(""input.txt"", ""r"", stdin), freopen(""output.txt"", ""w"", stdout);
+   #endif
+    ios_base::sync_with_stdio(false), cin.tie(nullptr), cout.tie(nullptr);
+ }
+
+  bool cmp(pair<int, int>& a, pair<int, int>& b){ 
+    return a.second < b.second; 
+  }
+
+ void solve(){
+	int t;
+	cin>>t;
+	while(t--){
+    int n,t;
+    cin>>n;
+    vector<char>v(n),v1;
+    string s,ans,ans1;
+    for(int i=0;i<n;i++){
+      cin>>v[i];
+      if(i<n&&i>=n-3){
+        s+=v[i];
+      }else{
+        v1.push_back(v[i]);
+      }
+    }
+    t=stoi(s)-stoi(s)%8;
+    ans1=to_string(t);
+    if(ans1.size()<3&&n>3){
+      v1.push_back('0');
+      for(int i=0;i<ans1.size();i++){
+        v1.push_back(ans1[i]);
+      }
+    }else{
+      for(int i=0;i<ans1.size();i++){
+        v1.push_back(ans1[i]);
+      }
+    }
+    for(int i=0;i<v1.size();i++){
+      ans+=v1[i];
+    }
+    cout<<ans<<""\n"";
+	}
+ }
+
+ int main(){
+  Rofyda_Elghadban();
+  solve();
+ 
+  return 0;
+ }
+"
+1E7fQNG2,LeetCode 121 - Best Time to Buy and Sell Stock - 2023.10.12 solution,nathanwailes,Python,Wednesday 11th of October 2023 02:57:22 PM CDT,"class Solution:
+    def maxProfit(self, prices: List[int]) -> int:
+        """"""
+        """"""
+        buy_index = 0
+        sell_index = 1
+
+        max_profit = 0
+
+        while sell_index < len(prices):
+            current_profit = prices[sell_index] - prices[buy_index]
+            max_profit = max(current_profit, max_profit)
+
+            if prices[sell_index] < prices[buy_index]:
+                buy_index = sell_index
+            
+            sell_index += 1
+        
+        return max_profit"
+8cP3KaB9,AC_LAB1_EX1,varli_ketanpl,VeriLog,Wednesday 11th of October 2023 02:51:08 PM CDT,"module half_adder(
+    	output sum,
+    	output c_out,
+    	input a, b);
+    
+    xor x1(sum, a, b);
+    and an1(c_out, a, b);
+endmodule
+
+module full_adder(
+    	output sum,
+    	output c_out,
+    input a, b, c_in);
+    
+    wire o1, o2, o3;
+    half_adder h1(sum, o1, c_in, o2);
+    half_adder h2(o2, o3, a, b);
+    or or1(o1, o3);
+endmodule"
+WJT9CXKK,Untitled,Chefir,C#,Wednesday 11th of October 2023 02:51:01 PM CDT,"static void Main(string[] args)
+        {
+            double filledPercent;
+            int barLength = 10;
+            char symbol;
+            Console.WriteLine(""Введите символ для заполннения бара: "");
+            symbol = Console.ReadKey().KeyChar;
+            Console.WriteLine(""Введите процент заполнения бара: "");
+            filledPercent = Convert.ToInt32(Console.ReadLine());
+            DrawBar(barLength, filledPercent, symbol);  
+        }
+
+        static void DrawBar(int barLength, double filledPercent, char symbol)
+        {
+            string bar;
+
+            if (filledPercent >= 0 && filledPercent <= 100)
+            {
+                int percent = 100;
+                char emptySymbol = '_';
+                int currentValue = (int)Math.Round(barLength * (filledPercent / percent));
+                bar = FillingBar(symbol, currentValue);
+                Console.Write('[');
+                Console.Write(bar);
+                bar = FillingBar(emptySymbol, barLength - currentValue);
+                Console.Write(bar + ']');
+            }
+            else
+            {
+                Console.WriteLine(""Введено отрицательное или превышающее предел значение"");
+            }
+        }
+
+        private static string FillingBar(char symbol, int currentValue)
+        {
+            string bar = string.Empty;
+
+            for (int i = 0; i < currentValue; i++)
+            {
+                bar += symbol;
+            }
+
+            return bar;
+        }"

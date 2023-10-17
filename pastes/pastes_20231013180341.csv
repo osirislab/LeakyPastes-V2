@@ -1,0 +1,3191 @@
+id,title,username,language,date,content
+Fp97gJcK,AceDB question,Sygon,Lua,Friday 13th of October 2023 12:43:41 PM CDT,"--- SmartRes2
+-- @class file
+-- @name SmartRes2.lua
+-- @author Sygon_Paul of Lightbringer
+-- File revision: @file-revision@
+-- Project date: @project-date-iso@
+
+-- Blizzard has two variants of GetAddOnMetadata; make a compatibility workaround
+local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+
+-- create the main addon
+local addon = LibStub(""AceAddon-3.0""):NewAddon(""SmartRes2"", ""AceEvent-3.0"", ""AceConsole-3.0"", ""AceComm-3.0"", ""LibAboutPanel-2.0"")
+local L = LibStub(""AceLocale-3.0""):GetLocale(""SmartRes2"")
+addon:SetDefaultModuleLibraries(""AceEvent-3.0"")
+
+-- get the addon version
+addon.version = GetAddOnMetadata(""SmartRes2"", ""Version"")
+if addon.version:match(""@"") then
+	addon.version = ""Development""
+end
+
+-- additional libraries
+local LDB = LibStub(""LibDataBroker-1.1"")
+local DBI = LibStub(""LibDBIcon-1.0"")
+local Dialog = LibStub(""AceConfigDialog-3.0"")
+
+-- variables that are file scope
+local _, default_icon, isMainline, isWrath, player_class
+_, _, default_icon = GetSpellInfo(2006)
+isMainline = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+isWrath = WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC
+player_class = UnitClassBase(""player"")
+
+-- create the default user options and shortcut variables
+local db, gdb
+local defaults = {
+	global = {
+		minimap = {
+			hide = false,
+			lock = true,
+			minimapPos = 190,
+			radius = 80
+		},
+		useClassIconForBroker = true
+	},
+	profile = {
+		enabled = true,
+		modules = {
+			[""**""] = {}
+		},
+		themes = {
+			[""**""] = {}
+		}
+	}
+}
+
+-- create the user options
+local options = {
+	type = ""group"",
+	childGroups = ""tab"",
+	name = ""SmartRes2 "" .. addon.version,
+	args = {
+		enabled = {
+			order = 10,
+			type = ""toggle"",
+			name = ENABLE .. "" "" .. JUST_OR .. "" "" .. DISABLE,
+			desc = L[""Toggle SmartRes2 and all modules on/off.""],
+			descStyle = ""inline"",
+			get = function(info) return db[info[#info]] end,
+			set = function(info, value)
+				db[info[#info]] = value
+				if value then
+					addon:OnEnable()
+				else
+					addon:OnDisable()
+				end
+			end
+		},
+		minimap = {
+			order = 20,
+			type = ""group"",
+			name = MINIMAP_LABEL,
+			args = {
+				hide = {
+					order = 10,
+					type = ""toggle"",
+					name = L[""Minimap Button""],
+					desc = L[""Hide the minimap icon.""],
+					descStyle = ""inline"",
+					get = function(info) return gdb[info[#info]] end,
+					set = function(info, value)
+						gdb[info[#info]] = value
+						if value then
+							DBI:Show(""SmartRes2"")
+						else
+							DBI:Hide(""SmartRes2"")
+						end
+					end
+				},
+				lock = {
+					order = 20,
+					type = ""toggle"",
+					name = L[""Lock Button""],
+					desc = L[""Lock minimap button and prevent moving.""],
+					descStyle = ""inline"",
+					get = function(info) return gdb[info[#info]] end,
+					set = function(info, value)
+						gdb[info[#info]] = value
+						if value then
+							DBI:Lock(""SmartRes2"")
+						else
+							DBI:Unlock(""SmartRes2"")
+						end
+					end
+				},
+				useClassIconForBroker = {
+					order = 30,
+					type = ""toggle"",
+					name = L[""Class Button""],
+					desc = L[""Use your class spell icon for the Broker display (defaults to Priest's Resurrection).""],
+					descStyle = ""inline"",
+					width = 1.5,
+					get = function(info) return gdb[info[#info]] end,
+					set = function(info, value)
+						gdb[info[#info]] = value
+					end
+				},
+				resetButton = {
+					order = 40,
+					type = ""execute"",
+					name = L[""Reset Button""],
+					desc = L[""Reset the minimap button to defaults (position, visible, locked).""],
+					func = function()
+						gdb = addon.db.global
+						DBI:Refresh(""SmartRes2"", gdb.minimap)
+					end
+				}
+			}
+		}
+	}
+}
+
+-- local function that returns the player's class resurrection spell icon or default_icon
+local function GetIconForBrokerDisplay(player_class)
+	local res_spells = {
+		[""PALADIN""] = GetSpellInfo(7328),				-- Redemption
+		[""PRIEST""] = GetSpellInfo(2006),				-- Resurrection
+		[""SHAMAN""] = GetSpellInfo(2008),				-- Ancestral Spirit
+	}
+	if isWrath or isMainline then
+		res_spells[""DRUID""] = GetSpellInfo(50769)		-- Revive
+	end
+	if isMainline then
+		res_spells[""EVOKER""] = GetSpellInfo(361227)		-- Return
+		res_spells[""MONK""] = GetSpellInfo(115178)		-- Resuscitate
+	end
+
+	local player_spell = res_spells[player_class]
+	local player_spell_icon = select(3, (GetSpellInfo(player_spell)))
+
+	local icon = (player_spell and player_spell_icon) or default_icon
+	return icon
+end
+
+-- Ace3 embedded functions
+function addon:OnInitialize()
+	self.db = LibStub(""AceDB-3.0""):New(""SmartRes2DB"", defaults, true)
+	self.db.RegisterCallback(self, ""OnProfileChanged"", ""RefreshConfig"")
+	self.db.RegisterCallback(self, ""OnProfileCopied"", ""RefreshConfig"")
+	self.db.RegisterCallback(self, ""OnProfileReset"", ""RefreshConfig"")
+	db = self.db.profile
+	gdb = self.db.global
+	self:SetEnabledState(db.enabled)
+
+	-- Broker display
+	self.launcher = LDB:NewDataObject(""SmartRes2"", {
+		type = ""launcher"",
+		tocname = ""SmartRes2"",
+		label = ""SmartRes2"",
+		text = ""SmartRes2"",
+		icon = GetIconForBrokerDisplay(player_class),
+		OnClick = function(_, button)
+			if UnitAffectingCombat(""player"") then
+				if Dialog.OpenFrames[""SmartRes2""] then
+					Dialog:Close(""SmartRes2"")
+				end
+				return
+			end
+			if button == ""RightButton"" then
+				if Dialog.OpenFrames[""SmartRes2""] then
+					Dialog:Close(""SmartRes2"")
+				else
+					Dialog:Open(""SmartRes2"")
+				end
+			end
+		end,
+		OnTooltipShow = function()
+			GameTooltip:AddLine(""SmartRes2"", HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
+			GameTooltip:AddLine(L[""Right click for configuration.""], NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b)
+			GameTooltip:Show()
+		end
+	})
+	DBI:Register(""SmartRes2"", self.launcher, gdb.minimap)
+
+	-- create Profiles
+	options.args.profiles = LibStub(""AceDBOptions-3.0""):GetOptionsTable(self.db)
+
+	-- LibDualSpec enchancements
+	LibStub(""LibDualSpec-1.0""):EnhanceDatabase(self.db, ""SmartRes2"")
+	LibStub(""LibDualSpec-1.0""):EnhanceOptions(options.args.profiles, self.db)
+
+	-- add ""About"" panel
+	options.args.aboutPanel = self:AboutOptionsTable(""SmartRes2"")
+	options.args.aboutPanel.order = -1
+
+	-- register the options table with AceConfig and add the options table to the Blizzard Options UI
+	LibStub(""AceConfig-3.0""):RegisterOptionsTable(""SmartRes2"", options)
+	Dialog:AddToBlizOptions(""SmartRes2"")
+
+	-- create slash commands
+	addon:RegisterChatCommand(""smartres"", ""ChatCommands"")
+	addon:RegisterChatCommand(""sr"", ""ChatCommands"")
+end
+
+function addon:OnEnable()
+end
+
+function addon:OnDisable()
+end
+
+function addon:RefreshConfig()
+	db = self.db.profile
+	gdb = self.db.global
+	DBI:Refresh(""SmartRes2"", gdb.minimap)
+end
+
+-- chat commands handler
+function addon:ChatCommands()
+	if UnitAffectingCombat(""player"") then
+		if Dialog.OpenFrames[""SmartRes2""] then
+			Dialog:Close(""SmartRes2"")
+		end
+		return
+	end
+	if Dialog.OpenFrames[""SmartRes2""] then
+		Dialog:Close(""SmartRes2"")
+	else
+		Dialog:Open(""SmartRes2"")
+	end
+end"
+GMbrk4he,Untitled,lighted,C++,Friday 13th of October 2023 12:43:36 PM CDT,"#include <bits/stdc++.h> 
+using namespace std; 
+ 
+using ll = long long; 
+ 
+vector < vector < int > > g, t, tr; 
+vector < bool > used; 
+ 
+vector < int > topsort; 
+ 
+void TopSort(int v) { 
+    if (used[v]) { 
+        return; 
+    } 
+ 
+    used[v] = true; 
+ 
+    for (auto u : t[v]) 
+        TopSort(u); 
+ 
+    topsort.push_back(v); 
+} 
+ 
+vector < int > scc; 
+vector < int > scale; 
+ 
+void Paint(int v, int &cnt) { 
+    if (scc[v] > 0) { 
+        return; 
+    } 
+ 
+    scc[v] = cnt; 
+    scale[cnt]++; 
+ 
+    for (auto u : tr[v]) 
+        Paint(u, cnt); 
+} 
+ 
+bool exist; 
+ 
+void DFS(int v) { 
+    if (used[v]) { 
+        return; 
+    } 
+ 
+    used[v] = true; 
+ 
+    bool edge = false; 
+ 
+    for (auto u : g[v]) 
+        edge |= u != v; 
+ 
+    if (scale[scc[v]] == 1 && edge) 
+        exist = true; 
+ 
+    for (auto u : g[v]) 
+        DFS(u); 
+} 
+ 
+signed main() { 
+    ios_base::sync_with_stdio(0); cin.tie(0); 
+    //freopen(""a.in"", ""r"", stdin); freopen(""a.out"", ""w"", stdout); 
+ 
+    int n, m, v, u, type; cin >> n >> m; 
+ 
+    g = vector < vector < int > >(n + 1); 
+    t = vector < vector < int > >(n + 1); 
+    tr = vector < vector < int > >(n + 1); 
+ 
+    while (m--) { 
+        cin >> v >> u >> type; 
+ 
+        if (type == 2) { 
+            t[v].push_back(u); 
+            tr[u].push_back(v); 
+        } 
+ 
+        g[v].push_back(u); 
+    } 
+ 
+    used = vector < bool >(n + 1); 
+ 
+    for (int i = 1; i <= n; i++) 
+        TopSort(i); 
+ 
+    reverse(topsort.begin(), topsort.end()); 
+ 
+    scc = vector < int >(n + 1); 
+    scale = vector < int >(n + 1); 
+ 
+    int cnt = 0; 
+ 
+    for (auto v : topsort) 
+        if (scc[v] == 0) 
+            Paint(v, ++cnt); 
+ 
+    fill(used.begin(), used.end(), false); 
+ 
+    DFS(1); 
+ 
+    cout << (exist ? ""Yes"" : ""No"") << ""\n""; 
+}"
+K5fP1Egm,Delete Exam 3 (Take into consideration that there might be conflicts with foreign key constraints.),horozov86,PostgreSQL,Friday 13th of October 2023 12:42:39 PM CDT,"-- Delete records from referencing tables first
+DELETE FROM board_games
+WHERE publisher_id IN (
+    SELECT id
+    FROM publishers
+    WHERE address_id IN (
+        SELECT id
+        FROM addresses
+        WHERE town LIKE 'L%'
+    )
+);
+
+DELETE FROM publishers
+WHERE address_id IN (
+    SELECT id
+    FROM addresses
+    WHERE town LIKE 'L%'
+);
+
+-- Delete records from addresses table
+DELETE FROM addresses
+WHERE town LIKE 'L%';
+"
+19K8qbcf,G. Bowling Figure,Junaid_Hossain,C++,Friday 13th of October 2023 12:42:32 PM CDT,"#include<bits/stdc++.h>
+#include<string.h>
+
+using namespace std;
+
+int main(){
+    int t;
+    cin >> t;
+
+    while(t--){
+        string str;
+        cin >> str;
+        int overs=0;
+        int balls=0;
+        overs= str.size()/6;
+        balls= str.size()%6;
+
+        int run=0;
+        int wicket=0;
+
+        for(int i=0; i<str.size(); i++){
+            if(str[i]=='W'){
+                wicket++;
+            }else{
+                int x;
+                x = int(str[i])-48;
+                run=run+x;
+            }
+        }
+        string o= "" Over "";
+        string r= "" Run "";
+        string w= "" Wicket"";
+        if((overs+balls*0.1)> 1.0){
+            o = "" Overs "";
+        }
+        if((run)> 1){
+            r = "" Runs "";
+        }
+        if(wicket> 1){
+            w = "" Wickets"";
+        }
+        cout << overs << ""."" << balls  << o << run << r << wicket << w << "".\n"";
+    }
+}"
+ZtAR1pLd,Don't Try to Count,Junaid_Hossain,C++,Friday 13th of October 2023 12:29:32 PM CDT,"    #include<bits/stdc++.h>
+    using namespace std;
+     
+    int flag;
+     
+    int is_substring(string x, string s){
+        if(x.find(s)==string::npos){
+            if(s.size()*x.size()>=630){
+                flag=0;
+                cout<<""-1\n"";
+                return 0;
+            }
+            return 1;
+        }
+        return 0;
+    }
+     
+    int main(){
+        int t;
+        cin >> t;
+     
+        while(t--){
+            int n, m;
+            flag=1;
+            string x, s, x_temp;
+     
+            cin >> n >> m;
+            cin >> x >> s;
+            int count=0;
+     
+            while(is_substring(x, s)){
+                x_temp=x;
+     
+                x.append(x_temp);
+     
+                count++;
+            }
+     
+            if(flag)
+                cout << count << ""\n"";
+        }
+    }"
+hfjBHu8h,constr,maxim_shlyahtin,C++,Friday 13th of October 2023 12:24:07 PM CDT,"void Field::field_swap(Field& other){
+    std::swap(height, other.height);
+    std::swap(width, other.width);
+    std::swap(field, other.field);
+    std::swap(starting_cell, other.starting_cell);
+    std::swap(finishing_cell, other.finishing_cell);
+}
+
+Field::Field(Field&& other){
+    this->field_swap(other);
+}
+
+Field::Field(const Field& other){
+    this->width = other.width;
+    this->height = other.height;
+    this->starting_cell = other.starting_cell;
+    this->finishing_cell = other.finishing_cell;
+    Cell **tmp;
+    tmp = new Cell*[this->height];
+    for(int y = 0; y < other.height; y++){
+        tmp[y] = new Cell[this->width];
+        for(int x = 0; x < other.width; x++)
+            tmp[y][x] = other.field[y][x];
+    }
+    this->field = tmp;
+}
+
+Field &Field::operator=(const Field& other){
+    if(this != &other)
+        Field(other).field_swap(*this);
+    return *this;
+}
+
+Field &Field::operator=(Field&& other){
+    if(this != &other)
+        this->field_swap(other);
+    return *this;
+}
+"
+fHwrqxfV,Untitled,AlonsoAliaga,Java,Friday 13th of October 2023 12:18:27 PM CDT,"package com.alonsoaliaga.betterbackpacks.utils;
+
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
+
+import java.io.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+
+import static java.lang.Class.forName;
+import static java.lang.String.format;
+import static org.bukkit.Bukkit.getServer;
+
+public class BukkitSerializers {
+    private static final String
+            ERR_NBT_LOAD = ""Failed to find a load method in NBTCompressedStreamTools"",
+            ERR_NBT_SAVE = ""Failed to find a save method in NBTCompressedStreamTools"";
+    private static final Constructor<?> CONSTRUCTOR_NBT;
+    private static final Method
+            METHOD_NBT_SAVE,
+            METHOD_NBT_LOAD_DATAINPUT,
+            METHOD_NBT_LOAD_DATAINPUTSTREAM;
+    private static final Class<?> CLASS_ITEM;
+    protected static final Class<?> CLASS_CRAFT_ITEM;
+    private static final Constructor<?> CONSTRUCTOR_ITEM;
+    private static final Method
+            METHOD_ITEM_CREATE,
+            METHOD_ITEM_TO,
+            METHOD_ITEM_FROM;
+    private static Method
+            METHOD_ITEM_SAVE;
+    private static boolean NEW_NMS;
+    private static final String nms = ""net.minecraft.server.%s.%s"";
+    private static final String cb = ""org.bukkit.craftbukkit.%s.%s"";
+    private static final String version = getServer().getClass().getName().split(""\\."")[3];
+    /*
+        Updated to 1.18
+     */
+    static {
+        try {
+            NEW_NMS = AlonsoUtils.serverVersion.isNewerEqualThanV1_17();
+            if(NEW_NMS) {
+                LocalUtils.logp(""1.17.x or newer was detected! Attempting to use new NMS style. Please report bugs"");
+                LocalUtils.logp(""if any in our discord server. Join us on https://alonsoaliaga.com/discord"");
+            }
+            final Class<?> nbt = getNmsClass( version, ""NBTTagCompound"",""net.minecraft.nbt"");
+            (CONSTRUCTOR_NBT = nbt.getConstructor()).setAccessible(true);
+            Method nbtSave = null, nbtLoadDataInputStream = null, nbtLoadDataInput = null;
+            for (Method method : getNmsClass(version, ""NBTCompressedStreamTools"",""net.minecraft.nbt"").getDeclaredMethods()) {
+                final Class<?>[] params = method.getParameterTypes();
+                if (params.length == 2 && params[1] == DataOutput.class)
+                    nbtSave = method;
+                else if (params.length == 1 && params[0] == DataInputStream.class)
+                    nbtLoadDataInputStream = method;
+                else if (params.length == 1 && params[0] == DataInput.class)
+                    nbtLoadDataInput = method;
+            }
+            if ((METHOD_NBT_SAVE = nbtSave) == null)
+                throw new IllegalStateException(ERR_NBT_SAVE);
+            if ((METHOD_NBT_LOAD_DATAINPUTSTREAM = nbtLoadDataInputStream) == null) {
+                if ((METHOD_NBT_LOAD_DATAINPUT = nbtLoadDataInput) == null) {
+                    throw new IllegalStateException(ERR_NBT_LOAD);
+                }
+                METHOD_NBT_LOAD_DATAINPUT.setAccessible(true);
+            }else{
+                METHOD_NBT_LOAD_DATAINPUTSTREAM.setAccessible(true);
+                METHOD_NBT_LOAD_DATAINPUT = null;
+            }
+            METHOD_NBT_SAVE.setAccessible(true);
+            CLASS_ITEM = getNmsClass(version, ""ItemStack"",""net.minecraft.world.item"");
+            CLASS_CRAFT_ITEM = getOcbClass(version, ""inventory.CraftItemStack"");
+
+            METHOD_ITEM_FROM = CLASS_CRAFT_ITEM.getDeclaredMethod(""asBukkitCopy"", CLASS_ITEM);
+            METHOD_ITEM_TO = CLASS_CRAFT_ITEM.getDeclaredMethod(""asNMSCopy"", ItemStack.class);
+            Constructor<?> itemConstruct = null; Method itemCreate = null;
+            try {
+                itemConstruct = CLASS_ITEM.getConstructor(nbt);
+            } catch (Throwable $) {
+                try {
+                    itemCreate = CLASS_ITEM.getDeclaredMethod(""createStack"", nbt);
+                } catch (Throwable $2) {
+                    itemCreate = CLASS_ITEM.getDeclaredMethod(""a"", nbt);
+                }
+            }
+            CONSTRUCTOR_ITEM = itemConstruct; METHOD_ITEM_CREATE = itemCreate;
+            try {
+                METHOD_ITEM_SAVE = CLASS_ITEM.getDeclaredMethod(""save"", nbt);
+            }catch (Throwable $2){
+                METHOD_ITEM_SAVE = CLASS_ITEM.getDeclaredMethod(""b"", nbt);
+            }
+            METHOD_ITEM_SAVE.setAccessible(true);
+            LocalUtils.logp(""Successfully initialized reflections! Found version: ""+version);
+        } catch (Throwable reason) {
+            LocalUtils.logp(""Reflections failed! This plugin is for 1.16 and newer versions."");
+            LocalUtils.logp(""If you are using a recently released minecraft version not listed in 'Tested versions'"");
+            LocalUtils.logp(""please be patient. The developer has a lot of plugins to update when new minecraft versions"");
+            LocalUtils.logp(""are released. NMS issues are really hard to fix sometimes, so please be patient."");
+            throw new IllegalStateException(""Could not initialize reflection!"", reason);
+        }
+    }
+    private static Class<?> getOcbClass(String version, String name) throws ClassNotFoundException {
+        return forName(format(cb, version, name));
+    }
+    private static Class<?> getNmsClass(String version, String name, String newNmsPackage) throws ClassNotFoundException {
+        if(NEW_NMS) {
+            return forName(newNmsPackage + "".""+ name);
+        }else{
+            return forName(format(nms, version, name));
+        }
+    }
+    public static Object createNBTTagCompound() throws Exception {
+        return CONSTRUCTOR_NBT.newInstance();
+    }
+    public static void saveNBT(OutputStream out, Object nbt) throws Exception {
+        METHOD_NBT_SAVE.invoke(null, nbt, new DataOutputStream(out));
+    }
+    public static Object loadNBT(InputStream in) throws Exception {
+        return METHOD_NBT_LOAD_DATAINPUTSTREAM == null ? METHOD_NBT_LOAD_DATAINPUT.invoke(null, in) :
+                METHOD_NBT_LOAD_DATAINPUTSTREAM.invoke(null, new DataInputStream(in));
+    }
+    public static Object itemFromBukkit(ItemStack item) throws Exception {
+        return METHOD_ITEM_TO.invoke(null, item);
+    }
+    public static ItemStack itemToBukkit(Object item) throws Exception {
+        return (ItemStack) METHOD_ITEM_FROM.invoke(null, item);
+    }
+    public static void saveItems(ItemStack[] contents, OutputStream out) throws Exception {
+        out.write(contents.length);
+        LocalUtils.logp(""[SAVE] ItemStack contents length is: ""+contents.length);
+        int i = 0;
+        for (final ItemStack item : contents) {
+            LocalUtils.logp(""[SAVE] Attempting to save item #""+i);
+            saveItem(item, out);
+            i++;
+        }
+    }
+    public static ItemStack[] loadItems(InputStream in) throws Exception {
+        final ItemStack[] contents = new ItemStack[in.read()];
+        LocalUtils.logp(""[LOAD] ItemStack contents length is: ""+contents.length);
+        for (int i = 0; i < contents.length; i++) {
+            LocalUtils.logp(""[LOAD] Attempting to load item #""+i);
+            contents[i] = loadItem(in);
+        }
+        return contents;
+    }
+    public static void saveItem(ItemStack item, OutputStream out) throws Exception {
+        if (item != null && item.getType() != Material.AIR) {
+            LocalUtils.logp(""[SAVE] Saving item '""+item.getType().name()+""' with value 1"");
+            out.write(1);
+            saveNBT(out, METHOD_ITEM_SAVE.invoke(itemFromBukkit(item), createNBTTagCompound()));
+        } else {
+            LocalUtils.logp(""[SAVE] Saving item with value 0"");
+            out.write(0);
+        }
+    }
+    public static ItemStack loadItem(InputStream in) throws Exception {
+        if (in.read() != 1) {
+            LocalUtils.logp(""[LOAD] Item value is: 0"");
+            return null;
+        }
+        LocalUtils.logp(""[LOAD] Item value is: 1"");
+        return itemToBukkit(CONSTRUCTOR_ITEM == null ?
+                METHOD_ITEM_CREATE.invoke(null, loadNBT(in)) :
+                CONSTRUCTOR_ITEM.newInstance(loadNBT(in))
+        );
+    }
+    public static void load() {
+    }
+}"
+2GNncXiV,HTML Run Python,A_GUES,HTML 5,Friday 13th of October 2023 12:07:40 PM CDT,"<script>
+// JavaScript code
+// Import Skulpt library
+const Sk = require('skulpt').Sk;
+
+// Function to run Python code
+function runPythonCode(code) {
+  // Set up Skulpt
+  Sk.configure({
+    output: (text) => console.log(text), // Redirect Skulpt output to console
+    read: (filename) => Sk.builtinFiles[""files""][filename], // Read files in Skulpt virtual file system
+  });
+
+  // Run Python code
+  Sk.misceval.asyncToPromise(() => Sk.importMainWithBody(""<stdin>"", false, code, true));
+}
+
+// Example usage
+const pythonCode = `
+print(""Hello, Python!"")
+`;
+
+runPythonCode(pythonCode);
+</script>"
+GNYH1vcA,Untitled,Josif_tepe,C++,Friday 13th of October 2023 12:00:06 PM CDT,"#include <iostream>
+
+using namespace std;
+
+int main() {
+    
+    int n;
+    cin >> n;
+    
+    int kvadrat = n * n;
+    int kub = n * n * n;
+    
+    cout << kvadrat << "" "" << kub;
+    
+    
+    return 0;
+}
+"
+sAuJL2pK,Untitled,Josif_tepe,C++,Friday 13th of October 2023 11:50:14 AM CDT,"#include <iostream>
+
+using namespace std;
+
+int main() {
+    
+    int a;
+    cin >> a;
+    
+    cout << a;
+    
+    
+    
+    return 0;
+}
+"
+0uinZk1B,Untitled,nightert1,Python,Friday 13th of October 2023 11:36:25 AM CDT,"class Tween:
+    def __init__(self):
+        self.time = 0
+        self.begin = 0
+        self.change = 0
+        self.duration = 0
+        self.isRunning = False
+
+    # method to start animation
+    def play(self, begin, finish, duration, ease=None):
+        self.time = 0
+        self.begin = begin
+        self.change = finish - begin
+        self.duration = duration
+        self.isRunning = True
+        if (ease == None):
+            ease = self.easeLinear
+        self.ease = ease
+
+    # method to return current value
+    def get(self):
+        if self.time >= self.duration:
+            self.isRunning = False
+            return self.begin + self.change
+        else:
+            self.time += 1
+            return self.ease(self.time, self.begin, self.change, self.duration)
+
+    @staticmethod
+    def easeLinear(t, b, c, d):
+        return c * t / d + b
+
+    @staticmethod
+    def easeIn(t, b, c, d):
+        t /= d
+        return c * t ** 3 + b
+
+    @staticmethod
+    def easeOut(t, b, c, d):
+        t = t / d - 1
+        return c * (t ** 3 + 1) + b
+
+
+from tkinter import *
+from random import randrange
+
+fps = 60
+maxFramesAnim = 3 * fps  # 3 sg
+stepTime = round(000 / fps)  # 1000ms / fps
+
+# creamos animaciones
+twx = Tween()
+twy = Tween()
+
+# Building the screen
+root = Tk()  # constructs your root window
+root.title(""Ball Tween example"")
+root.resizable(False, False)
+
+canvas = Canvas(root, width=300, height=300)
+canvas.pack()
+
+ball = canvas.create_oval(10, 10, 20, 20, fill=""pink"")  # ball
+canvas.create_rectangle(3, 3, 300, 300)
+
+
+def move_ball():
+    x = round(twx.get())
+    y = round(twy.get())
+
+    if twx.isRunning:  # se mueve
+        # actualizamos la pelota
+        canvas.moveto(ball, x, y)
+    else:  # ya no se mueve
+
+        # random duracion de la animacion
+        d = randrange(maxFramesAnim - fps) + fps  # d = 1-4 sg
+        # random de las proxima xy posicion ee
+        nx = randrange(300 - 20) + 10  # nx = 10-290 pxl
+        ny = randrange(300 - 20) + 10
+
+        print(""x:"", x, ""->"", nx, ""   y:"", y, ""->"", ny, ""  "", round(d / fps, 2), ""sg"")
+
+        # volvemos animar
+        twx.play(x, nx, d, Tween.easeOut)
+        twy.play(y, ny, d, Tween.easeOut)
+
+    # volvemos llamar move_ball al cabo de x ms
+    root.after(stepTime, move_ball)
+
+
+# iniciamos animaciones
+# twx.play(10, 290, maxFramesAnim)  # default linear acceleration
+# twy.play(10, 290, maxFramesAnim)
+
+# enters a ""game loop"".
+move_ball()
+root.mainloop()"
+vzgiiusz,Old Books,Spocoman,Python,Friday 13th of October 2023 11:30:01 AM CDT,"book = input()
+book_count = int(input())
+is_found = False
+counter = 0
+
+for i in range(book_count):
+    command = input() 
+    if command == '' or command == ""No More Books"":
+        break
+    elif command == book:
+        print(f""You checked {counter} books and found it."")
+        is_found = True
+        break
+    counter += 1
+    
+if not is_found:
+    print(f""The book you search is not here!\nYou checked {counter} books."")
+"
+sEsRDxst,Untitled,Sichanov,PostgreSQL,Friday 13th of October 2023 11:19:46 AM CDT,"CREATE TABLE addresses
+(
+    id   serial primary key,
+    name varchar(100) NOT NULL
+);
+
+CREATE table categories
+(
+    id   serial primary key,
+    name varchar(10) NOT NULL
+);
+
+Create table clients
+(
+    id           serial primary key,
+    full_name    varchar(50) NOT NULL,
+    phone_number varchar(20) NOT NULL
+);
+
+CREATE TABLE drivers
+(
+    id         serial primary key,
+    first_name varchar(30) not null,
+    last_name  varchar(30) not null,
+    age        INT         not null,
+    rating     numeric(2) DEFAULT 5.5
+);
+
+CREATE TABLE cars
+(
+    id          serial primary key,
+    make        varchar(20)                    NOT NULL,
+    model       varchar(20),
+    year        INT default 0 CHECK (year > 0) NOT NULL,
+    mileage     INT default 0 CHECK (mileage > 0),
+    condition   varchar(1)                     NOT NULL,
+    category_id INT                            NOT NULL,
+    CONSTRAINT fk_cars_categories FOREIGN KEY (category_id) REFERENCES categories (id)
+);
+
+CREATE TABLE courses
+(
+    id              serial primary key,
+    from_address_id INT       not null,
+    start           TIMESTAMP not null,
+    bill            NUMERIC(10, 2) DEFAULT 10 CHECK (bill > 10),
+    car_id          INT       not null,
+    client_id       INT       not null,
+    CONSTRAINT fk_courses_addresses FOREIGN KEY (from_address_id) REFERENCES addresses (id) ON DELETE CASCADE,
+    CONSTRAINT fk_courses_cars FOREIGN KEY (car_id) REFERENCES cars (id) ON DELETE CASCADE,
+    CONSTRAINT fk_courses_clients FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE
+);
+
+CREATE TABLE cars_drivers
+(
+    car_id    INT not null,
+    driver_id INT not null,
+    CONSTRAINT fk_cars_drivers_cars FOREIGN KEY (car_id) REFERENCES cars (id) ON DELETE CASCADE,
+    CONSTRAINT fk_cars_drivers_drivers FOREIGN KEY (driver_id) REFERENCES drivers (id) ON DELETE CASCADE
+);"
+NFnDxfuC,Old Books,Spocoman,JavaScript,Friday 13th of October 2023 11:19:32 AM CDT,"function oldBooks(input) {
+    let book = input[0];
+    let bookCount = Number(input[1]);
+    let counter = 0, index = 2;
+
+    let command = input[index++];
+
+    for (let i = 0; i < bookCount && command != """"; i++) {
+        if (command == ""No More Books"" || command == book) {
+            break;
+        }
+        counter++;
+        command = input[index++];
+    }
+
+    if (command == book) {
+        console.log(`You checked ${counter} books and found it.`);
+    } else {
+        console.log(`The book you search is not here!\nYou checked ${counter} books.`);
+    }
+    return;
+}"
+nMSVS0QE,HP iLO Fan Control Script,zefie,Bash,Friday 13th of October 2023 11:18:51 AM CDT,"#!/bin/bash
+CMD=(""ssh"" ""-oHostKeyAlgorithms=+ssh-rsa"" ""-oKexAlgorithms=diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"" ""-oPubkeyAcceptedKeyTypes=+ssh-rsa"" ""-i/root/.ssh/id_ilo"" ""Administrator@192.168.11.7"" ""-C"")
+SPEED0=100
+SPEED1=75
+
+# HOT
+#SPEED0=255
+#SPEED1=175
+
+# main fan (iLO/HD Controller/LAN/etc)
+${CMD[@]} fan p 0 max ${SPEED0};
+${CMD[@]} fan p 1 max ${SPEED0};
+
+# rest of the fans
+for f in `seq 2 7`; do
+    ${CMD[@]} fan p ${f} max ${SPEED1};
+done"
+XMNZGaBN,opus.book.4,iconoclasthero,Bash,Friday 13th of October 2023 11:18:31 AM CDT,"$ cat ~/bin/opus.book.4
+#!/bin/bash
+
+shopt -s extglob
+scriptname=""$(realpath $0)""
+pidfile=""/tmp/.opus.book.pids""
+threads=4
+
+function editscript(){
+if [[ ""$1"" == ""edit"" ]] || [[ ""$1"" == ""e"" ]]; then
+ (/usr/bin/nano ""$scriptname"")
+ exit 1
+fi
+}
+
+function pause(){
+   read -p ""$*""
+}
+
+
+function ffmpegs(){
+   ffmpeg -n -nostdin -hide_banner -loglevel error -stats -i ""$1"" -filter_complex ""compand=attacks=0:decays=0.12:points=-70/-900|-40/-90|-35/-37|-21/-18|1/-1|20/-1:soft-knee=0.03:gain=1.00:volume=-90, firequalizer=gain_entry='entry(0,-99);entry(140,0);entry(1000,0);entry(8000,1);entry(10500,4);entry(12000,5);entry(14500,-4);entry(19000,-20)', volume=1.0"" -c:a libopus -b:a 17k -frame_duration:a 60 ""${1%.*}.opus""
+}
+
+function ffmpeg2(){
+    for file in *.@(flac|mp3|wav|m4?|ogg|MP4|mp4|wma) #2022.12.23 added MP4|mp4 support #2023.09.06 added wma support
+     do
+      ffmpeg -n -nostdin -hide_banner -loglevel error -stats -i ""$file"" -filter_complex ""compand=attacks=0:decays=0.12:points=-70/-900|-40/-90|-35/-37|-21/-18|1/-1|20/-1:soft-knee=0.03:gain=1.00:volume=-90, firequalizer=gain_entry='entry(0,-99);entry(140,0);entry(1000,0);entry(8000,1);entry(10500,4);entry(12000,5);entry(14500,-4);entry(19000,-20)', volume=1.0"" -c:a libopus -b:a 17k -frame_duration:a 60 ""${file%.*}.opus""
+     done
+}
+
+
+function stats(){
+if [ -n ""$1"" ];
+ then
+  echo mediaduration ""${1#*.}"" `mediaduration ""${1#*.}""`
+  echo mediaduration opus `mediaduration opus`
+ else
+#  for g in *@(flac|mp3|wav|m4?|ogg);do startext=""${g#*.}""; done
+  startbitrate=$(mediainfo ""$g""|grep ""Overall bit rate"")
+  printf '\n\nConverstion statistics:\n'
+  printf '\nFor %s:\n%s\n' ""$g"" ""$startbitrate""
+  printf 'mediaduration %s: %s\n' ""$startext"" ""$(mediaduration ""$startext"")""
+  printf 'mediaduration opus: %s\n' ""$(mediaduration opus)""
+fi
+
+elapsed=$SECONDS
+elmin=""$((elapsed/60))""
+elsec=""$((elapsed-elmin*60))""
+printf 'Script runtime: %ss / %s:%s mm:ss\n' ""$SECONDS"" ""$elmin"" ""$elsec""
+
+#printf 'Elapsed time: %s m:%s s\n' ""$elmin"" ""$elsec""
+startsize=""$(\du -bcs *@(flac|mp3|wav|m4?|ogg|wma) |tail -1)""
+startsize=""${startsize%$'\t'*}""
+startsizehr=""$(\du -hcs *@(flac|mp3|wav|m4?|ogg|wma) |tail -1)""
+startsizehr=""${startsizehr%$'\t'*}""
+opussize=""$(\du -bcs *opus|tail -1)""
+opussize=""${opussize%$'\t'*}""
+opussizehr=""$(\du -hcs *opus|tail -1)""
+opussizehr=""${opussizehr%$'\t'*}""
+d=$((startsize-opussize))
+r=""$((d*100 / startsize))""
+printf 'Initial size (%s) = %s bytes/ %s\n' ""$startext"" ""$startsize"" ""$startsizehr""
+printf 'Final size (opus) = %s bytes / %s\n' ""$opussize"" ""$opussizehr""
+printf '%s%% file size reduction\n' ""$r""
+}
+
+
+
+script=""${0#*\/}""
+
+if [ -f "".opus.book.pids"" ]
+ then
+  rm "".opus.book.pids""
+ fi
+
+
+function breakout(){
+while IFS= read -r pid
+ do
+  if [[ ""$pid"" == *$script* ]] || [[ ""$pid"" == *ffmpeg* ]]
+   then
+    echo ""${pid% pts*}"" >> ""$pidfile""
+  fi
+  done< <(ps --tty $(tty) Sf)
+  opusbook4ka
+}
+
+trap '{ breakout; exit 1; }' INT
+
+editscript ""$1""
+
+for g in *@(flac|mp3|wav|m4?|ogg|wma);
+ do
+  startext=""${g#*.}""
+ done
+
+echo
+printf 'Duration of %s files to convert: %s\n' ""$startext"" ""$(mediaduration ""$startext"")""
+echo
+echo
+
+i=1
+while [ $i -le $threads ]
+ do
+  if [ -n ""$1"" ];
+   then
+
+    ffmpeg -n -nostdin -hide_banner -loglevel error -stats -i ""$1"" -acodec libopus -b:a 17k ""${1%.*}.opus""&
+   else
+    echo ""Calling ffmpeg-$i""
+    ffmpeg2&
+  fi
+   i=$(( $i + 1 ))
+   \sleep 0.5s
+ done
+
+
+wait
+
+#stats
+
+
+if [ -f "".opus.book.pids"" ]
+ then
+  rm "".opus.book.pids""
+ fi
+"
+Cv74vmxX,Untitled,lighted,C++,Friday 13th of October 2023 11:08:05 AM CDT,"#include <bits/stdc++.h> 
+using namespace std; 
+ 
+using ll = long long; 
+ 
+vector < vector < int > > g, t, tr; 
+vector < bool > used; 
+ 
+vector < int > topsort; 
+ 
+void TopSort(int v) { 
+    if (used[v]) { 
+        return; 
+    } 
+ 
+    used[v] = true; 
+ 
+    for (auto u : t[v]) 
+        TopSort(u); 
+ 
+    topsort.push_back(v); 
+} 
+ 
+vector < int > scc; 
+vector < int > scale; 
+ 
+void Paint(int v, int &cnt) { 
+    if (scc[v] > 0) { 
+        return; 
+    } 
+ 
+    scc[v] = cnt; 
+    scale[cnt]++; 
+ 
+    for (auto u : tr[v]) 
+        Paint(u, cnt); 
+} 
+ 
+bool exist; 
+ 
+void DFS(int v) { 
+    if (used[v]) { 
+        return; 
+    } 
+ 
+    used[v] = true; 
+ 
+    bool loop = false; 
+    bool edge = false; 
+ 
+    for (auto u : g[v]) 
+        loop |= u == v, 
+        edge |= u != v; 
+ 
+    if (scale[scc[v]] == 1 && edge && !loop) 
+        exist = true; 
+ 
+    for (auto u : g[v]) 
+        DFS(u); 
+} 
+ 
+signed main() { 
+    ios_base::sync_with_stdio(0); cin.tie(0); 
+    //freopen(""a.in"", ""r"", stdin); freopen(""a.out"", ""w"", stdout); 
+ 
+    int n, m, v, u, type; cin >> n >> m; 
+ 
+    g = vector < vector < int > >(n + 1); 
+    t = vector < vector < int > >(n + 1); 
+    tr = vector < vector < int > >(n + 1); 
+ 
+    while (m--) { 
+        cin >> v >> u >> type; 
+ 
+        if (type == 2) { 
+            t[v].push_back(u); 
+            tr[u].push_back(v); 
+        } 
+ 
+        g[v].push_back(u); 
+    } 
+ 
+    used = vector < bool >(n + 1); 
+ 
+    for (int i = 1; i <= n; i++) 
+        TopSort(i); 
+ 
+    reverse(topsort.begin(), topsort.end()); 
+ 
+    scc = vector < int >(n + 1); 
+    scale = vector < int >(n + 1); 
+ 
+    int cnt = 0; 
+ 
+    for (auto v : topsort) 
+        if (scc[v] == 0) 
+            Paint(v, ++cnt); 
+ 
+    fill(used.begin(), used.end(), false); 
+ 
+    DFS(1); 
+ 
+    cout << (exist ? ""Yes"" : ""No"") << ""\n""; 
+}"
+1pVQjSbp,Nigerian scammers [13-10-2/2023],bombaires,Haskell,Friday 13th of October 2023 11:06:47 AM CDT,"<a href=""mailto:hs772358@gmail.com"">hs772358@gmail.com</a>
+<a href=""mailto:hs.772.3.5.8@gmail.com"">hs.772.3.5.8@gmail.com</a>
+<a href=""mailto:h.s77.2.35.8@gmail.com"">h.s77.2.35.8@gmail.com</a>
+<a href=""mailto:h.s7.723.58@gmail.com"">h.s7.723.58@gmail.com</a>
+<a href=""mailto:hs7.7.235.8@gmail.com"">hs7.7.235.8@gmail.com</a>
+<a href=""mailto:hs.7.7.23.58@gmail.com"">hs.7.7.23.58@gmail.com</a>
+<a href=""mailto:hs7.72358@gmail.com"">hs7.72358@gmail.com</a>
+<a href=""mailto:h.s.772.358@gmail.com"">h.s.772.358@gmail.com</a>
+<a href=""mailto:h.s.77.235.8@gmail.com"">h.s.77.235.8@gmail.com</a>
+<a href=""mailto:hs7.723.5.8@gmail.com"">hs7.723.5.8@gmail.com</a>
+<a href=""mailto:hs.7.723.5.8@gmail.com"">hs.7.723.5.8@gmail.com</a>
+<a href=""mailto:h.s7.72.35.8@gmail.com"">h.s7.72.35.8@gmail.com</a>
+<a href=""mailto:h.s77.23.58@gmail.com"">h.s77.23.58@gmail.com</a>
+<a href=""mailto:hs7.7.23.58@gmail.com"">hs7.7.23.58@gmail.com</a>
+<a href=""mailto:hs.7.72.3.5.8@gmail.com"">hs.7.72.3.5.8@gmail.com</a>
+<a href=""mailto:h.s7.7.2.35.8@gmail.com"">h.s7.7.2.35.8@gmail.com</a>
+<a href=""mailto:h.s7.7235.8@gmail.com"">h.s7.7235.8@gmail.com</a>
+<a href=""mailto:hs.7.7.2.35.8@gmail.com"">hs.7.7.2.35.8@gmail.com</a>
+<a href=""mailto:h.s.77.23.58@gmail.com"">h.s.77.23.58@gmail.com</a>
+<a href=""mailto:hs7.7.2.35.8@gmail.com"">hs7.7.2.35.8@gmail.com</a>
+<a href=""mailto:hs772358@gmail.com"">hs772358@gmail.com</a>
+<a href=""mailto:h.s.7.72.358@gmail.com"">h.s.7.72.358@gmail.com</a>
+<a href=""mailto:h.s7.7.23.5.8@gmail.com"">h.s7.7.23.5.8@gmail.com</a>
+<a href=""mailto:hs7.7235.8@gmail.com"">hs7.7235.8@gmail.com</a>
+<a href=""mailto:hs77.2.3.58@gmail.com"">hs77.2.3.58@gmail.com</a>
+<a href=""mailto:h.s.7.72.35.8@gmail.com"">h.s.7.72.35.8@gmail.com</a>
+<a href=""mailto:hs7.7.2.3.58@gmail.com"">hs7.7.2.3.58@gmail.com</a>
+<a href=""mailto:h.s.772.3.5.8@gmail.com"">h.s.772.3.5.8@gmail.com</a>
+<a href=""mailto:hs.77.2.3.5.8@gmail.com"">hs.77.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs7.7.23.5.8@gmail.com"">hs7.7.23.5.8@gmail.com</a>
+<a href=""mailto:hs.77.2.3.58@gmail.com"">hs.77.2.3.58@gmail.com</a>
+<a href=""mailto:h.s77.23.5.8@gmail.com"">h.s77.23.5.8@gmail.com</a>
+<a href=""mailto:h.s.77.23.5.8@gmail.com"">h.s.77.23.5.8@gmail.com</a>
+<a href=""mailto:h.s772.35.8@gmail.com"">h.s772.35.8@gmail.com</a>
+<a href=""mailto:h.s7.7.2358@gmail.com"">h.s7.7.2358@gmail.com</a>
+<a href=""mailto:h.s.7.723.58@gmail.com"">h.s.7.723.58@gmail.com</a>
+<a href=""mailto:hs.77.23.58@gmail.com"">hs.77.23.58@gmail.com</a>
+<a href=""mailto:h.s.7.7.2.3.58@gmail.com"">h.s.7.7.2.3.58@gmail.com</a>
+<a href=""mailto:h.s.7.7.2.358@gmail.com"">h.s.7.7.2.358@gmail.com</a>
+<a href=""mailto:h.s.7.7235.8@gmail.com"">h.s.7.7235.8@gmail.com</a>
+<a href=""mailto:h.s.7.72.3.5.8@gmail.com"">h.s.7.72.3.5.8@gmail.com</a>
+<a href=""mailto:hs.7.7.2.358@gmail.com"">hs.7.7.2.358@gmail.com</a>
+<a href=""mailto:hs.77235.8@gmail.com"">hs.77235.8@gmail.com</a>
+<a href=""mailto:h.s.77.2.358@gmail.com"">h.s.77.2.358@gmail.com</a>
+<a href=""mailto:hs.7.7.2.3.5.8@gmail.com"">hs.7.7.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs7.7.2358@gmail.com"">hs7.7.2358@gmail.com</a>
+<a href=""mailto:hs.772358@gmail.com"">hs.772358@gmail.com</a>
+<a href=""mailto:h.s.7.723.5.8@gmail.com"">h.s.7.723.5.8@gmail.com</a>
+<a href=""mailto:h.s77.235.8@gmail.com"">h.s77.235.8@gmail.com</a>
+<a href=""mailto:hs.772.35.8@gmail.com"">hs.772.35.8@gmail.com</a>
+<a href=""mailto:hs77.2.35.8@gmail.com"">hs77.2.35.8@gmail.com</a>
+<a href=""mailto:h.s.7.7.2358@gmail.com"">h.s.7.7.2358@gmail.com</a>
+<a href=""mailto:hs77.235.8@gmail.com"">hs77.235.8@gmail.com</a>
+<a href=""mailto:h.s7.7.2.3.5.8@gmail.com"">h.s7.7.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs772.35.8@gmail.com"">hs772.35.8@gmail.com</a>
+<a href=""mailto:hs772.3.58@gmail.com"">hs772.3.58@gmail.com</a>
+<a href=""mailto:h.s7.723.5.8@gmail.com"">h.s7.723.5.8@gmail.com</a>
+<a href=""mailto:hs.772.3.58@gmail.com"">hs.772.3.58@gmail.com</a>
+<a href=""mailto:h.s77.2.358@gmail.com"">h.s77.2.358@gmail.com</a>
+<a href=""mailto:hs.7.7.2358@gmail.com"">hs.7.7.2358@gmail.com</a>
+<a href=""mailto:h.s7723.5.8@gmail.com"">h.s7723.5.8@gmail.com</a>
+<a href=""mailto:hs.77.235.8@gmail.com"">hs.77.235.8@gmail.com</a>
+<a href=""mailto:hs.7723.58@gmail.com"">hs.7723.58@gmail.com</a>
+<a href=""mailto:h.s.77.2358@gmail.com"">h.s.77.2358@gmail.com</a>
+<a href=""mailto:h.s.7.7.235.8@gmail.com"">h.s.7.7.235.8@gmail.com</a>
+<a href=""mailto:hs77.2.3.5.8@gmail.com"">hs77.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs.7.7235.8@gmail.com"">hs.7.7235.8@gmail.com</a>
+<a href=""mailto:h.s.7.7.23.58@gmail.com"">h.s.7.7.23.58@gmail.com</a>
+<a href=""mailto:h.s772.3.5.8@gmail.com"">h.s772.3.5.8@gmail.com</a>
+<a href=""mailto:hs77.23.5.8@gmail.com"">hs77.23.5.8@gmail.com</a>
+<a href=""mailto:hs.77.2358@gmail.com"">hs.77.2358@gmail.com</a>
+<a href=""mailto:hs.77.2.35.8@gmail.com"">hs.77.2.35.8@gmail.com</a>
+<a href=""mailto:h.s7.7.23.58@gmail.com"">h.s7.7.23.58@gmail.com</a>
+<a href=""mailto:hs7.723.58@gmail.com"">hs7.723.58@gmail.com</a>
+<a href=""mailto:h.s.77.2.3.58@gmail.com"">h.s.77.2.3.58@gmail.com</a>
+<a href=""mailto:hs7.72.3.58@gmail.com"">hs7.72.3.58@gmail.com</a>
+<a href=""mailto:hs.7.723.58@gmail.com"">hs.7.723.58@gmail.com</a>
+<a href=""mailto:h.s.7723.58@gmail.com"">h.s.7723.58@gmail.com</a>
+<a href=""mailto:h.s.77.2.35.8@gmail.com"">h.s.77.2.35.8@gmail.com</a>
+<a href=""mailto:hs7.72.35.8@gmail.com"">hs7.72.35.8@gmail.com</a>
+<a href=""mailto:h.s77.2358@gmail.com"">h.s77.2358@gmail.com</a>
+<a href=""mailto:h.s77235.8@gmail.com"">h.s77235.8@gmail.com</a>
+<a href=""mailto:h.s.7.7.2.35.8@gmail.com"">h.s.7.7.2.35.8@gmail.com</a>
+<a href=""mailto:h.s7.7.2.358@gmail.com"">h.s7.7.2.358@gmail.com</a>
+<a href=""mailto:h.s.7.72.3.58@gmail.com"">h.s.7.72.3.58@gmail.com</a>
+<a href=""mailto:h.s7723.58@gmail.com"">h.s7723.58@gmail.com</a>
+<a href=""mailto:hs77235.8@gmail.com"">hs77235.8@gmail.com</a>
+<a href=""mailto:h.s.77.2.3.5.8@gmail.com"">h.s.77.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs7723.58@gmail.com"">hs7723.58@gmail.com</a>
+<a href=""mailto:hs.7.72358@gmail.com"">hs.7.72358@gmail.com</a>
+<a href=""mailto:h.s7.72358@gmail.com"">h.s7.72358@gmail.com</a>
+<a href=""mailto:hs.7.7.2.3.58@gmail.com"">hs.7.7.2.3.58@gmail.com</a>
+<a href=""mailto:hs77.2.358@gmail.com"">hs77.2.358@gmail.com</a>
+<a href=""mailto:hs77.23.58@gmail.com"">hs77.23.58@gmail.com</a>
+<a href=""mailto:h.s7.72.358@gmail.com"">h.s7.72.358@gmail.com</a>
+<a href=""mailto:h.s.7.7.23.5.8@gmail.com"">h.s.7.7.23.5.8@gmail.com</a>
+<a href=""mailto:hs772.358@gmail.com"">hs772.358@gmail.com</a>
+<a href=""mailto:h.s7.72.3.58@gmail.com"">h.s7.72.3.58@gmail.com</a>
+<a href=""mailto:h.s.7723.5.8@gmail.com"">h.s.7723.5.8@gmail.com</a>
+<a href=""mailto:h.s772358@gmail.com"">h.s772358@gmail.com</a>
+<a href=""mailto:hs7.7.2.358@gmail.com"">hs7.7.2.358@gmail.com</a>
+<a href=""mailto:h.s.772.3.58@gmail.com"">h.s.772.3.58@gmail.com</a>
+<a href=""mailto:hs7.72.3.5.8@gmail.com"">hs7.72.3.5.8@gmail.com</a>
+<a href=""mailto:hs772.3.5.8@gmail.com"">hs772.3.5.8@gmail.com</a>
+<a href=""mailto:hs7.72.358@gmail.com"">hs7.72.358@gmail.com</a>
+<a href=""mailto:hs.772.358@gmail.com"">hs.772.358@gmail.com</a>
+<a href=""mailto:h.s77.2.3.5.8@gmail.com"">h.s77.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs.77.23.5.8@gmail.com"">hs.77.23.5.8@gmail.com</a>
+<a href=""mailto:hs.7.72.3.58@gmail.com"">hs.7.72.3.58@gmail.com</a>
+<a href=""mailto:h.s.772358@gmail.com"">h.s.772358@gmail.com</a>
+<a href=""mailto:h.s.7.7.2.3.5.8@gmail.com"">h.s.7.7.2.3.5.8@gmail.com</a>
+<a href=""mailto:hs77.2358@gmail.com"">hs77.2358@gmail.com</a>
+<a href=""mailto:hs.7723.5.8@gmail.com"">hs.7723.5.8@gmail.com</a>
+<a href=""mailto:h.s7.7.235.8@gmail.com"">h.s7.7.235.8@gmail.com</a>
+<a href=""mailto:hs.7.7.23.5.8@gmail.com"">hs.7.7.23.5.8@gmail.com</a>
+<a href=""mailto:hs7723.5.8@gmail.com"">hs7723.5.8@gmail.com</a>
+<a href=""mailto:h.s77.2.3.58@gmail.com"">h.s77.2.3.58@gmail.com</a>
+<a href=""mailto:hs.77.2.358@gmail.com"">hs.77.2.358@gmail.com</a>
+<a href=""mailto:hs.7.72.358@gmail.com"">hs.7.72.358@gmail.com</a>
+<a href=""mailto:h.s7.7.2.3.58@gmail.com"">h.s7.7.2.3.58@gmail.com</a>
+<a href=""mailto:h.s772.358@gmail.com"">h.s772.358@gmail.com</a>
+<a href=""mailto:h.s.7.72358@gmail.com"">h.s.7.72358@gmail.com</a>
+<a href=""mailto:hs.7.72.35.8@gmail.com"">hs.7.72.35.8@gmail.com</a>
+<a href=""mailto:hs.7.7.235.8@gmail.com"">hs.7.7.235.8@gmail.com</a>
+<a href=""mailto:h.s.772.35.8@gmail.com"">h.s.772.35.8@gmail.com</a>
+<a href=""mailto:h.s.77235.8@gmail.com"">h.s.77235.8@gmail.com</a>
+<a href=""mailto:h.s772.3.58@gmail.com"">h.s772.3.58@gmail.com</a>
+<a href=""mailto:h.s7.72.3.5.8@gmail.com"">h.s7.72.3.5.8@gmail.com</a>
+<a href=""mailto:hs7.7.2.3.5.8@gmail.com"">hs7.7.2.3.5.8@gmail.com</a>
+<a href=""mailto:peterlawrence101@hotmail.com"">peterlawrence101@hotmail.com</a>
+<a href=""mailto:mr.raymondscowkendel@hotmail.com"">mr.raymondscowkendel@hotmail.com</a>
+<a href=""mailto:bangaajay001@aol.com"">bangaajay001@aol.com</a>
+<a href=""mailto:eboka2022@rediffmail.com"">eboka2022@rediffmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1@gmail.com"">barristerjrobertsonchambers1@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+27135@gmail.com"">barristerjrobertsonchambers1+27135@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+31261@gmail.com"">barristerjrobertsonchambers1+31261@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+6647@gmail.com"">barristerjrobertsonchambers1+6647@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+12174@gmail.com"">barristerjrobertsonchambers1+12174@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+19814@gmail.com"">barristerjrobertsonchambers1+19814@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+20929@gmail.com"">barristerjrobertsonchambers1+20929@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+9907@gmail.com"">barristerjrobertsonchambers1+9907@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+12337@gmail.com"">barristerjrobertsonchambers1+12337@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+9515@gmail.com"">barristerjrobertsonchambers1+9515@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+13293@gmail.com"">barristerjrobertsonchambers1+13293@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+26174@gmail.com"">barristerjrobertsonchambers1+26174@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+29372@gmail.com"">barristerjrobertsonchambers1+29372@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+32111@gmail.com"">barristerjrobertsonchambers1+32111@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+27390@gmail.com"">barristerjrobertsonchambers1+27390@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+21390@gmail.com"">barristerjrobertsonchambers1+21390@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+32492@gmail.com"">barristerjrobertsonchambers1+32492@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+1400@gmail.com"">barristerjrobertsonchambers1+1400@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+2581@gmail.com"">barristerjrobertsonchambers1+2581@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+22207@gmail.com"">barristerjrobertsonchambers1+22207@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7765@gmail.com"">barristerjrobertsonchambers1+7765@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+30416@gmail.com"">barristerjrobertsonchambers1+30416@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+30757@gmail.com"">barristerjrobertsonchambers1+30757@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+24540@gmail.com"">barristerjrobertsonchambers1+24540@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+4489@gmail.com"">barristerjrobertsonchambers1+4489@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+8064@gmail.com"">barristerjrobertsonchambers1+8064@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+60@gmail.com"">barristerjrobertsonchambers1+60@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+16621@gmail.com"">barristerjrobertsonchambers1+16621@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+929@gmail.com"">barristerjrobertsonchambers1+929@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+31975@gmail.com"">barristerjrobertsonchambers1+31975@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7309@gmail.com"">barristerjrobertsonchambers1+7309@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+8821@gmail.com"">barristerjrobertsonchambers1+8821@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5485@gmail.com"">barristerjrobertsonchambers1+5485@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+22159@gmail.com"">barristerjrobertsonchambers1+22159@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+18921@gmail.com"">barristerjrobertsonchambers1+18921@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+20729@gmail.com"">barristerjrobertsonchambers1+20729@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+31897@gmail.com"">barristerjrobertsonchambers1+31897@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+1245@gmail.com"">barristerjrobertsonchambers1+1245@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+3165@gmail.com"">barristerjrobertsonchambers1+3165@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+18048@gmail.com"">barristerjrobertsonchambers1+18048@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+31408@gmail.com"">barristerjrobertsonchambers1+31408@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+12494@gmail.com"">barristerjrobertsonchambers1+12494@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+10322@gmail.com"">barristerjrobertsonchambers1+10322@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+9386@gmail.com"">barristerjrobertsonchambers1+9386@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+21022@gmail.com"">barristerjrobertsonchambers1+21022@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+414@gmail.com"">barristerjrobertsonchambers1+414@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+3319@gmail.com"">barristerjrobertsonchambers1+3319@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5103@gmail.com"">barristerjrobertsonchambers1+5103@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+14735@gmail.com"">barristerjrobertsonchambers1+14735@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+11346@gmail.com"">barristerjrobertsonchambers1+11346@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+11237@gmail.com"">barristerjrobertsonchambers1+11237@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+14820@gmail.com"">barristerjrobertsonchambers1+14820@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+10050@gmail.com"">barristerjrobertsonchambers1+10050@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5659@gmail.com"">barristerjrobertsonchambers1+5659@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+11983@gmail.com"">barristerjrobertsonchambers1+11983@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+18278@gmail.com"">barristerjrobertsonchambers1+18278@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+3828@gmail.com"">barristerjrobertsonchambers1+3828@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+28322@gmail.com"">barristerjrobertsonchambers1+28322@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+19312@gmail.com"">barristerjrobertsonchambers1+19312@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+29714@gmail.com"">barristerjrobertsonchambers1+29714@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+31391@gmail.com"">barristerjrobertsonchambers1+31391@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+21596@gmail.com"">barristerjrobertsonchambers1+21596@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+32207@gmail.com"">barristerjrobertsonchambers1+32207@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5284@gmail.com"">barristerjrobertsonchambers1+5284@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+22612@gmail.com"">barristerjrobertsonchambers1+22612@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+13229@gmail.com"">barristerjrobertsonchambers1+13229@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5625@gmail.com"">barristerjrobertsonchambers1+5625@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+18988@gmail.com"">barristerjrobertsonchambers1+18988@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+24707@gmail.com"">barristerjrobertsonchambers1+24707@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+1592@gmail.com"">barristerjrobertsonchambers1+1592@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+592@gmail.com"">barristerjrobertsonchambers1+592@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+12200@gmail.com"">barristerjrobertsonchambers1+12200@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+16540@gmail.com"">barristerjrobertsonchambers1+16540@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7013@gmail.com"">barristerjrobertsonchambers1+7013@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7583@gmail.com"">barristerjrobertsonchambers1+7583@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+19104@gmail.com"">barristerjrobertsonchambers1+19104@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+14419@gmail.com"">barristerjrobertsonchambers1+14419@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+18091@gmail.com"">barristerjrobertsonchambers1+18091@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+24825@gmail.com"">barristerjrobertsonchambers1+24825@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+20042@gmail.com"">barristerjrobertsonchambers1+20042@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+1982@gmail.com"">barristerjrobertsonchambers1+1982@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5593@gmail.com"">barristerjrobertsonchambers1+5593@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+28909@gmail.com"">barristerjrobertsonchambers1+28909@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+13151@gmail.com"">barristerjrobertsonchambers1+13151@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+29309@gmail.com"">barristerjrobertsonchambers1+29309@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+26763@gmail.com"">barristerjrobertsonchambers1+26763@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+3905@gmail.com"">barristerjrobertsonchambers1+3905@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+8370@gmail.com"">barristerjrobertsonchambers1+8370@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+30226@gmail.com"">barristerjrobertsonchambers1+30226@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7920@gmail.com"">barristerjrobertsonchambers1+7920@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+12831@gmail.com"">barristerjrobertsonchambers1+12831@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+24820@gmail.com"">barristerjrobertsonchambers1+24820@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+15456@gmail.com"">barristerjrobertsonchambers1+15456@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+23517@gmail.com"">barristerjrobertsonchambers1+23517@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+5859@gmail.com"">barristerjrobertsonchambers1+5859@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+29982@gmail.com"">barristerjrobertsonchambers1+29982@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+435@gmail.com"">barristerjrobertsonchambers1+435@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+11693@gmail.com"">barristerjrobertsonchambers1+11693@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+24777@gmail.com"">barristerjrobertsonchambers1+24777@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+3476@gmail.com"">barristerjrobertsonchambers1+3476@gmail.com</a>
+<a href=""mailto:barristerjrobertsonchambers1+7395@gmail.com"">barristerjrobertsonchambers1+7395@gmail.com</a>
+<a href=""mailto:isainuwa20@outlook.com"">isainuwa20@outlook.com</a>
+<a href=""mailto:royaltrustcorporationofcanada@gmail.com"">royaltrustcorporationofcanada@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+30290@gmail.com"">royaltrustcorporationofcanada+30290@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+24646@gmail.com"">royaltrustcorporationofcanada+24646@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+10996@gmail.com"">royaltrustcorporationofcanada+10996@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+21884@gmail.com"">royaltrustcorporationofcanada+21884@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+20335@gmail.com"">royaltrustcorporationofcanada+20335@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+28064@gmail.com"">royaltrustcorporationofcanada+28064@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15260@gmail.com"">royaltrustcorporationofcanada+15260@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+22551@gmail.com"">royaltrustcorporationofcanada+22551@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5446@gmail.com"">royaltrustcorporationofcanada+5446@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+11919@gmail.com"">royaltrustcorporationofcanada+11919@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+6953@gmail.com"">royaltrustcorporationofcanada+6953@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+18892@gmail.com"">royaltrustcorporationofcanada+18892@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+4794@gmail.com"">royaltrustcorporationofcanada+4794@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+2416@gmail.com"">royaltrustcorporationofcanada+2416@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+7956@gmail.com"">royaltrustcorporationofcanada+7956@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+10898@gmail.com"">royaltrustcorporationofcanada+10898@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+24558@gmail.com"">royaltrustcorporationofcanada+24558@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+11451@gmail.com"">royaltrustcorporationofcanada+11451@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+23985@gmail.com"">royaltrustcorporationofcanada+23985@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+11250@gmail.com"">royaltrustcorporationofcanada+11250@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+16775@gmail.com"">royaltrustcorporationofcanada+16775@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+30635@gmail.com"">royaltrustcorporationofcanada+30635@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15126@gmail.com"">royaltrustcorporationofcanada+15126@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+4455@gmail.com"">royaltrustcorporationofcanada+4455@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+18215@gmail.com"">royaltrustcorporationofcanada+18215@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5196@gmail.com"">royaltrustcorporationofcanada+5196@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+21103@gmail.com"">royaltrustcorporationofcanada+21103@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+6606@gmail.com"">royaltrustcorporationofcanada+6606@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+32640@gmail.com"">royaltrustcorporationofcanada+32640@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+10578@gmail.com"">royaltrustcorporationofcanada+10578@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+682@gmail.com"">royaltrustcorporationofcanada+682@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+22552@gmail.com"">royaltrustcorporationofcanada+22552@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+18484@gmail.com"">royaltrustcorporationofcanada+18484@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+29027@gmail.com"">royaltrustcorporationofcanada+29027@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15121@gmail.com"">royaltrustcorporationofcanada+15121@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+3246@gmail.com"">royaltrustcorporationofcanada+3246@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+14846@gmail.com"">royaltrustcorporationofcanada+14846@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+16862@gmail.com"">royaltrustcorporationofcanada+16862@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+6871@gmail.com"">royaltrustcorporationofcanada+6871@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+1167@gmail.com"">royaltrustcorporationofcanada+1167@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8497@gmail.com"">royaltrustcorporationofcanada+8497@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5282@gmail.com"">royaltrustcorporationofcanada+5282@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+7867@gmail.com"">royaltrustcorporationofcanada+7867@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+14051@gmail.com"">royaltrustcorporationofcanada+14051@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+7510@gmail.com"">royaltrustcorporationofcanada+7510@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+25838@gmail.com"">royaltrustcorporationofcanada+25838@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5371@gmail.com"">royaltrustcorporationofcanada+5371@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+18699@gmail.com"">royaltrustcorporationofcanada+18699@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15892@gmail.com"">royaltrustcorporationofcanada+15892@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+2867@gmail.com"">royaltrustcorporationofcanada+2867@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+7103@gmail.com"">royaltrustcorporationofcanada+7103@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+27269@gmail.com"">royaltrustcorporationofcanada+27269@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+21159@gmail.com"">royaltrustcorporationofcanada+21159@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+4370@gmail.com"">royaltrustcorporationofcanada+4370@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+31926@gmail.com"">royaltrustcorporationofcanada+31926@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+20813@gmail.com"">royaltrustcorporationofcanada+20813@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8380@gmail.com"">royaltrustcorporationofcanada+8380@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+29005@gmail.com"">royaltrustcorporationofcanada+29005@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+12358@gmail.com"">royaltrustcorporationofcanada+12358@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+1866@gmail.com"">royaltrustcorporationofcanada+1866@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8984@gmail.com"">royaltrustcorporationofcanada+8984@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5031@gmail.com"">royaltrustcorporationofcanada+5031@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+20508@gmail.com"">royaltrustcorporationofcanada+20508@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8322@gmail.com"">royaltrustcorporationofcanada+8322@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+27763@gmail.com"">royaltrustcorporationofcanada+27763@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+29924@gmail.com"">royaltrustcorporationofcanada+29924@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+13142@gmail.com"">royaltrustcorporationofcanada+13142@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+7673@gmail.com"">royaltrustcorporationofcanada+7673@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+3332@gmail.com"">royaltrustcorporationofcanada+3332@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+26900@gmail.com"">royaltrustcorporationofcanada+26900@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+6028@gmail.com"">royaltrustcorporationofcanada+6028@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8525@gmail.com"">royaltrustcorporationofcanada+8525@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+30246@gmail.com"">royaltrustcorporationofcanada+30246@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+28804@gmail.com"">royaltrustcorporationofcanada+28804@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+28085@gmail.com"">royaltrustcorporationofcanada+28085@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+21959@gmail.com"">royaltrustcorporationofcanada+21959@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+30568@gmail.com"">royaltrustcorporationofcanada+30568@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+24608@gmail.com"">royaltrustcorporationofcanada+24608@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+20394@gmail.com"">royaltrustcorporationofcanada+20394@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+27469@gmail.com"">royaltrustcorporationofcanada+27469@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15280@gmail.com"">royaltrustcorporationofcanada+15280@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+30611@gmail.com"">royaltrustcorporationofcanada+30611@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+32560@gmail.com"">royaltrustcorporationofcanada+32560@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+16609@gmail.com"">royaltrustcorporationofcanada+16609@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+12327@gmail.com"">royaltrustcorporationofcanada+12327@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+23215@gmail.com"">royaltrustcorporationofcanada+23215@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+20659@gmail.com"">royaltrustcorporationofcanada+20659@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+8054@gmail.com"">royaltrustcorporationofcanada+8054@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+27432@gmail.com"">royaltrustcorporationofcanada+27432@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+12414@gmail.com"">royaltrustcorporationofcanada+12414@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+5456@gmail.com"">royaltrustcorporationofcanada+5456@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+29589@gmail.com"">royaltrustcorporationofcanada+29589@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+13783@gmail.com"">royaltrustcorporationofcanada+13783@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+13337@gmail.com"">royaltrustcorporationofcanada+13337@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+15260@gmail.com"">royaltrustcorporationofcanada+15260@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+27196@gmail.com"">royaltrustcorporationofcanada+27196@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+11305@gmail.com"">royaltrustcorporationofcanada+11305@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+25172@gmail.com"">royaltrustcorporationofcanada+25172@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+16403@gmail.com"">royaltrustcorporationofcanada+16403@gmail.com</a>
+<a href=""mailto:royaltrustcorporationofcanada+9561@gmail.com"">royaltrustcorporationofcanada+9561@gmail.com</a>
+<a href=""mailto:ubuluaka3@outlook.com"">ubuluaka3@outlook.com</a>"
+mExhR1zA,Old Books,Spocoman,C++,Friday 13th of October 2023 11:04:02 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+int main() {
+    string book;
+    getline(cin, book);
+
+    int bookCount, counter = 0;
+    cin >> bookCount;
+    cin.ignore();
+
+    string command;
+    getline(cin, command);
+
+    for (int i = 0; i < bookCount && command != """"; i++) {
+        if (command == ""No More Books"" || command == book) {
+            break;
+        }
+        counter++;
+        getline(cin, command);
+    }
+
+    if (command == book) {
+        printf(""You checked %i books and found it.\n"", counter);
+    }
+    else {
+        printf(""The book you search is not here!\nYou checked %i books.\n"", counter);
+    }
+    return 0;
+}"
+Y3bDwD1Z,Untitled,Josif_tepe,C++,Friday 13th of October 2023 11:02:54 AM CDT,"#include <iostream>
+using namespace std;
+int main() {
+    
+    int n;
+    cin >> n;
+    
+    int a = n / 10;
+    int b = a / 10;
+    
+    cout << a - (b * 10) << endl;
+    return 0;
+}
+"
+Dn1N8kR3,Old Books,Spocoman,C#,Friday 13th of October 2023 10:56:26 AM CDT,"using System;
+
+namespace OldBooks
+{
+    class Program
+    {
+        static void Main()
+        {
+            string book = Console.ReadLine();
+            int bookCount = int.Parse(Console.ReadLine());
+            string command = Console.ReadLine();
+            int counter = 0;
+
+            for (int i = 0; i < bookCount && command != """"; i++)
+            {
+                if (command == ""No More Books"" || command == book)
+                {
+                    break;
+                } 
+                counter++;
+                command = Console.ReadLine();
+            }
+
+            if (command == book)
+            {
+                Console.WriteLine($""You checked {counter} books and found it."");
+            }
+            else
+            {
+                Console.WriteLine(""The book you search is not here!"");
+                Console.WriteLine($""You checked {counter} books."");
+            }
+        }
+    }
+}"
+NSNfC5W4,Untitled,moise2807,Go,Friday 13th of October 2023 10:30:50 AM CDT,"package main
+
+import (
+	""encoding/csv""
+	""flag""
+	""fmt""
+	""io""
+	""log""
+	""net/http""
+	""os""
+	""strings""
+)
+
+const bamHost string = ""https://dnsam.ari.com/Services/REST/v1""
+
+type Subnet struct {
+	Cidr     string
+	name     string
+	parentId string
+}
+
+func new_subnet(cidr, name, parentId string) Subnet {
+	return Subnet{
+		cidr,
+		name,
+		parentId,
+	}
+}
+
+func getToken() string {
+
+	username := os.Getenv(""BAM_USERNAME"")
+	password := os.Getenv(""BAM_PASSWORD"")
+
+	url := fmt.Sprintf(""%s/login?username=%s&password=%s"", bamHost, username, password)
+	method := ""GET""
+
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, nil)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	token := strings.Split(strings.Split(string(body), "">"")[1], ""<"")[0]
+	return strings.TrimSpace(token)
+}
+
+func readCSV(file string) [][]string {
+
+	f, err := os.Open(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	csvReader := csv.NewReader(f)
+
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		panic(err)
+	}
+
+	return records
+
+}
+
+func addSubnet(token string, subnet Subnet) {
+
+	fmt.Printf(""Adding subnet %s with name %s to BAM\n"", subnet.Cidr, subnet.name)
+	url := fmt.Sprintf(""%s/addIP4Network?CIDR=%s&blockId=%s&properties=name=%s"", bamHost, subnet.Cidr, subnet.parentId, subnet.name)
+
+	method := ""POST""
+
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, nil)
+
+	req.Header.Add(""Authorization"", token)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	responseString := string(body)
+
+	if strings.Contains(responseString, ""Duplicate"") {
+		fmt.Printf(""%s already in BAM"", subnet.Cidr)
+	} else {
+		fmt.Println(responseString)
+	}
+
+}
+
+func main() {
+
+	dryRunFlag := flag.Bool(""dryrun"", true, ""Dryrun mode by default, Use `-dryrun=false` if you want to add subnets to BAM "")
+
+	flag.Parse()
+
+	var subnets []Subnet
+
+	token := getToken()
+
+	records := readCSV(""add_subnets.csv"")
+
+	for i, record := range records {
+		if i != 0 {
+			subnets = append(subnets, new_subnet(record[0], record[1], record[2]))
+		}
+	}
+
+	for _, subnet := range subnets {
+
+		if *dryRunFlag {
+			fmt.Printf(""DRYRUN MODE: %s with name %s would have been added to BAM\n"", subnet.Cidr, subnet.name)
+		} else {
+			addSubnet(token, subnet)
+		}
+	}
+
+}
+
+"
+d1jr8Kt2,Untitled,Josif_tepe,C++,Friday 13th of October 2023 10:07:03 AM CDT,"#include <iostream>
+using namespace std;
+int main() {
+    
+    int n;
+    cin >> n;
+    
+    cout << n * n << endl;
+    cout << n * n * n << endl;
+    return 0;
+}
+"
+x0j6Gkaz,main.cpp,Death420,C++,Friday 13th of October 2023 09:47:34 AM CDT,"#include <iostream>
+#include <string>
+#include ""StringView.h""
+
+int main()
+{
+  std::string original = ""ABCDEFGHIJKLMNOPQRSTUVWXYZ"";
+
+  StringView sv{original.data(), original.size()};
+  std::cout << ""sv: \"""" << sv << ""\"" (size: "" << sv.size() << "").\n""
+  ""Modifying original string (original[0] to '4')...\n"";
+
+  original[0] = '4';
+
+  std::cout << ""sv: \"""" << sv << ""\"" (size: "" << sv.size() << "").\n""
+  ""sv[1]: \'"" << sv[1] << ""\'.\n"";
+
+  std::cout << ""sv == \""4BCDEFGHIJKLMNOPQRSTUVWXYZ\"": ""
+  << std::boolalpha << (sv == ""4BCDEFGHIJKLMNOPQRSTUVWXYZ"") << '\n';
+}
+
+/*output:
+
+sv: ""ABCDEFGHIJKLMNOPQRSTUVWXYZ"" (size: 26).
+Modifying original string (original[0] to '4')...
+sv: ""4BCDEFGHIJKLMNOPQRSTUVWXYZ"" (size: 26).
+sv[1]: 'B'.
+sv == ""4ABCDEFGHIJKLMNOPQRSTUVWXYZ"": true
+*/"
+spEfeVvD,StringView.cpp,Death420,C++,Friday 13th of October 2023 09:45:24 AM CDT,"#include ""StringView.h""
+#include <cstring>
+#include <iostream>
+StringView::StringView(const char* data, size_t size) 
+{
+  m_data = data;
+  if(size == -1)
+    m_size = strlen(data);
+  else
+    m_size = size;
+}
+
+bool StringView::operator==(const StringView& other) const
+{
+  if(m_size != other.m_size)
+    return false;
+  for(size_t i = 0; i < m_size; ++i)
+    if(m_data[i] != other.m_data[i])
+      return false;
+  return true;
+}
+
+std::ostream& operator<<(std::ostream& out, StringView view)
+{
+    out.write(view.data(), view.size());
+    return out;
+}
+//^will let us print StringView objects to the console with `std::cout <<`"
+XDFHc8JG,Untitled,ggscript,Lua,Friday 13th of October 2023 09:44:55 AM CDT," Users = {
+    {
+        [""id""] = 1,
+        [""username""] = ""exz1fy"",
+        [""password""] = ""11064"",
+        [""whiteIPs""] = {""178.176.77.135"",""31.173.82.251""}
+    },
+    {
+        [""id""] = 2,
+        [""username""] = ""Danil2008"",
+        [""password""] = ""11103"",
+        [""whiteIPs""] = {""176.59.202.192"", ""37.140.43.34""}
+ },
+    {
+   [""id""] = 3,
+        [""username""] = ""Limon4ik349"",
+        [""password""] = ""11319"",
+        [""whiteIPs""] = {""95.179.122.207""}
+ },
+    {
+   [""id""] = 4,
+        [""username""] = ""unknokable"",
+        [""password""] = ""11798"",
+        [""whiteIPs""] = {""83.31.191.251""}
+ },
+    {
+   [""id""] = 5,
+        [""username""] = ""Dsfyedsgewer"",
+        [""password""] = ""12256"",
+        [""whiteIPs""] = {""94.51.219.243"", ""85.140.22.156""}
+ },
+    {
+   [""id""] = 6,
+        [""username""] = ""krypton"",
+        [""password""] = ""11329"",
+        [""whiteIPs""] = {""171.33.250.74""}
+ },
+    {
+   [""id""] = 7,
+        [""username""] = ""Lakker"",
+        [""password""] = ""11173"",
+        [""whiteIPs""] = {""85.140.160.129""}
+ },
+    {
+   [""id""] = 8,
+        [""username""] = ""Kodi"",
+        [""password""] = ""10237"",
+        [""whiteIPs""] = {""85.115.248.218""}
+},
+    {
+   [""id""] = 9,
+        [""username""] = ""lifer"",
+        [""password""] = ""10932"",
+        [""whiteIPs""] = {""217.25.85.107""}
+},
+    {
+   [""id""] = 10,
+        [""username""] = ""Zetix"",
+        [""password""] = ""12296"",
+        [""whiteIPs""] = {""5.144.120.61""}
+    }
+}"
+hAcZsYAZ,StringView.h,Death420,C++,Friday 13th of October 2023 09:37:31 AM CDT,"#pragma once
+#include <cstdint>
+
+class StringView
+{
+  const char* m_data;
+  size_t m_size;
+public:
+  StringView(const char* data, size_t size = -1); //definition in StringView.cpp
+  
+  size_t size(){ return m_size;} 
+  const char* data(){ return m_data; }  
+  const char& operator[](size_t index) { return m_data[index]; }
+
+  bool operator==(const StringView& other) const; //definition in StringView.cpp
+};
+
+"
+519DgicH,Untitled,barabar4e,PostgreSQL,Friday 13th of October 2023 09:29:56 AM CDT,"CREATE TABLE IF NOT EXISTS categories(
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(50) NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS addresses(
+	id SERIAL PRIMARY KEY, 
+	street_name VARCHAR(100) NOT NULL, 
+	street_number INT NOT NULL,
+	town VARCHAR(30) NOT NULL,
+	country VARCHAR(50) NOT NULL,
+	zip_code INT NOT NULL,
+	
+	CONSTRAINT ch_addresses_street_number
+		CHECK (street_number > 0),
+	CONSTRAINT ch_addresses_zip_code
+		CHECK (zip_code > 0)
+);
+
+
+CREATE TABLE IF NOT EXISTS publishers(
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(30) NOT NULL,
+	address_id INT NOT NULL,
+	website VARCHAR(40),
+	phone VARCHAR(20),
+	
+	CONSTRAINT fk_publishers_addresses
+		FOREIGN KEY (address_id)
+		REFERENCES addresses(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS players_ranges(
+	id SERIAL PRIMARY KEY,
+	min_players INT NOT NULL,
+	max_players INT NOT NULL,
+	
+	CONSTRAINT ch_players_ranges_min_players
+		CHECK (min_players > 0),
+	CONSTRAINT ch_players_ranges_max_players
+		CHECK (max_players > 0)
+);
+
+
+CREATE TABLE IF NOT EXISTS creators(
+	id SERIAL PRIMARY KEY,
+	first_name VARCHAR(30) NOT NULL,
+	last_name VARCHAR(30) NOT NULL,
+	email VARCHAR(30) NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS board_games(
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(30) NOT NULL,
+	release_year INT NOT NULL,
+	ratings NUMERIC(3, 2) NOT NULL,
+	category_id INT NOT NULL,
+	publisher_id INT NOT NULL,
+	players_range_id INT NOT NULL,
+	
+	CONSTRAINT ch_board_games_release_year
+		CHECK(release_year > 0),
+	CONSTRAINT fk_bord_games_categories
+		FOREIGN KEY(category_id)
+		REFERENCES categories(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE,
+	CONSTRAINT fk_board_games_publishers
+		FOREIGN KEY(publisher_id)
+		REFERENCES publishers(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE,
+	CONSTRAINT fk_board_games_players_ranges
+		FOREIGN KEY(players_range_id)
+		REFERENCES players_ranges(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE	
+);
+
+CREATE TABLE IF NOT EXISTS creators_board_games(
+	creator_id INT NOT NULL,
+	board_game_id INT NOT NULL,
+	
+	CONSTRAINT fk_creators_board_games_creators
+		FOREIGN KEY(creator_id)
+		REFERENCES creators(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE,
+	CONSTRAINT fk_creators_board_games_board_games
+		FOREIGN KEY(board_game_id)
+		REFERENCES board_games(id)
+		ON UPDATE CASCADE
+		ON DELETE CASCADE
+);	
+
+"
+DPkWVXRe,Untitled,Slavik9510,C++,Friday 13th of October 2023 09:21:26 AM CDT,"#include <QApplication>
+#include <QMainWindow>
+#include <QGraphicsScene>
+#include <QGraphicsView>
+#include <QGraphicsLineItem>
+#include <QPointF>
+#include <cmath>
+
+// Функція для обертання точки навколо іншої точки на певний кут
+QPointF rotatePoint(const QPointF& center, const QPointF& point, qreal angle) {
+    qreal s = sin(angle * M_PI / 180);
+    qreal c = cos(angle * M_PI / 180);
+
+    qreal x = point.x() - center.x();
+    qreal y = point.y() - center.y();
+
+    qreal new_x = x * c - y * s;
+    qreal new_y = x * s + y * c;
+
+    new_x += center.x();
+    new_y += center.y();
+
+    return QPointF(new_x, new_y);
+}
+
+// Функція для малювання фрактала Коха
+void drawKochFractal(QGraphicsScene* scene, QPointF p1, QPointF p2, int depth, int ratio) {
+    if (depth == 0) {
+        scene->addLine(QLineF(p1, p2));
+    } else {
+        QPointF p3 = p1 + (p2 - p1) / ratio;
+        QPointF p4 = p1 + (p2 - p1) / ratio * 2;
+        QPointF p5 = rotatePoint(p3, p4, 60);
+
+        drawKochFractal(scene, p1, p3, depth - 1, ratio);
+        drawKochFractal(scene, p3, p5, depth - 1, ratio);
+        drawKochFractal(scene, p5, p4, depth - 1, ratio);
+        drawKochFractal(scene, p4, p2, depth - 1, ratio);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    QApplication app(argc, argv);
+
+    QMainWindow mainWindow;
+    QGraphicsScene scene;
+    QGraphicsView view(&scene);
+    mainWindow.setCentralWidget(&view);
+    mainWindow.show();
+
+    // Початкові точки квадрата
+    QPointF p1(100, 100);
+    QPointF p2(300, 100);
+    QPointF p3(300, 300);
+    QPointF p4(100, 300);
+
+    int iter = 4;
+    int ratio = 4;
+    // Рекурсивно малюємо фрактал Коха
+    drawKochFractal(&scene, p1, p2, iter, ratio);
+    drawKochFractal(&scene, p2, p3, iter, ratio);
+    drawKochFractal(&scene, p3, p4, iter, ratio);
+    drawKochFractal(&scene, p4, p1, iter, ratio);
+
+    return app.exec();
+}
+"
+3kSX6v5N,Postfix Evaluation,MasterVovo,Java,Friday 13th of October 2023 09:21:24 AM CDT,"import java.util.*;
+
+class postfix {
+    double a[] = new double[20];
+    int top;
+
+    postfix() {
+        top = -1;
+    }
+
+    void push(double x) {
+        top++;
+        a[top] = x;
+    }
+
+    double pop() {
+        if (top == -1) {
+            System.out.println(""\nImproper expression !"" + (char) 7);
+            System.exit(1);
+        }
+        return a[top--];
+    }
+
+    boolean isdigit(char x) {
+        return (x >= '0' & x <= '9');
+    }
+
+    double val(double v1, double v2, char x) {
+        switch (x) {
+            case '+':
+                return v1 + v2;
+            case '-':
+                return v1 - v2;
+            case '*':
+                return v1 * v2;
+            case '/':
+                return v1 / v2;
+            case '^': //Added caret for exponent
+                return Math.pow(v1, v2);
+            case '%': //Added percent for modulus
+                return v1 % v2;
+            default:
+                System.out.println(""Improper Operation"");
+                System.exit(1);
+        }
+        return 1;
+    }
+
+    double eval(char b[]) {
+        double v1, v2, v;
+        for (int i = 0; i < b.length; i++) {
+            if (isdigit(b[i]))
+                push((double) b[i] - 48);
+            else {
+                v2 = pop();
+                v1 = pop();
+                v = val(v1, v2, b[i]);
+                push(v);
+            }
+        }
+        if (top != 0) {
+            System.out.println(""\nImproper expression"" + (char) 7);
+            System.exit(1);
+        }
+        return pop();
+    }
+}
+
+class PostfixEval {
+    public static void main(String args[]) {
+        postfix p = new postfix();
+        Scanner scr = new Scanner(System.in);
+        System.out.print(""Enter the post fix expression: "");
+        String str = scr.next();
+        char b[] = str.toCharArray();
+        System.out.print(""\nValue of the expression is: "" + p.eval(b));
+        scr.close();
+    }
+}"
+PXtyDSLN,Cash in User Games Odd Rows,dragonbs,T-SQL,Friday 13th of October 2023 09:20:19 AM CDT,"CREATE FUNCTION ufn_CashInUsersGames(@gameName NVARCHAR(50))
+RETURNS TABLE
+AS
+RETURN SELECT(SELECT SUM([Cash]) AS [SumCash]
+				FROM 
+					(SELECT ROW_NUMBER() OVER (PARTITION BY [g].[Name] ORDER BY [ug].[Cash] DESC) AS [Row]
+					        ,[g].[Name] AS [Game Name]
+                            ,[ug].[Cash]
+                        FROM [UsersGames] AS [ug]
+                        JOIN [Games] AS [g] ON [ug].[GameId] = [g].[Id]
+						WHERE [g].[Name] = @gameName
+					 ) AS [Rows]
+				WHERE [Row] % 2 <> 0
+			  ) AS [SumCash]"
+tTNHKCgx,Untitled,Josif_tepe,C++,Friday 13th of October 2023 09:08:11 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+class Point {
+private:
+    int x;
+    int y;
+    
+public:
+    
+    Point() {
+       // obicno empty constructor treba da izgleda tokmu vaka
+    }
+    
+    Point(int _x, int _y) {
+        x = _x;
+        y = _y;
+    }
+    void pecati() {
+        cout << x << "" "" << y << endl;
+    }
+    
+    
+};
+int main() {
+    
+    Point p(5, 6);
+    
+    p.pecati();
+    return 0;
+}
+"
+U3ABdXDU,Zadacha_1,Alethiashy,C#,Friday 13th of October 2023 08:55:13 AM CDT,"using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+
+namespace Zadacha_1
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine(""Welcome to the Women's Names Checker!"");
+            while (true)
+            {
+                string inputText = GetUserInput(""Enter a list of names separated by commas (type 'exit' to quit):"");
+
+                if (inputText.Equals(""exit"", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine(""Exiting the program."");
+                    break;
+                }
+
+                List<string> womenNames = FindWomenNames(inputText, NamePattern.Template1);
+
+                if (womenNames.Count == 0)
+                {
+                    Console.WriteLine(""No women's names found."");
+                }
+                else
+                {
+                    Console.WriteLine(""Women's names found:"");
+                    DisplayNumberedOptions(womenNames);
+
+                    if (womenNames.Count > 1)
+                    {
+                        int selectedNameIndex = GetUserSelection(womenNames);
+                        if (selectedNameIndex >= 0)
+                        {
+                            Console.WriteLine(""You selected: "" + womenNames[selectedNameIndex]);
+                        }
+                        else
+                        {
+                            Console.WriteLine(""Invalid selection."");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Only one woman's name found: "" + womenNames[0]);
+                    }
+                }
+            }
+        }
+
+        static string GetUserInput(string prompt)
+        {
+            Console.WriteLine(prompt);
+            return Console.ReadLine();
+        }
+
+        static List<string> FindWomenNames(string inputText, NamePattern pattern)
+        {
+            string regexPattern = pattern switch
+            {
+                NamePattern.Template1 => @""\b[A-Z][a-z]*[oOeE][vV][aA]\b"",
+                NamePattern.Template2 => @""[A-Z][a-z]*\s[A-Z][a-z]*"",
+                _ => throw new ArgumentOutOfRangeException(nameof(pattern), pattern, null),
+            };
+
+            Regex regex = new Regex(regexPattern, RegexOptions.IgnoreCase);
+            return regex.Matches(inputText).ConvertMatchesToList();
+        }
+
+        static void DisplayNumberedOptions(List<string> options)
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                Console.WriteLine($""{i}: {options[i]}"");
+            }
+        }
+
+        static int GetUserSelection(List<string> options)
+        {
+            while (true)
+            {
+                string userInput = GetUserInput(""Enter the number of the woman's name you want to select:"");
+                if (int.TryParse(userInput, out int selectedNameIndex) && selectedNameIndex >= 0 && selectedNameIndex < options.Count)
+                {
+                    return selectedNameIndex;
+                }
+                Console.WriteLine(""Invalid selection. Please try again."");
+            }
+        }
+    }
+
+    static class RegexExtensions
+    {
+        public static List<string> ConvertMatchesToList(this MatchCollection matches)
+        {
+            var list = new List<string>();
+            foreach (Match match in matches)
+            {
+                list.Add(match.Value);
+            }
+            return list;
+        }
+    }
+
+    enum NamePattern
+    {
+        Template1,
+        Template2
+    }
+}
+"
+rgGm9qwh,Untitled,Josif_tepe,C++,Friday 13th of October 2023 08:47:33 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+class Point {
+public:
+    int x;
+    int y;
+    
+    Point() {
+       // obicno empty constructor treba da izgleda tokmu vaka
+    }
+    
+    Point(int _x, int _y) {
+        x = _x;
+        y = _y;
+    }
+    
+    
+};
+int main() {
+    
+    Point p(5, 6);
+    
+    cout << p.x << "" "" << p.y << endl;
+    return 0;
+}
+"
+PBy3iYR2,adb.arcadeitalia.net CMD code update,NateMac00,Batch,Friday 13th of October 2023 08:46:52 AM CDT,"@echo off
+
+rem MAME SCRIPT EXPORT
+rem AUTHOR: Arcade Database by motoschifo - http://adb.arcadeitalia.net
+rem TITLE: MAME 0.259 - Games Working
+rem DATE: 12/10/2023
+
+rem MAMEROOT is the original folder for ROMs
+rem NEWLOCATION is the new folder for ROMs
+set MAMEROOT=V:\MAME\MAME_0.259
+set NEWLOCATION=V:\MAME\MAME_0.259_Systems\mame
+
+goto process_games
+
+:process_game
+SETLOCAL
+rem ROMSET is the zip rom file name without extension (ex. mslug, pacman, atetris)
+set ROMSET=%~1
+rem ROMTYPE is used for game type: P=parent, C=clone, N=none
+set ROMTYPE=%~2
+rem ROMPARENT is the parent romset (only for clones)
+set ROMPARENT=%~3
+rem SCREEN is the orientation of screen: H=horizontal, V=vertical, N=none/screenless
+set SCREEN=%~4
+rem TITLE is the game title
+set TITLE=%~5
+
+echo.===============================================================================
+echo.PROCESS GAME %ROMSET% - %TITLE%
+echo.PARENT: %ROMPARENT%  -  TYPE %ROMTYPE%  -  SCREEN %SCREEN%
+echo.-------------------------------------------------------------------------------
+echo.TODO: Complete here to do some action...
+rem Example:
+rem if exist ""%MAMEROOT%\titles\%ROMSET%.png"" copy ""%MAMEROOT%\titles\%ROMSET%.png"" ""%MAMEROOT%\titles.clones\%ROMSET%.png""
+rem if ""%ROMTYPE%""==""P"" ( echo This is a parent rom )
+
+rem Moves ROM Zips
+if exist ""%MAMEROOT%\%ROMSET%.zip"" move ""%MAMEROOT%\%ROMSET%.zip"" ""%NEWLOCATION%\%ROMSET%.zip""
+rem Moves CHD Folders
+if exist ""%MAMEROOT%\%ROMSET%"" move ""%MAMEROOT%\%ROMSET%"" ""%NEWLOCATION%""
+echo.
+
+ENDLOCAL \& SET _result=
+goto :eof"
+hu4ikPMT,trucks,STANAANDREY,Java,Friday 13th of October 2023 08:46:22 AM CDT,"import java.util.Arrays;
+
+class Trailer {
+    private int boxesNr;
+    private String matriculationNr;
+    private static int last = 10;
+
+    public Trailer(final String matriculationNr) {
+        this.matriculationNr = matriculationNr;
+        this.boxesNr = ++last;
+    }
+    public Trailer(final String matriculationNr, int boxesNr) {
+        this.matriculationNr = matriculationNr;
+        last = this.boxesNr = boxesNr;
+    }
+
+    public int getBoxesNr() {
+        return boxesNr;
+    }
+
+    public String getMatriculationNr() {
+        return matriculationNr;
+    }
+
+    @Override
+    public String toString() {
+        return ""R("" + matriculationNr + "", "" + boxesNr + "")"";
+    }
+}
+
+class Truck {
+    private static final int MAX_LEN = 5;
+    private Trailer[] trailers;
+    private int len;
+
+    public Truck() {
+        trailers = new Trailer[MAX_LEN];
+        len = 0;
+    }
+
+    public boolean addTrailer(final String matriculationNr, int boxesNr) {
+        if (len == MAX_LEN) {
+            return false;
+        }
+        trailers[len++] = new Trailer(matriculationNr, boxesNr);
+        return true;
+    }
+
+    public boolean addTrailer(final Trailer trailer) {
+        if (len == MAX_LEN) {
+            return false;
+        }
+        trailers[len++] = trailer;
+        return true;
+    }
+
+    public Trailer deleteTrailer(final String matriculationNr) {
+        Trailer tmp = null;
+        int id = -1;
+        for (int i = 0; i < len; i++) {
+            if (trailers[i].getMatriculationNr().equals(matriculationNr)) {
+                tmp = trailers[i];
+                id = i;
+                break;
+            }
+        }
+        for (int i = id; i < len - 1; i++) {
+            trailers[i] = trailers[i + 1];
+        }
+        len--;
+        return tmp;
+    }
+
+    private int getTrailersSum() {
+        int sum = 0;
+        for (int i = 0; i < len; i++) {
+            sum += trailers[i].getBoxesNr();
+        }
+        return sum;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o instanceof Truck) {
+            Truck other = (Truck)o;
+            return getTrailersSum() == other.getTrailersSum();
+        }
+        return false;
+    }
+
+    @Override
+    public String toString() {
+        String string = ""T"";
+        for (int i = 0; i < len; i++) {
+            string += "" -> "" + trailers[i];
+        }
+        return string;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Truck truck1 = new Truck(), truck2 = new Truck();
+        truck1.addTrailer(""1abc"", 2);
+        truck1.addTrailer(""2xyz"", 3);
+        System.out.println(truck1);
+        Trailer trailer = new Trailer(""3abc"");
+        truck2.addTrailer(trailer);
+        System.out.println(truck1.equals(truck2));
+        truck2.addTrailer(""4bfj"", 1);
+        System.out.println(truck2);
+        System.out.println(truck1.equals(truck2));
+        truck2.deleteTrailer(""3abc"");
+        System.out.println(truck2);
+        System.out.println(truck1.equals(truck2));
+    }
+}
+"
+SXfz0SvD,News Oct13 23,Newscaster_Ned,Email,Friday 13th of October 2023 08:41:20 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎y‎,‎ ‎g‎u‎y‎s‎.‎ ‎H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎.‎
+
+I‎s‎r‎a‎e‎l‎i‎ ‎D‎e‎f‎e‎n‎s‎e‎ ‎M‎i‎n‎i‎s‎t‎e‎r‎:‎ ‎H‎a‎m‎a‎s‎ ‎t‎h‎e‎ ‎'‎I‎S‎I‎S‎ ‎o‎f‎ ‎G‎a‎z‎a‎,‎ ‎o‎n‎ ‎'‎I‎r‎a‎n‎i‎a‎n‎ ‎P‎a‎y‎r‎o‎l‎l‎'‎
+R‎u‎d‎o‎l‎p‎h‎ ‎I‎s‎l‎e‎y‎ ‎D‎i‎e‎s‎ ‎a‎t‎ ‎8‎4‎
+R‎e‎p‎o‎r‎t‎:‎ ‎H‎a‎m‎a‎s‎ ‎P‎r‎e‎v‎e‎n‎t‎s‎ ‎C‎i‎v‎i‎l‎i‎a‎n‎s‎ ‎f‎r‎o‎m‎ ‎E‎v‎a‎c‎u‎a‎t‎i‎n‎g‎ ‎N‎o‎r‎t‎h‎e‎r‎n‎ ‎G‎a‎z‎a‎
+F‎u‎l‎l‎ ‎L‎i‎s‎t‎ ‎o‎f‎ ‎F‎o‎r‎e‎i‎g‎n‎e‎r‎s‎ ‎M‎u‎r‎d‎e‎r‎e‎d‎,‎ ‎A‎b‎d‎u‎c‎t‎e‎d‎ ‎o‎r‎ ‎M‎i‎s‎s‎i‎n‎g‎ ‎i‎n‎ ‎H‎a‎m‎a‎s‎ ‎A‎t‎t‎a‎c‎k‎
+J‎e‎w‎s‎ ‎W‎o‎r‎l‎d‎w‎i‎d‎e‎ ‎T‎o‎l‎d‎ ‎t‎o‎ ‎S‎t‎a‎y‎ ‎H‎o‎m‎e‎ ‎o‎n‎ ‎H‎a‎m‎a‎s‎ ‎'‎D‎a‎y‎ ‎o‎f‎ ‎J‎i‎h‎a‎d‎'‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+N‎o‎w‎ ‎H‎e‎ ‎T‎e‎l‎l‎s‎ ‎U‎s‎!‎
+
+K‎i‎s‎s‎i‎n‎g‎e‎r‎:‎ ‎E‎u‎r‎o‎p‎e‎ ‎L‎e‎t‎ ‎i‎n‎ ‎T‎o‎o‎ ‎M‎a‎n‎y‎ ‎F‎o‎r‎e‎i‎g‎n‎e‎r‎s‎
+
+G‎l‎o‎b‎a‎l‎i‎s‎t‎ ‎V‎a‎n‎g‎u‎a‎r‎d‎,‎ ‎M‎e‎n‎t‎o‎r‎ ‎t‎o‎ ‎K‎l‎a‎u‎s‎ ‎S‎c‎h‎w‎a‎b‎ ‎C‎a‎l‎l‎s‎ ‎H‎i‎s‎ ‎L‎i‎f‎e‎ ‎W‎o‎r‎k‎ ‎‘‎G‎r‎a‎v‎e‎ ‎M‎i‎s‎t‎a‎k‎e‎’‎
+2‎0‎ ‎J‎u‎n‎e‎ ‎2‎0‎2‎3‎,‎ ‎B‎a‎v‎a‎r‎i‎a‎,‎ ‎F‎ü‎r‎t‎h‎:‎ ‎H‎e‎n‎r‎y‎ ‎K‎i‎s‎s‎i‎n‎g‎e‎r‎,‎ ‎f‎o‎r‎m‎e‎r‎ ‎U‎.‎S‎.‎ ‎S‎e‎c‎r‎e‎t‎a‎r‎y‎ ‎o‎f‎ ‎S‎t‎a‎t‎e‎,‎ ‎s‎i‎t‎s‎ ‎o‎n‎ ‎s‎t‎a‎g‎e‎ ‎a‎t‎ ‎t‎h‎e‎ ‎c‎e‎l‎e‎b‎r‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎h‎i‎s‎ ‎1‎0‎0‎t‎h‎ ‎b‎i‎r‎t‎h‎d‎a‎y‎.‎ ‎F‎ü‎r‎t‎h‎,‎ ‎t‎h‎e‎ ‎b‎i‎r‎t‎h‎p‎l‎a‎c‎e‎ ‎o‎f‎ ‎e‎x‎-‎U‎S‎ ‎S‎e‎c‎r‎e‎t‎a‎r‎y‎ ‎o‎f‎ ‎S‎t‎a‎t‎e‎ ‎K‎i‎s‎s‎i‎n‎g‎e‎r‎,‎ ‎i‎s‎ ‎h‎o‎l‎d‎i‎n‎g‎ ‎a‎ ‎c‎e‎l‎e‎b‎r‎a‎t‎i‎o‎n‎ ‎t‎o‎ ‎m‎a‎r‎k‎ ‎t‎h‎e‎ ‎1‎0‎0‎t‎h‎ ‎b‎i‎r‎t‎h‎d‎a‎y‎ ‎o‎f‎ ‎i‎t‎s‎ ‎h‎o‎n‎o‎r‎a‎r‎y‎ ‎c‎i‎t‎i‎z‎e‎n‎.‎ ‎P‎h‎o‎t‎o‎:‎ ‎D‎a‎n‎i‎e‎l‎ ‎V‎o‎g‎l‎/‎d‎p‎a‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎D‎a‎n‎i‎e‎l‎ ‎…‎
+P‎r‎o‎-‎H‎a‎m‎a‎s‎ ‎d‎e‎m‎o‎s‎ ‎s‎h‎o‎w‎ ‎E‎u‎r‎o‎p‎e‎ ‎m‎a‎d‎e‎ ‎a‎ ‎“‎g‎r‎a‎v‎e‎ ‎m‎i‎s‎t‎a‎k‎e‎”‎,‎ ‎a‎n‎d‎ ‎s‎h‎o‎u‎l‎d‎ ‎b‎e‎ ‎c‎o‎n‎c‎e‎r‎n‎e‎d‎ ‎a‎b‎o‎u‎t‎ ‎f‎u‎t‎u‎r‎e‎ ‎h‎o‎s‎t‎a‎g‎e‎-‎t‎a‎k‎i‎n‎g‎ ‎r‎a‎i‎d‎s‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎i‎t‎s‎ ‎o‎w‎n‎ ‎p‎e‎o‎p‎l‎e‎.‎
+
+E‎u‎r‎o‎p‎e‎ ‎L‎e‎t‎ ‎i‎n‎ ‎T‎o‎o‎ ‎M‎a‎n‎y‎ ‎F‎o‎r‎e‎i‎g‎n‎e‎r‎s‎,‎ ‎S‎a‎y‎s‎ ‎H‎e‎n‎r‎y‎ ‎K‎i‎s‎s‎i‎n‎g‎e‎r‎
+E‎u‎r‎o‎p‎e‎ ‎L‎e‎t‎ ‎i‎n‎ ‎T‎o‎o‎ ‎M‎a‎n‎y‎ ‎F‎o‎r‎e‎i‎g‎n‎e‎r‎s‎,‎ ‎S‎a‎y‎s‎ ‎H‎e‎n‎r‎y‎ ‎K‎i‎s‎s‎i‎n‎g‎e‎r‎
+7‎5‎7‎
+U‎.‎N‎.‎ ‎I‎s‎s‎u‎e‎s‎ ‎'‎U‎r‎g‎e‎n‎t‎'‎ ‎C‎a‎l‎l‎ ‎f‎o‎r‎ ‎$‎2‎9‎4‎ ‎M‎i‎l‎l‎i‎o‎n‎ ‎t‎o‎ ‎F‎u‎n‎d‎ ‎G‎a‎z‎a‎ ‎S‎t‎r‎i‎p‎ ‎A‎i‎d‎
+U‎.‎N‎.‎ ‎I‎s‎s‎u‎e‎s‎ ‎'‎U‎r‎g‎e‎n‎t‎'‎ ‎C‎a‎l‎l‎ ‎f‎o‎r‎ ‎$‎2‎9‎4‎ ‎M‎i‎l‎l‎i‎o‎n‎ ‎t‎o‎ ‎F‎u‎n‎d‎ ‎G‎a‎z‎a‎ ‎S‎t‎r‎i‎p‎ ‎A‎i‎d‎
+2‎7‎7‎
+D‎e‎ ‎N‎i‎r‎o‎ ‎I‎n‎s‎u‎l‎t‎s‎ ‎T‎r‎u‎m‎p‎ ‎S‎u‎p‎p‎o‎r‎t‎e‎r‎s‎:‎ ‎T‎h‎e‎y‎ ‎H‎a‎v‎e‎ ‎T‎u‎r‎n‎e‎d‎ ‎T‎h‎e‎i‎r‎ ‎B‎a‎c‎k‎s‎ ‎o‎n‎ ‎D‎e‎m‎o‎c‎r‎a‎c‎y‎
+D‎e‎ ‎N‎i‎r‎o‎ ‎I‎n‎s‎u‎l‎t‎s‎ ‎T‎r‎u‎m‎p‎ ‎S‎u‎p‎p‎o‎r‎t‎e‎r‎s‎:‎ ‎T‎h‎e‎y‎ ‎H‎a‎v‎e‎ ‎T‎u‎r‎n‎e‎d‎ ‎T‎h‎e‎i‎r‎ ‎B‎a‎c‎k‎s‎ ‎o‎n‎ ‎D‎e‎m‎o‎c‎r‎a‎c‎y‎
+1‎,‎8‎6‎7‎
+N‎e‎t‎a‎n‎y‎a‎h‎u‎:‎ ‎H‎a‎m‎a‎s‎ ‎T‎e‎r‎r‎o‎r‎i‎s‎t‎s‎ ‎P‎u‎t‎ ‎T‎i‎r‎e‎s‎ ‎A‎r‎o‎u‎n‎d‎ ‎P‎e‎o‎p‎l‎e‎ ‎a‎n‎d‎ ‎B‎u‎r‎n‎e‎d‎ ‎T‎h‎e‎m‎ ‎A‎l‎i‎v‎e‎
+N‎e‎t‎a‎n‎y‎a‎h‎u‎:‎ ‎H‎a‎m‎a‎s‎ ‎T‎e‎r‎r‎o‎r‎i‎s‎t‎s‎ ‎P‎u‎t‎ ‎T‎i‎r‎e‎s‎ ‎A‎r‎o‎u‎n‎d‎ ‎P‎e‎o‎p‎l‎e‎ ‎a‎n‎d‎ ‎B‎u‎r‎n‎e‎d‎ ‎T‎h‎e‎m‎ ‎A‎l‎i‎v‎e‎
+8‎,‎8‎8‎7‎
+H‎u‎n‎d‎r‎e‎d‎s‎ ‎o‎f‎ ‎H‎o‎l‎l‎y‎w‎o‎o‎d‎ ‎A‎c‎t‎o‎r‎s‎,‎ ‎E‎x‎e‎c‎s‎ ‎S‎i‎g‎n‎ ‎L‎e‎t‎t‎e‎r‎ ‎C‎o‎n‎d‎e‎m‎n‎i‎n‎g‎ ‎H‎a‎m‎a‎s‎
+H‎u‎n‎d‎r‎e‎d‎s‎ ‎o‎f‎ ‎H‎o‎l‎l‎y‎w‎o‎o‎d‎ ‎A‎c‎t‎o‎r‎s‎,‎ ‎E‎x‎e‎c‎s‎ ‎S‎i‎g‎n‎ ‎L‎e‎t‎t‎e‎r‎ ‎C‎o‎n‎d‎e‎m‎n‎i‎n‎g‎ ‎H‎a‎m‎a‎s‎
+1‎3‎7‎
+I‎s‎r‎a‎e‎l‎ ‎W‎a‎r‎n‎s‎ ‎1‎ ‎M‎i‎l‎l‎i‎o‎n‎ ‎R‎e‎s‎i‎d‎e‎n‎t‎s‎ ‎o‎f‎ ‎N‎o‎r‎t‎h‎e‎r‎n‎ ‎G‎a‎z‎a‎ ‎t‎o‎ ‎L‎e‎a‎v‎e‎ ‎U‎n‎t‎i‎l‎ ‎W‎a‎r‎'‎s‎ ‎E‎n‎d‎
+I‎s‎r‎a‎e‎l‎ ‎W‎a‎r‎n‎s‎ ‎1‎ ‎M‎i‎l‎l‎i‎o‎n‎ ‎R‎e‎s‎i‎d‎e‎n‎t‎s‎ ‎o‎f‎ ‎N‎o‎r‎t‎h‎e‎r‎n‎ ‎G‎a‎z‎a‎ ‎t‎o‎ ‎L‎e‎a‎v‎e‎ ‎U‎n‎t‎i‎l‎ ‎W‎a‎r‎'‎s‎ ‎E‎n‎d‎
+8‎3‎3‎
+S‎c‎a‎l‎i‎s‎e‎ ‎H‎a‎s‎ ‎S‎e‎r‎i‎o‎u‎s‎ ‎P‎r‎o‎b‎l‎e‎m‎s‎ ‎G‎e‎t‎t‎i‎n‎g‎ ‎V‎o‎t‎e‎s‎ ‎t‎o‎ ‎W‎i‎n‎ ‎S‎p‎e‎a‎k‎e‎r‎s‎h‎i‎p‎
+S‎c‎a‎l‎i‎s‎e‎ ‎H‎a‎s‎ ‎S‎e‎r‎i‎o‎u‎s‎ ‎P‎r‎o‎b‎l‎e‎m‎s‎ ‎G‎e‎t‎t‎i‎n‎g‎ ‎V‎o‎t‎e‎s‎ ‎t‎o‎ ‎W‎i‎n‎ ‎S‎p‎e‎a‎k‎e‎r‎s‎h‎i‎p‎
+1‎,‎9‎1‎6‎
+N‎O‎N‎E‎ ‎W‎E‎R‎E‎ ‎S‎P‎A‎R‎E‎D‎:‎ ‎V‎i‎c‎t‎i‎m‎s‎ ‎o‎f‎ ‎H‎a‎m‎a‎s‎ ‎F‎a‎c‎e‎d‎ ‎‘‎E‎v‎i‎l‎ ‎N‎o‎t‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎E‎v‎e‎n‎ ‎b‎y‎ ‎D‎e‎v‎i‎l‎’‎
+N‎O‎N‎E‎ ‎W‎E‎R‎E‎ ‎S‎P‎A‎R‎E‎D‎:‎ ‎V‎i‎c‎t‎i‎m‎s‎ ‎o‎f‎ ‎H‎a‎m‎a‎s‎ ‎F‎a‎c‎e‎d‎ ‎‘‎E‎v‎i‎l‎ ‎N‎o‎t‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎E‎v‎e‎n‎ ‎b‎y‎ ‎D‎e‎v‎i‎l‎’‎
+6‎,‎1‎1‎7‎
+R‎e‎p‎o‎r‎t‎:‎ ‎H‎a‎m‎a‎s‎ ‎A‎t‎t‎a‎c‎k‎ ‎o‎n‎ ‎I‎s‎r‎a‎e‎l‎ ‎P‎l‎a‎n‎n‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎B‎i‎d‎e‎n‎ ‎T‎o‎o‎k‎ ‎O‎f‎f‎i‎c‎e‎
+R‎e‎p‎o‎r‎t‎:‎ ‎H‎a‎m‎a‎s‎ ‎A‎t‎t‎a‎c‎k‎ ‎o‎n‎ ‎I‎s‎r‎a‎e‎l‎ ‎P‎l‎a‎n‎n‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎B‎i‎d‎e‎n‎ ‎T‎o‎o‎k‎ ‎O‎f‎f‎i‎c‎e‎
+6‎,‎3‎9‎2‎
+'‎G‎l‎o‎b‎a‎l‎ ‎D‎a‎y‎ ‎o‎f‎ ‎J‎i‎h‎a‎d‎'‎:‎ ‎T‎e‎a‎c‎h‎e‎r‎ ‎K‎i‎l‎l‎e‎d‎,‎ ‎T‎w‎o‎ ‎I‎n‎j‎u‎r‎e‎d‎ ‎i‎n‎ ‎F‎r‎e‎n‎c‎h‎ ‎S‎c‎h‎o‎o‎l‎ ‎A‎t‎t‎a‎c‎k‎
+'‎G‎l‎o‎b‎a‎l‎ ‎D‎a‎y‎ ‎o‎f‎ ‎J‎i‎h‎a‎d‎'‎:‎ ‎T‎e‎a‎c‎h‎e‎r‎ ‎K‎i‎l‎l‎e‎d‎,‎ ‎T‎w‎o‎ ‎I‎n‎j‎u‎r‎e‎d‎ ‎i‎n‎ ‎F‎r‎e‎n‎c‎h‎ ‎S‎c‎h‎o‎o‎l‎ ‎A‎t‎t‎a‎c‎k‎
+
+S‎p‎i‎c‎ ‎G‎r‎a‎n‎t‎e‎d‎ ‎P‎a‎r‎o‎l‎e‎ ‎A‎f‎t‎e‎r‎ ‎S‎h‎o‎o‎t‎i‎n‎g‎ ‎a‎n‎d‎ ‎I‎n‎j‎u‎r‎i‎n‎g‎ ‎Y‎o‎n‎k‎e‎r‎s‎ ‎P‎o‎l‎i‎c‎e‎ ‎O‎f‎f‎i‎c‎e‎r‎.‎
+
+T‎h‎i‎s‎ ‎i‎s‎ ‎h‎o‎w‎ ‎y‎o‎u‎ ‎e‎l‎i‎m‎i‎n‎a‎t‎e‎ ‎r‎a‎c‎i‎s‎m‎.‎
+
+
+S‎p‎i‎c‎ ‎T‎h‎u‎g‎ ‎K‎n‎o‎c‎k‎s‎ ‎o‎u‎t‎ ‎R‎a‎n‎d‎o‎m‎ ‎J‎o‎g‎g‎e‎r‎ ‎i‎n‎ ‎R‎o‎s‎e‎n‎b‎e‎r‎g‎.‎
+
+
+P‎a‎k‎i‎ ‎G‎e‎t‎s‎ ‎2‎5‎ ‎Y‎e‎a‎r‎s‎ ‎A‎f‎t‎e‎r‎ ‎C‎h‎o‎p‎p‎i‎n‎g‎ ‎o‎f‎f‎ ‎L‎a‎n‎d‎l‎o‎r‎d‎'‎s‎ ‎H‎e‎a‎d‎ ‎w‎i‎t‎h‎ ‎S‎a‎m‎u‎r‎a‎i‎ ‎S‎w‎o‎r‎d‎.‎
+
+
+C‎l‎a‎r‎e‎m‎o‎n‎t‎:‎ ‎P‎a‎r‎e‎n‎t‎s‎ ‎o‎f‎ ‎H‎a‎l‎f‎-‎C‎a‎s‎t‎e‎ ‎B‎u‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎F‎a‎k‎i‎n‎g‎ ‎H‎i‎s‎ ‎L‎y‎n‎c‎h‎i‎n‎g‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+A‎M‎ ‎C‎l‎o‎u‎d‎s‎/‎P‎M‎ ‎S‎u‎n‎
+9‎1‎°‎
+/‎5‎9‎°‎
+9‎%‎
+N‎W‎ ‎9‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎3‎ ‎|‎ ‎D‎a‎y‎
+9‎1‎°‎
+9‎%‎
+N‎W‎
+9‎
+ ‎
+m‎p‎h‎
+C‎l‎o‎u‎d‎y‎ ‎s‎k‎i‎e‎s‎ ‎e‎a‎r‎l‎y‎,‎ ‎t‎h‎e‎n‎ ‎p‎a‎r‎t‎l‎y‎ ‎c‎l‎o‎u‎d‎y‎ ‎t‎h‎i‎s‎ ‎a‎f‎t‎e‎r‎n‎o‎o‎n‎.‎ ‎H‎i‎g‎h‎ ‎9‎1‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎W‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+6‎7‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+7‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎3‎0‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎0‎1‎ ‎p‎m‎
+F‎r‎i‎ ‎1‎3‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+5‎9‎°‎
+1‎%‎
+N‎
+1‎1‎
+ ‎
+m‎p‎h‎
+C‎l‎e‎a‎r‎ ‎s‎k‎i‎e‎s‎.‎ ‎L‎o‎w‎ ‎5‎9‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+4‎4‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+6‎:‎2‎8‎ ‎a‎m‎
+W‎a‎n‎i‎n‎g‎ ‎C‎r‎e‎s‎c‎e‎n‎t‎
+M‎o‎o‎n‎s‎e‎t‎
+6‎:‎3‎7‎ ‎p‎m‎
+S‎a‎t‎ ‎1‎4‎
+S‎u‎n‎n‎y‎
+8‎2‎°‎
+/‎5‎5‎°‎
+0‎%‎
+N‎ ‎1‎5‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎5‎
+S‎u‎n‎n‎y‎
+7‎7‎°‎
+/‎5‎0‎°‎
+0‎%‎
+N‎ ‎1‎6‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎6‎
+S‎u‎n‎n‎y‎
+7‎7‎°‎
+/‎4‎7‎°‎
+2‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎7‎
+S‎u‎n‎n‎y‎
+8‎0‎°‎
+/‎5‎0‎°‎
+2‎%‎
+E‎S‎E‎ ‎6‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎8‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎6‎1‎°‎
+5‎%‎
+S‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎9‎
+I‎s‎o‎l‎a‎t‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎4‎°‎
+/‎6‎1‎°‎
+3‎3‎%‎
+S‎S‎E‎ ‎9‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎2‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎1‎°‎
+/‎5‎7‎°‎
+2‎3‎%‎
+N‎N‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎2‎1‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+7‎9‎°‎
+/‎5‎7‎°‎
+3‎0‎%‎
+N‎ ‎9‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎2‎2‎
+S‎u‎n‎n‎y‎
+8‎0‎°‎
+/‎5‎9‎°‎
+5‎%‎
+W‎S‎W‎ ‎9‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎2‎3‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎1‎°‎
+/‎5‎7‎°‎
+1‎6‎%‎
+E‎ ‎9‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎2‎4‎
+S‎u‎n‎n‎y‎
+7‎9‎°‎
+/‎5‎6‎°‎
+1‎6‎%‎
+N‎ ‎9‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎2‎5‎
+S‎u‎n‎n‎y‎
+8‎0‎°‎
+/‎5‎8‎°‎
+7‎%‎
+S‎E‎ ‎9‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎2‎6‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎4‎°‎
+/‎6‎0‎°‎
+6‎%‎
+S‎ ‎1‎0‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎2‎7‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎4‎°‎
+/‎6‎1‎°‎
+1‎8‎%‎
+S‎S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎T‎h‎e‎ ‎S‎a‎n‎t‎a‎ ‎r‎a‎c‎e‎ ‎w‎a‎r‎.‎ ‎🎅🏼🎅🏿
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+S‎a‎m‎ ‎H‎y‎d‎e‎
+S‎a‎m‎ ‎H‎y‎d‎e‎ ‎i‎s‎ ‎a‎ ‎s‎e‎c‎o‎n‎d‎ ‎r‎a‎t‎e‎ ‎c‎o‎m‎e‎d‎i‎a‎n‎[‎1‎]‎,‎ ‎W‎h‎i‎t‎e‎ ‎S‎u‎p‎r‎e‎m‎a‎c‎i‎s‎t‎,‎ ‎A‎l‎t‎-‎r‎i‎g‎h‎t‎ ‎a‎c‎t‎i‎v‎i‎s‎t‎,‎ ‎M‎R‎A‎ ‎a‎n‎d‎ ‎o‎b‎s‎e‎s‎s‎i‎v‎e‎ ‎G‎a‎m‎e‎r‎G‎a‎t‎e‎ ‎s‎u‎p‎p‎o‎r‎t‎e‎r‎,‎ ‎w‎h‎o‎ ‎g‎r‎e‎w‎ ‎s‎o‎ ‎f‎r‎u‎s‎t‎r‎a‎t‎e‎d‎ ‎a‎t‎ ‎s‎o‎c‎i‎a‎l‎ ‎j‎u‎s‎t‎i‎c‎e‎,‎ ‎f‎e‎m‎i‎n‎i‎s‎t‎ ‎a‎n‎d‎ ‎m‎i‎n‎o‎r‎i‎t‎y‎ ‎i‎s‎s‎u‎e‎s‎ ‎i‎n‎ ‎v‎i‎d‎e‎o‎ ‎g‎a‎m‎e‎ ‎c‎u‎l‎t‎u‎r‎e‎ ‎t‎h‎a‎t‎ ‎h‎e‎ ‎s‎n‎a‎p‎p‎e‎d‎ ‎a‎n‎d‎ ‎c‎o‎m‎m‎i‎t‎t‎e‎d‎ ‎m‎u‎l‎t‎i‎p‎l‎e‎ ‎m‎a‎s‎s‎ ‎s‎h‎o‎o‎t‎i‎n‎g‎s‎,‎ ‎k‎i‎l‎l‎i‎n‎g‎ ‎d‎o‎z‎e‎n‎s‎ ‎a‎n‎d‎ ‎i‎n‎j‎u‎r‎i‎n‎g‎ ‎a‎t‎ ‎l‎e‎a‎s‎t‎ ‎1‎0‎0‎ ‎p‎e‎o‎p‎l‎e‎.‎ ‎E‎v‎e‎n‎ ‎w‎i‎t‎h‎ ‎e‎v‎e‎r‎y‎ ‎l‎a‎w‎ ‎e‎n‎f‎o‎r‎c‎e‎m‎e‎n‎t‎ ‎a‎g‎e‎n‎c‎y‎ ‎i‎n‎ ‎t‎h‎e‎ ‎w‎o‎r‎l‎d‎ ‎l‎o‎o‎k‎i‎n‎g‎ ‎f‎o‎r‎ ‎h‎i‎m‎,‎ ‎S‎a‎m‎ ‎H‎y‎d‎e‎ ‎h‎a‎s‎ ‎y‎e‎t‎ ‎t‎o‎ ‎b‎e‎ ‎b‎r‎o‎u‎g‎h‎t‎ ‎t‎o‎ ‎j‎u‎s‎t‎i‎c‎e‎.‎ ‎I‎t‎ ‎i‎s‎ ‎s‎u‎s‎p‎e‎c‎t‎e‎d‎ ‎t‎h‎e‎ ‎m‎a‎i‎n‎s‎t‎r‎e‎a‎m‎ ‎m‎e‎d‎i‎a‎ ‎i‎s‎ ‎d‎e‎l‎i‎b‎e‎r‎a‎t‎e‎l‎y‎ ‎m‎i‎s‎l‎e‎a‎d‎i‎n‎g‎ ‎t‎h‎e‎ ‎p‎u‎b‎l‎i‎c‎ ‎a‎b‎o‎u‎t‎ ‎h‎i‎m‎.‎ ‎T‎h‎i‎s‎ ‎i‎s‎ ‎s‎u‎p‎p‎o‎r‎t‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎f‎a‎c‎t‎ ‎t‎h‎a‎t‎ ‎H‎y‎d‎e‎ ‎h‎a‎s‎ ‎b‎e‎e‎n‎ ‎s‎h‎o‎w‎n‎ ‎o‎p‎e‎n‎ ‎s‎u‎p‎p‎o‎r‎t‎ ‎b‎y‎ ‎m‎e‎d‎i‎a‎ ‎o‎u‎t‎l‎e‎t‎s‎ ‎l‎i‎k‎e‎ ‎F‎o‎r‎b‎e‎s‎.‎c‎o‎m‎,‎ ‎d‎e‎s‎p‎i‎t‎e‎ ‎h‎o‎w‎ ‎i‎n‎c‎r‎e‎d‎i‎b‎l‎y‎ ‎c‎r‎u‎e‎l‎ ‎t‎h‎i‎s‎ ‎b‎l‎a‎t‎a‎n‎t‎ ‎c‎o‎v‎e‎r‎ ‎u‎p‎ ‎i‎s‎ ‎t‎o‎ ‎t‎h‎e‎ ‎f‎a‎m‎i‎l‎i‎e‎s‎ ‎o‎f‎ ‎H‎y‎d‎e‎'‎s‎ ‎v‎i‎c‎t‎i‎m‎s‎.‎
+
+(‎(‎(‎ ‎H‎E‎'‎S‎ ‎A‎C‎T‎U‎A‎L‎L‎Y‎ ‎T‎H‎E‎ ‎M‎O‎R‎E‎ ‎N‎O‎R‎M‎A‎L‎ ‎O‎F‎ ‎G‎A‎M‎E‎R‎G‎A‎T‎E‎ ‎S‎U‎P‎P‎O‎R‎T‎E‎R‎S‎!‎ ‎)‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+T‎h‎e‎ ‎S‎e‎a‎ ‎G‎i‎r‎t‎ ‎L‎i‎g‎h‎t‎ ‎i‎s‎ ‎a‎ ‎l‎i‎g‎h‎t‎h‎o‎u‎s‎e‎ ‎m‎a‎r‎k‎i‎n‎g‎ ‎t‎h‎e‎ ‎i‎n‎l‎e‎t‎ ‎l‎e‎a‎d‎i‎n‎g‎ ‎t‎o‎ ‎t‎h‎e‎ ‎W‎r‎e‎c‎k‎ ‎P‎o‎n‎d‎ ‎i‎n‎ ‎S‎e‎a‎ ‎G‎i‎r‎t‎,‎ ‎N‎e‎w‎ ‎J‎e‎r‎s‎e‎y‎,‎ ‎U‎n‎i‎t‎e‎d‎ ‎S‎t‎a‎t‎e‎s‎.‎ ‎I‎t‎ ‎i‎s‎ ‎l‎o‎c‎a‎t‎e‎d‎ ‎o‎n‎ ‎a‎ ‎s‎t‎r‎e‎t‎c‎h‎ ‎o‎f‎ ‎t‎h‎e‎ ‎N‎e‎w‎ ‎J‎e‎r‎s‎e‎y‎ ‎s‎h‎o‎r‎e‎ ‎b‎e‎t‎w‎e‎e‎n‎ ‎t‎h‎e‎ ‎B‎a‎r‎n‎e‎g‎a‎t‎ ‎a‎n‎d‎ ‎N‎a‎v‎e‎s‎i‎n‎k‎ ‎l‎i‎g‎h‎t‎h‎o‎u‎s‎e‎s‎.‎ ‎I‎t‎s‎ ‎s‎i‎t‎e‎ ‎w‎a‎s‎ ‎c‎h‎o‎s‎e‎n‎ ‎a‎f‎t‎e‎r‎ ‎a‎ ‎p‎r‎e‎v‎i‎o‎u‎s‎ ‎p‎r‎o‎p‎o‎s‎a‎l‎ ‎f‎o‎r‎ ‎a‎ ‎l‎i‎g‎h‎t‎h‎o‎u‎s‎e‎ ‎a‎t‎ ‎M‎a‎n‎a‎s‎q‎u‎a‎n‎ ‎I‎n‎l‎e‎t‎ ‎w‎a‎s‎ ‎f‎o‎u‎n‎d‎ ‎i‎n‎f‎e‎a‎s‎i‎b‎l‎e‎,‎ ‎a‎n‎d‎ ‎i‎t‎ ‎w‎a‎s‎ ‎f‎i‎r‎s‎t‎ ‎l‎i‎t‎ ‎i‎n‎ ‎D‎e‎c‎e‎m‎b‎e‎r‎ ‎1‎8‎9‎6‎.‎ ‎P‎r‎o‎t‎e‎c‎t‎i‎o‎n‎s‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎s‎a‎n‎d‎ ‎e‎r‎o‎s‎i‎o‎n‎ ‎w‎e‎r‎e‎ ‎a‎d‎d‎e‎d‎ ‎i‎n‎ ‎1‎9‎0‎0‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎1‎9‎2‎0‎s‎,‎ ‎a‎n‎d‎ ‎i‎n‎ ‎1‎9‎2‎1‎,‎ ‎S‎e‎a‎ ‎G‎i‎r‎t‎ ‎L‎i‎g‎h‎t‎ ‎w‎a‎s‎ ‎e‎q‎u‎i‎p‎p‎e‎d‎ ‎w‎i‎t‎h‎ ‎a‎ ‎r‎a‎d‎i‎o‎ ‎b‎e‎a‎c‎o‎n‎ ‎f‎o‎r‎ ‎u‎s‎e‎ ‎i‎n‎ ‎f‎o‎g‎,‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎s‎u‎c‎h‎ ‎i‎n‎s‎t‎a‎l‎l‎a‎t‎i‎o‎n‎ ‎o‎n‎ ‎a‎ ‎s‎h‎o‎r‎e‎-‎b‎a‎s‎e‎d‎ ‎l‎i‎g‎h‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎U‎S‎.‎ ‎A‎t‎ ‎t‎h‎e‎ ‎o‎u‎t‎s‎e‎t‎ ‎o‎f‎ ‎W‎o‎r‎l‎d‎ ‎W‎a‎r‎ ‎I‎I‎,‎ ‎t‎h‎e‎ ‎l‎i‎g‎h‎t‎ ‎w‎a‎s‎ ‎d‎e‎a‎c‎t‎i‎v‎a‎t‎e‎d‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎l‎e‎n‎s‎ ‎r‎e‎m‎o‎v‎e‎d‎;‎ ‎t‎h‎e‎ ‎h‎o‎u‎s‎e‎ ‎w‎a‎s‎ ‎r‎e‎m‎o‎d‎e‎l‎e‎d‎ ‎t‎o‎ ‎s‎e‎r‎v‎e‎ ‎a‎s‎ ‎a‎ ‎d‎o‎r‎m‎i‎t‎o‎r‎y‎ ‎f‎o‎r‎ ‎a‎ ‎C‎o‎a‎s‎t‎ ‎G‎u‎a‎r‎d‎ ‎o‎b‎s‎e‎r‎v‎a‎t‎i‎o‎n‎ ‎p‎o‎s‎t‎.‎ ‎A‎t‎ ‎t‎h‎e‎ ‎e‎n‎d‎ ‎o‎f‎ ‎t‎h‎e‎ ‎w‎a‎r‎,‎ ‎a‎n‎ ‎a‎e‎r‎o‎b‎e‎a‎c‎o‎n‎ ‎w‎a‎s‎ ‎m‎o‎u‎n‎t‎e‎d‎ ‎a‎t‎o‎p‎ ‎t‎h‎e‎ ‎t‎o‎w‎e‎r‎,‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎ ‎l‎i‎g‎h‎t‎h‎o‎u‎s‎e‎ ‎b‎e‎i‎n‎g‎ ‎d‎e‎c‎o‎m‎m‎i‎s‎s‎i‎o‎n‎e‎d‎.‎ ‎I‎n‎ ‎1‎9‎5‎5‎,‎ ‎a‎ ‎n‎e‎w‎ ‎b‎e‎a‎c‎o‎n‎ ‎w‎a‎s‎ ‎e‎r‎e‎c‎t‎e‎d‎ ‎a‎w‎a‎y‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎b‎u‎i‎l‎d‎i‎n‎g‎ ‎o‎n‎ ‎a‎ ‎s‎t‎e‎e‎l‎ ‎t‎o‎w‎e‎r‎ ‎o‎n‎ ‎t‎h‎e‎ ‎l‎a‎w‎n‎.‎ ‎T‎h‎e‎ ‎b‎u‎i‎l‎d‎i‎n‎g‎ ‎w‎a‎s‎ ‎s‎o‎l‎d‎ ‎t‎o‎ ‎t‎h‎e‎ ‎b‎o‎r‎o‎u‎g‎h‎ ‎o‎f‎ ‎S‎e‎a‎ ‎G‎i‎r‎t‎ ‎s‎h‎o‎r‎t‎l‎y‎ ‎a‎f‎t‎e‎r‎.‎ ‎I‎t‎ ‎w‎a‎s‎ ‎u‎s‎e‎d‎ ‎f‎o‎r‎ ‎t‎h‎e‎ ‎t‎o‎w‎n‎ ‎l‎i‎b‎r‎a‎r‎y‎ ‎a‎n‎d‎ ‎f‎o‎r‎ ‎m‎e‎e‎t‎i‎n‎g‎ ‎s‎p‎a‎c‎e‎ ‎f‎o‎r‎ ‎m‎a‎n‎y‎ ‎y‎e‎a‎r‎s‎,‎ ‎w‎h‎i‎l‎e‎ ‎t‎h‎e‎ ‎b‎e‎a‎c‎o‎n‎ ‎i‎t‎s‎e‎l‎f‎ ‎r‎e‎m‎a‎i‎n‎e‎d‎ ‎o‎p‎e‎r‎a‎t‎i‎o‎n‎a‎l‎ ‎u‎n‎t‎i‎l‎ ‎1‎9‎7‎7‎.‎ ‎T‎h‎e‎ ‎b‎u‎i‎l‎d‎i‎n‎g‎ ‎w‎a‎s‎ ‎t‎a‎k‎e‎n‎ ‎o‎v‎e‎r‎ ‎b‎y‎ ‎t‎h‎e‎ ‎S‎e‎a‎ ‎G‎i‎r‎t‎ ‎L‎i‎g‎h‎t‎h‎o‎u‎s‎e‎ ‎C‎i‎t‎i‎z‎e‎n‎s‎ ‎C‎o‎m‎m‎i‎t‎t‎e‎e‎ ‎i‎n‎ ‎1‎9‎8‎0‎ ‎a‎n‎d‎ ‎w‎a‎s‎ ‎s‎u‎b‎s‎e‎q‎u‎e‎n‎t‎l‎y‎ ‎r‎e‎s‎t‎o‎r‎e‎d‎.‎ ‎I‎t‎ ‎n‎o‎w‎ ‎s‎e‎r‎v‎e‎s‎ ‎a‎s‎ ‎a‎ ‎m‎u‎s‎e‎u‎m‎,‎ ‎o‎f‎f‎e‎r‎i‎n‎g‎ ‎t‎o‎u‎r‎s‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎K‎i‎n‎g‎ ‎o‎f‎ ‎H‎e‎a‎r‎t‎s‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎t‎h‎r‎o‎w‎ ‎a‎p‎p‎l‎e‎s‎ ‎a‎t‎ ‎G‎e‎o‎r‎g‎e‎ ‎L‎o‎p‎e‎z‎.‎"
+3dM4s1we,Untitled,Josif_tepe,C++,Friday 13th of October 2023 08:41:06 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+class Point {
+public:
+    int x;
+    int y;
+    
+    Point() {
+       // obicno empty constructor treba da izgleda tokmu vaka
+    }
+    
+    
+};
+int main() {
+    
+    Point p;
+    cout << p.x << "" "" << p.y << endl;
+    return 0;
+}
+"
+J2EJvvaQ,Untitled,Josif_tepe,C++,Friday 13th of October 2023 08:37:51 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+class Point {
+public:
+    int x;
+    int y;
+    
+    Point() {
+        cout << ""empty constructor"" << endl;
+        
+        // ova znaci deka koga ke pravime objekt od Point avtomatski x i y ke imaat vrednost od 5
+        x = 5;
+        y = 5;
+    }
+    
+    
+};
+int main() {
+    
+    Point p;
+    cout << p.x << "" "" << p.y << endl;
+    return 0;
+}
+"
+9YGtPPn6,Untitled,Hamikadze,C#,Friday 13th of October 2023 08:18:40 AM CDT,"mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerdown PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mousedown MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerup PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseup MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerdown PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mousedown MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerup PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseup MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerdown PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mousedown MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerup PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseup MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerdown PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mousedown MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerup PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseup MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerover PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 pointerenter PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mouseover MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerdown PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0.5, …}
+VM334:1 mousedown MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 pointerup PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}
+VM334:1 mouseup MouseEvent {isTrusted: true, screenX: 992, screenY: 180, clientX: 992, clientY: 103, …}
+VM334:1 click PointerEvent {isTrusted: true, pointerId: 1, width: 1, height: 1, pressure: 0, …}"
+9TAsUYqu,Untitled,Josif_tepe,C++,Friday 13th of October 2023 08:13:56 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+class Point {
+public:
+    int x;
+    int y;
+    
+    
+    void soberi(int x_tmp, int y_tmp) {
+        x += x_tmp;
+        y += y_tmp;
+    }
+    
+};
+int main() {
+    
+    Point p;
+    cin >> p.x >> p.y;
+    
+    p.soberi(4, 5);
+    
+    cout << p.x << "" "" << p.y << endl;
+    return 0;
+}
+"
+JGc5Yt1G,Untitled,Josif_tepe,C++,Friday 13th of October 2023 08:13:25 AM CDT,"#include <iostream>
+
+using namespace std;
+
+
+struct Point {
+    int x;
+    int y;
+    
+    
+    void soberi(int x_tmp, int y_tmp) {
+        x += x_tmp;
+        y += y_tmp;
+    }
+    
+};
+int main() {
+    
+    Point p;
+    cin >> p.x >> p.y;
+    
+    p.soberi(4, 5);
+    
+    cout << p.x << "" "" << p.y << endl;
+    return 0;
+}
+"
+gGEfyJVm,rename tiles in grid | unity3d,halleman19,C#,Friday 13th of October 2023 07:53:51 AM CDT,"using System.Text.RegularExpressions;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UIElements;
+
+public class EditRename : EditorWindow
+{
+    [MenuItem(""dev/hierarchly"")]
+    public static void showHierEditWind()
+    {
+        EditRename hierWind = GetWindow<EditRename>();
+        hierWind.titleContent = new GUIContent(""rename tiles"");
+    }
+
+    public TextField newTagTitle;
+
+    public void CreateGUI()
+    {
+        VisualElement rootVisual = rootVisualElement;
+
+        Button mainBtn = new Button();
+        mainBtn.name = ""renameBtn"";
+        mainBtn.text = ""rename tiles"";
+        mainBtn.clicked += MainBtn_clicked;
+
+        rootVisual.Add(mainBtn);
+
+        Button changeTagBtn = new Button();
+        changeTagBtn.name = ""changeTagBtn"";
+        changeTagBtn.text = ""change tag"";
+        changeTagBtn.clicked += ChangeTagBtn_clicked;;
+
+        newTagTitle = new TextField();
+        newTagTitle.value = ""set title new tag"";
+        
+        rootVisual.Add(newTagTitle);
+        rootVisual.Add(changeTagBtn);
+    }
+
+    private void MainBtn_clicked()
+    {
+        GameObject[] objs = GameObject.FindGameObjectsWithTag(""tile"");
+
+        for (int i = 0; i < 10; i++)
+        {
+            for (int j = 0; j < 10; j++)
+            {
+                objs[(i * 10) + j].name = string.Format(""tile {0} {1}"", i, j);
+            }
+        }
+    }
+
+    private void ChangeTagBtn_clicked()
+    {
+        GameObject[] objs = GameObject.FindGameObjectsWithTag(""tile"");
+
+        foreach (GameObject obj in objs)
+            obj.transform.GetChild(0).tag = newTagTitle.value;
+    }
+}"
+xCq9HW8a,Untitled,amberlex78,JavaScript,Friday 13th of October 2023 07:31:53 AM CDT,"(() => {
+    'use strict';
+
+    // Функция для работы с localStorage
+    const getStoredValue = (key, defaultValue) => localStorage.getItem(key) || defaultValue;
+    const setStoredValue = (key, value) => localStorage.setItem(key, value);
+
+    // Функции для установки фронт-темы и фронт-иконки
+    const setFrontTheme = theme => document.documentElement.setAttribute('data-bs-theme', theme);
+    const setFrontThemeIcon = themeIcon => document.querySelector('#themeIcon').setAttribute('xlink:href', themeIcon);
+
+    // Установка начальных значений
+    setFrontTheme(getStoredValue('theme', 'light'));
+    setFrontThemeIcon(getStoredValue('themeIcon', '#icoMoonFill'));
+
+    // Функция для обновления темы и иконки
+    const updateTheme = () => {
+        const currentTheme = getStoredValue('theme', 'light');
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        setStoredValue('theme', newTheme);
+        setFrontTheme(newTheme);
+
+        const currentThemeIcon = getStoredValue('themeIcon', '#icoMoonFill');
+        const newThemeIcon = currentThemeIcon === '#icoMoonFill' ? '#icoSunFill' : '#icoMoonFill';
+        setStoredValue('themeIcon', newThemeIcon);
+        setFrontThemeIcon(newThemeIcon);
+    };
+
+    // Добавление обработчика события
+    document.querySelector('.change-theme').addEventListener('click', updateTheme);
+})();
+"
+XJSu5iJv,Recover git branch,nezvers,Bash,Friday 13th of October 2023 07:28:01 AM CDT,"## Pre-requisite: You have to know your last commit message from your deleted branch.
+git reflog
+# Search for message in the list
+# a901eda HEAD@{18}: commit: <last commit message>
+
+# Now you have two options, either checkout revision or HEAD
+git checkout a901eda 
+# Or
+git checkout HEAD@{18}
+
+# Create branch
+git branch recovered-branch
+
+# You may want to push that back to remote
+git push origin recovered-branch:recovered-branch"
+2Hz2kykA,Untitled,wclovers,PHP,Friday 13th of October 2023 07:21:10 AM CDT,"function wcfm_replace_store_and_shop_texts( $translation, $text, $domain ) {
+    $allowed_domains = [
+        'bp-better-messages-wcfm'
+    ];
+
+    if( in_array( $domain, $allowed_domains ) ) {
+        $find = ['Private Message'];
+        $replace = ['Contacter le vendeur'];
+        $translation = str_ireplace( $find, $replace, $translation );
+    }
+
+    return $translation;
+}
+add_filter('gettext', 'wcfm_replace_store_and_shop_texts', 10, 3);
+add_filter('ngettext', 'wcfm_replace_store_and_shop_texts', 10, 3);"
+Z7yf7sAg,Untitled,lukas60055,JSON,Friday 13th of October 2023 07:18:46 AM CDT,"{
+  ""navbar"": {
+    ""popularTravel"": ""Popularne cele podróży"",
+    ""recommend"": ""Polecamy"",
+    ""categories"": ""Kategorie"",
+    ""priceList"": ""Cennik"",
+    ""button"": {
+      ""signIn"": ""Zaloguj się"",
+      ""signUp"": ""Zarejestruj się""
+    },
+    ""icon"": ""Wybierz język"",
+    ""modal"": ""Wybierz wersję językową""
+  },
+  ""header"": {
+    ""heading1"": ""Znajdź idealne miejsce na nocleg"",
+    ""heading2"": ""rezerwuj online lub telefonicznie"",
+    ""input"": ""Wpisz miasto, region lub nazwę obiektu"",
+    ""button"": ""Szukaj noclegu""
+  },
+  ""home"": {
+    ""popularTravel"": {
+      ""title"": ""Popularne cele podróży"",
+      ""subtitle"": ""Przenieś się w czasie i przestrzeni, zwiedzając europejskie klejnoty takie jak Paryż, Rzym czy Barcelona,<br> aby doświadczyć niezapomnianych chwil w najpiękniejszych miastach Starego Kontynentu."",
+      ""story"": [
+        {
+          ""title"": ""Paryż"",
+          ""text"": ""Tu historia, sztuka i kuchnia <br>tworzą niepowtarzalną atmosferę <br>pełną magii i inspiracji."",
+          ""button"": ""Szukaj miejsca na pobyt""
+        },
+        {
+          ""title"": ""Rzym"",
+          ""text"": ""Majestatyczne, wieczne miasto, <br> gdzie historia, sztuka i smaki <br>spotykają się w niezapomniany sposób."",
+          ""button"": ""Znajdź doskonałe hotele""
+        },
+        {
+          ""title"": ""Barcelona"",
+          ""text"": ""Mieszanka architektonicznej magii, <br>plażowego relaksu <br>i niezwykłego życia nocnego."",
+          ""button"": ""Rezerwuj online lub telefonicznie""
+        }
+      ]
+    }
+  }
+}
+"
+gW6zTPg8,SwitchGroup.qml,vladislav_larionov,QML,Friday 13th of October 2023 07:16:39 AM CDT,"// SPDX-FileCopyrightText: 2023 Open Mobile Platform LLC <community@omp.ru>
+// SPDX-License-Identifier: BSD-3-Clause
+import QtQuick 2.0
+import Sailfish.Silica 1.0
+
+Column {
+    id: root
+
+    property alias model: repeater.model
+    property bool exclusive: true
+    property string selectedRole: ""selected""
+    property string valueRole: ""value""
+    property string nameRole: ""name""
+    property string iconRole: ""icon""
+    property string descriptionRole: ""description""
+
+    signal selectedValuesChanged
+
+    function selectedValues() {
+        var selectedValues = new Array(children.length - 1);
+        if (exclusive) {
+            if (repeater.selectedIndex >= 0)
+                selectedValues[repeater.selectedIndex] = children[repeater.selectedIndex].value;
+        } else {
+            for (var iChild = 0; iChild < selectedValues.length; ++iChild) {
+                var child = children[iChild];
+                if (child.checked)
+                    selectedValues[iChild] = child.value;
+            }
+        }
+        return selectedValues;
+    }
+
+    function selectedValue() {
+        var selectedValues = new Array(children.length - 1);
+        for (var iChild = 0; iChild < selectedValues.length; ++iChild) {
+            var child = children[iChild];
+            if (child.checked)
+                return child.value;
+        }
+        return """";
+    }
+
+    function setCurrentIndex(childIndex) {
+        children[childIndex].checked = true;
+    }
+
+    width: parent ? parent.width : Screen.width
+
+    Repeater {
+        id: repeater
+
+        property int selectedIndex: -1
+
+        onModelChanged: selectedIndex = -1
+        delegate: switchDelegate
+    }
+
+    Component {
+        id: switchDelegate
+
+        IconTextSwitch {
+            id: switchItem
+
+            readonly property var m: model.modelData || model
+            readonly property var value: m[root.valueRole] === undefined ? m : m[root.valueRole]
+
+            onClicked: {
+                if (checked) {
+                    if (root.exclusive)
+                        return;
+                    checked = false;
+                    repeater.selectedIndex = -1;
+                } else {
+                    checked = true;
+                    repeater.selectedIndex = model.index;
+                }
+                root.selectedValuesChanged();
+            }
+            Component.onCompleted: {
+                if (m[root.selectedRole])
+                    repeater.selectedIndex = model.index;
+            }
+
+            text: m[root.nameRole] === undefined ? value : m[root.nameRole]
+            description: m[root.descriptionRole] || """"
+            icon.source: m[root.iconRole] || """"
+            automaticCheck: false
+
+            Binding {
+                id: targetStateWatcher
+
+                when: root.exclusive
+                target: switchItem
+                property: ""checked""
+                value: model.index === repeater.selectedIndex
+            }
+        }
+    }
+}
+"
+4wpuD2Gj,Untitled,wclovers,PHP,Friday 13th of October 2023 07:12:56 AM CDT,"add_filter('wcfm_form_custom_validation', function ($form_data, $wcfm_screen) {
+    if ('product_manage' == $wcfm_screen) {
+        $minimum_price = 1;
+
+        if (isset($form_data['regular_price']) && isset($form_data['sale_price'])) {
+            $regular_price = is_numeric($form_data['regular_price']) ? $form_data['regular_price'] : false;
+
+            if (false === $regular_price) {
+                return [
+                    'has_error' => true,
+                    'message'   => __('Regular price can not be empty', 'wc-frontend-manager'),
+                ];
+            }
+
+            $sale_price = is_numeric($form_data['sale_price']) ? $form_data['sale_price'] : false;
+
+            if (false !== $sale_price && $regular_price <= $sale_price) {
+                return [
+                    'has_error' => true,
+                    'message'   => __('Sale price must be less than regular price', 'wc-frontend-manager'),
+                ];
+            }
+
+            $effective_price = (false !== $sale_price) ? min($regular_price, $sale_price) : $regular_price;
+
+            if ($effective_price < $minimum_price) {
+                return [
+                    'has_error' => true,
+                    'message'   => sprintf(__('Price can not be less than %1$s%2$s', 'wc-frontend-manager'), get_woocommerce_currency_symbol(), $minimum_price),
+                ];
+            }
+        }
+    }
+    return $form_data;
+}, 10, 2);"
+K61R56pA,LeetCode 3 - Longest Substring Without Repeating Characters - 2023.10.13 solution,nathanwailes,Python,Friday 13th of October 2023 07:07:58 AM CDT,"class Solution:
+    def lengthOfLongestSubstring(self, s: str) -> int:
+        """""" Thought: We can have two pointers, with a set listing
+        all the characters contained in the span between them. We
+        advance the right pointer until we hit a duplicate, at
+        which point we advance the left pointer. We use a separate
+        variable to keep track of the largest substring we've
+        encountered.
+        """"""
+        l = 0
+        r = 0
+
+        if len(s) == 0:
+            return 0
+
+        span_set = set([s[0]])
+        largest_substring = 1
+
+        while r < len(s) - 1:
+            r += 1
+            while s[r] in span_set:
+                span_set.remove(s[l])
+                l += 1
+            span_set.add(s[r])
+            largest_substring = max(largest_substring, r - l + 1)
+        
+        return largest_substring
+"

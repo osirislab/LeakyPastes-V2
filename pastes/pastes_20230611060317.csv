@@ -1,0 +1,4338 @@
+id,title,username,language,date,content
+F70EZEs7,Dockerfile,InnovativeStudios,Bash,Sunday 11th of June 2023 12:53:58 AM CDT,"FROM ubuntu:latest
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --no-install-suggests \
+        software-properties-common \
+        wget \
+        ca-certificates \
+        lib32gcc-s1 \
+        lib32stdc++6 \
+        locales \
+        net-tools \
+        python3 \
+        python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Enable the en_US.UTF-8 locale
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen
+
+# Download and install SteamCMD
+RUN mkdir -p /steamcmd && \
+    wget -qO- 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz' | tar zxf - -C /steamcmd
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# Docker environment values
+ENV ARMA_BINARY=./arma3server
+ENV ARMA_CONFIG=main.cfg
+ENV ARMA_PARAMS=
+ENV ARMA_PROFILE=main
+ENV ARMA_WORLD=empty
+ENV ARMA_LIMITFPS=1000
+ENV ARMA_CDLC=
+ENV HEADLESS_CLIENTS=0
+ENV HEADLESS_CLIENTS_PROFILE=""\$profile-hc-\$i""
+ENV PORT=2302
+ENV STEAM_BRANCH=public
+ENV STEAM_BRANCH_PASSWORD=
+ENV MODS_LOCAL=true
+ENV MODS_PRESET=
+ENV SKIP_INSTALL=false
+
+# Expose necessary ports
+EXPOSE 2302-2306/tcp
+EXPOSE 2302-2306/udp
+
+# Set working directory
+WORKDIR /arma3
+
+# Mount the steamcmd volume
+VOLUME /steamcmd
+
+# Define the stop signal
+STOPSIGNAL SIGINT
+
+# Copy the Python scripts to the container
+COPY *.py /
+
+# Set the entrypoint to run the Python script
+CMD [""python3"", ""/launch.py""]"
+8dSSj0xi,workshop.py,InnovativeStudios,Python,Sunday 11th of June 2023 12:44:58 AM CDT,"import os
+import re
+import subprocess
+import requests
+import keys
+
+WORKSHOP = ""steamapps/workshop/content/107410/""
+USER_AGENT = ""Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36""  # noqa: E501
+
+
+def download(mods):
+    steamcmd = [""/steamcmd/steamcmd.sh""]
+    steamcmd.extend(
+        [
+            ""+force_install_dir"",
+            ""/arma3"",
+            ""+login"",
+            os.environ[""STEAM_USERNAME""],
+            os.environ[""STEAM_PASSWORD""],
+        ]
+    )
+    for id in mods:
+        steamcmd.extend([""+workshop_download_item"", ""107410"", id])
+    steamcmd.extend([""+quit""])
+    subprocess.call(steamcmd)
+
+
+def preset(mod_file):
+    if mod_file.startswith(""http""):
+        response = requests.get(mod_file, headers={""User-Agent"": USER_AGENT})
+        with open(""preset.html"", ""wb"") as f:
+            f.write(response.content)
+        mod_file = ""preset.html""
+
+    mods = []
+    moddirs = []
+
+    with open(mod_file) as f:
+        html = f.read()
+        regex = r""filedetails\/\?id=(\d+)\""""
+        matches = re.finditer(regex, html, re.MULTILINE)
+
+        for _, match in enumerate(matches, start=1):
+            mods.append(match.group(1))
+            moddir = WORKSHOP + match.group(1)
+            moddirs.append(moddir)
+
+        download(mods)
+
+        for moddir in moddirs:
+            keys.copy(moddir)
+
+    return moddirs
+"
+3kiw5zcW,keys.py,InnovativeStudios,Python,Sunday 11th of June 2023 12:44:04 AM CDT,"import glob
+import os
+import shutil
+
+
+def copy(moddir):
+    keys = glob.glob(os.path.join(moddir, ""**/*.bikey""))
+    if len(keys) > 0:
+        for key in keys:
+            if not os.path.isdir(key):
+                shutil.copy2(key, ""/arma3/keys"")
+    else:
+        print(""Missing keys:"", moddir)
+
+
+if __name__ == ""__main__"":
+    for moddir in glob.glob(""/arma3/steamapps/workshop/content/107410/*""):
+        copy(moddir)
+"
+qyx1Qavd,local.py,InnovativeStudios,Python,Sunday 11th of June 2023 12:43:16 AM CDT,"import os
+import keys
+
+
+def mods(d):
+    mods = []
+
+    for m in os.listdir(d):
+        moddir = os.path.join(d, m)
+        if os.path.isdir(moddir):
+            mods.append(moddir)
+            keys.copy(moddir)
+    return mods
+"
+NbQwPkMV,launch.py,InnovativeStudios,Python,Sunday 11th of June 2023 12:42:26 AM CDT,"import os
+import re
+import subprocess
+import local
+import workshop
+
+
+def mod_param(name, mods):
+    return ' -{}=""{}"" '.format(name, "";"".join(mods))
+
+
+def env_defined(key):
+    return key in os.environ and len(os.environ[key]) > 0
+
+
+CONFIG_FILE = os.environ[""ARMA_CONFIG""]
+KEYS = ""/arma3/keys""
+
+if not os.path.isdir(KEYS):
+    if os.path.exists(KEYS):
+        os.remove(KEYS)
+    os.makedirs(KEYS)
+
+if os.environ[""SKIP_INSTALL""] in ["""", ""false""]:
+    steamcmd = [""/steamcmd/steamcmd.sh""]
+    steamcmd.extend(
+        [
+            ""+force_install_dir"",
+            ""/arma3"",
+            ""+login"",
+            os.environ[""STEAM_USERNAME""],
+            os.environ[""STEAM_PASSWORD""],
+            ""+app_update"",
+            ""233780"",
+        ]
+    )
+    if env_defined(""STEAM_BRANCH""):
+        steamcmd.extend([""-beta"", os.environ[""STEAM_BRANCH""]])
+    if env_defined(""STEAM_BRANCH_PASSWORD""):
+        steamcmd.extend([""-betapassword"", os.environ[""STEAM_BRANCH_PASSWORD""]])
+    steamcmd.extend([""validate"", ""+quit""])
+    subprocess.call(steamcmd)
+
+mods = []
+
+if os.environ[""MODS_PRESET""] != """":
+    mods.extend(workshop.preset(os.environ[""MODS_PRESET""]))
+
+if os.environ[""MODS_LOCAL""] == ""true"" and os.path.exists(""mods""):
+    mods.extend(local.mods(""mods""))
+
+launch = ""{} -limitFPS={} -world={} {} {}"".format(
+    os.environ[""ARMA_BINARY""],
+    os.environ[""ARMA_LIMITFPS""],
+    os.environ[""ARMA_WORLD""],
+    os.environ[""ARMA_PARAMS""],
+    mod_param(""mod"", mods),
+)
+
+if os.environ[""ARMA_CDLC""] != """":
+    for cdlc in os.environ[""ARMA_CDLC""].split("";""):
+        launch += "" -mod={}"".format(cdlc)
+
+clients = int(os.environ[""HEADLESS_CLIENTS""])
+print(""Headless Clients:"", clients)
+
+if clients != 0:
+    with open(""arma3/configs/{}"".format(CONFIG_FILE)) as config:
+        data = config.read()
+        regex = r""(.+?)(?:\s+)?=(?:\s+)?(.+?)(?:$|\/|;)""
+
+        config_values = {}
+
+        matches = re.finditer(regex, data, re.MULTILINE)
+        for matchNum, match in enumerate(matches, start=1):
+            config_values[match.group(1).lower()] = match.group(2)
+
+        if ""headlessclients[]"" not in config_values:
+            data += '\nheadlessclients[] = {""127.0.0.1""};\n'
+        if ""localclient[]"" not in config_values:
+            data += '\nlocalclient[] = {""127.0.0.1""};\n'
+
+        with open(""/tmp/arma3.cfg"", ""w"") as tmp_config:
+            tmp_config.write(data)
+        launch += ' -config=""/tmp/arma3.cfg""'
+
+    client_launch = launch
+    client_launch += "" -client -connect=127.0.0.1""
+    if ""password"" in config_values:
+        client_launch += "" -password={}"".format(config_values[""password""])
+
+    for i in range(0, clients):
+        hc_launch = client_launch + ' -name=""{}-hc-{}""'.format(
+            os.environ[""ARMA_PROFILE""], i
+        )
+        print(""LAUNCHING ARMA CLIENT {} WITH"".format(i), hc_launch)
+        subprocess.Popen(hc_launch, shell=True)
+
+else:
+    launch += ' -config=""/arma3/configs/{}""'.format(CONFIG_FILE)
+
+launch += ' -port={} -name=""{}"" -profiles=""/arma3/configs/profiles""'.format(
+    os.environ[""PORT""], os.environ[""ARMA_PROFILE""]
+)
+
+if os.path.exists(""servermods""):
+    launch += mod_param(""serverMod"", local.mods(""servermods""))
+
+print(""Launching Arma Server With"", launch, flush=True)
+os.system(launch)
+"
+Tc3b8JhZ,BTC Wallet Credentials have been reset,confeossif_29,GetText,Sunday 11th of June 2023 12:15:28 AM CDT,"Dear User
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please disregard this message.
+Your new login credentials will be 
+ektodermasv:w45N4k on 193.233.202.76(SSH)
+Regards"
+yJLH9EHm,Exporta para HTML lista do IMDB,MizunoBrasil,Python,Sunday 11th of June 2023 12:10:13 AM CDT,"import os
+import requests
+from bs4 import BeautifulSoup
+import datetime
+
+def obter_detalhes_filme(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    filmes = []
+
+    for item in soup.find_all('div', class_='lister-item-content'):
+        titulo = item.h3.a.text.strip()
+        descricao = item.find('p', class_='').text.strip()
+        filmes.append({'Título': titulo, 'Descrição': descricao})
+
+    return filmes
+
+url_imdb = 'COLOCAR A URL DA LISTA DO IMDB'
+filmes = obter_detalhes_filme(url_imdb)
+
+# Obtenha o diretório atual do arquivo do aplicativo
+diretorio_atual = os.path.dirname(os.path.abspath(__file__))
+
+# Crie o caminho completo para o arquivo ""filmes.html""
+caminho_arquivo_html = os.path.join(diretorio_atual, 'filmes.html')
+
+# Número de filmes por página
+filmes_por_pagina = 10
+
+# Dividir os filmes em páginas
+paginas = [filmes[i:i+filmes_por_pagina] for i in range(0, len(filmes), filmes_por_pagina)]
+
+# Obter a data e hora atual
+data_hora_atual = datetime.datetime.now().strftime(""%d/%m/%Y às %H:%M:%S"")
+
+# Criar arquivo HTML com estilização CSS e paginação
+with open(caminho_arquivo_html, 'w', encoding='utf-8') as arquivo_html:
+    arquivo_html.write('<html>\n')
+    arquivo_html.write('<head>\n')
+    arquivo_html.write('<title>Filmes</title>\n')
+    arquivo_html.write('<style>\n')
+    arquivo_html.write('body {\n')
+    arquivo_html.write('    font-family: Arial, sans-serif;\n')
+    arquivo_html.write('    margin: 20px;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('h2 {\n')
+    arquivo_html.write('    color: #333;\n')
+    arquivo_html.write('    font-size: 24px;\n')
+    arquivo_html.write('    margin-bottom: 10px;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('p {\n')
+    arquivo_html.write('    color: #666;\n')
+    arquivo_html.write('    font-size: 14px;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('hr {\n')
+    arquivo_html.write('    border: none;\n')
+    arquivo_html.write('    border-top: 1px solid #ccc;\n')
+    arquivo_html.write('    margin: 20px 0;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('.pagina {\n')
+    arquivo_html.write('    display: none;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('.pagina.ativa {\n')
+    arquivo_html.write('    display: block;\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('</style>\n')
+    arquivo_html.write('<script>\n')
+    arquivo_html.write('function mostrarPagina(pagina) {\n')
+    arquivo_html.write('    var paginas = document.getElementsByClassName(""pagina"");\n')
+    arquivo_html.write('    for (var i = 0; i < paginas.length; i++) {\n')
+    arquivo_html.write('        paginas[i].style.display = ""none"";\n')
+    arquivo_html.write('    }\n')
+    arquivo_html.write('    document.getElementById(""pagina-"" + pagina).style.display = ""block"";\n')
+    arquivo_html.write('}\n')
+    arquivo_html.write('</script>\n')
+    arquivo_html.write('</head>\n')
+    arquivo_html.write('<body>\n')
+
+    # Adicionar a mensagem de exportação
+    arquivo_html.write(f'<p>Exportado em {data_hora_atual}</p>\n')
+
+    # Adicionar links de paginação
+    for i, pagina in enumerate(paginas):
+        arquivo_html.write(f'<a href=""javascript:void(0);"" onclick=""mostrarPagina({i+1});"">Página {i+1}</a>\n')
+
+    # Adicionar conteúdo de cada página
+    for i, pagina in enumerate(paginas):
+        arquivo_html.write(f'<div class=""pagina"" id=""pagina-{i+1}"">\n')
+        for filme in pagina:
+            arquivo_html.write('<h2>{}</h2>\n'.format(filme['Título']))
+            arquivo_html.write('<p>{}</p>\n'.format(filme['Descrição']))
+            arquivo_html.write('<hr>\n')
+        arquivo_html.write('</div>\n')
+
+    arquivo_html.write('<script>\n')
+    arquivo_html.write('mostrarPagina(1);\n')
+    arquivo_html.write('</script>\n')
+    arquivo_html.write('</body>\n')
+    arquivo_html.write('</html>\n')
+
+print(""Arquivo 'filmes.html' gerado com sucesso!"")
+"
+SMCB77XQ,Hetman Office Recovery,brague,VB.NET,Saturday 10th of June 2023 11:30:35 PM CDT,"Hetman Office Recovery
+
+Ulimited edition
+
+Name: djoudi
+Serials:
+
+0580-7830-8188-DCC5
+0580-7830-8188-BCC9
+0580-7830-8188-EDD7
+0580-7830-8188-ECE8
+0580-7830-8188-ECB3
+0580-7830-8188-DBC1
+0580-7830-8188-ECD3"
+Aa8D9fPz,Single-Button Media,althindor,CSS,Saturday 10th of June 2023 11:20:27 PM CDT,"/* Basic Media Panel Code */
+
+.media_panel {
+  background: magenta;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.media_panel h2 {display: none;}
+
+.media_panel iframe {
+  width: 300px;
+  height: 200px;
+  position: absolute;
+  bottom: calc(50% - 20px);
+  left: calc(50% - 35px);
+  opacity: .001;
+}
+
+/* CHOOSE ONLY ONE OPTION */
+/* Small Music Visualizer */
+
+.media_panel {
+ -webkit-mask: url('https://i.imgur.com/MWTKBXK.gif') center no-repeat;
+  mask: url('https://i.imgur.com/MWTKBXK.gif') center no-repeat;
+  width: 20px;
+  height: 20px !important;
+}
+
+/* YT Play + Pause Button */
+
+.media_panel {
+ -webkit-mask: url('https://i.imgur.com/gqTTTvw.png') -26px -7px;
+  mask: url('https://i.imgur.com/gqTTTvw.png') -26px -7px;
+  width: 30px;
+  height: 30px !important;
+}"
+rMeGSt2U,SFX,gatunes,Lua,Saturday 10th of June 2023 11:15:36 PM CDT,"geometry = Geometry()
+geometry:setVertices(
+   0.0,  0.5, 0.0,   0, 0, 1,   0.5, 1,
+  -0.5, -0.5, 0.0,   0, 0, 1,     0, 0,
+   0.5, -0.5, 0.0,   0, 0, 1,     1, 0
+)
+geometry:setIndex(0, 1, 2)
+
+shader = Shader(
+[[
+out vec2 vUV;
+void main() {
+  vUV = uv;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+}
+]],
+[[
+in vec2 vUV;
+void main() {
+  gl_FragColor = sRGB(vec4(vec3(vUV.y, 0.0, 1 - vUV.x), 1.0));
+}
+]]
+)
+
+sfx = SFX(""https://cdn.glitch.global/f95f83f8-1295-420a-ba25-3773d1099c3a/ding.ogg"")
+
+numMeshes = 16
+meshes = {}
+local offset = math.pi / -3
+local step = math.pi * 2 / numMeshes * 2
+for i=1,numMeshes do
+  meshes[i] = Mesh(geometry, shader)
+  meshes[i]:setPosition(math.cos(offset + i * step) * 8, math.sin(offset + i * step) * 8, i * -6)
+end
+
+camera.setFov(50)
+camera.setPosition(0, 0, 12)
+framebuffer = Framebuffer(1, true, 4)
+
+log([[
+## #007 SFX
+Press *CTRL+E* to edit source
+]])
+
+function loop()
+  raycaster.setFromCamera(mouse.x, mouse.y)
+  local hit = raycaster.intersect(table.unpack(meshes))
+  if hit then
+    mouse.cursor(""hand"")
+  end
+
+  framebuffer:bind(resolution.x, resolution.y)
+  framebuffer:clear()
+  for i=1,numMeshes do
+    if mouse.primaryDown and hit == meshes[i]:getId() then
+      local x, y, z = meshes[i]:getPosition()
+      sfx:play(x, y, z);
+    end
+    meshes[i]:render()
+  end
+  framebuffer:unbind()
+  framebuffer:blit()
+end
+"
+Ni6uaRLj,Aro Flag,_Pandora,CSS,Saturday 10th of June 2023 10:25:58 PM CDT,"<link rel=""stylesheet"" type=""text/css"" href=""https://dl.dropbox.com/s/ouc2rtqwic2uixs/PRIDE_ARO.css?dl=0"" />"
+WSETH0pp,Aro Flag - Overlay,_Pandora,CSS,Saturday 10th of June 2023 10:24:35 PM CDT,"<link rel=""stylesheet"" type=""text/css"" href=""https://dl.dropbox.com/s/9m09xwr6ip1hnds/PRIDE_ARO_OVERLAY.css?dl=0"" />"
+tsEFGFTC,clip images with Java,Mark2020H,Java,Saturday 10th of June 2023 09:04:18 PM CDT,"/* MD Harrington  London  UK */
+
+
+
+import com.sun.imageio.plugins.common.ImageUtil;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.EventQueue;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.geom.Ellipse2D;
+import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.swing.JFrame;
+import javax.swing.JPanel;
+import javax.swing.Timer;
+class Surface extends JPanel implements ActionListener {
+
+    private int pos_x = 8;
+    private int pos_y = 8;
+    private final int RADIUS = 200;
+    private final int DELAY = 10;
+    private Timer timer;
+    private Image image;
+    private final double delta[] = { 3, 3 };
+
+    public Surface() {
+        setDoubleBuffered(true);
+        this.setBackground(Color.black);
+        loadImage();
+        determineAndSetImageSize();
+        initTimer();
+    }
+
+    private void loadImage() {
+        try {
+            image = javax.imageio.ImageIO.read(Surface.class.getClassLoader().getResourceAsStream(""images/storm.jpg""));
+        } catch (IOException ex) {
+            Logger.getLogger(Surface.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private void determineAndSetImageSize() {
+        int h = image.getHeight(this);
+        System.out.println(""Height = "" +h);
+        int w = image.getWidth(this);
+        setPreferredSize(new Dimension(w, h));        
+    }
+    
+    private void initTimer() {   
+        timer = new Timer(DELAY, this);
+        timer.start();
+    }
+
+    private void doDrawing(Graphics g) {
+        Graphics2D g2d = (Graphics2D) g.create();
+        g2d.clip(new Ellipse2D.Double(pos_x, pos_y, RADIUS, RADIUS));
+        g2d.drawImage(image, 0, 0, null); 
+        g2d.dispose();
+    }
+
+    @Override
+    public void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        doDrawing(g);
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        moveCircle();
+        repaint();
+    }
+
+    private void moveCircle() {
+        int w = getWidth();
+        int h = getHeight();
+        if (pos_x < 0) {
+            delta[0] = Math.random() % 4 + 2;
+        } else if (pos_x > w - RADIUS) {
+            delta[0] = -(Math.random() % 4 + 2);
+        }
+        if (pos_y < 0 ) {
+            delta[1] = Math.random() % 4 + 2;
+
+        } else if (pos_y > h - RADIUS) {
+            delta[1] = -(Math.random() % 4 + 2);
+        }
+
+        pos_x += delta[0];
+        pos_y += delta[1];
+    }     
+  
+}
+public class ClippingEx extends JFrame
+ {
+    public ClippingEx() {
+        initUI();
+    }
+
+    private void initUI() {
+        setTitle(""Clipping"");
+        setBackground(Color.black);
+        add(new Surface());
+        pack();
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);        
+    }
+
+    public static void main(String[] args) {
+        EventQueue.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                ClippingEx cl = new ClippingEx();
+                cl.setVisible(true);
+            }
+        });        
+    }
+}"
+deDCJtfq,2023-06-10_stats.json,rdp_snitch,JSON,Saturday 10th of June 2023 07:15:09 PM CDT,"{
+  ""ip"": {
+    ""164.92.158.134"": 3,
+    ""51.75.160.42"": 2,
+    ""162.241.158.17"": 24,
+    ""31.43.185.3"": 2,
+    ""62.122.184.168"": 6,
+    ""45.227.254.48"": 2,
+    ""209.146.28.26"": 6,
+    ""110.77.220.230"": 1,
+    ""45.56.120.165"": 18,
+    ""87.251.75.145"": 4,
+    ""45.227.254.49"": 4,
+    ""87.251.75.64"": 1,
+    ""202.9.127.222"": 10,
+    ""31.43.185.32"": 3,
+    ""185.170.144.3"": 2,
+    ""123.57.58.91"": 7,
+    ""45.227.254.54"": 2,
+    ""202.57.58.188"": 1,
+    ""87.251.75.120"": 2,
+    ""45.135.201.65"": 4,
+    ""138.197.8.152"": 1,
+    ""103.195.236.137"": 45,
+    ""152.89.198.113"": 1,
+    ""122.55.211.36"": 20,
+    ""194.165.16.37"": 2,
+    ""124.158.10.68"": 20,
+    ""106.116.169.71"": 1,
+    ""152.89.198.133"": 2,
+    ""14.169.151.16"": 10,
+    ""62.122.184.165"": 2,
+    ""103.232.55.195"": 1,
+    ""45.146.55.108"": 1,
+    ""205.210.31.222"": 3,
+    ""62.122.184.166"": 4,
+    ""167.248.133.50"": 1,
+    ""188.161.150.234"": 1,
+    ""94.232.41.30"": 1,
+    ""194.165.16.73"": 2,
+    ""198.235.24.223"": 3
+  },
+  ""asn"": {
+    ""AS14061"": 4,
+    ""AS16276"": 2,
+    ""AS19871"": 24,
+    ""AS211736"": 5,
+    ""AS57523"": 15,
+    ""AS267784"": 8,
+    ""AS135607"": 6,
+    ""AS131090"": 1,
+    ""AS63949"": 18,
+    ""AS208091"": 8,
+    ""AS58659"": 10,
+    ""AS48080"": 2,
+    ""AS37963"": 7,
+    ""AS9927"": 1,
+    ""AS44486"": 4,
+    ""AS140827"": 45,
+    ""AS9299"": 20,
+    ""AS48721"": 4,
+    ""AS38733"": 20,
+    ""AS4134"": 1,
+    ""AS45899"": 10,
+    ""AS63737"": 1,
+    ""AS62240"": 1,
+    ""AS396982"": 6,
+    ""AS398722"": 1,
+    ""AS12975"": 1
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 4,
+    ""OVH SAS"": 2,
+    ""Unified Layer"": 24,
+    ""FOP Dmytro Nedilskyi"": 5,
+    ""Chang Way Technologies Co. Limited"": 15,
+    ""Flyservers S.A."": 12,
+    ""Cogent Communications"": 6,
+    ""CAT-BB"": 1,
+    ""Akamai Technologies, Inc."": 18,
+    ""XHOST-INTERNET-SOLUTIONS"": 8,
+    ""Quest Consultancy Pvt Ltd"": 10,
+    ""Dmitriy Panchenko"": 2,
+    ""Hangzhou Alibaba Advertising Co"": 7,
+    ""PhilCom Corporation"": 1,
+    ""LIVINGBOTS"": 4,
+    ""AZ Viet NAM Communications Technology Company Limited"": 45,
+    ""Philippine Long Distance Telephone Co."": 20,
+    ""CMC Telecom Infrastructure Company"": 20,
+    ""Chinanet"": 1,
+    ""VNPT-VNNIC"": 10,
+    ""VIETSERVER"": 1,
+    ""VPN"": 1,
+    ""Google LLC"": 6,
+    ""Censys, Inc."": 1,
+    ""Palestine Telecommunications Company"": 1
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 3,
+    ""OVH Ltd"": 2,
+    ""WEBSITEWELCOME.COM"": 24,
+    ""FOP Dmytro Nedilskyi"": 5,
+    ""Chang Way Technologies Co. Limited"": 12,
+    ""UAB Host Baltic"": 8,
+    ""IPS, Inc"": 6,
+    ""Unknown"": 5,
+    ""Linode"": 18,
+    ""Xhost Internet Solutions"": 7,
+    ""TAB"": 10,
+    ""Xhostis"": 2,
+    ""Aliyun Computing Co., LTD"": 7,
+    ""PhilCom Corporation"": 1,
+    ""Digital Ocean"": 1,
+    ""DULIEUAZ"": 45,
+    ""Starcrecium Limited"": 3,
+    ""Philippine Long Distance Telephone Company"": 20,
+    ""Flyservers S.A"": 4,
+    ""CMC Telecom Infrastructure Company"": 20,
+    ""Chinanet HE"": 1,
+    ""VietNam Post and Telecom Corporation"": 10,
+    ""VietServer Services technology company limited"": 1,
+    ""VPN-Consumer-US"": 1,
+    ""Palo Alto Networks, Inc"": 6,
+    ""Censys, Inc."": 1,
+    ""DSL -PALTEL"": 1,
+    ""Dmitriy Panchenko"": 1
+  },
+  ""regionName"": {
+    ""North Holland"": 12,
+    ""England"": 2,
+    ""Utah"": 24,
+    ""Kyiv City"": 5,
+    ""Moscow"": 15,
+    ""Vilnius"": 8,
+    ""Metro Manila"": 26,
+    ""Samut Sakhon"": 1,
+    ""Texas"": 18,
+    ""Dadra and Nagar Haveli and Daman and Diu"": 10,
+    ""Beijing"": 7,
+    ""Central Luzon"": 1,
+    ""Bremen"": 4,
+    ""New Jersey"": 1,
+    ""Ho Chi Minh"": 55,
+    ""Kaunas"": 4,
+    ""Hanoi"": 21,
+    ""Hebei"": 1,
+    ""Georgia"": 1,
+    ""California"": 6,
+    ""Michigan"": 1,
+    ""Gaza"": 1,
+    ""Perm Krai"": 1
+  },
+  ""country"": {
+    ""Netherlands"": 12,
+    ""United Kingdom"": 2,
+    ""United States"": 51,
+    ""Ukraine"": 5,
+    ""Russia"": 16,
+    ""Lithuania"": 12,
+    ""Philippines"": 27,
+    ""Thailand"": 1,
+    ""India"": 10,
+    ""China"": 8,
+    ""Germany"": 4,
+    ""Vietnam"": 76,
+    ""Palestine"": 1
+  },
+  ""account"": {
+    ""hello"": 171,
+    ""Test"": 14,
+    ""Administr"": 15,
+    ""Domain"": 14,
+    ""Almaz"": 1,
+    ""a"": 1,
+    ""(empty)"": 3,
+    ""ZCLMLAOJX"": 1,
+    ""KhvEBJ"": 1,
+    ""eslOhr"": 1,
+    ""EweFZqNaw"": 1,
+    ""WMkqOD"": 1,
+    ""vjLlUU"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 225
+  },
+  ""client_build"": {
+    ""Unknown"": 225
+  },
+  ""client_name"": {
+    ""Unknown"": 225
+  },
+  ""ip_type"": {
+    ""hosting"": 61,
+    ""Unknown"": 160,
+    ""proxy"": 3,
+    ""hosting & proxy"": 1
+  }
+}"
+u8sAtUU9,Wild Mining Turtle,WildBeastPT,Lua,Saturday 10th of June 2023 07:11:23 PM CDT,"local SLOT_COUNT = 16
+local CHUNK_SIDE = 8
+
+function storeAll()
+    for slot = 1, SLOT_COUNT, 1 do
+        item = turtle.getItemDetail(slot)
+        if(item ~= nil) then
+            if(item[""name""] == ""minecraft:chest"") then
+                turtle.select(slot)
+                turtle.placeUp()
+                for slot = 1, SLOT_COUNT, 1 do
+                    item = turtle.getItemDetail(slot)
+                    if(item ~= nil) then
+                        if((item[""name""] ~= ""minecraft:coal"") and (item[""name""] ~= ""minecraft:chest"")) then
+                            turtle.select(slot)
+                            turtle.dropUp()
+                        end
+                    end
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function checkFuel()
+    if(turtle.getFuelLevel() < 50) then
+        for slot = 1, SLOT_COUNT, 1 do
+            item = turtle.getItemDetail(slot)
+            if(item ~= nil) then
+                if(item[""name""] == ""minecraft:coal"") then
+                    turtle.select(slot)
+                    turtle.refuel(1)
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    return true
+end
+
+function chunkDig()
+    success, data = turtle.inspectDown()
+    while(data.name ~= ""minecraft:bedrock"") do
+        checkFuel()
+        for times = 1, 4, 1 do
+            for block = 2, 8, 1 do
+                turtle.dig()
+                turtle.forward()
+            end
+            turtle.turnRight()
+            turtle.dig()
+            turtle.forward()
+            turtle.turnRight()
+            for block = 2, 8, 1 do
+                turtle.dig()
+                turtle.forward()
+            end
+            turtle.turnLeft()
+            turtle.dig()
+            turtle.forward()
+            turtle.turnLeft()
+            checkFuel()
+        end
+        turtle.turnLeft()
+        for block = 1, 8, 1 do
+            turtle.forward()
+        end
+        turtle.turnRight()
+        turtle.digDown()
+        turtle.down()
+        storeAll()
+        success, data = turtle.inspectDown()
+    end
+    return true
+end
+
+function main()
+    return chunkDig()
+end
+
+main()
+"
+MeeFjDdT,Silent_mode.bat,GlobalAccessSoftware,Batch,Saturday 10th of June 2023 06:28:43 PM CDT,":::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+::: Launch AAA_Sync in Silent Mode, output to Logfile :::
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+:::     -- output to Logfile Pending: rev 8.2+ --
+:::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+
+@echo off
+  if not defined set vers=v8.12.39 20230610151321 by -JpE-
+  set bats=C:\Users\%username%\Documents\AAA Sync2Laptop\Batch Files\BCS-Suite
+  if not exist %bats% echo . & echo Folder not found! & echo . & pause & exit
+  title Silent_mode.bat %vers% launched: %date% @ %time%
+  goto choice
+  ::: DOES ^ NOT START BELOW
+  
+  
+                  :::::::[ HANDY! Reusable Function Routines ]:::::::
+
+::: loop body for for-loop below
+:loop
+  set line1=%line1%%charsForPadding%
+  exit /b %errorlevel%
+
+:padder <intVar lengthOfStringRequired>
+  for /l %%k in (1, 1, %~1) do ( call :loop
+    if %errorlevel% gtr 1 echo errorlevel: %errorlevel% & goto choice
+  )
+  exit /b %errorlevel%
+
+:sizeOfString <stringVar string1>
+  set string1=%~1
+  set sizer=""%bats%\string_length.bat""
+  if exist %sizer% call %sizer% actualSize2 string1
+  if not exist %sizer% echo . & echo Can't find %sizer% & echo . & pause & echo .
+  exit /b %errorlevel%
+
+:intro
+  set charsForPadding=*=
+  set line1=
+  set txt1= Introducing Silent Mode! %vers% 
+  call :sizeOfString ""%txt1%""
+  set /a size1=((%actualSize2% + 5) / 2)
+  ::: The division by two is for 2  ^^^ pad chars.
+  call :padder %size1%
+  echo . & echo . & VER & echo . & echo .
+  echo %line1%*
+  echo =*=%txt1%=*=
+  echo %line1%*
+  echo .
+  exit /b %errorlevel%
+
+
+                  :::::::[ PROGRAM MAIN ]:::::::
+:choice
+  call :intro
+  set msg=""Ready to Run Backups? (Y/n): ""
+  choice /c yn /n /t 30 /d y /m %msg%
+  if %errorlevel% equ 2 goto return
+  echo . & echo Proceeding... & echo .
+  ::goto start
+  
+:: :start
+  set AAA=""%bats%\AAA-Sync.bat""
+  if not exist %AAA% echo . & echo %AAA% not found! & echo . & goto errr1
+  set filename1=""%bats%\overrider3.txt""
+  ::: Purely a runtime file ^ see usages implementing override1 in %AAA% @:restart and the override1 var thereafter.
+  if exist %filename1% del /f /s /q %filename1%
+  copy %sizer% %filename1%
+  call %AAA%
+  if exist %filename1% del /f /s /q %filename1%
+  goto return
+
+                    :::::::[ Error and Exit Routines ]:::::::
+:errr1
+  echo oopsie an error sent Flow here. Get on it!
+  pause
+  set txt=OMG It fn Werked! Error Detected Successfully.
+  title %txt%
+  set sender1=""Silent_mode.bat""
+  set error=""%bats%\ErrorHandling.bat""
+  if exist %error% call %error% :next txt,%sender%
+
+
+:return
+  REM echo . & echo .
+  REM set msg=""Review what happened? (y/N): ""
+  REM choice /c yn /n /t 120 /d n /m %msg%
+  REM if %errorlevel% equ 1 echo . & pause & echo . & pause & echo . & goto return
+  
+
+
+:::  100%  -JpE-
+
+
+"
+HdWTFGeS,Baked: Auto-Click Embed,AdamBlast,JavaScript,Saturday 10th of June 2023 06:27:35 PM CDT,"// ==UserScript==
+// @name        Baked: Auto-Click Embed
+// @description Clicks ""Embed"" button for untrusted content, whatever that means.
+// @version     1.0
+// @author      AdamBlast
+// @match       https://baked.live/*
+// @run-at      document-start
+// @grant       none
+// ==/UserScript==
+
+document.addEventListener(""DOMContentLoaded"", function() {
+    clickEmbed;
+    setTimeout(clickEmbed, 1000);
+    setTimeout(clickEmbed, 2000);
+});
+
+window.addEventListener('load', function(){
+    clickEmbed;
+    setTimeout(clickEmbed, 1000);
+    setTimeout(clickEmbed, 2000);
+}, false);
+
+
+function clickEmbed(){
+    var btnTags = document.getElementsByTagName(""button"");
+    var searchText = ""Embed"";
+
+    for (var i = 0; i < btnTags.length; i++) {
+        if (btnTags[i].innerText == searchText) {
+            //alert(btnTags[i].className) // className should be ""btn btn-default""
+            btnTags[i].click()
+            break;
+        }
+    }
+}"
+cvCF2gMi,CCCEM User Interface,xxfillex,JavaScript,Saturday 10th of June 2023 06:09:04 PM CDT,"//version 1.0: User Interface created, I'm sure it has no issues whatsoever and works perfectly fine. This is meant to be run by the Cookie Clicker Combo Execution Mod, if run otherwise it will not work.
+
+Game.sesame=0 //this prevents a crash if opensesame is open, but doesn't get rid of the fps counter. Not sure what to do about that
+
+if (typeof RedrawCCCEM === ""undefined"") {
+  eval(""Game.OpenSesame=""+Game.OpenSesame.toString().replace(""var str='';"",""return"")) //prevents you from using OpenSesame as this mod removes the debugLog to make it look nice, which breaks the game if you run OpenSesame
+  if (l('debugLog')) {l('debugLog').remove();};
+  eval(""Game.getNewTicker=""+Game.getNewTicker.toString().replace(""!manual && Game.T>Game.fps*10 && Game.Has('Fortune cookies') && Math.random()<(Game.HasAchiev('O Fortuna')?0.04:0.02)"",""!manual && Game.T>Game.fps*10 && Game.Has('Fortune cookies') && Math.random()<forceFortune"")) //force fortunes to have a different chance of appearing
+  eval(""Game.Logic=""+Game.Logic.toString().replace(""if (canSave) Game.WriteSave();"",""if (false) Game.WriteSave();"")) //disable saving
+  eval(""Game.shimmerTypes.golden.popFunc=""+Game.shimmerTypes.golden.popFunc.toString().replace(""var list=[];"",""var list=[]; if (seedNats==true) {Math.seedrandom(Game.seed+'/'+Game.goldenClicks);};"")) //seed GCs
+  eval(""Game.updateBuffs=""+Game.updateBuffs.toString().replace(""if (buff.onDie) buff.onDie();"",""if (buff.onDie) buff.onDie(); FindMaxComboStr();"")) //find combo multipliers when a buff dies
+  };
+
+var FtHoFOutcomes=['random','blood frenzy','click frenzy','building special','frenzy','cursed finger','multiply cookies','cookie storm','free sugar lump','cookie storm drop','blab']
+var N=0
+var maxComboStr=1
+var relComboStr=1
+var maxBSCount=0
+var maxGodz=1
+var iniRaw=1
+
+FindMaxComboStr=function() {
+  var mComboStr=1;
+  var rComboStr=1; 
+  var bsCount=0; 
+  var isBS=false; 
+  var godzStr=1; 
+  for (var i in Game.buffs) {
+    var buff=Game.buffs[i]; 
+    for (var obj in Game.Objects) {
+      if (Game.goldenCookieBuildingBuffs[obj][0]==buff.name) {
+        isBS=true; 
+        bsCount++;
+        };
+      };
+    if (buff.multCpS) {
+      mComboStr*=buff.multCpS; 
+      if (isBS==false) {
+        rComboStr*=buff.multCpS
+        };
+      }; 
+    if (buff.multClick) {
+      mComboStr*=buff.multClick
+      if (buff.name=='Devastation') {rComboStr*=buff.multClick; godzStr*=buff.multClick};
+      };
+    };
+  if (maxComboStr<mComboStr) {maxComboStr=mComboStr; relComboStr=rComboStr; maxBSCount=bsCount; maxGodz=godzStr}; 
+  };
+
+PrintScore=function() {
+  var cookieGain=Game.cookiesEarned-iniCE
+  var scoreRed=(maxComboStr*iniRaw/relComboStr);
+  var score=cookieGain/scoreRed;
+  console.log('Score: '+score,'Combo Strength: '+maxComboStr,'Strength of non-divided buffs: '+relComboStr,'Number of BSs: '+maxBSCount,'Strength of Godzamok: '+maxGodz,'Initial Raw CpS: '+iniRaw,'Years of CpS: '+Beautify(cookieGain/iniRaw/31536000));
+  Game.Notify('Score: '+score.toPrecision(3),Beautify(cookieGain/iniRaw/31536000)+' years of CpS, GZ: '+maxGodz.toPrecision(3),[11,5]);
+  };
+
+CycleFtHoF=function()
+{
+	for (var i=0;i<=FtHoFOutcomes.length;i++) {if (forceFtHoF==FtHoFOutcomes[i]) {if (i!=FtHoFOutcomes.length-1) {return FtHoFOutcomes[i+1]} else {return FtHoFOutcomes[0]};};};
+}
+
+GetPrompt=function()
+{
+	Game.Prompt('<id ImportSave><h3>'+""Input to variable""+'</h3><div class=""block"">'+loc(""Please paste what you want the variable to be equal to."")+'<div id=""importError"" class=""warning"" style=""font-weight:bold;font-size:11px;""></div></div><div class=""block""><textarea id=""textareaPrompt"" style=""width:100%;height:128px;"">'+'</textarea></div>',[[loc(""Load""),';Game.ClosePrompt(); switch (N) {case 0: iniLoadSave=(l(\'textareaPrompt\').value); if (iniLoadSave.length<100) {iniLoadSave=false};break;case 1: iniSeed=(l(\'textareaPrompt\').value); if (iniSeed.trim().length!=5) {iniSeed=\'R\'};break;case 2: iniC=Number(l(\'textareaPrompt\').value);break;case 3: iniCE=Number(l(\'textareaPrompt\').value);break;case 4: iniP=Number(l(\'textareaPrompt\').value);break;case 5: iniLumps=Number(l(\'textareaPrompt\').value);break;case 6: iniBC=Number(l(\'textareaPrompt\').value);break;case 7: wizCount=Number(l(\'textareaPrompt\').value);break;case 8: wizLevel=Number(l(\'textareaPrompt\').value);break;};RedrawCCCEM();'],loc(""Nevermind"")]);
+	l('textareaPrompt').focus();
+}
+
+RedrawCCCEM=function()
+{
+	var str='';
+	str+='<div class=""icon"" style=""position:absolute;left:-9px;top:-6px;background-position:'+(-28*48)+'px '+(-12*48)+'px;""></div>';
+	
+	str+='<div id=""devConsoleContent"">';
+	str+='<div class=""title"" style=""font-size:14px;margin:6px;"">CCCEM interface</div>';
+	
+	str+='<a class=""option neato"" '+Game.clickStr+'=""ResetAll(1);"">Try again</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""PresetSettingsGrail();RedrawCCCEM();"">Default</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""PresetSettingsConsist();RedrawCCCEM();"">consistency</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""PresetSettingsBSScry();RedrawCCCEM();"">BS scry</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=0;GetPrompt();"">Import Save</a>';
+	str+='<div class=""line""></div>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=1;GetPrompt();"">iniSeed '+iniSeed+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=2;GetPrompt();"">Cookies '+(iniC.toPrecision(1))+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=3;GetPrompt();"">CookiesB '+(iniCE.toPrecision(1))+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=4;GetPrompt();"">Prestige '+(iniP.toPrecision(1))+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=5;GetPrompt();"">Lumps '+(iniLumps)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""chooseLump+=1; if (chooseLump>4) chooseLump=0;RedrawCCCEM();"">LumpT '+(chooseLump)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=6;GetPrompt();"">Cursors '+(iniBC)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=7;GetPrompt();"">Wizards '+(wizCount)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""N=8;GetPrompt();"">WizLev '+(wizLevel)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""d1Aura+=1; if (d1Aura>21) d1Aura=0;RedrawCCCEM();"">Aura1 '+(d1Aura)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""d2Aura+=1; if (d2Aura>21) d2Aura=0;RedrawCCCEM();"">Aura2 '+(d2Aura)+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""forceFtHoF=CycleFtHoF(); RedrawCCCEM();"">FtHoF '+(forceFtHoF)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""gardenSeed+=1; if (gardenSeed>33) gardenSeed=0;RedrawCCCEM();"">HeldS '+(gardenSeed)+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""gardenP1[0]+=1; if (gardenP1[0]>33) gardenP1[0]=0;RedrawCCCEM();"">Seed1 '+(gardenP1[0])+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""gardenP1[1]+=5; if (gardenP1[1]>99) gardenP1[1]=0;RedrawCCCEM();"">Age1 '+(gardenP1[1])+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""gardenP2[0]+=1; if (gardenP2[0]>33) gardenP2[0]=0;RedrawCCCEM();"">Seed2 '+(gardenP2[0])+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""gardenP2[1]+=5; if (gardenP2[1]>99) gardenP2[1]=0;RedrawCCCEM();"">Age2 '+(gardenP2[1])+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""officeL+=1; if (officeL>5) officeL=0;RedrawCCCEM();"">office '+(officeL)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""spirit1+=1; if (spirit1>10) spirit1=0;RedrawCCCEM();"">Dia '+(spirit1)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""spirit2+=1; if (spirit2>10) spirit2=0;RedrawCCCEM();"">Ruby '+(spirit2)+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""spirit3+=1; if (spirit3>10) spirit3=0;RedrawCCCEM();"">Jade '+(spirit3)+'</a>';
+	str+='<div class=""line""></div>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""iniSpawn=!iniSpawn;RedrawCCCEM();"">iniSpawn '+(iniSpawn?'On':'Off')+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""iniDO=!iniDO;RedrawCCCEM();"">iniDO '+(iniDO?'On':'Off')+'</a>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""iniDEoRL=!iniDEoRL;RedrawCCCEM();"">iniDEoRL '+(iniDEoRL?'On':'Off')+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""if (iniGC==\'R\') {iniGC=-1}; iniGC+=2; if (iniGC>27) iniGC=\'R\';RedrawCCCEM();"">GC1 '+(Game.goldenCookieChoices[iniGC])+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""if (iniGC2==\'R\') {iniGC2=-1}; iniGC2+=2; if (iniGC2>27) iniGC2=\'R\';RedrawCCCEM();"">GC2 '+(Game.goldenCookieChoices[iniGC2])+'</a><br>';
+	str+='<a class=""option neato"" '+Game.clickStr+'=""if (iniGC3==\'R\') {iniGC3=-1}; iniGC3+=2; if (iniGC3>27) iniGC3=\'R\';RedrawCCCEM();"">GC3 '+(Game.goldenCookieChoices[iniGC3])+'</a><br>';
+	str+='</div>';
+	l('devConsole').innerHTML=str;
+	l('debug').style.display='block';
+};
+RedrawCCCEM();"
+rVfWTzcf,Janela de Favoritos com edição e exclusão (Python),MizunoBrasil,Python,Saturday 10th of June 2023 06:08:33 PM CDT,"#EDITADO EM 10/06/2023 ÀS 23:20
+
+import tkinter as tk
+from tkinter import ttk
+from tkinter import messagebox
+import webbrowser
+import csv
+from bs4 import BeautifulSoup
+import requests
+from datetime import datetime
+
+def cadastrar():
+    url = url_entry.get()
+    if url:
+        try:
+            response = requests.get(url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.title.string
+            current_time = datetime.now().strftime(""%d/%m/%Y %H:%M:%S"")
+
+            # Salvar os dados em um arquivo CSV
+            with open('sites.csv', 'a', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow([title, url, current_time])
+
+            # Adicionar os dados na Treeview
+            tree.insert('', 'end', values=(title, url, current_time))
+
+            # Limpar a caixa de texto
+            url_entry.delete(0, 'end')
+        except:
+            # Tratamento de erro caso não seja possível acessar a URL
+            messagebox.showerror(""Erro"", ""Erro ao acessar a URL."")
+    else:
+        messagebox.showerror(""Erro"", ""Digite uma URL."")
+
+def excluir():
+    item = tree.selection()
+    if item:
+        confirm = messagebox.askyesno(""Confirmação"", ""Deseja realmente excluir a URL selecionada?"")
+        if confirm:
+            selected_item = tree.selection()[0]
+            title = tree.item(selected_item)['values'][0]
+            url = tree.item(selected_item)['values'][1]
+            tree.delete(selected_item)
+            messagebox.showinfo(""Exclusão"", ""URL excluída com sucesso."")
+
+            # Remover o registro do arquivo CSV
+            remove_registro_csv(title, url)
+    else:
+        messagebox.showerror(""Erro"", ""Selecione uma URL para excluir."")
+
+def editar():
+    item = tree.selection()
+    if item:
+        selected_item = tree.selection()[0]
+        old_title = tree.item(selected_item)['values'][0]
+        old_url = tree.item(selected_item)['values'][1]
+
+        # Exibir janela de edição
+        edit_window = tk.Toplevel()
+        edit_window.title(""Editar URL"")
+
+        # Campos de edição
+        title_label = tk.Label(edit_window, text=""Título:"")
+        title_label.pack()
+        title_entry = tk.Entry(edit_window, width=50)
+        title_entry.insert(0, old_title)
+        title_entry.pack()
+
+        url_label = tk.Label(edit_window, text=""URL:"")
+        url_label.pack()
+        url_entry = tk.Entry(edit_window, width=50)
+        url_entry.insert(0, old_url)
+        url_entry.pack()
+
+        # Função para salvar as alterações
+        def salvar():
+            new_title = title_entry.get()
+            new_url = url_entry.get()
+
+            if new_title and new_url:
+                tree.item(selected_item, values=(new_title, new_url))
+                edit_window.destroy()
+
+                # Atualizar o registro no arquivo CSV
+                atualizar_registro_csv(old_title, old_url, new_title, new_url)
+            else:
+                messagebox.showerror(""Erro"", ""Preencha todos os campos."")
+
+        # Botão de salvar
+        salvar_button = tk.Button(edit_window, text=""Salvar"", command=salvar)
+        salvar_button.pack()
+
+    else:
+        messagebox.showerror(""Erro"", ""Selecione uma URL para editar."")
+
+def remove_registro_csv(title, url):
+    rows = []
+    with open('sites.csv', 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if row[0] != title or row[1] != url:
+                rows.append(row)
+
+    with open('sites.csv', 'w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerows(rows)
+
+def atualizar_registro_csv(old_title, old_url, new_title, new_url):
+    rows = []
+    with open('sites.csv', 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if row[0] == old_title and row[1] == old_url:
+                current_time = datetime.now().strftime(""%d/%m/%Y %H:%M:%S"")
+                rows.append([new_title, new_url, current_time])
+            else:
+                rows.append(row)
+
+    with open('sites.csv', 'w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerows(rows)
+
+def open_url(event):
+    item = tree.selection()[0]
+    url = tree.item(item)['values'][1]
+    webbrowser.open_new(url)
+
+def carregar_dados():
+    try:
+        with open('sites.csv', 'r', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            for row in reader:
+                title = row[0]
+                url = row[1]
+                timestamp = row[2]
+                tree.insert('', 'end', values=(title, url, timestamp))
+    except FileNotFoundError:
+        messagebox.showerror(""Erro"", ""Arquivo 'sites.csv' não encontrado."")
+
+def paste_url(event):
+    url_entry.delete(0, 'end')
+    url_entry.insert(0, root.clipboard_get())
+
+# Configuração da janela principal
+root = tk.Tk()
+root.title(""Cadastro de Sites"")
+root.geometry(""1280x800"")
+
+# Centralizar a janela
+root.update_idletasks()
+window_width = root.winfo_width()
+window_height = root.winfo_height()
+position_right = int(root.winfo_screenwidth() / 2 - window_width / 2)
+position_down = int(root.winfo_screenheight() / 2 - window_height / 2)
+root.geometry(f""+{position_right}+{position_down}"")
+
+# Configuração da Treeview
+tree = ttk.Treeview(root, columns=(""Title"", ""URL"", ""Data e Hora""), show=""headings"")
+tree.heading(""Title"", text=""Título"")
+tree.heading(""URL"", text=""URL"")
+tree.heading(""Data e Hora"", text=""Data e Hora"")
+tree.pack()
+
+# Configuração da caixa de texto
+url_entry = tk.Entry(root, width=50)
+url_entry.pack(pady=10)
+url_entry.bind(""<Return>"", lambda event: cadastrar())
+url_entry.bind(""<Button-3>"", paste_url)
+
+# Configuração do botão cadastrar
+cadastrar_button = tk.Button(root, text=""Cadastrar"", command=cadastrar)
+cadastrar_button.pack()
+
+# Configuração do botão excluir
+excluir_button = tk.Button(root, text=""Excluir"", command=excluir)
+excluir_button.pack()
+
+# Configuração do botão editar
+editar_button = tk.Button(root, text=""Editar"", command=editar)
+editar_button.pack()
+
+# Configuração do evento de duplo clique na Treeview
+tree.bind(""<Double-1>"", open_url)
+
+# Carregar os dados do arquivo CSV
+carregar_dados()
+
+root.mainloop()
+"
+4Nbp4Jh5,Megre!(Real-CUGAN),ot_inc,Winbatch,Saturday 10th of June 2023 05:04:31 PM CDT,"@echo off
+@title Megre!(Real-CUGAN)
+cd /d ""%~dp0""
+
+:: Frame Rate
+set FPS=59.94
+
+set time2=%time: =0%
+set dttime=%date:~0,4%%date:~5,2%%date:~8,2%%time2:~0,2%%time2:~3,2%%time2:~6,2%
+
+ffmpeg64\ffmpeg.exe -framerate %FPS% -hide_banner -strict -2 -i ""%~dp0\temp-project\image-frames\%%08d.png"" -i ""%~dp0\temp-project\streams\audio.mp4"" -r %FPS% -qp 0 -vcodec libx264 -acodec aac -b:a 192k -y ""%~dp0\FINAL_%dttime%.mp4""
+
+timeout /t 5
+exit 0"
+HL3Z3Thf,webinar-python-input-patterns-2023-06-10,jspill,Python,Saturday 10th of June 2023 05:04:08 PM CDT,"# Webinar Input Patterns June 10 2023
+
+# input() ALWAYS returns a string
+# myInput = input() # that myInput var is definitely a str!
+
+# but we might want to change it to something else...
+
+# 1 Recast a numeric string into an int or float
+# 2 Breaking up a long string into a list of smaller strings
+# 3 Break up a string containing numeric chars into a list of
+#       recast ints or floats
+# 4 One value tells you how many times to call input()
+# 5 We DON'T KNOW how many times to call input(), but we know
+#       a sentinel value to stop
+
+
+# 1 Recast a numeric string into an int or float
+# looks a number...  5 so it's really ""5""
+# myInput = int(input())
+# print(type(myInput))
+
+# 2 Breaking up a long string into a list of smaller strings
+# ""Pat Silly Doe""
+myInput = ""Pat Silly Doe"" # input()
+strList = myInput.split()
+# myInput = input().split()
+print(strList)
+
+# getting a series of numbers... 12 44 67 23
+# 3 Break up a string containing numeric chars into a list of
+#       recast ints or floats
+myInput =  ""31 333 2 78 92"" # input()
+strList = myInput.split()
+print(strList)
+numList = []
+# for __ in __someContainer__
+for num in strList:
+    numList.append(int(num))
+print(numList)
+
+# 4 One value tells you HOW MANY TIMES to call input()
+# 5 # so 5 more pieces of data coming in...
+# 30.0
+# 50.0
+# 10.0
+# 100.0
+# 65.0
+
+
+# numVals = int(input()) # get that first input
+# floatList = []
+#
+# for num in range(numVals):
+#     # get each next input, do your stuff
+#     nextInput = float(input())
+#     floatList.append(nextInput)
+# print(floatList)
+
+# 5 We DON'T KNOW how many times to call input(), but we know to stop on some SENTINEL VALUE
+# this is a WHILE loop condition
+
+# ask for the FIRST input()
+# myInput = input()
+# # THEN I can set up a while loop condition...
+# while myInput != ""-1"": # pay attention to string vs int
+#     print(f""I got this input: {myInput}"")
+#     myInput = input()
+# print(f""I am done! I saw the sentinel value of {myInput}"")
+
+# Condition is never satisfied... comparing ints and strings
+# myInput = int(input())
+# while myInput != ""-1"":
+#     print(myInput * 2)
+#     myInput = int(input())
+# print(f""I am done! I saw the sentinel value of {myInput}"")
+
+# multiple quit commands
+# You can quit with ""quit"" or ""done"" or ""d""
+myInput = input()
+quitCommands = [""quit"", ""done"", ""d""] # pro tip: put them in a list!
+while not myInput in quitCommands:
+    print(f""I received the command: {myInput}"")
+    myInput = input()
+print(""OK. Done!"")"
+j8SzzNnX,Untitled,LordMZTE,Bash,Saturday 10th of June 2023 04:44:35 PM CDT,"#!/bin/sh
+gcc \
+    -o hello \
+    -I include \
+    -lglfw \
+    src/*.c
+"
+WnPQDTVS,Untitled,bigbadvoodoo,C++,Saturday 10th of June 2023 04:26:26 PM CDT,"#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+const int MAX_RESULT_DOCUMENT_COUNT = 5;
+
+const int INVALID_DOCUMENT_ID = -1;
+
+string ReadLine() {
+    string s;
+    getline(cin, s);
+    return s;
+}
+
+int ReadLineWithNumber() {
+    int result;
+    cin >> result;
+    ReadLine();
+    return result;
+}
+
+vector<string> SplitIntoWords(const string& text) {
+    vector<string> words;
+    string word;
+    for (const char c : text) {
+        if (c == ' ') {
+            if (!word.empty()) {
+                words.push_back(word);
+                word.clear();
+            }
+        } else {
+            word += c;
+        }
+    }
+    if (!word.empty()) {
+        words.push_back(word);
+    }
+
+    return words;
+}
+
+struct Document {
+    Document() = default;
+
+    Document(int id, double relevance, int rating)
+            : id(id)
+            , relevance(relevance)
+            , rating(rating) {
+    }
+
+    int id = 0;
+    double relevance = 0.0;
+    int rating = 0;
+};
+
+template <typename StringContainer>
+set<string> MakeUniqueNonEmptyStrings(const StringContainer& strings) {
+    set<string> non_empty_strings;
+    for (const string& str : strings) {
+        if (!str.empty()) {
+            non_empty_strings.insert(str);
+        }
+    }
+    return non_empty_strings;
+}
+
+enum class DocumentStatus {
+    ACTUAL,
+    IRRELEVANT,
+    BANNED,
+    REMOVED,
+};
+
+class SearchServer {
+public:
+    template <typename StringContainer>
+    explicit SearchServer(const StringContainer& stop_words)
+            : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
+    }
+
+    explicit SearchServer(const string& stop_words_text)
+            : SearchServer(
+            SplitIntoWords(stop_words_text))  // Invoke delegating constructor from string container
+    {
+    }
+
+    bool AddDocument(int document_id, const string& document, DocumentStatus status,
+                     const vector<int>& ratings) {
+        if (document_id < 0 || documents_.count(document_id)) {
+            return false;
+        }
+        const vector<string> words = SplitIntoWordsNoStop(document);
+        const double inv_word_count = 1.0 / words.size();
+        for (const string& word : words) {
+            if (!IsValidWord(word)) {
+                return false;
+            }
+            word_to_document_freqs_[word][document_id] += inv_word_count;
+        }
+        documents_.emplace(document_id, DocumentData{ComputeAverageRating(ratings), status});
+        return true;
+    }
+
+
+    template <typename DocumentPredicate>
+    [[nodiscard]]
+    bool FindTopDocuments(const string& raw_query,
+                          DocumentPredicate document_predicate,
+                          vector<Document>& result) const {
+        Query query;
+        bool query_result = ParseQuery(raw_query, query);
+
+        if (!query_result) {
+            return false;
+        }
+        auto matched_documents = FindAllDocuments(query, document_predicate);
+
+        sort(matched_documents.begin(), matched_documents.end(),
+             [](const Document& lhs, const Document& rhs) {
+                 if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+                     return lhs.rating > rhs.rating;
+                 } else {
+                     return lhs.relevance > rhs.relevance;
+                 }
+             });
+        if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
+            matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
+        }
+        result = matched_documents;
+        return true;
+    }
+
+    [[nodiscard]]
+    bool FindTopDocuments(const string& raw_query,
+                          DocumentStatus status,
+                          vector<Document>& result) const {
+        return FindTopDocuments(
+                raw_query, [status](int document_id, DocumentStatus document_status, int rating) {
+                    return document_status == status;
+                }, result);
+    }
+
+    bool FindTopDocuments(const string& raw_query, vector<Document>& result,
+                          DocumentStatus status = DocumentStatus::ACTUAL) const {
+        return FindTopDocuments(raw_query, status, result);
+    }
+
+    int GetDocumentCount() const {
+        return documents_.size();
+    }
+
+    [[nodiscard]]
+    bool MatchDocument(const string& raw_query,
+                       int document_id,
+                       tuple<vector<string>, DocumentStatus>& result) const {
+        Query query;
+        bool query_result = ParseQuery(raw_query, query);
+        if (!query_result) {
+            return false;
+        }
+
+        vector<string> matched_words;
+        for (const string& word : query.plus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            if (word_to_document_freqs_.at(word).count(document_id)) {
+                matched_words.push_back(word);
+            }
+        }
+        for (const string& word : query.minus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            if (word_to_document_freqs_.at(word).count(document_id)) {
+                matched_words.clear();
+                break;
+            }
+        }
+        result = make_tuple(matched_words, documents_.at(document_id).status);
+        return true;
+    }
+
+    int GetDocumentId(int index) const {
+        if (index < 0 || index > GetDocumentCount()) {
+            return INVALID_DOCUMENT_ID;
+        }
+
+        int i=0;
+        for (const auto& [key, value] : documents_) {
+            if (i == index) {
+                return key;
+            }
+            ++i;
+        }
+        return INVALID_DOCUMENT_ID;
+    }
+
+private:
+    struct DocumentData {
+        int rating;
+        DocumentStatus status;
+    };
+    const set<string> stop_words_;
+    map<string, map<int, double>> word_to_document_freqs_;
+    map<int, DocumentData> documents_;
+
+    bool IsStopWord(const string& word) const {
+        return stop_words_.count(word) > 0;
+    }
+
+    vector<string> SplitIntoWordsNoStop(const string& text) const {
+        vector<string> words;
+        for (const string& word : SplitIntoWords(text)) {
+            if (!IsStopWord(word)) {
+                words.push_back(word);
+            }
+        }
+        return words;
+    }
+
+    static int ComputeAverageRating(const vector<int>& ratings) {
+        if (ratings.empty()) {
+            return 0;
+        }
+        int rating_sum = 0;
+        for (const int rating : ratings) {
+            rating_sum += rating;
+        }
+        return rating_sum / static_cast<int>(ratings.size());
+    }
+
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
+
+    QueryWord ParseQueryWord(string text) const {
+        bool is_minus = false;
+        // Word shouldn't be empty
+        if (text[0] == '-' && text[1] != ' ') {
+            is_minus = true;
+            text = text.substr(1);
+        }
+        return {text, is_minus, IsStopWord(text)};
+    }
+
+    struct Query {
+        set<string> plus_words;
+        set<string> minus_words;
+    };
+
+    [[nodiscard]]
+    bool ParseQuery(const string& text, Query& result) const {
+        for (const string& word : SplitIntoWords(text)) {
+            if (!IsValidWord(word)) {
+                return false;
+            }
+            const QueryWord query_word = ParseQueryWord(word);
+            if (!query_word.is_stop) {
+                if (query_word.is_minus) {
+                    result.minus_words.insert(query_word.data);
+                } else {
+                    result.plus_words.insert(query_word.data);
+                }
+            }
+        }
+        return true;
+    }
+
+    // Existence required
+    double ComputeWordInverseDocumentFreq(const string& word) const {
+        return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
+    }
+
+    template <typename DocumentPredicate>
+    vector<Document> FindAllDocuments(const Query& query,
+                                      DocumentPredicate document_predicate) const {
+        map<int, double> document_to_relevance;
+        for (const string& word : query.plus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
+            for (const auto [document_id, term_freq] : word_to_document_freqs_.at(word)) {
+                const auto& document_data = documents_.at(document_id);
+                if (document_predicate(document_id, document_data.status, document_data.rating)) {
+                    document_to_relevance[document_id] += term_freq * inverse_document_freq;
+                }
+            }
+        }
+
+        for (const string& word : query.minus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            for (const auto [document_id, _] : word_to_document_freqs_.at(word)) {
+                document_to_relevance.erase(document_id);
+            }
+        }
+
+        vector<Document> matched_documents;
+        for (const auto [document_id, relevance] : document_to_relevance) {
+            matched_documents.push_back(
+                    {document_id, relevance, documents_.at(document_id).rating});
+        }
+        return matched_documents;
+    }
+
+    static bool IsValidWord(const string& word) {
+        return none_of(word.begin(), word.end(), [](char c) {
+            return c >= '\0' && c < ' ';
+        });
+    }
+
+    bool CheckQueryWords(const Query& query) const {
+        for (const auto& word : query.minus_words) {
+            if (count(word.begin(), word.end(), '-') || word.empty() || IsValidWord(word)) {
+                return false;
+            }
+        }
+        for (const auto& word : query.plus_words) {
+            if (count(word.begin(), word.end(), '-') || word.empty() || IsValidWord(word)) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// ==================== для примера =========================
+
+void PrintDocument(const Document& document) {
+    cout << ""{ ""s
+         << ""document_id = ""s << document.id << "", ""s
+         << ""relevance = ""s << document.relevance << "", ""s
+         << ""rating = ""s << document.rating << "" }""s << endl;
+}
+
+int main() {
+    SearchServer search_server(""и в на""s);
+    // Явно игнорируем результат метода AddDocument, чтобы избежать предупреждения
+    // о неиспользуемом результате его вызова
+    (void) search_server.AddDocument(1, ""пушистый кот пушистый хвост""s, DocumentStatus::ACTUAL, {7, 2, 7});
+    if (!search_server.AddDocument(1, ""пушистый пёс и модный ошейник""s, DocumentStatus::ACTUAL, {1, 2})) {
+        cout << ""Документ не был добавлен, так как его id совпадает с уже имеющимся""s << endl;
+    }
+    if (!search_server.AddDocument(-1, ""пушистый пёс и модный ошейник""s, DocumentStatus::ACTUAL, {1, 2})) {
+        cout << ""Документ не был добавлен, так как его id отрицательный""s << endl;
+    }
+    if (!search_server.AddDocument(3, ""большой пёс скво\x12рец""s, DocumentStatus::ACTUAL, {1, 3, 2})) {
+        cout << ""Документ не был добавлен, так как содержит спецсимволы""s << endl;
+    }
+    if (!search_server.AddDocument(3, ""боль-шой пёс скворец""s, DocumentStatus::ACTUAL, {1, 3, 2})) {
+        cout << ""Присутствуют слова с дефисом в середине""s << endl;
+    }
+    vector<Document> documents;
+    if (search_server.FindTopDocuments(""--пушистый""s, documents)) {
+        for (const Document& document : documents) {
+            PrintDocument(document);
+        }
+    } else {
+        cout << ""Ошибка в поисковом запросе""s << endl;
+    }
+}"
+5UE1zWbf,Untitled,skimono,C++,Saturday 10th of June 2023 04:23:23 PM CDT,"#pragma GCC optimize(""Ofast"") // ������������ ���������, �� ��� ������
+#pragma GCC optimize(""no-stack-protector"") //�����
+#pragma GCC optimize(""unroll-loops"") // � ���� ���� ��� �� 100 �� ������ ����� � ��������� �� ��� � 100 ��� �� ������ ��������
+#pragma GCC target(""sse,sse2,sse3,ssse3,popcnt,abm,mmx,tune=native"") // ��� ����� ����� �� ��� 03 02 ��������� � ������ ������� �������� ��� ���� ������������
+#pragma GCC optimize(""fast-math"")
+#define _CRT_SECURE_NO_WARNINGS
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <stack>
+#include <iomanip>
+#include <fstream>
+#include <string>
+#include <set>
+#include <deque>
+#include <queue>
+#include <map>
+#include <bitset>
+#include <random>
+#include <list>
+#include <unordered_map>
+#include <unordered_set>
+#include <cassert>
+
+using namespace std;
+
+typedef long long ll;
+typedef short sh;
+typedef unsigned long long ull;
+typedef long double ld;
+typedef string str;
+//typedef __int128 ultraint;
+#define sqrt sqrtl
+#define F first
+#define S second
+#define endl '\n'
+#define all(vc666) vc666.begin(), vc666.end()
+#define allr(vc666) vc666.rbegin(), vc666.rend()
+#define int long long
+#define degug(x) cerr (#x) << "" "" << (x) << endl;
+
+const ll INF = 1e18;
+const ll inf = 1e9 + 7;
+const ll ONE = 1;
+const ll mod = 1e9 + 7;
+const ll m1 = 1e8 + 575179;
+const ll m2 = 1e9 + 87;
+const ll LG = 19;
+const ll k = 347;
+ld EPS = 1e-7;
+ld PI = 3.1415926535897932384;
+ld phi = (sqrt(5) + 1.0) / 2.0;
+mt19937_64 gen(4906);
+
+void solve() {
+    string s, t;
+    cin >> s >> t;
+    vector <int> ans;
+    int n = s.size(), i, j, n2 = t.size();
+    if (n < n2) {
+        cout << 0 << endl;
+        return;
+    }
+    vector <int> zxc(95, 0), zxc2(95, 0), pw(n2 + 1, 1);
+    for (i = 1; i <= n2; i++) {
+        pw[i] = (pw[i - 1] * k) % m1;
+    }
+    vector <int> keys;
+    vector <int> keys2;
+    for (i = 0; i < n2; i++) {
+        for (j = 0; j < 95; j++) {
+            zxc[j] = zxc[j] * k;
+            zxc[j] %= m1;
+            zxc2[j] = zxc2[j] * k;
+            zxc2[j] %= m1;
+        }
+        zxc[t[i] - 33] += 1;
+        zxc[t[i] - 33] %= m1;
+        zxc2[s[i] - 33] += 1;
+        zxc2[s[i] - 33] %= m1;
+    }
+    for (j = 0; j < 95; j++) {
+        if (zxc[j] > 0) {
+            keys.push_back(zxc[j]);
+        }
+        if (zxc2[j] > 0) {
+            keys2.push_back(zxc2[j]);
+        }
+    }
+    sort(all(keys));
+    sort(all(keys2));
+    if (keys == keys2) {
+        ans.push_back(0);
+    }
+    for (i = 0; i + n2 < n; i++) {
+        keys2.clear();
+        for (j = 0; j < 95; j++) {
+            zxc2[j] = zxc2[j] * k;
+            zxc2[j] %= m1;
+        }
+        zxc2[s[i + n2] - 33] += 1;
+        zxc2[s[i + n2] - 33] %= m1;
+        zxc2[s[i] - 33] = (zxc2[s[i] - 33] + m1 - pw[n2]) % m1;
+        for (j = 0; j < 95; j++) {
+            if (zxc2[j] > 0) {
+                keys2.push_back(zxc2[j]);
+            }
+        }
+        if (keys2.size() != keys.size()) continue;
+        sort(all(keys2));
+        if (keys == keys2) {
+            ans.push_back(i + 1);
+        }
+    }
+    cout << ans.size() << endl;
+    for (auto it : ans) {
+        cout << it + 1 << "" "";
+    }
+}
+
+signed main() {
+#ifdef _DEBUG
+    freopen(""input.txt"", ""r "", stdin);
+    freopen(""output.txt"", ""w"", stdout);
+#endif
+    ios_base::sync_with_stdio(0);
+    cin.tie(NULL);
+    cout.tie(NULL);
+    int t = 1;
+    //cin >> t;
+    while (t--) solve();
+}
+//Deisgned by skimono"
+cHd6N3h4,Minecraft 1.19.2 world wont open in 1.20 update,NightofHunter,JavaScript,Saturday 10th of June 2023 04:16:37 PM CDT,"[16:53:34] [Datafixer Bootstrap/INFO]: 188 Datafixer optimizations took 363 milliseconds
+[16:53:37] [Render thread/INFO]: Environment: authHost='https://authserver.mojang.com', accountsHost='https://api.mojang.com', sessionHost='https://sessionserver.mojang.com', servicesHost='https://api.minecraftservices.com', name='PROD'
+[16:53:38] [Render thread/INFO]: Setting user: NightofHunter
+[16:53:39] [Render thread/INFO]: Backend library: LWJGL version 3.3.1 build 7
+[16:53:49] [Render thread/INFO]: Found non-pack entry 'C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\christmas', ignoring
+[16:53:49] [Render thread/WARN]: Missing metadata in pack file/christmas.zip
+[16:53:50] [Render thread/WARN]: Missing metadata in pack file/decoration-goplus.zip
+[16:53:50] [Render thread/WARN]: Missing metadata in pack file/dirt-slabs-textures.zip
+[16:53:50] [Render thread/WARN]: Missing metadata in pack file/dramatic-rain-e1420.zip
+[16:53:51] [Render thread/WARN]: Missing metadata in pack file/gothiclily-s-flower-pack-e3390.zip
+[16:53:51] [Render thread/WARN]: Missing metadata in pack file/halloween-paintings.zip
+[16:53:52] [Render thread/WARN]: Missing metadata in pack file/skyhammer-textures-1553081281.zip
+[16:53:52] [Render thread/WARN]: Missing metadata in pack file/VanillaTweaks_d771778_UNZIP_ME.zip
+[16:53:54] [Render thread/INFO]: Reloading ResourceManager: vanilla, file/texture-transparency-bug-fix.zip, file/Conquest Paintings, file/Conquest Blocks, file/Shield+Corrections+§c[Colored].zip, file/Dirt Slabs Textures, file/Enhanced Dripstone v1.1.zip, file/Dramatic Rain, file/Gothiclily's flower pack, file/STONEBORN+Gear-HIGH_EYES-1.17+-+V1.0.zip, file/Tall Golden Wheat.zip, file/VanillaTweaks_r250323.zip, file/Turtleman's+Golden+Birch.zip, file/Wagon+Wheel+Add-on+1.1-1.13.zip, file/candles.zip, file/glowing-stems-e570.zip, file/henrys-better-sugar-cane.zip, file/fafik77 Language pack.zip, file/more-totems-r1-16-5-2-resourcepack.zip
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\Dirt Slabs Textures
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\Dramatic Rain
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\candles.zip
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\Dirt Slabs Textures
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\Dramatic Rain
+[16:53:54] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\resourcepacks\candles.zip
+[16:53:54] [Worker-Main-1/INFO]: Found unifont_all_no_pua-15.0.06.hex, loading
+[16:53:54] [Worker-Main-2/ERROR]: Invalid path in pack: minecraft:blockstates/.DS_Store, ignoring
+[16:53:55] [Worker-Main-4/ERROR]: Invalid path in pack: minecraft:models/.DS_Store, ignoring
+[16:53:55] [Worker-Main-4/ERROR]: Invalid path in pack: minecraft:models/block/.DS_Store, ignoring
+[16:53:55] [Worker-Main-7/ERROR]: Invalid path in pack: minecraft:textures/block/.DS_Store, ignoring
+[16:53:55] [Worker-Main-7/ERROR]: Invalid path in pack: minecraft:textures/block/rose_bush_bottom 2.png, ignoring
+[16:53:55] [Worker-Main-4/ERROR]: Invalid path in pack: minecraft:models/block/orange_tulip 3.json, ignoring
+[16:53:55] [Worker-Main-4/WARN]: Invalid path in datapack: minecraft:models/.DS_Store, ignoring
+[16:53:55] [Worker-Main-7/WARN]: Invalid path in datapack: minecraft:textures/item/carrot_on_a_stick/exp_stoar old.png, ignoring
+[16:53:55] [Worker-Main-7/WARN]: Invalid path in datapack: minecraft:textures/item/life_shards/heart note.txt, ignoring
+[16:53:58] [Worker-Main-1/WARN]: Texture minecraft:item/carrot_on_a_stick/eidos_reversal_controller with size 225x225 limits mip level from 4 to 0
+[16:53:58] [Worker-Main-1/WARN]: minecraft:textures/atlas/blocks.png: dropping miplevel from 4 to 0, because of minimum power of two: 1
+[16:54:01] [Worker-Main-1/WARN]: Missing textures in model minecraft:totem_of_undying#inventory:
+    minecraft:textures/atlas/blocks.png:more_totems:item/bat
+    minecraft:textures/atlas/blocks.png:more_totems:item/cod
+    minecraft:textures/atlas/blocks.png:more_totems:item/donkey
+    minecraft:textures/atlas/blocks.png:more_totems:item/elder_guardian
+    minecraft:textures/atlas/blocks.png:more_totems:item/endermite
+    minecraft:textures/atlas/blocks.png:more_totems:item/evoker
+    minecraft:textures/atlas/blocks.png:more_totems:item/fox
+    minecraft:textures/atlas/blocks.png:more_totems:item/ghast
+    minecraft:textures/atlas/blocks.png:more_totems:item/giant
+    minecraft:textures/atlas/blocks.png:more_totems:item/guardian
+    minecraft:textures/atlas/blocks.png:more_totems:item/hoglin
+    minecraft:textures/atlas/blocks.png:more_totems:item/horse
+    minecraft:textures/atlas/blocks.png:more_totems:item/husk
+    minecraft:textures/atlas/blocks.png:more_totems:item/illusioner
+    minecraft:textures/atlas/blocks.png:more_totems:item/llama
+    minecraft:textures/atlas/blocks.png:more_totems:item/mooshroom
+    minecraft:textures/atlas/blocks.png:more_totems:item/mule
+    minecraft:textures/atlas/blocks.png:more_totems:item/ocelot
+    minecraft:textures/atlas/blocks.png:more_totems:item/panda
+    minecraft:textures/atlas/blocks.png:more_totems:item/parrot
+    minecraft:textures/atlas/blocks.png:more_totems:item/piglin_brute
+    minecraft:textures/atlas/blocks.png:more_totems:item/pillager
+    minecraft:textures/atlas/blocks.png:more_totems:item/polar_bear
+    minecraft:textures/atlas/blocks.png:more_totems:item/pufferfish
+    minecraft:textures/atlas/blocks.png:more_totems:item/rabbit
+    minecraft:textures/atlas/blocks.png:more_totems:item/ravager
+    minecraft:textures/atlas/blocks.png:more_totems:item/salmon
+    minecraft:textures/atlas/blocks.png:more_totems:item/silverfish
+    minecraft:textures/atlas/blocks.png:more_totems:item/snow_golem
+    minecraft:textures/atlas/blocks.png:more_totems:item/stray
+    minecraft:textures/atlas/blocks.png:more_totems:item/strider
+    minecraft:textures/atlas/blocks.png:more_totems:item/trader_llama
+    minecraft:textures/atlas/blocks.png:more_totems:item/tropical_fish
+    minecraft:textures/atlas/blocks.png:more_totems:item/turtle
+    minecraft:textures/atlas/blocks.png:more_totems:item/vex
+    minecraft:textures/atlas/blocks.png:more_totems:item/vindicator
+    minecraft:textures/atlas/blocks.png:more_totems:item/wandering_trader
+    minecraft:textures/atlas/blocks.png:more_totems:item/witch
+    minecraft:textures/atlas/blocks.png:more_totems:item/wolf
+    minecraft:textures/atlas/blocks.png:more_totems:item/zoglin
+    minecraft:textures/atlas/blocks.png:more_totems:item/zombie_horse
+    minecraft:textures/atlas/blocks.png:more_totems:item/zombie_villager
+    minecraft:textures/atlas/blocks.png:more_totems:item/zombified_piglin
+[16:54:04] [Render thread/WARN]: Missing sound for event: minecraft:item.goat_horn.play
+[16:54:04] [Render thread/WARN]: Missing sound for event: minecraft:entity.goat.screaming.horn_break
+[16:54:04] [Render thread/INFO]: OpenAL initialized on device OpenAL Soft on Speakers (Realtek High Definition Audio)
+[16:54:04] [Render thread/INFO]: Sound engine started
+[16:54:04] [Render thread/INFO]: Created: 1024x1024x0 minecraft:textures/atlas/blocks.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 256x256x4 minecraft:textures/atlas/signs.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 512x512x4 minecraft:textures/atlas/banner_patterns.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 1024x1024x4 minecraft:textures/atlas/shield_patterns.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 1024x1024x4 minecraft:textures/atlas/armor_trims.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 256x256x4 minecraft:textures/atlas/chest.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 128x64x4 minecraft:textures/atlas/decorated_pot.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 512x256x4 minecraft:textures/atlas/shulker_boxes.png-atlas
+[16:54:04] [Render thread/INFO]: Created: 512x256x4 minecraft:textures/atlas/beds.png-atlas
+[16:54:05] [Render thread/WARN]: Shader rendertype_entity_translucent_emissive could not find sampler named Sampler2 in the specified shader program.
+[16:54:06] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/particles.png-atlas
+[16:54:06] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/paintings.png-atlas
+[16:54:06] [Render thread/INFO]: Created: 128x128x0 minecraft:textures/atlas/mob_effects.png-atlas
+[16:55:43] [Render thread/WARN]: Missing metadata in pack file/apple-pollinator-v1-1.zip
+[16:55:43] [Render thread/WARN]: Missing metadata in pack file/better-skeleton-loot.zip
+[16:55:44] [Render thread/WARN]: Missing metadata in pack file/mlogo-s-craftable-dead-bushes-v1-0-0-1570869082.zip
+[16:55:44] [Render thread/WARN]: Missing metadata in pack file/repairableanvils-1559874924.zip
+[16:55:44] [Render thread/WARN]: Missing metadata in pack file/veryns-dirt-slabs.zip
+[16:55:45] [Render thread/WARN]: Missing metadata in pack file/Villager Names [1.18x] UNZIP ME.zip
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Bundle
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Calcite
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Clay
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Gunpowder
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Magma
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Small Dripleaf
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Spore Blossom
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\Re-Dying Datapack
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\how-many-bees-e2230.zip
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\veryns-dirt-slabs
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\minibossbars.zip
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Bundle
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Calcite
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Clay
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Gunpowder
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Magma
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Small Dripleaf
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\NoH Spore Blossom
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\Re-Dying Datapack
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\how-many-bees-e2230.zip
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\veryns-dirt-slabs
+[16:55:45] [Render thread/WARN]: Ignored non-lowercase namespace: .DS_Store in C:\Users\Alberto\AppData\Roaming\.minecraft\saves\world\datapacks\minibossbars.zip
+[16:55:47] [Render thread/ERROR]: Registry loading errors:
+> Errors in registry minecraft:root:
+>> Errors in element minecraft:worldgen/biome:
+java.lang.IllegalStateException: Unbound values in registry ResourceKey[minecraft:root / minecraft:worldgen/biome]: [minecraft:basalt_deltas, minecraft:crimson_forest, minecraft:end_barrens, minecraft:end_highlands, minecraft:end_midlands, incendium:infernal_dunes, minecraft:nether_wastes, incendium:quartz_flats, nullscape:shadowlands, minecraft:small_end_islands, minecraft:soul_sand_valley, minecraft:the_end, minecraft:warped_forest, incendium:withered_forest]
+	at hm.l(SourceFile:360)
+	at acl.b(SourceFile:103)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:100)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+>> Errors in element minecraft:worldgen/configured_feature:
+java.lang.IllegalStateException: Unbound values in registry ResourceKey[minecraft:root / minecraft:worldgen/configured_feature]: [incendium:feature_pool/warped_fungus]
+	at hm.l(SourceFile:360)
+	at acl.b(SourceFile:103)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:100)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+> Errors in registry minecraft:worldgen/biome:
+>> Errors in element incendium:ash_barrens:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/ash_barrens.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""spawners"":{""water_ambient"":[],""ambient"":[],""misc"":[],""water_creature"":[],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""monster"":[{""type"":""minecraft:ghast"",""weight"":20,""minCount"":1,""maxCount"":1},{""type"":""minecraft:magma_cube"",""weight"":100,""minCount"":2,""maxCount"":7},{""type"":""minecraft:piglin"",""weight"":100,""minCount"":1,""maxCount"":1}]},""spawn_costs"":{},""carvers"":{""air"":[""minecraft:nether_cave""]},""features"":[[""incendium:ash_barrens/ash_delta"",""incendium:ash_barrens/crimson_patch_large"",""incendium:ash_barrens/crimson_patch_small"",""incendium:ash_barrens/vines_ceiling"",""incendium:ash_barrens/vines_ceiling_dx""],[],[],[],[],[],[],[""minecraft:basalt_blobs"",""minecraft:blackstone_blobs"",""minecraft:spring_delta"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[]],""temperature"":2,""downfall"":0,""effects"":{""ambient_sound"":""minecraft:ambient.basalt_deltas.loop"",""mood_sound"":{""sound"":""minecraft:ambient.basalt_deltas.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.basalt_deltas.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.basalt_deltas"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""fog_color"":6184034,""water_color"":4143428,""water_fog_color"":4341314,""sky_color"":7254527,""particle"":{""options"":{""type"":""minecraft:ash""},""probability"":0.08}},""precipitation"":""none""}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:basalt_deltas:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/basalt_deltas.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.basalt_deltas.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.basalt_deltas.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.basalt_deltas"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:white_ash""},""probability"":0.118093334},""ambient_sound"":""minecraft:ambient.basalt_deltas.loop"",""sky_color"":7254527,""fog_color"":6840176,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[""minecraft:delta"",""minecraft:small_basalt_columns"",""minecraft:large_basalt_columns""],[],[],[],[],[],[],[""minecraft:basalt_blobs"",""minecraft:blackstone_blobs"",""minecraft:spring_delta"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed_double"",""minecraft:ore_gold_deltas"",""minecraft:ore_quartz_deltas"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""]],""spawners"":{""monster"":[{""type"":""minecraft:ghast"",""weight"":40,""minCount"":1,""maxCount"":1},{""type"":""minecraft:magma_cube"",""weight"":100,""minCount"":2,""maxCount"":5}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:crimson_forest:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/crimson_forest.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.crimson_forest.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.crimson_forest.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.crimson_forest"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:crimson_spore""},""probability"":0.025},""ambient_sound"":""minecraft:ambient.crimson_forest.loop"",""sky_color"":7254527,""fog_color"":3343107,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[],[],[],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal"",""minecraft:weeping_vines"",""incendium:crimson_jungle/flower_tree"",""incendium:crimson_jungle/tree_log"",""incendium:crimson_jungle/trees_up_outer"",""incendium:crimson_jungle/trees_vines"",""minecraft:crimson_forest_vegetation""]],""spawners"":{""monster"":[{""type"":""minecraft:zombified_piglin"",""weight"":1,""minCount"":2,""maxCount"":4},{""type"":""minecraft:hoglin"",""weight"":9,""minCount"":3,""maxCount"":4},{""type"":""minecraft:piglin"",""weight"":5,""minCount"":3,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element nullscape:crystal_peaks:
+java.lang.IllegalStateException: Failed to parse nullscape:worldgen/biome/crystal_peaks.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""sky_color"":0,""fog_color"":10518688,""water_color"":7172215,""water_fog_color"":329011,""ambient_sound"":""minecraft:ambient.soul_sand_valley.loop"",""mood_sound"":{""sound"":""minecraft:ambient.basalt_deltas.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:block.amethyst_block.chime"",""tick_chance"":0.004},""particle"":{""options"":{""type"":""falling_obsidian_tear""},""probability"":0.01}},""carvers"":{},""features"":[[""nullscape:crystal/crystal""],[],[],[],[""minecraft:end_gateway_return""],[],[],[],[],[]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:end_barrens:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/end_barrens.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[],[],[],[],[""minecraft:end_gateway_return""],[],[],[],[],[]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:end_highlands:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/end_highlands.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[],[],[],[],[""minecraft:end_gateway_return""],[],[],[],[],[""nullscape:highland/glowstone_patch"",""nullscape:highland/patch_bottom"",""nullscape:glowstone/roots"",""nullscape:glowstone/tree"",""nullscape:glowstone/tree2"",""nullscape:chorus_quadratic"",""nullscape:chorus_variation""]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:end_midlands:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/end_midlands.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[],[],[],[],[""minecraft:end_gateway_return""],[],[],[],[],[]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:infernal_dunes:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/infernal_dunes.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""temperature"":2,""downfall"":0,""precipitation"":""none"",""effects"":{""sky_color"":13590016,""fog_color"":6835787,""water_color"":4159204,""water_fog_color"":4341314,""ambient_sound"":""minecraft:ambient.crimson_forest.loop"",""mood_sound"":{""sound"":""minecraft:ambient.crimson_forest.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.nether_wastes.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.nether_wastes"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false}},""spawners"":{""water_ambient"":[],""ambient"":[],""misc"":[],""water_creature"":[],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""monster"":[{""type"":""minecraft:blaze"",""weight"":20,""minCount"":2,""maxCount"":5},{""type"":""minecraft:magma_cube"",""weight"":5,""minCount"":1,""maxCount"":3}]},""spawn_costs"":{},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[""incendium:infernal_dunes/dune""],[],[],[],[],[],[],[""incendium:infernal_dunes/delta"",""incendium:infernal_dunes/bush"",""incendium:infernal_dunes/blood_vines"",""incendium:infernal_dunes/blood_vines_long"",""minecraft:spring_delta"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed_double"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""]]}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:inverted_forest:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/inverted_forest.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.warped_forest.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.warped_forest.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.warped_forest"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:warped_spore""},""probability"":0.01428},""ambient_sound"":""minecraft:ambient.warped_forest.loop"",""sky_color"":7254527,""fog_color"":1705242,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[""incendium:inverted_forest/trees_extra"",""incendium:inverted_forest/trees_step2_big"",""incendium:inverted_forest/trees_step1"",""incendium:inverted_forest/trees_step2"",""incendium:inverted_forest/trees_up_outer"",""incendium:inverted_forest/trees_up_inner"",""incendium:inverted_forest/trees_vines""],[],[],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal"",""warped_forest_vegetation"",""minecraft:nether_sprouts"",""minecraft:twisting_vines""]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":1,""minCount"":4,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""minecraft:enderman"":{""energy_budget"":0.12,""charge"":1}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:nether_wastes:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/nether_wastes.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.nether_wastes.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.nether_wastes.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.nether_wastes"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""ambient_sound"":""minecraft:ambient.nether_wastes.loop"",""sky_color"":7254527,""fog_color"":3344392,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[],[],[],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal""]],""spawners"":{""monster"":[{""type"":""minecraft:ghast"",""weight"":50,""minCount"":4,""maxCount"":4},{""type"":""minecraft:zombified_piglin"",""weight"":100,""minCount"":4,""maxCount"":4},{""type"":""minecraft:magma_cube"",""weight"":2,""minCount"":4,""maxCount"":4},{""type"":""minecraft:enderman"",""weight"":1,""minCount"":4,""maxCount"":4},{""type"":""minecraft:piglin"",""weight"":15,""minCount"":4,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:quartz_flats:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/quartz_flats.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.warped_forest.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.soul_sand_valley"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:end_rod""},""probability"":0.003},""ambient_sound"":""minecraft:ambient.warped_forest.loop"",""sky_color"":12763856,""fog_color"":13746120,""foliage_color"":7798551,""grass_color"":7798551,""water_color"":4159204,""water_fog_color"":4341314},""carvers"":{""air"":[""minecraft:nether_cave""]},""features"":[[""incendium:quartz_flats/quartz_delta"",""incendium:quartz_flats/quartz_crystal"",""incendium:quartz_flats/soul_fire_rings""],[],[],[],[],[],[],[""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed_double"",""minecraft:ore_gold_deltas"",""minecraft:ore_quartz_deltas"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal""],[]],""spawners"":{""monster"":[{""type"":""minecraft:ghast"",""weight"":100,""minCount"":8,""maxCount"":8},{""type"":""minecraft:skeleton"",""weight"":100,""minCount"":1,""maxCount"":5}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element nullscape:shadowlands:
+java.lang.IllegalStateException: Failed to parse nullscape:worldgen/biome/shadowlands.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""temperature"":2,""downfall"":0,""precipitation"":""none"",""effects"":{""sky_color"":0,""fog_color"":10518688,""water_color"":7172215,""water_fog_color"":329011,""mood_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.additions"",""tick_chance"":0.0111},""ambient_sound"":""minecraft:ambient.warped_forest.loop"",""particle"":{""options"":{""type"":""minecraft:ash"",""fromColor"":[0.4,0.4,0.4],""toColor"":[0,0,0],""scale"":1.45},""probability"":0.08}},""spawners"":{""monster"":[{""type"":""minecraft:phantom"",""weight"":5,""minCount"":1,""maxCount"":1},{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""phantom"":{""energy_budget"":0.12,""charge"":1}},""carvers"":{},""features"":[[""nullscape:asteroid_carver""],[""minecraft:end_gateway_return""],[],[""nullscape:shadow/shadow_cut""],[""nullscape:shadow/blackstone"",""nullscape:shadow/basalt"",""nullscape:shadow/bone_trees1"",""nullscape:shadow/droop""],[""nullscape:shadow/pillar"",""nullscape:shadow/vegetation"",""nullscape:shadow/pillars_coral""]]}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:small_end_islands:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/small_end_islands.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[""minecraft:end_island_decorated""],[""nullscape:float/asteroid""]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:soul_sand_valley:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/soul_sand_valley.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.soul_sand_valley"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:ash""},""probability"":0.00625},""ambient_sound"":""minecraft:ambient.soul_sand_valley.loop"",""sky_color"":7254527,""fog_color"":1787717,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[],[],[""minecraft:basalt_pillar""],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:patch_crimson_roots"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_soul_sand"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava""]],""spawners"":{""monster"":[{""type"":""minecraft:skeleton"",""weight"":20,""minCount"":5,""maxCount"":5},{""type"":""minecraft:ghast"",""weight"":50,""minCount"":4,""maxCount"":4},{""type"":""minecraft:enderman"",""weight"":1,""minCount"":4,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""minecraft:skeleton"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:ghast"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:enderman"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:strider"":{""energy_budget"":0.15,""charge"":0.7}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:the_end:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/the_end.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[],[],[],[],[""minecraft:end_spike""]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:toxic_heap:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/toxic_heap.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.nether_wastes.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.basalt_deltas.additions"",""tick_chance"":0.02},""music"":{""sound"":""minecraft:music.nether.basalt_deltas"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:dust"",""color"":[0.5,0.9,0.1],""scale"":1},""probability"":0.01},""ambient_sound"":""minecraft:ambient.warped_forest.loop"",""sky_color"":7254527,""fog_color"":7303732,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave""]},""features"":[[""incendium:toxic_heap/spike"",""incendium:toxic_heap/junk_pile""],[],[],[],[],[],[""incendium:toxic_heap/lava_flows""],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal""]],""spawners"":{""monster"":[{""type"":""minecraft:phantom"",""weight"":10,""minCount"":1,""maxCount"":1},{""type"":""minecraft:magma_cube"",""weight"":90,""minCount"":1,""maxCount"":3}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""minecraft:phantom"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:vex"":{""energy_budget"":0.15,""charge"":1}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element nullscape:void_barrens:
+java.lang.IllegalStateException: Failed to parse nullscape:worldgen/biome/void_barrens.json from pack file/Nullscape_1.19.x_v1.2a.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.cave"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""sky_color"":0,""fog_color"":10518688,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{},""features"":[[],[],[],[],[""minecraft:end_gateway_return""],[],[],[],[],[]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":10,""minCount"":4,""maxCount"":4}],""creature"":[],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":0.5,""downfall"":0.5}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:volcanic_deltas:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/volcanic_deltas.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""ambient_sound"":""minecraft:ambient.basalt_deltas.loop"",""mood_sound"":{""sound"":""minecraft:ambient.basalt_deltas.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.basalt_deltas.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.basalt_deltas"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""fog_color"":8215650,""water_color"":6116194,""water_fog_color"":4341314,""sky_color"":7254527,""particle"":{""options"":{""type"":""minecraft:white_ash""},""probability"":0.1}},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[""incendium:volcanic_deltas/eruption""],[],[],[],[""incendium:volcanic_deltas/delta"",""minecraft:small_basalt_columns"",""minecraft:large_basalt_columns""],[],[],[""minecraft:basalt_blobs"",""minecraft:blackstone_blobs"",""minecraft:spring_delta"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed_double"",""minecraft:ore_gold_deltas"",""minecraft:ore_quartz_deltas"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""]],""spawners"":{""water_ambient"":[],""ambient"":[],""misc"":[],""water_creature"":[],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""monster"":[{""type"":""minecraft:ghast"",""weight"":50,""minCount"":8,""maxCount"":8},{""type"":""minecraft:magma_cube"",""weight"":50,""minCount"":2,""maxCount"":3},{""type"":""minecraft:blaze"",""weight"":20,""minCount"":1,""maxCount"":1}]},""spawn_costs"":{},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:warped_forest:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/biome/warped_forest.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.warped_forest.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.warped_forest.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.warped_forest"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:warped_spore""},""probability"":0.01428},""ambient_sound"":""minecraft:ambient.warped_forest.loop"",""sky_color"":7254527,""fog_color"":1705242,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[],[],[],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava"",""minecraft:brown_mushroom_normal"",""minecraft:red_mushroom_normal"",""minecraft:warped_fungi"",""minecraft:warped_forest_vegetation"",""minecraft:nether_sprouts"",""minecraft:twisting_vines""]],""spawners"":{""monster"":[{""type"":""minecraft:enderman"",""weight"":1,""minCount"":4,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""minecraft:enderman"":{""energy_budget"":0.12,""charge"":1}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:weeping_valley:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/weeping_valley.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.soul_sand_valley.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.soul_sand_valley"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:ash""},""probability"":0.00625},""ambient_sound"":""minecraft:ambient.soul_sand_valley.loop"",""sky_color"":7254527,""fog_color"":3352095,""water_color"":4159204,""water_fog_color"":329011},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[""incendium:weeping_valley/surface"",""incendium:weeping_valley/tendril1_floor"",""incendium:weeping_valley/tendril2_floor"",""incendium:weeping_valley/ceiling"",""incendium:weeping_valley/tendril1_ceiling"",""incendium:weeping_valley/tendril2_ceiling""],[],[""minecraft:basalt_pillar""],[],[],[],[],[""minecraft:spring_open"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:patch_crimson_roots"",""minecraft:ore_magma"",""minecraft:spring_closed"",""minecraft:ore_soul_sand"",""minecraft:ore_gravel_nether"",""minecraft:ore_blackstone"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""],[],[""minecraft:spring_lava""]],""spawners"":{""monster"":[{""type"":""minecraft:skeleton"",""weight"":25,""minCount"":5,""maxCount"":5},{""type"":""minecraft:ghast"",""weight"":50,""minCount"":4,""maxCount"":4},{""type"":""minecraft:enderman"",""weight"":2,""minCount"":4,""maxCount"":4},{""type"":""minecraft:magma_cube"",""weight"":20,""minCount"":2,""maxCount"":4}],""creature"":[{""type"":""minecraft:strider"",""weight"":60,""minCount"":1,""maxCount"":2}],""ambient"":[],""axolotls"":[],""underground_water_creature"":[],""water_creature"":[],""water_ambient"":[],""misc"":[]},""spawn_costs"":{""minecraft:skeleton"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:ghast"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:enderman"":{""energy_budget"":0.15,""charge"":0.7},""minecraft:strider"":{""energy_budget"":0.15,""charge"":0.7}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:withered_forest:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/biome/withered_forest.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key has_precipitation in MapLike[{""effects"":{""mood_sound"":{""sound"":""minecraft:ambient.warped_forest.mood"",""tick_delay"":6000,""block_search_extent"":8,""offset"":2},""additions_sound"":{""sound"":""minecraft:ambient.crimson_forest.additions"",""tick_chance"":0.0111},""music"":{""sound"":""minecraft:music.nether.basalt_deltas"",""min_delay"":12000,""max_delay"":24000,""replace_current_music"":false},""particle"":{""options"":{""type"":""minecraft:smoke""},""probability"":0.01},""ambient_sound"":""minecraft:ambient.basalt_deltas.loop"",""sky_color"":12763856,""fog_color"":2169642,""foliage_color"":8357004,""water_color"":4159204,""water_fog_color"":4341314},""carvers"":{""air"":[""minecraft:nether_cave"",""incendium:big_cave""]},""features"":[[],[],[],[],[""incendium:withered_forest/trees""],[],[],[""minecraft:blackstone_blobs"",""minecraft:spring_delta"",""minecraft:patch_fire"",""minecraft:patch_soul_fire"",""minecraft:glowstone_extra"",""minecraft:glowstone"",""minecraft:brown_mushroom_nether"",""minecraft:red_mushroom_nether"",""minecraft:ore_magma"",""minecraft:spring_closed_double"",""minecraft:ore_gold_nether"",""minecraft:ore_quartz_nether"",""minecraft:ore_ancient_debris_large"",""minecraft:ore_debris_small""]],""spawners"":{""water_ambient"":[],""ambient"":[],""misc"":[],""water_creature"":[],""creature"":[],""monster"":[{""type"":""minecraft:wither_skeleton"",""weight"":50,""minCount"":1,""maxCount"":3},{""type"":""minecraft:magma_cube"",""weight"":20,""minCount"":1,""maxCount"":3},{""type"":""minecraft:phantom"",""weight"":6,""minCount"":1,""maxCount"":2}]},""spawn_costs"":{""minecraft:wither_skeleton"":{""energy_budget"":0.1,""charge"":0.4},""minecraft:enderman"":{""energy_budget"":0.1,""charge"":0.2},""minecraft:magma_cube"":{""energy_budget"":0.15,""charge"":0.5},""minecraft:vex"":{""energy_budget"":0.2,""charge"":0.5},""minecraft:phantom"":{""energy_budget"":0.15,""charge"":0.7}},""precipitation"":""none"",""temperature"":2,""downfall"":0}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+> Errors in registry minecraft:worldgen/configured_feature:
+>> Errors in element minecraft:crimson_fungi:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/configured_feature/crimson_fungi.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key replaceable_blocks in MapLike[{""hat_state"":{""Name"":""minecraft:nether_wart_block""},""decor_state"":{""Name"":""minecraft:shroomlight""},""planted"":false,""valid_base_block"":{""Name"":""minecraft:crimson_nylium""},""stem_state"":{""Properties"":{""axis"":""y""},""Name"":""minecraft:crimson_stem""}}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element incendium:feature_pool/warped_fungus:
+java.lang.IllegalStateException: Failed to parse incendium:worldgen/configured_feature/feature_pool/warped_fungus.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key replaceable_blocks in MapLike[{""hat_state"":{""Name"":""minecraft:warped_wart_block""},""decor_state"":{""Name"":""minecraft:shroomlight""},""planted"":false,""valid_base_block"":{""Name"":""minecraft:warped_nylium""},""stem_state"":{""Properties"":{""axis"":""y""},""Name"":""minecraft:warped_stem""}}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+>> Errors in element minecraft:warped_fungi:
+java.lang.IllegalStateException: Failed to parse minecraft:worldgen/configured_feature/warped_fungi.json from pack file/Incendium_1.19_v5.1.4.zip
+	at acl.a(SourceFile:179)
+	at acl$b.a(SourceFile:61)
+	at acl.a(SourceFile:98)
+	at java.base/java.lang.Iterable.forEach(Iterable.java:75)
+	at acl.a(SourceFile:98)
+	at adj.a(SourceFile:67)
+	at adj.b(SourceFile:71)
+	at adj.a(SourceFile:34)
+	at ezk.a(SourceFile:187)
+	at ezk.a(SourceFile:123)
+	at ezk.a(SourceFile:202)
+	at ezk.a(SourceFile:64)
+	at ezl$c.k(SourceFile:590)
+	at ezl$c.d(SourceFile:480)
+	at ezl$c.a(SourceFile:402)
+	at epc.a(SourceFile:327)
+	at eqs.a(SourceFile:38)
+	at eno.b(SourceFile:98)
+	at euq.a(SourceFile:409)
+	at eno.a(SourceFile:98)
+	at eno.c(SourceFile:169)
+	at bcn.execute(SourceFile:102)
+	at eno.b(SourceFile:169)
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43)
+	at org.lwjgl.system.JNI.invokeV(Native Method)
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474)
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237)
+	at enn.f(SourceFile:1244)
+	at enn.e(SourceFile:802)
+	at net.minecraft.client.main.Main.main(SourceFile:250)
+Caused by: java.lang.RuntimeException: No key replaceable_blocks in MapLike[{""hat_state"":{""Name"":""minecraft:warped_wart_block""},""decor_state"":{""Name"":""minecraft:shroomlight""},""planted"":false,""valid_base_block"":{""Name"":""minecraft:warped_nylium""},""stem_state"":{""Properties"":{""axis"":""y""},""Name"":""minecraft:warped_stem""}}]
+	at com.mojang.serialization.DataResult.lambda$getOrThrow$5(DataResult.java:101)
+	at com.mojang.datafixers.util.Either$Right.map(Either.java:99)
+	at com.mojang.serialization.DataResult.getOrThrow(DataResult.java:93)
+	at acl.a(SourceFile:176)
+	... 29 more
+
+[16:55:47] [Render thread/WARN]: Failed to load level data or datapacks, can't proceed with server load
+java.util.concurrent.ExecutionException: java.lang.IllegalStateException: Failed to load registries due to above errors
+	at java.util.concurrent.CompletableFuture.reportGet(CompletableFuture.java:396) ~[?:?]
+	at java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2073) ~[?:?]
+	at ezk.a(SourceFile:189) ~[1.20.jar:?]
+	at ezk.a(SourceFile:123) ~[1.20.jar:?]
+	at ezk.a(SourceFile:202) ~[1.20.jar:?]
+	at ezk.a(SourceFile:64) ~[1.20.jar:?]
+	at ezl$c.k(SourceFile:590) ~[1.20.jar:?]
+	at ezl$c.d(SourceFile:480) ~[1.20.jar:?]
+	at ezl$c.a(SourceFile:402) ~[1.20.jar:?]
+	at epc.a(SourceFile:327) ~[1.20.jar:?]
+	at eqs.a(SourceFile:38) ~[1.20.jar:?]
+	at eno.b(SourceFile:98) ~[1.20.jar:?]
+	at euq.a(SourceFile:409) ~[1.20.jar:?]
+	at eno.a(SourceFile:98) ~[1.20.jar:?]
+	at eno.c(SourceFile:169) ~[1.20.jar:?]
+	at bcn.execute(SourceFile:102) ~[1.20.jar:?]
+	at eno.b(SourceFile:169) ~[1.20.jar:?]
+	at org.lwjgl.glfw.GLFWMouseButtonCallbackI.callback(GLFWMouseButtonCallbackI.java:43) ~[lwjgl-glfw-3.3.1.jar:build 7]
+	at org.lwjgl.system.JNI.invokeV(Native Method) ~[lwjgl-3.3.1.jar:build 7]
+	at org.lwjgl.glfw.GLFW.glfwWaitEventsTimeout(GLFW.java:3474) ~[lwjgl-glfw-3.3.1.jar:build 7]
+	at com.mojang.blaze3d.systems.RenderSystem.limitDisplayFPS(SourceFile:237) ~[1.20.jar:?]
+	at enn.f(SourceFile:1244) ~[1.20.jar:?]
+	at enn.e(SourceFile:802) ~[1.20.jar:?]
+	at net.minecraft.client.main.Main.main(SourceFile:250) ~[1.20.jar:?]
+Caused by: java.lang.IllegalStateException: Failed to load registries due to above errors
+	at acl.a(SourceFile:111) ~[1.20.jar:?]
+	at adj.a(SourceFile:67) ~[1.20.jar:?]
+	at adj.b(SourceFile:71) ~[1.20.jar:?]
+	at adj.a(SourceFile:34) ~[1.20.jar:?]
+	at ezk.a(SourceFile:187) ~[1.20.jar:?]
+	... 21 more
+"
+bBqFz5mN,Untitled,kiraventom,C,Saturday 10th of June 2023 04:05:51 PM CDT,"#include <stdio.h>
+#include <stdlib.h>
+int main(){
+   int w,h,j,i,*t,**m,**b,**e;
+   for(printf(""Enter width, height: ""),scanf(""%d,%d"",&w,&h),b=m=e=malloc(h*sizeof*b),i=j=0,*m=malloc(w*sizeof**e);i<h;++i,j=0,*(e+i)=malloc(w*sizeof**b),printf(""\n""))
+      while(j<w&&printf(""Value at [%d,%d]: "",i,j)) 
+         scanf(""%d"",*(m+i)+j++);
+   e=m+h-1;
+   do{t=*e;*e=*b;*b=t;}
+   while(++b<--e);
+   for(i=j=0;i<h;++i,j=0,printf(""\n""))
+      while(j<w)
+         printf(""%d "",*(*(m+i)+j++));
+}"
+hcPNL9Hv,Untitled,kopyl,Python,Saturday 10th of June 2023 03:17:16 PM CDT,"import json
+
+
+def handler(event, context):
+    import os
+    files_and_folders = os.listdir()
+    return {
+        ""headers"": {""Content-Type"": ""application/json""},
+        ""statusCode"": 200,
+        ""body"": json.dumps(
+            {
+                ""message"": ""Lambda Container image invoked!"",
+                ""event"": event,
+                ""context"": context,
+                ""files_and_folders"": files_and_folders,
+            }
+        ),
+    }"
+eyEuC3bN,Crazy doors - Simba 1.5 [imperfect],WarPie90,Delphi,Saturday 10th of June 2023 03:03:14 PM CDT,"program new;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I SRL/osr.simba}
+
+type
+  TDoorMMInfo = record
+    Search: TQuad;
+    Shape: TQuad;
+    BaseAngle: Double;
+    mm1,mm2: TPoint;
+  end;
+  TDoorMMInfoArray = array of TDoorMMInfo;
+
+  TRSDoor = record
+    Door: TQuad;
+    IsOpen: Boolean;
+  end;
+  TRSDoors = array of TRSDoor;
+
+  TDoorFilter = record
+    EdgeSensitivity: Int32;
+    Grow: Int32;
+    Erode: Int32;
+    MinDensity: Double;
+  end;
+
+
+function DoorFilter(EdgeSensitivity: Int32; Grow: Int32; Erode: Int32; MinDensity: Double): TDoorFilter;
+begin
+  Result.EdgeSensitivity := EdgeSensitivity;
+  Result.Grow            := Grow;
+  Result.Erode           := Erode;
+  Result.MinDensity      := MinDensity;
+end;
+
+function PolygonArea(const Poly:TPointArray): Double; override;
+begin
+  Result := Abs(inherited);
+end;
+
+function GetPolyDensity(TPA: TPointArray; Poly: TPointArray): Double;
+begin
+  Result := Length(TPA) / PolygonArea(Poly);
+end;
+
+
+function ReduceToQuad(Poly: TPointArray): TPointArray;
+var
+  i: Int32;
+  base, area: Double;
+  best: record area: Double; i: Int32; end;
+  tmp: TPointArray;
+begin
+  while Length(Poly) > 4 do
+  begin
+    base := PolygonArea(Poly);
+
+    best.area := 0;
+    best.i    := -1;
+
+    for i:=0 to High(Poly) do
+    begin
+      tmp := Poly.Copy();
+      tmp.Pop(i);
+      area := PolygonArea(tmp);
+      if area > best.area then
+        best := [area,i];
+    end;
+
+    Poly.Pop(best.i);
+  end;
+
+  Result := Poly;
+end;
+
+
+procedure FurthestPoints(const TPA:TPointArray; out A,B:TPoint);
+var
+  i,j: Integer;
+  dist,tmp: Single;
+begin
+  for i:=0 to High(TPA) do
+    for j:=i+1 to High(TPA) do
+    begin
+      tmp := Hypot(TPA[i].x-TPA[j].x, TPA[i].y-TPA[j].y);
+      if tmp > dist then
+      begin
+        dist := tmp;
+        A := TPA[i];
+        B := TPA[j];
+      end;
+    end;
+end;
+
+function DoorDirectionsAndArea(): TDoorMMInfoArray;
+var
+  dColor, wColor: TCTS1Color;
+  doors, w,d: TPointArray;
+  line: record a,b:TPoint; end;
+  theta,c: Single;
+  shape: TQuad;
+
+  function Scale4Or8(start, other: TPoint): TPoint;
+  var rad, theta: Double;
+  begin
+    rad := start.DistanceTo(other);
+    theta := PI+ArcTan2(start.y-other.y, start.x-other.x);
+    if rad > 6 then
+    begin
+      Result.x := Round(start.x + 8 * Cos(theta));
+      Result.y := Round(start.y + 8 * Sin(theta));
+    end else begin
+      Result.x := Round(start.x + 4 * Cos(theta));
+      Result.y := Round(start.y + 4 * Sin(theta));
+    end;
+  end;
+
+begin
+  dColor := CTS1($FF, 45);
+  wColor := CTS1($FFFFFF, 45);
+
+  srl.FindColors(w, wColor, minimap.Bounds());
+  srl.FindColors(d, dColor, Minimap.Bounds());
+
+  c := Minimap.GetCompassAngle(True);
+  d := d.PointsNearby(w, 0,8);
+  for doors in d.Cluster(3) do
+  begin
+    FurthestPoints(doors, line.a, line.b);
+    line.b := Scale4Or8(line.a, line.b);
+
+    theta := ArcTan2(line.a.y-line.b.y, line.a.x-line.b.x);
+    theta := Degrees(theta);
+    theta := Modulo(theta-c, 180);
+
+    // build a ms rectangle for later use for size comparison:
+    shape := [
+      Minimap.VecToMs([line.a.x, line.a.y, 8]),
+      Minimap.VecToMs([line.b.x, line.b.y, 8]),
+      Minimap.VecToMs([line.b.x, line.b.y, 0]),
+      Minimap.VecToMs([line.a.x, line.a.y, 0])
+    ];
+
+    Result += [Minimap.PointToMsRect(TPointArray([line.a, line.b]).Mean()), shape, theta, line.a, line.b];
+  end;
+end;
+
+
+function FixOrderQuad(Q: TPointArray): TPointArray;
+var i,t: Int32;
+begin
+  for i:=1 to High(Q) do
+    if (Q[i].y < Q[t].y) or ((Q[i].y = Q[t].y) and (Q[i].x < Q[t].x)) then
+      t := i;
+
+  Result += Q[t];
+  Result += Q[(t+1) mod 4];
+  Result += Q[(t+2) mod 4];
+  Result += Q[(t+3) mod 4];
+end;
+
+
+function QuadTop(Q: TPointArray; UpDirection: Double): TPointArray;
+var
+  p: TPoint;
+  d_0_3,d_0_1: Double;
+begin
+  d_0_1 := Abs(DeltaAngle(Degrees(PI + ArcTan2(Q[0].y-Q[3].y, Q[0].x-Q[3].x)), UpDirection, 360));
+  d_0_3 := Abs(DeltaAngle(Degrees(PI + ArcTan2(Q[0].y-Q[1].y, Q[0].x-Q[1].x)), UpDirection, 360));
+
+  //Q[0] is highest, now I need second highest
+  if d_0_1 > d_0_3 then begin
+    P := Q[3];
+  end else begin
+    P := Q[1];
+  end;
+
+  Result := [Q[0],P];
+end;
+
+function GetUpAngle(mmpt: TPoint): Double;
+var
+  l1,l2: TPoint;
+begin
+  l1 := Minimap.VecToMs([mmpt.x, mmpt.y, 0]);
+  l2 := Minimap.VecToMs([mmpt.x, mmpt.y, 32]);
+
+  Result := Degrees(ArcTan2(l1.y-l2.y, l1.x-l2.x));
+end;
+
+function ExtractDoorsAndStates(ATPA: T2DPointArray; MinDensity: Double): TRSDoors;
+var
+  i,j, nearest: Int32;
+  poly, reduced: TPointArray;
+  up, best, dist, theta, roll, a1,a2: Single;
+  ms1,ms2: TPoint;
+  qp: TPointArray;
+  v1,v2: Vector3;
+  doors: TDoorMMInfoArray;
+begin
+  roll := Minimap.GetCompassAngle(True);
+  doors := DoorDirectionsAndArea();
+
+  for i:=0 to High(ATPA) do
+  begin
+    if Length(ATPA[i]) < 100 then
+      continue;
+
+    Poly := ATPA[i].ConvexHull();
+    if Length(Poly) < 4 then continue;
+
+    reduced := FixOrderQuad(ReduceToQuad(Poly));
+
+    if (GetPolyDensity(ATPA[i], Poly) > MinDensity) then
+    begin
+      // get corresponding door from minimap:
+      nearest := -1;
+      best := $FFFFFF;
+
+      for j:=0 to High(doors) do
+      begin
+        dist := Distance(ATPA[i].Mean(), doors[j].Search.Mean());
+        if (dist < best) and (dist < MainScreen.NormalizeDistance(120)) then
+        begin
+          nearest := j;
+          best := dist;
+        end;
+      end;
+
+      if best = $FFFFFF then
+        continue;
+
+      up := GetUpAngle(TPointArray([doors[nearest].mm1, doors[nearest].mm2]).Mean());
+      qp := QuadTop(reduced, up);
+
+      ms1 := Minimap.VecToMs([doors[nearest].mm1.x, doors[nearest].mm1.y, 8]);
+      ms2 := Minimap.VecToMs([doors[nearest].mm2.x, doors[nearest].mm2.y, 8]);
+
+      v1 := MainScreen.PointToMM(qp[0], 8);
+      v2 := MainScreen.PointToMM(qp[1], 8);
+
+      theta := Degrees(ArcTan2(v1.y-v2.y, v1.x-v2.x));
+      theta := Modulo(theta-roll, 180);
+
+      if Abs(DeltaAngle(theta, doors[nearest].BaseAngle, 180)) < 40 then begin
+        Result += [[reduced[0], reduced[1], reduced[2], reduced[3]], False];
+      end else begin
+        Result += [[reduced[0], reduced[1], reduced[2], reduced[3]], True];
+      end;
+    end;
+  end;
+end;
+
+function FindDoors(Color: TCTS2Color; Bounds: TBox; Filter: TDoorFilter): TRSDoors;
+var
+  client_raw: TMufasaBitmap;
+  Edge, TPA: TPointArray;
+  ATPA: T2DPointArray;
+  i: Int32;
+begin
+  srl.FindColors(TPA, Color, Bounds);
+  if Length(TPA) < 10 then
+    Exit;
+
+  //TPA := TPA.Erode(1).Grow(1); // <--- reduce pixel noise?
+
+  // if EdgeSensitivity is set to more than 0, then we use edges to process on
+  // this is needed wherever ground and doors have too similar color
+  if Filter.EdgeSensitivity > 0 then
+  begin
+    client_raw := TMufasaBitmap.CreateFromClient();
+    Edge := client_raw.PixelEdgesTPA(Filter.EdgeSensitivity);
+    client_raw.Free();
+    TPA := TPA.Intersection(Edge);
+  end;
+
+  // apply grow and erode for noise filtering
+  TPA := TPA.Grow(Filter.Grow).Erode(Filter.Erode);
+  //TPA := TPA.ExcludePoints(Edge);
+
+  // filter out interfaces
+  TPA := TPA.ExcludePoints(TPointArray.CreateFromBox(Chat.Bounds, True));
+  TPA := TPA.ExcludePoints(TPointArray.CreateFromBox(GameTabs.Bounds, True));
+  TPA := TPA.ExcludePoints(TPointArray.CreateFromBox(Minimap.Bounds, True));
+
+
+  ATPA := TPA.Cluster(1);
+  //RSClient.Image.DrawATPA(ATPA);
+  Result := ExtractDoorsAndStates(ATPA, Filter.MinDensity);
+
+  for i:=0 to High(Result) do
+    Result[i].Door := Result[i].Door.Expand(Filter.Erode-Filter.Grow);
+end;
+
+function FilterDoorsMM(Doors: TRSDoors; AcceptableTileDist: Double): TRSDoors;
+var
+  mmd: TDoorMMInfoArray;
+  idx, i, j: Int32;
+  best,dist: Double;
+begin
+  mmd := DoorDirectionsAndArea();
+  if Length(mmd) = 0 then Exit;
+
+  AcceptableTileDist := mmd[0].Search.Top.DistanceTo(mmd[0].Search.Right) * AcceptableTileDist;
+  for i:=0 to High(mmd) do
+  begin
+    best := $FFFFFF;
+    for j:=0 to High(doors) do
+    begin
+      dist := mmd[i].Search.Mean().DistanceTo(doors[j].Door.Mean());
+      if dist < best then
+      begin
+        best := dist;
+        idx := j;
+      end;
+    end;
+    if best < AcceptableTileDist then
+      Result += Doors[idx];
+  end;
+end;
+
+var
+  doors: TRSDoors;
+  i: Int32;
+begin
+  RSClient.Image.SetFontSize(12);
+  RSClient.Image.setFontAntialiasing(False);
+  RSClient.Image.Clear();
+  //TerminateScript;
+
+  //Varrock simple door: CTS2(3561056, 19, 0.08, 0.34), MainScreen.Bounds(), DoorFilter(15, 4,6, 0.6)
+  //Varrock fancy door : CTS2(3302000, 18, 0.06, 0.89), MainScreen.Bounds(), DoorFilter(20, 5,7, 0.4)
+  //Lumby              : CTS2(1138041, 17, 0.08, 1.48), MainScreen.Bounds(), DoorFilter(0, 4,6, 0.6)
+  //A lumby gate!!     : CTS2(1138041, 17, 0.08, 1.48), MainScreen.Bounds(), DoorFilter(0, 6,8, 0.1)
+
+  while True do
+  begin                 //Fally    = CTS2(5930899, 21, 0.04, 0.41)
+
+
+    doors := FindDoors(CTS2(3561056, 19, 0.08, 0.34), MainScreen.Bounds(), DoorFilter(15, 4,6, 0.6));
+    doors := FilterDoorsMM(doors, 2.5);
+
+    RSClient.Image.Clear();
+    for i:=0 to High(doors) do
+    begin
+      if doors[i].IsOpen then begin
+        RSClient.Image.DrawQuad(doors[i].Door, $00FF00);
+        RSClient.Image.DrawText('Open', doors[i].Door.Mean()+Point(-20,0), $77FF77);
+        RSClient.Image.DrawText('Open', doors[i].Door.Mean()+Point(-19,0), $77FF77);
+      end else begin
+        RSClient.Image.DrawQuad(doors[i].Door, $FF);
+        RSClient.Image.DrawText('Closed', doors[i].Door.Mean()+Point(-20,0), $77FF77);
+        RSClient.Image.DrawText('Closed', doors[i].Door.Mean()+Point(-19,0), $77FF77);
+      end;
+    end;
+  end;
+end."
+CUrcDbcr,loadstring,lukeyaya,Bash,Saturday 10th of June 2023 01:43:40 PM CDT,"local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({Name = ""d00dz offical trolling gui V1"", HidePremium = false, SaveConfig = true, ConfigFolder = ""OrionTest""})
+--Core 
+MainTab = Window:MakeTab({
+    Name = ""Public V1 Scripts"",
+    Icon = ""rbxassetid://4483345998"",
+    PremiumOnly = false
+})"
+hahtKHEQ,Untitled,cecko,JavaScript,Saturday 10th of June 2023 01:15:56 PM CDT,"describe('mathEnforcer function test', () => {
+    describe('addFive function test', () => {
+        it('type of num is !== number', () => {
+            assert(mathEnforcer.addFive('TEST') === undefined)
+        });
+        it('type of num is !== number (arr)', () => {
+            assert(mathEnforcer.addFive([]) === undefined)
+        });
+        it('type of num is !== number (obj)', () => {
+            assert(mathEnforcer.addFive({}) === undefined)
+        });
+        it('type of num is !== number (undefined)', () => {
+            assert(mathEnforcer.addFive(undefined) === undefined)
+        });
+        it('type of num is !== number (null)', () => {
+            assert(mathEnforcer.addFive(null) === undefined)
+        });
+        it('type of num is === number', () => {
+            assert(mathEnforcer.addFive(5) === 10)
+        });
+        it('negative type of num is === number ', () => {
+            assert(mathEnforcer.addFive(-5) === 0)
+        });
+        it('negative type of num is === number', () => {
+            assert(mathEnforcer.addFive(5.5) === 10.5)
+        });
+    });
+    describe('substractTen', () => {
+        it('type of num is !== number', () => {
+            assert(mathEnforcer.subtractTen('TEST') === undefined)
+        });
+        it('type of num is !== number (arr)', () => {
+            assert(mathEnforcer.subtractTen([]) === undefined)
+        });
+        it('type of num is !== number (obj)', () => {
+            assert(mathEnforcer.subtractTen({}) === undefined)
+        });
+        it('type of num is !== number (undefined)', () => {
+            assert(mathEnforcer.subtractTen(undefined) === undefined)
+        });
+        it('type of num is !== number (null)', () => {
+            assert(mathEnforcer.subtractTen(null) === undefined)
+        });
+        //wqeqweqweq
+        it('positive integer num -10', () => {
+            assert(mathEnforcer.subtractTen(5) === -5)
+        });
+        it('negative integer num -10', () => {
+            assert(mathEnforcer.subtractTen(-5) === -15)
+        });
+        it('decimel num -10', () => {
+            assert(mathEnforcer.subtractTen(15.5) === 5.5)
+        });
+    });
+    describe('sum', () => {
+        it('two positive numbers', () => {
+            assert(mathEnforcer.sum(10, 10) === 20)
+        });
+        it('two negaive numbers', () => {
+            assert(mathEnforcer.sum(-10, -2.5) === -12.5)
+        });
+        it('two decimal numbers', () => {
+            assert(mathEnforcer.sum(3.2, 2.3) === 5.5)
+        });
+
+        it('return undefined first str', () => {
+            assert(mathEnforcer.sum('rere', 10) === undefined);
+        });
+        it('return undefined second str', () => {
+            assert(mathEnforcer.sum(10, 'rere') === undefined);
+        });
+        it('return undefined arr', () => {
+            assert(mathEnforcer.sum(10, []) === undefined);
+        });
+        it('return undefined obj', () => {
+            assert(mathEnforcer.sum(10, {}) === undefined);
+        });
+
+    });
+});"
+UZDXk7Fx,refueling,ALEXANDAR_GEORGIEV,Python,Saturday 10th of June 2023 01:13:28 PM CDT,"# refueling.py
+from tkinter import Label, Entry, Tk
+
+
+class Refueling:
+    def __init__(self):
+        self.fuel_form = Tk()
+        self.fuel_form.title(""Зареждане на гориво"")
+        screen_width = self.fuel_form.winfo_screenwidth()
+        screen_height = self.fuel_form.winfo_screenheight()
+        w, h = 800, 800
+        print(f""{screen_width} x {screen_height}"")
+        self.fuel_form.geometry(f""{w}x{h}+{int(screen_width / 2 - w / 2)}+{int(screen_height / 2 - h / 2)}"")
+        self.screen_width = self.fuel_form.winfo_screenwidth()
+
+    def form(self):
+        Label(self.fuel_form, text=""РВ9449АР "").grid(row=0, column=0)
+        Label(self.fuel_form, text=""Обем на резервоара: 60 л"").grid(row=1, column=0)
+        Label(self.fuel_form, text=""Период - > Януари"").grid(row=2, column=0)
+
+
+
+
+
+if __name__ == ""__main__"":
+    test = Refueling()
+    test.form()
+
+    test.fuel_form.mainloop()"
+iCs7aRpR,JSON Parse running processes with ps aux jq,metalx1000,Bash,Saturday 10th of June 2023 01:04:12 PM CDT,"ps aux | jc -p --ps|jq -r '.[]|select(.command | contains(""adb"")).pid'"
+Ndt1Gim5,Untitled,kopyl,Python,Saturday 10th of June 2023 01:00:04 PM CDT,"import json
+import numpy as np
+import cv2
+import onnxruntime
+import urllib.request
+
+
+model = ""/child-adult-nonhuman.onnx""
+class_names = [""adults"", ""children"", ""nonhuman""]
+
+
+def predict_single_image(image_url):
+    req = urllib.request.Request(image_url, headers={""User-Agent"": ""Mozilla/5.0""})
+    with urllib.request.urlopen(req) as url:
+        image_contents = url.read()
+
+    arr = np.asarray(bytearray(image_contents), dtype=np.uint8)
+    img = cv2.imdecode(arr, -1)
+
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    resized_image = cv2.resize(img, (300, 300))
+    image_for_prediction = resized_image.transpose(2, 0, 1)
+    image_for_prediction = image_for_prediction.astype(""float32"") / 255.0
+    image_for_prediction = image_for_prediction[np.newaxis, :]
+
+    data = json.dumps({""data"": image_for_prediction.tolist()})
+    data = np.array(json.loads(data)[""data""]).astype(""float32"")
+    session = onnxruntime.InferenceSession(model, None)
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+
+    result = session.run([output_name], {input_name: data})
+    prediction = int(np.argmax(np.array(result).squeeze(), axis=0))
+
+    probabilities = np.exp(result) / np.sum(np.exp(result))
+    score = np.max(probabilities)
+    score = float(score)
+
+    return {""predicted_class"": class_names[prediction], ""score"": score}"
+qkhPqjyX,FE FATES ADMIN - LATEST VERSION.,ilovescripting,Lua,Saturday 10th of June 2023 12:33:44 PM CDT,"--Fates Admin
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/fatesc/fates-admin/main/main.lua""))();"
+Jrhv9hWd,PHP HTML - Light Color Detector - Exercise,rezamalik15,PHP,Saturday 10th of June 2023 11:47:14 AM CDT,"<?php
+
+$light = ""blue"";
+
+?>
+
+<html lang=""en"">
+<head>
+    <title>Light Color Detector</title>
+    <link href=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"" rel=""stylesheet"" integrity=""sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"" crossorigin=""anonymous"">
+</head>
+<body>
+
+<div class=""container"">
+    
+    <h1>Light Color Detector</h1>
+
+    <?php if($light == ""red""):?>
+
+
+
+    <?php elseif($light == ""green""):?>
+
+       
+
+    <?php elseif($light == ""blue""):?>
+
+
+
+    <?php else:?>
+
+
+
+    <?php endif;?>
+
+</div>
+
+<script src=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"" integrity=""sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz"" crossorigin=""anonymous""></script>
+</body>
+</html>"
+DJUgk5jP,PHP HTML - Light Color Detector,rezamalik15,PHP,Saturday 10th of June 2023 11:46:07 AM CDT,"<?php
+
+$light = ""blue"";
+
+?>
+
+<html lang=""en"">
+<head>
+    <title>Light Color Detector</title>
+    <link href=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"" rel=""stylesheet"" integrity=""sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"" crossorigin=""anonymous"">
+</head>
+<body>
+
+<div class=""container"">
+    
+    <h1>Light Color Detector</h1>
+
+    <?php if($light == ""red""):?>
+
+        <h2 class=""text-danger"">
+            <?= ""Light color is red""; ?>
+        </h2>
+   
+    <?php elseif($light == ""green""):?>
+
+        <h2 class=""text-success"">
+            <?= ""Light color is green""; ?>
+        </h2>
+
+    <?php elseif($light == ""blue""):?>
+
+        <h2 class=""text-primary"">
+            <?= ""Light color is blue""; ?>
+        </h2>
+
+    <?php else:?>
+
+        <h2 class=""text-secondary"">
+            <?= ""Light color is not detected""; ?>
+        </h2>
+
+    <?php endif;?>
+
+</div>
+
+<script src=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"" integrity=""sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz"" crossorigin=""anonymous""></script>
+</body>
+</html>"
+RQTfpYsL,Card Game,uktcar,Java,Saturday 10th of June 2023 11:45:04 AM CDT,"import java.util.Arrays;
+import java.util.List;
+import java.util.Scanner;
+import java.util.stream.Collectors;
+
+public class experiment {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+        List<Integer> list1 = Arrays.stream(scanner.nextLine().split("" "")).map(Integer::parseInt).collect(Collectors.toList());
+        List<Integer> list2 = Arrays.stream(scanner.nextLine().split("" "")).map(Integer::parseInt).collect(Collectors.toList());
+
+
+        while (list1.size() != 0 && list2.size() != 0) {
+
+            if (list1.get(0) > list2.get(0)) {   //first player is wining
+                list1.add(list1.get(0));
+                list1.add(list2.get(0));
+
+                list1.remove(0);
+                list2.remove(0);
+
+
+            } else if (list1.get(0) < list2.get(0)) {
+                list2.add(list2.get(0));
+                list2.add(list1.get(0));
+
+                list1.remove(0);
+                list2.remove(0);
+
+            } else  {
+
+                list1.remove(0);
+                list2.remove(0);
+            }
+        }
+
+        int sum = 0;
+
+        if (list1.size() > 0) {
+            for (int i : list1) {
+                sum += i;
+            }
+            System.out.printf(""First player wins! Sum: %d"",sum);
+        } else if (list2.size() > 0) {
+            for (int i : list2) {
+                sum += i;
+            }
+            System.out.printf(""Second player wins! Sum: %d"",sum);
+        }
+
+
+
+    }
+}"
+JKS3f0iC,NL Hub GUI - in progress ...,lukeyaya,Bash,Saturday 10th of June 2023 11:40:40 AM CDT,"local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({Name = ""NL Hub | made by xxNotLucasxx#4206"", HidePremium = false, IntroText = ""NL Hub"" , SaveConfig = true, ConfigFolder = ""OrionTest""})
+
+OrionLib:MakeNotification({
+	Name = ""Remember to join my discord"",
+	Content = ""discord.gg/nlcommunity"",
+	Image = ""rbxassetid://4483345998"",
+	Time = 5
+})
+
+local MainTab = Window:MakeTab({
+	Name = ""Main"",
+	Icon = ""rbxassetid://4483345998"",
+	PremiumOnly = false
+})
+
+MainTab:AddButton({
+	Name = ""Print Function"",
+	Callback = function()
+      		print(""discord.gg/nlcommunity"")
+  	end    
+})
+
+MainTab:AddToggle({
+	Name = ""Infinite Jump"",
+	Default = true,
+	Callback = function(s)
+		  
+	end    
+})
+
+MainTab:AddSlider({
+	Name = ""WalkSpeed"",
+	Min = 0,
+	Max = 250,
+	Default = 16,
+	Color = Color3.fromRGB(255,255,255),
+	Increment = 1,
+	ValueName = ""WalkSpeed"",
+	Callback = function(s)
+		game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = s
+end    
+})
+
+MainTab:AddBind({
+	Name = ""Keybind for WalkSpeed"",
+	Default = Enum.KeyCode.F,
+	Hold = true,
+	Callback = function()
+
+			
+	end    
+})
+
+MainTab:AddSlider({
+	Name = ""JumpPower"",
+	Min = 0,
+	Max = 550,
+	Default = 50,
+	Color = Color3.fromRGB(255,255,255),
+	Increment = 1,
+	ValueName = ""JumpPower"",
+	Callback = function(s)
+		game.Players.LocalPlayer.Character.Humanoid.JumpPower = s
+end    
+})
+
+MainTab:AddBind({
+	Name = ""Keybind for JumpPower"",
+	Default = Enum.KeyCode.E,
+	Hold = false,
+	Callback = function()
+		print(""press"")
+	end    
+})
+
+MainTab:AddButton({
+	Name = ""Reset"",
+	Callback = function()
+		game.Players.LocalPlayer.Character.Head:Destroy()
+  	end    
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+local OthersTab = Window:MakeTab({
+	Name = ""Others"",
+	Icon = ""rbxassetid://4483345998"",
+	PremiumOnly = false
+})
+
+OthersTab:AddButton({
+	Name = ""Infinite Yield"",
+	Callback = function()
+		loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+  	end    
+})
+
+
+
+
+local CreditsTab = Window:MakeTab({
+	Name = ""Credits"",
+	Icon = ""rbxassetid://4483345998"",
+	PremiumOnly = false
+})
+
+
+CreditsTab:AddButton({
+	Name = ""Creator | xxNotLucasxx#4206"",
+	Callback = function()
+  	end    
+})
+
+
+CreditsTab:AddButton({
+	Name = ""Helper | igotnoidea#8168 "",
+	Callback = function()
+  	end    
+})
+
+OrionLib:Init()"
+A3rGt11n,PHP HTML - foreach - key - value,rezamalik15,PHP,Saturday 10th of June 2023 11:31:53 AM CDT,"<?php
+
+$student = [
+    ""Nama""=>""Roni"",
+    ""Kelas""=>""12 MIPA"",
+    ""NIS""=>121367
+];
+
+?>
+
+<html lang=""en"">
+<head>
+    <title>PHP - foreach</title>
+</head>
+<body>
+    
+<?php foreach($student as $key => $value):?>
+
+<h1>
+    <?php echo ""$key = $value"";?>
+</h1>
+
+<?php endforeach;?>
+
+</body>
+</html>
+"
+SaieCm08,PHP HTML - foreach,rezamalik15,PHP,Saturday 10th of June 2023 11:28:32 AM CDT,"<?php
+
+$names = [
+    ""Andi"",""Anita"",
+    ""Beni"",""Bintang"",
+    ""Cika"",""Chandra""
+];
+
+?>
+
+<html lang=""en"">
+<head>
+    <title>PHP - foreach</title>
+</head>
+<body>
+
+<?php foreach($names as $name):?>
+
+    <h1>
+        <?php echo $name;?>
+    </h1>
+
+<?php endforeach;?>
+
+</body>
+</html>"
+RNcnpPUF,Rotation for Glitcher,HackCreator,Lua,Saturday 10th of June 2023 11:27:44 AM CDT,"local gui = game.Players.LocalPlayer.PlayerGui.StarGlitcherv2
+local Center = gui.Left.Spinners.Center
+local Center_2 = gui.Right.MusicBar_BG.Main.Bar.Spinnyz.Center
+local OuterCircle1 = gui.Left.Spinners.OuterCircle1
+local OuterCircle2 = gui.Left.Spinners.OuterCircle2
+local OuterCircle1_2 = gui.Right.MusicBar_BG.Main.Bar.Spinnyz.OuterCircle1
+local OuterCircle2_2 = gui.Right.MusicBar_BG.Main.Bar.Spinnyz.OuterCircle2
+local Spin1 = gui.Left.Spinners.Spin1
+local Spin2 = gui.Left.Spinners.Spin2
+local Spin1_2 = gui.Right.MusicBar_BG.Main.Bar.Spinnyz.Spin1
+local Spin2_2 = gui.Right.MusicBar_BG.Main.Bar.Spinnyz.Spin2
+
+while wait() do
+    OuterCircle1.Rotation = OuterCircle1.Rotation - 7.111
+    OuterCircle2.Rotation = OuterCircle2.Rotation + 5.111
+    Spin1.Rotation = Spin1.Rotation + 11.111
+    Spin2.Rotation = Spin2.Rotation - 11.111	
+    Center.Rotation = Center.Rotation + 4.123
+    OuterCircle1_2.Rotation = OuterCircle1.Rotation
+    OuterCircle2_2.Rotation = OuterCircle2.Rotation
+    Center_2.Rotation = Center.Rotation
+end"
+QjGWm1M7,PHP HTML - for,rezamalik15,PHP,Saturday 10th of June 2023 11:25:15 AM CDT,"<html lang=""en"">
+<head>
+  <title>PHP - for</title>
+</head>
+<body>
+
+<?php for ($x = 1; $x <= 10; $x++): ?>
+
+  <h1>
+    <?php echo ""Mahasiswa ke-$x"";?>
+  </h1>
+
+<?php endfor;?>
+  
+</body>
+</html>"
+9KBNwW2h,Labyrinth - cses problem solved,rasel33,C++,Saturday 10th of June 2023 11:25:05 AM CDT,"#include<bits/stdc++.h>
+#include<ext/pb_ds/assoc_container.hpp>
+#include<ext/pb_ds/tree_policy.hpp>
+using namespace std;
+using namespace __gnu_pbds;
+#define EPS          1E-9
+#define PI           acos(-1)
+#define SQR(n)       (n*n)
+#define M            998244353
+#define INF          (1<<30)-1+(1<<30)
+#define fast         ios::sync_with_stdio();cin.tie(nullptr)
+// #define all(v)       (v).begin(), (v).end()
+#define ll           long long
+#define pll          pair<ll,ll>
+#define pii          pair<int,int>
+#define f0(i, n)     for(int (i) = 0; i <  (n); i++)
+#define f1(i, n)     for(int (i) = 1; i <= (n); i++)
+#define endl         ""\n""
+#define pb           push_back
+#define UNIQUE(v)    (v).erase(unique(all(v)), (v).end())
+#define sz()         size()
+#define mxe(a,n)     (*max_element(a,a+n))
+#define mne(a,n)     (*min_element(a,a+n))
+#define countbit(x)  __builtin_popcount(x)
+//moves
+int dx[] = { -1,+0,+1,+0,-1,-1,+1,+1};
+int dy[] = { +0,-1,+0,+1,+1,-1,+1,-1};
+//bit
+int     Set(int N,int pos){ return N=N | (1<<pos);}
+int     Reset(int N,int pos){ return N= N & ~(1<<pos);}
+bool    Check(int N,int pos){ return (bool)(N & (1<<pos));}
+template< class T, class X > inline T   togglebit(T a, X i) { T t=1;return (a^(t<<i)); }
+// //fn
+template <typename T> T     BigMod (T b,T p,T m){if (p == 0) return 1;if (p%2 == 0){T s = BigMod(b,p/2,m);return ((s%m)*(s%m))%m;}return ((b%m)*(BigMod(b,p-1,m)%m))%m;}
+template <typename T> T     ModInv (T b,T m){return BigMod(b,m-2,m);}
+template <typename T> T     POW(T B,T P){ if(P==0) return 1; if(P&1) return B*POW(B,P-1);  else return SQR(POW(B,P/2));}
+template <typename T> T     Dis(T x1,T y1,T x2, T y2){return sqrt( SQR(x1-x2) + SQR(y1-y2) );}
+template <typename T> T     Angle(T x1,T y1,T x2, T y2){ return atan( double(y1-y2) / double(x1-x2));}
+template <typename T> void  yes(T a){if(a==1)printf(""YES\n"");else printf(""Yes\n"");}
+template <typename T> void  no(T a){if(a==1)printf(""NO\n"");else printf(""No\n"");}
+//file input
+void xxx(){
+    #ifdef LOCAL 
+    freopen(""input.txt"", ""r"", stdin);freopen(""output.txt"", ""w"",stdout);
+    #endif
+}
+// ordered set  -> (greater / greater_equal / less_equal) also can be used
+typedef tree<ll, null_type, greater<ll>, rb_tree_tag, tree_order_statistics_node_update> pbds; // find_by_order, order_of_key
+ 
+ 
+string str, sa, sb, s;
+ll n, m, k, x, y, h, t, a, b, c, d, e, f,q, l, r, z;
+ll arr[1000006];
+// priority_queue <pair<ll,ll>, vector<pair<ll,ll>>, greater<pair<ll,ll>>> pq;
+// bool cmp(pair<ll,ll>&a, pair<ll,ll>&b){
+//     if(a.first == b.first) return a.second>b.second;
+//     return a.first<b.first;
+// }
+
+
+ 
+void solve(int tc){
+    bool ok = true, can = false;
+    cin >> n >> m;
+    map<pair<ll,ll>,pair<ll,ll>>par;
+    string ss[1009];
+    string ans;
+    map<pair<ll,ll>, char> mp;
+    mp[{-1, 0}] = 'U';
+    mp[{ 1, 0}] = 'D';
+    mp[{0, -1}] = 'L';
+    mp[{0, +1}] = 'R';
+    for(int i=0;i<n;i++){
+        cin >> ss[i];
+    }
+    for(int i=0;i<n;i++){
+        for(int j=0;j<m;j++){
+            if(ss[i][j]=='A'){
+                par[{i, j}] = {-1, -1};
+                x = i;
+                y = j;
+                break;
+            }
+        }
+    }
+    bool vis[n][m] = {0};
+    ll path_length;
+    queue<pair<pair<ll,ll>, ll>> q;
+    q.push({{x, y}, 0});
+    vis[x][y] = 1;
+    while(!q.empty()){
+        x = q.front().first.first;
+        y = q.front().first.second;
+        z = q.front().second;
+        q.pop();
+        
+        if(ss[x][y]=='B'){
+            path_length = z;
+            can = true;
+            break;
+        }
+        for(int i=0;i<4;i++){
+            ll nx = x + dx[i];
+            ll ny = y + dy[i];
+            if(nx>=0 && nx<n && ny>=0 && ny<m && !vis[nx][ny] && ss[nx][ny]!='#'){
+                vis[nx][ny] = 1;
+                par[{nx, ny}] = {x, y};
+                q.push({{nx, ny}, z+1});
+            }
+        } 
+    }
+    if(!can)no(1);
+    //x y stores the position of B 
+    else{
+        yes(1);
+        cout << path_length << endl;
+        // return;
+        int cnt = 0;
+        while(ss[x][y]!='A'){
+            // cout << x <<"" ""<<y << endl;
+            ll nx = par[{x, y}].first;
+            ll ny = par[{x, y}].second;
+            ans.push_back(mp[{x - nx, y - ny}]);
+            x = nx;
+            y = ny;
+        }
+        
+        for(int i=path_length-1;i>=0;i--){
+            cout << ans[i];
+        }
+        cout << endl;
+    }
+    
+    
+}
+ 
+ 
+int main(){
+    //fast;
+    xxx();int tc = 1, cas_no = 0;
+    // cin >> tc;
+    while(tc--){++cas_no;solve(cas_no);}return 0;
+}"
+5VBaG4Vq,patrons by quadrant,mate2code,Python,Saturday 10th of June 2023 11:23:23 AM CDT,"# https://en.wikiversity.org/wiki/Zhegalkin_matrix#fixed_points
+
+patrons_by_quadrant = {
+    2: {
+        'lower light': [0],
+        'lower heavy': [6],
+        'upper light': [8],
+        'upper heavy': [14]
+    },
+    3: {
+        'lower light': [0, 40, 72, 96],
+        'lower heavy': [30, 54, 86, 126],
+        'upper light': [128, 168, 200, 224],
+        'upper heavy': [158, 182, 214, 254]
+    },
+    4: {
+        'lower light': [0, 680, 854, 1224, 1334, 1632, 2176, 2600, 3144, 3808, 4320, 4382, 4680, 5160, 5760, 6240, 6856, 7336, 7680, 8320, 8744, 9288, 9952, 10240, 10920, 11464, 11872, 12384, 13000, 13480, 13824, 14560, 14920, 15400, 16000, 16512, 16936, 17480, 18144, 18432, 19112, 19656, 20064, 20576, 21192, 21672, 22016, 22752, 23112, 23592, 24192, 24576, 25256, 25800, 26208, 26752, 27176, 27720, 28896, 29256, 29736, 30336, 30816, 32256],
+        'lower heavy': [510, 1950, 2430, 3030, 3510, 3870, 5046, 5590, 6014, 6558, 6966, 7510, 8190, 8574, 9174, 9654, 10014, 10750, 11094, 11574, 12190, 12702, 13110, 13654, 14334, 14622, 15286, 15830, 16254, 16766, 17366, 17846, 18206, 18942, 19286, 19766, 20382, 20894, 21302, 21846, 22526, 22814, 23478, 24022, 24446, 25086, 25430, 25910, 26526, 27006, 27606, 28086, 28384, 28446, 28958, 29622, 30166, 30590, 31134, 31432, 31542, 31912, 32086, 32766],
+        'upper light': [32768, 33448, 33622, 33992, 34102, 34400, 34944, 35368, 35912, 36576, 37088, 37150, 37448, 37928, 38528, 39008, 39624, 40104, 40448, 41088, 41512, 42056, 42720, 43008, 43688, 44232, 44640, 45152, 45768, 46248, 46592, 47328, 47688, 48168, 48768, 49280, 49704, 50248, 50912, 51200, 51880, 52424, 52832, 53344, 53960, 54440, 54784, 55520, 55880, 56360, 56960, 57344, 58024, 58568, 58976, 59520, 59944, 60488, 61664, 62024, 62504, 63104, 63584, 65024],
+        'upper heavy': [33278, 34718, 35198, 35798, 36278, 36638, 37814, 38358, 38782, 39326, 39734, 40278, 40958, 41342, 41942, 42422, 42782, 43518, 43862, 44342, 44958, 45470, 45878, 46422, 47102, 47390, 48054, 48598, 49022, 49534, 50134, 50614, 50974, 51710, 52054, 52534, 53150, 53662, 54070, 54614, 55294, 55582, 56246, 56790, 57214, 57854, 58198, 58678, 59294, 59774, 60374, 60854, 61152, 61214, 61726, 62390, 62934, 63358, 63902, 64200, 64310, 64680, 64854, 65534]
+    }
+}"
+uv9yfDuM,PHP HTML - do - while,rezamalik15,PHP,Saturday 10th of June 2023 11:20:24 AM CDT,"<?php $number = 1; ?>
+
+<html lang=""en"">
+<head>
+    <title>PHP - do - while</title>
+</head>
+<body>
+    
+<?php do{ ?>
+    <h1>
+        <?php echo ""Saya sedang belajar PHP\n"";?>
+    </h1>
+<?php $number++;?>
+<?php } while($number <= 5); ?>
+
+</body>
+</html>"
+0LmNuxCL,icons8-sign-in-24,cleverus,JavaScript,Saturday 10th of June 2023 11:17:40 AM CDT,"/* This is your custom Javascript */
+jQuery(document).ready(function ($) {
+  $(""#header-aside .signin-button"").attr(""href"", ""//earn.community/login"")
+  setLoginLink()
+ 
+//  $("".kvprofile"").click(function () {
+//    window.location.href = ""https://earn.community/members/me""
+//  })
+ 
+  $("".kv-login-link"").click(function (event) {
+    if ($(""body"").hasClass(""logged-in"")) {
+      $("".bb-mobile-header-wrapper .header-aside .sub-menu"").toggleClass(
+        ""active""
+      )
+    } else {
+      window.location.href = ""https://earn.community/login""
+    }
+  })
+ 
+  $("".user-wrap .sub-menu"")
+    .clone(true)
+    .insertAfter("".bb-mobile-header-wrapper .kv-login-link"")
+ 
+    $('<a href=""#"" class=""kv-menu-credits qc_wpbot_chat_link"" title=""Earning Assistant""> <div class=""kv-menu-credits__ico""> <img src=""/wp-content/uploads/2023/06/video.gif""> </div></a>').insertBefore($("".header-aside""))
+ 
+  const myTimeout = setTimeout(kvReputation, 3000)
+ 
+  function kvReputation() {
+    $("".gamipress-buddypress-reputation"").click(function () {
+      window.location.href = ""https://earn.community/reputation/""
+    })
+ 
+    $("".gamipress-user-points-credit"").click(function () {
+      window.location.href = ""https://earn.community/credits/""
+    })
+ 
+    $("".gamipress-user-points-reputation"").click(function () {
+      window.location.href = ""https://earn.community/reputation/""
+    })
+ 
+    var linkRedirect = """"
+ 
+    $("".kv-dashboard .ue_option"").click(function () {
+      let newLink = $(this).find("".ue_content_link"").prop(""href"")
+ 
+      if ($(this).hasClass(""active"")) {
+        if (newLink === linkRedirect) {
+          window.location.href = newLink
+        } else {
+          linkRedirect = newLink
+        }
+      }
+    })
+ 
+    $("".kv-linkclick .ue_option"").click(function () {
+      let newLinkBlock = $(this).find("".ue_content_link"").prop(""href"")
+ 
+      window.location.href = newLinkBlock
+    })
+ 
+    var elements = $("".ld-course-list .ld-status-complete"")
+ 
+    if (elements.length > 1) {
+      var elementToKeep = elements.first()
+ 
+      elements.not(elementToKeep).remove()
+      elementToKeep.addClass(""active"")
+    }
+ 
+    var elementsNew = $("".ld-course-list .ld-status-progress"")
+ 
+    if (elementsNew.length > 1) {
+      var elementToKeepNew = elementsNew.first()
+ 
+      elementsNew.not(elementToKeepNew).remove()
+      elementToKeepNew.addClass(""active"")
+    }
+  }
+ 
+  $('.bb-is-mobile [id^=""uc_expanding_content_cards_elementor_""]').click(
+    function (event) {
+      var url = $(this).find("".ue_content_link"").attr(""href"")
+      event.stopPropagation()
+ 
+      window.location.href = url
+    }
+  )
+  
+  $('.gamipress-congratulations-popup .gamipress-congratulations-popup-close').click(function(){
+      $('.gamipress-congratulations-popups-overlay').hide();
+  })
+})
+ 
+ 
+function setLoginLink() {
+  jQuery("".bb-mobile-header .header-search-link"").addClass(""kv-login-link"")
+  jQuery("".bb-mobile-header .kv-login-link"").removeClass(""header-search-link"")
+  jQuery("".bb-mobile-header .kv-login-link"").attr(""data-balloon"", """")
+
+  $('.push-right.kv-login-link').empty();
+  $('.push-right.kv-login-link').append('<img src=""/wp-content/uploads/2023/06/icons8-sign-in-24.png"">');
+}
+"
+4PbKUeqw,PHP HTML - while,rezamalik15,PHP,Saturday 10th of June 2023 11:15:36 AM CDT,"<?php $number = 1; ?>
+
+<html lang=""en"">
+<head>
+  <title>PHP - while</title>
+</head>
+<body>
+  
+<?php while($number <= 10): ?>
+
+  <h1>
+    <?php echo ""Saya sedang belajar PHP\n""; ?>
+  </h1>
+
+<?php $number++; ?>
+<?php endwhile; ?>
+
+</body>
+</html>"
+uasWfX8U,PHP HTML - if - elseif,rezamalik15,PHP,Saturday 10th of June 2023 11:10:08 AM CDT,"<?php $score = 85; ?>
+
+<html lang=""en"">
+<head>
+    <title>PHP - if - elseif</title>
+</head>
+<body>
+    
+<?php if($score >=80 && $score <=100): ?>
+    <h1>
+        <?php echo ""Grade Anda adalah A""; ?>
+    </h1>
+<?php elseif($score >=75 && $score <85): ?>
+    <h1>
+        <?php echo ""Grade Anda adalah B""; ?>
+    </h1>
+<?php elseif($score >=65 && $score <75): ?>
+    <h1>
+        <?php echo ""Grade Anda adalah C""; ?>
+    </h1>
+<?php else: ?>
+    <h1>
+        <?php  echo ""Grade Anda adalah D""; ?>
+    </h1>
+<?php endif; ?>
+
+</body>
+</html>"
+wH8x2tdv,Untitled,mark-naylor-1701,Lisp,Saturday 10th of June 2023 11:08:33 AM CDT,"(defun complement (f)
+  ""Returns a function that reverses the boolean value of the given function.""
+  (lambda (&rest args)
+    (not (apply f args))))
+"
+igzhywvg,5723,MrFireos,Python,Saturday 10th of June 2023 11:05:03 AM CDT,"for n in range(1, 10**4):
+    s='1'+'0'*n
+    while '10' in s or '1' in s:
+        if '10' in s:
+            s=s.replace('10','001',1)
+        elif '1' in s:
+            s=s.replace('1','0',1)
+    if 100 <= len(s) <= 999:
+        print(n)
+        break
+"

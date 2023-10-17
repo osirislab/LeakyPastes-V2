@@ -1,0 +1,3184 @@
+id,title,username,language,date,content
+pAVhiGrw,Untitled,Zlatas863,PHP,Sunday 1st of October 2023 12:48:43 PM CDT,"<?php
+
+class Database {
+  private PDO $connection;
+  private string $host;
+  private int $port;
+  private string $username;
+  private string $password;  
+  private string $database;
+  private array $config = array(
+   PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+   PDO::MYSQL_ATTR_INIT_COMMAND => 'SET NAMES utf8'
+  );
+  private array $cols = array();
+  private array $values = array();
+  private string $sql;
+  public function __construct(private array $input) {
+    $this->host = $input[""host""];
+    $this->port = $input[""port""];
+    $this->username = $input[""username""];
+    $this->password = $input[""password""];
+    $this->database = $input[""database""];
+    $this->connect();
+  }
+  private function connectionError(): void {
+    echo ""Nelze se připojit k databázi"";    
+  }
+  private function querryError(array $error): void {
+    echo new Alert(array(
+      ""zprava"" =>""Chyba databáze ("" .  $error[1] . ""):<br>"" . $error[2],
+      ""presmerovani"" => false
+    ));
+  }
+  public function connect(): PDO {
+    if (!isset($this->connection)) {      
+      try {
+        $this->connection = new PDO(
+          ""mysql:host="" . $this->host . 
+          "";port="" . $this->port .
+          "";dbname="" . $this->database,
+          $this->username,
+          $this->password,
+          $this->config
+        );  
+      } catch (PDOException $e) {
+        $this->connectionError();
+        exit;
+      }
+    }
+    return $this->connection; 
+  }
+  public function query(string $sql, array $params = array(), bool $commit=true): PDOStatement {  
+    try {
+      $query = $this->connection->prepare($sql);    
+      $query->execute($params);
+    } catch(PDOException) {
+      $this->querryError($query->errorInfo());
+      exit;
+    }
+    return $query;
+  }
+}
+?>"
+RXqZLqcE,Start At L:59,tomtomvader298,JavaScript,Sunday 1st of October 2023 12:42:12 PM CDT,"const fs = require('fs');
+const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, AutoModerationRuleManager, AutoModerationRule, } = require('discord.js');
+const { token } = require('./config.json');
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent], partials: [Partials.Channel, Partials.Message], ws: [{ properties: { $browser: ""Discord Android"" } }] });
+const Filter = require('bad-words');
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
+//
+client.on(""ready"", () => {
+  console.log(`Logged Into The Discord Client In ${client.ws.ping}ms!`);
+  console.log(`Ready! Logged Into Discord Under The Name Of ${client.user.username}, In ${client.guilds.cache.size} Servers`);
+  setInterval(() => {
+    const statuses = [
+      `Looking For Bad Words!`,
+      `Auditing What You Do!`,
+      `Making Sure Im Still ${client.user.username}`
+    ];
+    const Activity = [
+      0,
+      1,
+      2,
+      3,
+      5,
+    ];
+    const s = statuses[Math.floor(Math.random() * statuses.length)];
+    const a = Activity[Math.floor(Math.random() * Activity.length)];
+    client.user.setPresence({ activities: [{ name: `${s}`, type: a }], status: 'dnd' });
+  }, 20000);
+})
+//const channel = client.channels.cache.get(""ID""); this can be used to call a discord channel kept in index as a ref
+client.commands = new Collection();
+for (const file of commandFiles) {
+  const command = require(`./commands/${file}`);
+  client.commands.set(command.data.name, command);
+}
+for (const file of eventFiles) {
+  const event = require(`./events/${file}`);
+  if (event.once) {
+    client.once(event.name, (...args) => event.execute(...args));
+  } else { client.on(event.name, (...args) => event.execute(...args)); }
+}
+//
+client.on('interactionCreate', async interaction => {
+  console.log(`${interaction.user.tag} in #${interaction.channel.name} from ${interaction.guild.name} triggered an interaction (Slash Command: ${interaction.commandName}) .`);
+  if (!interaction.isCommand()) return;
+  const command = client.commands.get(interaction.commandName);
+  if (!command) return; try {
+    await command.execute(interaction);
+  } catch (error) {
+    console.error(error);
+    return interaction.reply({ content: '```diff\n- OH NO! \n-A Error Has Occurred, Bot Owner Will Fix Whenever \n```', ephemeral: true });
+  }
+});
+
+
+//Start Automod Section: Trail Alpha
+
+//Bad Word Detection:
+async function setupAutoModeration() {
+  const manager = client.automod.createAutoModerationRuleManager();
+  const loggingChannelId = '917549440347299840';
+  const filter = new Filter();
+
+  const badWordRule = new AutoModerationRule({
+    name: 'Bad Words',
+    reason: 'Using Inappropriate Language Is Not Allowed In This Server.',
+    validate: async (message) => {
+      if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return false; // Administration Bypass
+      }
+      const content = message.content.toLowerCase();
+      return filter.isProfane(content);
+    },
+    punish: async (message) => {
+      await message.delete();
+      await message.channel.send({ content: `# ${message.author} \nPlease Refrain From Using Inappropriate Language.` });
+      const loggingChannel = message.guild.channels.cache.get(loggingChannelId);
+      if (loggingChannel) {
+        await loggingChannel.send({ content: `A User (${message.author}) Has Been Flagged For Saying The Following:\n# ${content}` });
+      }
+    },
+  });
+
+  manager.addRule(badWordRule);
+  manager.enable();
+}
+
+setupAutoModeration();
+
+//Bad Nickname Detection:
+async function setupAutoModeration() {
+  const manager = new AutoModerationRuleManager();
+  const loggingChannelId = '917549440347299840';
+  const filter = new Filter();
+
+  const blockedUsernameRule = new AutoModerationRule({
+    name: 'Blocked Usernames',
+    reason: 'We Do Not Condemn Inappropriate Usernames/Knicknames In This Server.',
+    validate: async (member) => {
+      if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return false; // Administration Bypass
+      }
+      const nickname = member.displayName.toLowerCase();
+      return filter.isProfane(nickname);
+    },
+    punish: async (member) => {
+      await member.setNickname('');
+      const loggingChannel = message.guild.channels.cache.get(loggingChannelId);
+      if (loggingChannel) {
+        let clearedNameReason = `We Do Not Condemn Inappropriate Nicknames In This Server.`
+        await loggingChannel.send({ content: `A User (${member}) Has Had There Display Name Reset For The Following Reason:\n# ${clearedNameReason}` });
+      }
+    },
+
+  });
+
+  manager.addRule(blockedUsernameRule);
+  manager.enable();
+}
+
+setupAutoModeration();
+
+//Mess Mention Detection:
+async function setupAutoModeration() {
+  const manager = client.automod.createAutoModerationRuleManager();
+  const maxMentions = 6; // Maximum number of allowed mentions
+  const timeoutDuration = 10 * 60; // 10 minutes (in seconds)
+  const loggingChannelId = '917549440347299840';
+
+  const mentionSpamRule = new AutoModerationRule({
+    name: 'Mention Spam',
+    reason: 'Excessive mention spam is not allowed in this server.',
+    validate: async (message) => {
+      if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return false; // Administration Bypass
+      }
+      const mentionCount = message.mentions.users.size;
+      return mentionCount > maxMentions;
+    },
+    punish: async (message) => {
+      await message.delete();
+      await message.channel.send(`${message.author}, Please Refrain From Excessive Mention Spam.`);
+      const member = message.guild.members.cache.get(message.author.id);
+      if (member) {
+        await member.timeout({ reason: 'Excessive mention spam', timeout: timeoutDuration });
+        const loggingChannel = message.guild.channels.cache.get(loggingChannelId);
+        if (loggingChannel) {
+          await loggingChannel.send(`A User (${message.author}) Has Been Flagged For Mass Mentioning. They Have Been Timed Out For: ${timeoutDuration} Minutes.`);
+        }
+      }
+    },
+  });
+
+  manager.addRule(mentionSpamRule);
+  manager.enable();
+}
+
+setupAutoModeration();
+
+//Mass Spam Detection:
+async function setupAutoModeration() {
+  const manager = client.automod.createAutoModerationRuleManager();
+  const spamThreshold = 5; // Number of messages within the time frame to consider as spam
+  const timeFrame = 10000; // Time frame in milliseconds (10 seconds)
+  const removeCount = 3; // Number of messages to remove
+  const timeoutDuration = 300000; // Timeout duration in milliseconds (5 minutes)
+  const loggingChannelId = '917549440347299840';
+
+  const spamRule = new AutoModerationRule({
+    name: 'Spam Rule',
+    reason: 'Sending multiple messages within a short time frame is considered spamming.',
+    validate: async (message) => {
+      if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return false; // Administration Bypass
+      }
+      const channelMessages = await message.channel.messages.fetch({ limit: spamThreshold });
+      const spamMessages = channelMessages.filter((msg) => msg.author.id === message.author.id && msg.createdTimestamp >= (Date.now() - timeFrame));
+      return spamMessages.size >= spamThreshold;
+    },
+    punish: async (message) => {
+      const channelMessages = await message.channel.messages.fetch({ limit: removeCount + 1 });
+      const spamMessages = channelMessages.filter((msg) => msg.author.id === message.author.id && msg.createdTimestamp >= (Date.now() - timeFrame));
+      const messagesToRemove = spamMessages.array().slice(0, removeCount);
+      await message.channel.bulkDelete(messagesToRemove);
+      await message.channel.send(`${message.author}, Stop Spamming, It Floods The Chat.`);
+      const member = message.guild.members.cache.get(message.author.id);
+      if (member) {
+        await member.timeout({ reason: 'Sending Multiple Messages Within A Short Time Frame Is Considered Spamming.', timeout: timeoutDuration });
+      }
+      const loggingChannel = message.guild.channels.cache.get(loggingChannelId);
+      if (loggingChannel) {
+        let clearedNameReason = `Sending Multiple Messages Within A Short Time Frame Is Considered Spamming.`
+        await loggingChannel.send({ content: `A User (${member}) Has Been Timed Out For The Following Reason:\n# ${clearedNameReason}` });
+      }
+    },
+  });
+
+  manager.addRule(spamRule);
+  manager.enable();
+}
+
+setupAutoModeration();
+
+//Block Unallowed Discord Server Invites:
+async function setupAutoModeration() {
+  const manager = client.automod.createAutoModerationRuleManager();
+  const loggingChannelId = '917549440347299840';
+
+  const inviteLinkRule = new AutoModerationRule({
+    name: 'Invite Link Filter',
+    reason: 'Sending invite links is restricted to administrators only.',
+    validate: async (message) => {
+      if (message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return false; // Administration Bypass
+      }
+      const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li)|discord(app)?\.com\/invite)\/.+[a-z]/i;
+      return inviteRegex.test(message.content); // Check if the message contains an invite link
+    },
+    punish: async (message) => {
+      await message.delete();
+      await message.channel.send({ content: `${message.author}, Only administrators are allowed to send invite links in this server.` });
+      const loggingChannel = message.guild.channels.cache.get(loggingChannelId);
+      if (loggingChannel) {
+        let clearedNameReason = `Sent A Discord Invite Link.`
+        await loggingChannel.send({ content: `A User (${member}) Has Been Flagged For The Following Reason:\n# ${clearedNameReason}` });
+      }
+    },
+  });
+
+  manager.addRule(inviteLinkRule);
+  manager.enable();
+}
+
+setupAutoModeration();
+//End Automod For Now
+
+//------LOGIN------\\
+client.login(token);
+"
+vTqQAWq9,09 2023,spidersam,JSON,Sunday 1st of October 2023 12:10:49 PM CDT,"[
+ 
+  {
+    ""name"": ""Zoo-01-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/1bf489f5-9c95-d5a7-562a-113781ed66d1.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-02-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/c0150afa-70f4-975b-f7f9-784af4458b61.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-04-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/23a79e34-95dc-adf0-6d46-5d38aee5e086.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-05-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/400880b7-129f-8f43-3b8f-49cf037cef51.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-06-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/121c537c-21ab-f2a3-ce67-f5841601c1e4.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-07-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/ddcebf35-8d74-cf0f-2f0e-f7a9f9c4195e.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-08-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/c49e8c51-779c-81f6-9334-d3bf5722fe25.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-09-09-2023-Compilation-The Jackal"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/36207598-1d0a-4c25-3aa0-2ff5036e74c3.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-11-09-2023-Compilation-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/a25acb89-b21e-105c-5799-f30ac7ed6c15.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-12-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/88459b52-7e39-75f4-8190-3b728a6e3e02.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-13-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/6957033a-dee2-5173-caad-eeaa7c040810.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-14-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/a2cab2f1-51a1-1924-b6e0-7ad3fa6dfbbb.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-15-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/4d354e60-beee-38f9-fe8c-f670d1d03477.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""SabaZoo-16-09-2023-The Jackal"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-9-1/99433f72-796b-ace2-40b7-da045fa1f540.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-18-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/88ccab3f-53ea-9a16-0edb-90b72db2e785.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-19-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/3a48ab70-a400-8492-29eb-7427ebc8add7.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-20-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/8dd01cbc-bd92-f333-fb9b-619525bb52c4.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-21-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/a02f1db0-9467-63c8-2b54-308fb1eccc0b.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-22-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/b016ab70-5f40-9675-85af-44a472229345.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""SabaZoo-23-09-2023-The Jackalmp3"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/db49e2ab-eb9c-e051-8e61-042aa6934a77.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-25-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/e99ddbe7-794d-3f8f-8603-bc2191508744.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-26-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/bfd4b77f-441f-bfa2-ba60-41e12d58e1f0.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-27-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/0f61e5b1-9220-ddf5-fa58-a5101687d445.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-28-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/8d6a26e4-997b-ac69-871f-14e379e3a422.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  },
+  {
+    ""name"": ""Zoo-29-09-2023-S@m"",
+    ""url"": ""https://d3ctxlq1ktw2nl.cloudfront.net/staging/2023-8-30/74c39318-0c41-1101-d92b-0d5f6307b13f.mp3"",
+    ""imageUrl"": ""https://i.imgur.com/MGXdb63m.jpg""
+  }
+]"
+3ne5TmD4,Untitled,abstract_abstract,C++,Sunday 1st of October 2023 11:53:07 AM CDT,"#include ""Server.h""
+#include <iostream>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#pragma comment(lib, ""ws2_32.lib"")
+
+Server::Server(const std::string& address, int port)
+        : address(address), port(port), connected(false), serverSocket(0), clientSocket(0) {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << ""Ошибка при инициализации библиотеки WSA"" << std::endl;
+        return;
+    }
+
+// Создание сокета
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket == INVALID_SOCKET) {
+        std::cerr << ""Ошибка при создании сокета"" << std::endl;
+        WSACleanup();
+        return;
+    }
+
+// Настройка адреса и порта сервера
+    sockaddr_in serverAddress{};
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, address.c_str(), &(serverAddress.sin_addr)) <= 0) {
+        std::cerr << ""Некорректный адрес сервера"" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return;
+    }
+
+// Привязка сокета к адресу и порту
+    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == SOCKET_ERROR) {
+        std::cerr << ""Ошибка при привязке сокета"" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return;
+    }
+
+// Ожидание подключений
+    if (listen(serverSocket, 1) == SOCKET_ERROR) {
+        std::cerr << ""Ошибка при ожидании подключений"" << std::endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return;
+    }
+
+    std::cout << ""Сервер запущен и ожидает подключений..."" << std::endl;
+    connected = true;
+}
+
+Server::~Server() {
+    if (connected) {
+        // Остановка сервера
+
+        connected = false;
+        std::cout << ""Сервер успешно остановлен из деструктора"" << std::endl;
+    }
+}
+
+void Server::start() {
+    if (!connected) {
+        std::cerr << ""Сервер не был успешно запущен"" << std::endl;
+        return;
+    }
+
+    while (true) {
+        sockaddr_in clientAddress{};
+        int clientAddressLen = sizeof(clientAddress);
+
+        // Принятие нового подключения
+        clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddress, &clientAddressLen);
+        if (clientSocket == INVALID_SOCKET) {
+            std::cerr << ""Ошибка при принятии подключения"" << std::endl;
+            continue;
+        }
+
+        char clientIp[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(clientAddress.sin_addr), clientIp, INET_ADDRSTRLEN);
+        int clientPort = ntohs(clientAddress.sin_port);
+
+        std::cout << ""Получено новое соединение от "" << clientIp << "":"" << clientPort << std::endl;
+
+        // Ваш код для обработки подключения
+
+        // Закрытие сокета клиента
+        closesocket(clientSocket);
+        std::cout << ""Соединение с "" << clientIp << "":"" << clientPort << "" завершено"" << std::endl;
+    }
+}
+
+
+void Server::stop() {
+    if (connected) {
+        // Остановка сервера
+
+        // Закрытие клиентского сокета (если активно)
+        if (clientSocket != 0) {
+            closesocket(clientSocket);
+            clientSocket = 0;
+        }
+
+        // Закрытие серверного сокета
+        closesocket(serverSocket);
+        WSACleanup();
+
+        connected = false;
+        std::cout << ""Сервер успешно остановлен"" << std::endl;
+    } else {
+        std::cerr << ""Сервер не был запущен"" << std::endl;
+    }
+}
+
+
+bool Server::isConnected() const {
+    return connected;
+}
+
+bool Server::isRunning() const {
+    if (connected) {
+        if(serverSocket != 0) {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        return false;
+    }
+}
+"
+9p3jptFB,Untitled,greedydev,Swift,Sunday 1st of October 2023 11:42:16 AM CDT,"struct User {
+    init(name: String) {
+        self.name = name
+    }
+    
+    let name: String
+    
+    private var interests = [Interest]()
+    private var following = [User]()
+    
+    mutating func addInterest(_ interest: Interest) {
+        interests.append(interest)
+    }
+    
+    mutating func removeInterest(_ interest: Interest) {
+        interests.removeAll(where: { $0 == interest })
+    }
+    
+    mutating func follow(_ target: User) {
+        following.append(target)
+    }
+    
+    mutating func unfollow(_ target: User) {
+        following.removeAll(where: { $0 == target })
+    }
+    
+    func getFollowingList() -> [User] {
+        return following
+    }
+    
+    func getInterestsList() -> [Interest] {
+        return interests
+    }
+}
+
+extension User: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        return lhs.name == rhs.name
+    }
+}
+
+struct Interest {
+    let name: String
+}
+
+extension Interest: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        return lhs.name == rhs.name
+    }
+}
+"
+YGH8Xm3P,Equal Sum,Pijomir,JavaScript,Sunday 1st of October 2023 11:37:32 AM CDT,"function checkForEqualSums(arr) {
+    let result = 'no';
+    for (let i = 0; i < arr.length; i++) {
+        let leftSum = 0;
+        let rightSum = 0;
+        for (let j = 0; j < i; j++) {
+            leftSum += arr[j];
+        }
+
+        for (let k = i + 1; k < arr.length; k++) {
+            rightSum += arr[k];
+        }
+
+        if(leftSum === rightSum) {
+            result = i;
+            break;
+        }
+    }
+
+    console.log(result);
+}"
+ihpK1gYQ,Untitled,drinfernoo,Python,Sunday 1st of October 2023 11:29:54 AM CDT,"class Calculator:
+    def add(self, a, b):
+        return a + b
+
+    def subtract(self, a, b):
+        return a - b
+
+    def multiply(self, a, b):
+        return a * b
+
+    def divide(self, a, b):
+        try:
+            return a / b
+        except ZeroDivisionError:
+            return ""You can't divide by zero!""
+"
+kb7x7P4z,Untitled,drinfernoo,Python,Sunday 1st of October 2023 11:23:30 AM CDT,"class Calculator:
+    def add(self, a, b):
+        return a + b
+
+    def subtract(self, a, b):
+        return a - b
+
+    def multiply(self, a, b):
+        return a * b
+
+    def divide(self, a, b):
+        return a / b if b != 0 else ""You can't divide by zero!""
+"
+ppvSLJ73,triggers for elizabeth,vsevolod026,PostgreSQL,Sunday 1st of October 2023 11:11:41 AM CDT,"create type cud_operation as enum('update', 'insert', 'delete');
+
+-- Создание таблицы для логов
+create table session.building_logs(
+    id_log serial primary key,
+    operation_type cud_operation not null,
+    operation_time timestamp without time zone,
+    affected_building_id int null,
+    affected_building_name text null
+);
+
+-- Создание метода для триггера
+CREATE OR REPLACE FUNCTION building_add_to_log() RETURNS TRIGGER AS $$
+DECLARE
+    var_operation_type cud_operation;
+BEGIN
+    IF  TG_OP = 'INSERT' THEN
+        var_operation_type := 'insert';
+        insert into
+            session.building_logs(operation_type, operation_time, affected_building_id, affected_building_name)
+        VALUES
+            (var_operation_type, now(), new.building_id, new.building_name);
+        RETURN NEW;
+    ELSIF TG_OP = 'UPDATE' THEN
+        var_operation_type := 'update';
+        insert into
+            session.building_logs(operation_type, operation_time, affected_building_id, affected_building_name)
+        VALUES
+            (var_operation_type, now(), old.building_id, old.building_name);
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        var_operation_type := 'delete';
+        insert into
+            session.building_logs(operation_type, operation_time, affected_building_id, affected_building_name)
+        VALUES
+            (var_operation_type, now(), old.building_id, old.building_name);
+        RETURN OLD;
+    END IF;
+END
+$$ LANGUAGE plpgsql;
+
+
+
+create trigger log_trigger
+    after insert or update or delete on session.building
+    for each row execute procedure building_add_to_log();
+
+drop trigger log_trigger on session.building;
+
+
+
+delete  from session.building_logs;
+
+select * from session.building_logs;
+
+update session.building
+set
+    building_name = 'корпус228'
+where building_id=5;
+
+insert into session.building(building_id, address, building_name) values
+    (7, 'sample address', 'корпус30');
+
+delete from session.building where building_id=7;
+
+
+select edu_plan_subject_id from session.edu_plan_subject
+    where edu_plan_id=(select edu_plan_id from session.""group""
+        where group_id=(select group_id from session.student_in_group
+            where student_in_group_id=100));
+
+create or replace function check_subject_in_edu_plan() returns trigger as
+$$
+declare
+    edu_plan_subject_ids int[];
+begin
+    select array_agg(edu_plan_subject_id) into edu_plan_subject_ids from session.edu_plan_subject
+    where edu_plan_id=(select edu_plan_id from session.""group""
+        where group_id=(select group_id from session.student_in_group
+            where student_in_group_id=new.student_in_group_id));
+
+    if new.edu_plan_subject_id <> any(edu_plan_subject_ids) then
+        raise EXCEPTION 'Нет такого учебного курса в учебном плане группы';
+    end if;
+
+    return new;
+end
+$$ language plpgsql;
+
+
+create trigger check_subject_trigger
+before insert on session.attestation
+for each row execute procedure check_subject_in_edu_plan();
+
+select edu_plan_subject_id from session.edu_plan_subject
+    where edu_plan_id=(select edu_plan_id from session.""group""
+        where group_id=(select group_id from session.student_in_group
+            where student_in_group_id=1));
+
+
+insert into session.attestation(grade, attestation_date, teacher_id, edu_plan_subject_id, student_in_group_id, attempt_count)
+values (5, '2020-03-03', 0, 0, 1, 1)
+
+"
+jvd40JqH,Untitled,dllbridge,C,Sunday 1st of October 2023 11:07:55 AM CDT,"
+
+#include    <stdio.h>
+char sz[99] = ""Paramout_Pictures"";
+void foo(char *psz);
+
+
+int  n = 77;
+int *p = &n;
+
+//////////////////////////////////////////////////////// 
+int main()                                            //
+{
+	foo(sz);
+}
+
+////////////////////////////////////////////////////
+void foo(char *psz)
+{
+	
+    psz += 9;	
+
+	
+	printf(""%s"", psz);
+}
+
+
+
+
+
+
+
+/*
+#include    <stdio.h>
+
+
+void foo(int &pn);
+
+//////////////////////////////////////////////////////// 
+int main()                                            //
+{
+	
+	int nx = 123;
+	
+	printf(""address nx = %d\n"", &nx);
+	
+	foo(nx);
+	
+	printf(""from main nx = %d"", nx);
+	
+}
+
+
+
+
+//////////////////////////////////
+void foo(int &a)
+{
+	
+
+	
+	a = a - 100;
+	
+  // *pn = *pn - 100;
+	
+	printf(""address a = %d\n"", &a);
+	
+	
+	
+}
+
+*/
+
+
+
+
+
+/*
+#include    <stdio.h>
+
+
+void foo(int *pn);
+
+//////////////////////////////////////////////////////// 
+int main()                                            //
+{
+	
+	int nx = 123;
+	
+	printf(""address nx = %d\n"", &nx);
+	
+	foo(&nx);
+	
+	printf(""from main nx = %d"", nx);
+	
+}
+
+
+
+
+//////////////////////////////////
+void foo(int *pn)
+{
+	
+	int &a = *pn;
+	
+	a = a - 100;
+	
+  // *pn = *pn - 100;
+	
+	printf(""pn = %d\n"", pn);
+	
+	
+	
+}
+*/
+
+
+
+
+
+/*
+
+#include    <stdio.h>
+
+
+void foo(int *pn);
+
+//////////////////////////////////////////////////////// 
+int main()                                            //
+{
+	
+	int nx = 123;
+	
+	printf(""address nx = %d\n"", &nx);
+	
+	foo(&nx);
+	
+	printf(""from main nx = %d"", nx);
+	
+}
+
+
+
+
+//////////////////////////////////
+void foo(int *pn)
+{
+	
+   *pn = *pn - 100;
+	
+	printf(""pn = %d\n"", pn);
+	
+	
+	
+}
+
+
+*/
+
+
+
+
+
+
+"
+kBEdwTzi,random.html,amrul813,HTML,Sunday 1st of October 2023 11:02:19 AM CDT,"<!DOCTYPE html>
+<html>
+<head>
+	<meta charset=""utf-8"">
+	<title>Redirecting...</title>
+	<script type=""text/javascript"">
+		/*
+		This file randomly redirects a user to one of the URLs in a list. It is built
+		with the intent of randomization in a controlled experiment.
+
+		For example, create three Google Docs forms (or equivalent) and add their URLs
+		to the list below. That's it!
+
+		The user is then automatically and randomly assigned to one of the URLs when
+		the user visits this file. If the user decides to close and reopen the browser,
+		the user is still redirected to the same URL since a cookie is saved in the
+		user's browser.
+		
+		Peter M. Dahlgren
+		@peterdalle
+		peterdahlgren.com
+		2016-01-05
+		*/
+		
+		// List of URLs (two or more) for the experimental treatment and control groups.
+		var RedirectURLs = {
+			""urls"" : [
+				{ ""url"" : ""http://www.google.com/"" },
+				{ ""url"" : ""http://www.youtube.com/"" },
+				{ ""url"" : ""https://kusonime.com/"" }
+			]
+		}
+
+		// Count the number of URLs in list.
+		var Groups = RedirectURLs.urls.length;
+
+		// Randomize number and get the corresponding index for the URL in list.
+		var gotoUrl = RedirectURLs.urls[GetRandomNumber(Groups)].url
+
+		// Perform redirection.
+		if (window.location.search == ""?debug"") {
+			// Debug mode: If user supplies a ?debug querystring,
+			// then only show the redirect URL, but don't actually redirect.
+			document.write(""Redirect URL: "" + gotoUrl);
+		} else {
+			// Redirect the user to the new URL.
+			document.location = gotoUrl;
+		}
+
+		// Perform randomization and save it to a cookie.
+		function GetRandomNumber(Groups) {
+			// Has cookie been set?
+			var rndIndex = null;
+			if (GetCookie() != """") {
+				// Yes, get randomization from cookie.
+				rndIndex = GetCookie()
+			} else {
+				// No, set random value to cookie.
+				rndIndex = Math.floor((Math.random() * Groups));
+				SetCookie(rndIndex, 30) // Set cookie for 30 days.
+			}
+			return rndIndex
+		}
+
+		// Set cookie with randomization value.
+		function SetCookie(CookieValue, DaysUntilExpire) {
+			var d = new Date();
+			d.setTime(d.getTime() + (DaysUntilExpire * 24 * 60 * 60 * 1000));
+			document.cookie = ""rnd="" + CookieValue + "";expires="" + d.toUTCString();
+		}
+
+		// Get cookie with randomization value. Return empty string if not set.
+		function GetCookie() {
+			var ca = document.cookie.split(';');
+			for(var i = 0; i < ca.length; i++) {
+				var c = ca[i];
+				while (c.charAt(0) == ' ') c = c.substring(1);
+				if (c.indexOf(""rnd="") == 0) return c.substring(4, c.length);
+			}
+			return """";
+		}
+	</script>
+</head>
+<body>
+</body>
+</html>
+"
+gs4c4tcz,Perfect Diamond,Spocoman,Python,Sunday 1st of October 2023 10:28:41 AM CDT,"n = int(input())
+
+for i in range(n):
+    print(' ' * (n - (i + 1)) + '*' + ""-*"" * i)
+
+for i in range(n - 2, -1, -1):
+    print(' ' * (n - (i + 1)) + '*' + ""-*"" * i)
+"
+CFBf2dmL,Untitled,remico,JavaScript,Sunday 1st of October 2023 10:20:04 AM CDT,"function oscars (inputArray){
+let actorNameInput = inputArray [0];
+let academiPoints = Number (inputArray [1]); //205
+let juryCountInput = Number (inputArray [2]);//4
+
+for (let i = 3; i < juryCountInput ; i +=2){ 
+    let juryName = inputArray [i];
+    let juryPoints = Number (inputArray [i +1]);
+    let poinsWon = juryName.length * juryPoints / 2;
+    academiPoints += poinsWon
+
+    
+    if  (academiPoints > 1250.50){
+        console.log (`Congratulations, ${actorNameInput} got a nominee for leading role with ${academiPoints.toFixed(1)}!`);
+        break;
+    }
+    if (academiPoints <= 1250.50) {
+        let pointsNeeded = 1250.50 - academiPoints;
+        console.log (`Sorry, ${actorNameInput} you need ${pointsNeeded.toFixed(1)} more!`);
+    }  
+}
+}
+//oscars ([""Zahari Baharov"",""205"",""4"",""Johnny Depp"",""45"",""Will Smith"",""29"",""Jet Lee"",""10"",""Matthew Mcconaughey"",""39""]);"
+TQVnVA3h,First Impression,circlejourney,HTML 5,Sunday 1st of October 2023 10:18:18 AM CDT,"<!-- 
+    First Impression snippet by Circlejourney. See my codes here:
+    https://toyhou.se/orchestrator/characters/folder:524040
+    
+    Placeholders (use Ctrl + F to replace):
+        Outline colour: #cfcfcf
+        Text shadow colour: #ddd
+        Text highlight colour: #eee
+        FA accent icon: fa-umbrella-beach
+-->
+
+<div class=""row no-gutters rounded"" style=""overflow: hidden; border: 3px solid #cfcfcf; background: #cfcfcf; position: relative;"">
+    <div class=""col-12 col-md-6 d-flex"" style=""border: 3px solid #cfcfcf; height: 400px;"">
+        
+        <!-- Replace background-image URL to change first image -->
+        <div id=""SLICE-1""
+            style=""background-image: url(https://i.postimg.cc/150pr270/1130.png);
+                background-size: cover;
+                background-position: 20%;
+                width: 200px;""
+            class=""flex-grow-1 rounded-left""></div>
+        
+        <!-- Replace background-image URL to change second image -->
+        <div id=""SLICE-2""
+            style=""background-image: url(https://i.postimg.cc/bvV02nCK/s-a12-Cb12-Cc12-Cd12-Ce0f0g64h0-C282-C183748-EF6560-E69-A7-CD8-BA98-DAD0-AAi-C.png);
+                background-size: cover;
+                width: 200px;
+                clip-path: polygon(0 0, 100% 0%, 100% 100%, 60px 100%);
+                margin-left: -60px;""
+            class=""flex-grow-1""></div>
+            
+    </div>
+    
+    
+    <div id=""NAME-BLOCK"" style=""width: 0;"" class=""col-12 col-md-auto flex-column justify-content-center align-items-center"">
+        <div style=""color: #333; z-index: 3; text-shadow: -3px -3px 0 #eee, 0px -3px 0 #eee, 3px -3px 0 #eee, -3px 0px 0 #ddd, 0px 0px 0 #ddd, 3px 0px 0 #ddd, -3px 3px 0 #ddd, 0px 3px 0 #ddd, 3px 3px 0 #ddd; line-height: 0.4em;"" class=""display-2 font-weight-bold text-uppercase text-center font-italic"">
+            Character
+        </div>
+        
+        <!-- Replace src property below to change character portrait -->
+        <img id=""PORTRAIT""
+            src=""https://f2.toyhou.se/file/f2-toyhou-se/users/admin?9""
+            class=""rounded-circle""
+            style=""z-index: 2; max-width: none; width: 250px; height: 250px; border: 6px solid #cfcfcf;"">
+        
+        <div class=""display-2 font-weight-bold text-uppercase text-center font-italic"" style=""color: #333; z-index: 3; text-shadow:  -3px -3px 0 #eee, 0px -3px 0 #eee, 3px -3px 0 #eee, -3px 0px 0 #ddd, 0px 0px 0 #ddd, 3px 0px 0 #ddd, -3px 3px 0 #ddd, 0px 3px 0 #ddd, 3px 3px 0 #ddd; line-height: 0em;"">
+            Name
+        </div>
+    </div>
+    
+    
+    <div class=""col-12 col-md-6 d-flex"" style=""border: 3px solid #cfcfcf; height: 400px;"">
+        
+        <!-- Replace background-image URL to change third image -->
+        <div id=""SLICE-3""
+            style=""background-image: url(https://i.postimg.cc/hvTVw5DB/s-a12-Cb12-Cc12-Cd12-Ce0f0g64h-EFF2-E2-E4-E1-C4-DECEAEDDB79-DABDBF3i-B5.png);
+                background-size: cover;
+                position: left;
+                width: 200px;
+                margin-right: -60px;""
+            data-toggle=""tooltip""
+            title=""Tooltip text 1""
+            class=""flex-grow-1"" ></div>
+            
+        <!-- Replace background-image URL to change fourth image -->
+        <div id=""SLICE-4""
+            style=""background-image: url(https://i.postimg.cc/ZR98PqX0/s-a12-Cb12-Cc12-Cd12-Ce0f0g64h162136193649-E79799-E3-B2-A3-E3-CAB3-E8-DFC8i85.png);   
+                background-size: cover;
+                background-position: top;
+                width: 200px;
+                clip-path: polygon(60px 0, 100% 0%, 100% 100%, 0 100%);""
+            data-toggle=""tooltip""
+            title=""Tooltip text 2""
+            class=""flex-grow-1 rounded-right""></div>
+    </div>
+    
+    <div id=""CORNER-ICON"" style=""position: absolute; z-index: 2; font-size: 150pt; bottom: -5%; right: -3%; color: #cfcfcf; line-height: 1em;"">
+        <i class=""fa-thin fa-fw fa-umbrella-beach""></i>
+    </div>
+    
+</div>
+
+<div id=""CREDIT"" style=""z-index: 3; font-size: 9pt; opacity: 0.5;"">
+    <a href=""https://toyhou.se/~forums/16.htmlcss-graphics/75580.circlejourney-s-code-creations-free-""><i class=""fa fa-code""></i> Snippet by Circlejourney</a>
+</div>"
+n1vtDSaW,MOK layout Batang Arab,dksetiavan,YAML,Sunday 1st of October 2023 09:52:09 AM CDT,"{
+""title"":""Batang Arab"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ڠورتيَُِف"",
+""اسدْغهکل"",
+""[SHIFT][MC:َٕ][MC:ُو]بنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""عةظطئًٌٍث"",
+""ءشذّجحخل"",
+""[SHIFT]ـٕصضـ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+uZNNuUW7,Perfect Diamond,Spocoman,JavaScript,Sunday 1st of October 2023 09:47:29 AM CDT,"function perfectDiamond(input) {
+    let n = Number(input);
+
+   for (let i = 0; i <n; i++) {
+    console.log("" "".repeat(n - (i + 1)) + '*' + ""-*"".repeat(i));
+    }
+ 
+    for (let i = n - 2; i >= 0; i--) {
+        console.log("" "".repeat(n - (i + 1)) + '*' + ""-*"".repeat(i));
+    }
+
+    return;
+}"
+PQdUmc2V,shared.module.ts,donev,TypeScript,Sunday 1st of October 2023 09:37:18 AM CDT,"import { NgModule } from '@angular/core';
+
+import { PrimeNgModule } from './prime-ng/prime-ng.module';
+import { ComponentsModule } from './components/components.module';
+import { DirectivesModule } from './directives/directives.module';
+
+@NgModule({
+  imports: [PrimeNgModule, ComponentsModule, DirectivesModule],
+  exports: [PrimeNgModule, ComponentsModule, DirectivesModule],
+})
+export class SharedModule {}"
+pf0EJsBF,directives.module.ts,donev,TypeScript,Sunday 1st of October 2023 09:36:17 AM CDT,"import { NgModule } from '@angular/core';
+
+import { ImageErrorHandlerDirective } from './image-error-handler.directive';
+import { SvgIconDirective } from './svg-icon.directive';
+
+@NgModule({
+  declarations: [ImageErrorHandlerDirective, SvgIconDirective],
+  exports: [ImageErrorHandlerDirective, SvgIconDirective],
+})
+export class DirectivesModule {}"
+iwmEC4CH,directive.ts,donev,JavaScript,Sunday 1st of October 2023 09:35:09 AM CDT,"import { Directive, ElementRef, Input, Renderer2 } from '@angular/core';
+
+@Directive({
+  selector: '[svg-icon]',
+})
+export class SvgIconDirective {
+  @Input() svgName!: string;
+  @Input() svgWidth: string = '30';
+  @Input() svgHeight: string = 'auto';
+  @Input() svgColor: string = 'black';
+
+  constructor(private el: ElementRef, private renderer: Renderer2) {}
+
+  ngOnInit(): void {
+    const svgFilePath = `assets/svg/${this.svgName}.svg`;
+
+    fetch(svgFilePath)
+      .then((response) => response.text())
+      .then((svgData) => {
+        const parser = new DOMParser();
+        const svgElement = parser.parseFromString(
+          svgData,
+          'image/svg+xml'
+        ).documentElement;
+
+        svgElement.setAttribute('width', this.svgWidth);
+        svgElement.setAttribute('height', this.svgHeight);
+
+        this.renderer.setStyle(svgElement, 'fill', this.svgColor);
+        this.renderer.appendChild(this.el.nativeElement, svgElement);
+      });
+  }
+}"
+ZvqrnTAM,Perfect Diamond,Spocoman,C++,Sunday 1st of October 2023 09:32:40 AM CDT,"#include <iostream>
+
+using namespace std;
+
+string repeat(string s, int n) {
+    string result;
+    for (int i = 0; i < n; i++) {
+        result += s;
+    }
+    return result;
+}
+
+int main() {
+    int n;
+    cin >> n;
+    
+    for (int i = 0; i < n; i++) {
+        cout << repeat("" "", (n - (i + 1))) + '*' + repeat(""-*"", i) << endl;
+    }
+
+    for (int i = n - 2; i >= 0; i--) {
+        cout << repeat("" "", (n - (i + 1))) + '*' + repeat(""-*"", i) << endl;
+    }
+
+    return 0;
+}"
+eB9LwtPn,Untitled,remico,JavaScript,Sunday 1st of October 2023 09:25:35 AM CDT,"function tennisRanklist (input) {
+    let tournamentCount = Number (input[0]);//5
+    let startingPoints = Number (input[1]);//1400
+    let allPoints =startingPoints + 0;
+    let averagePointTournir = 0;
+    let averageTotal = averagePointTournir/5;
+    let allWins = 0;
+    let percentWins = (allWins / 5)* 100;
+
+
+    for ( let i =2; i<= tournamentCount; i++){
+        if (input = ""W""){
+            allPoints +=2000;
+            averagePointTournir+=2000
+            allWins +=1;
+        }else if (input =""F""){
+            allPoints +=1200;
+            averagePointTournir +=1200;
+        }else if (input =""SF""){
+            allPoints +=720;
+            averagePointTournir +=720;
+        }
+                
+    }
+        console.log (`Final points: ${allPoints}`);
+        console.log (`Average point ${averageTotal}`);
+        console.log (`${percentWins}%`);
+    }
+    //tennisRanklist ([""5"",""1400"",""F"",""SF"",""W"",""W"",""SF""]);"
+Buz4gJbq,Untitled,remico,JavaScript,Sunday 1st of October 2023 09:22:47 AM CDT,"function oscars (inputArray){
+let actorNameInput = inputArray [0];
+let startingPointsInput = Number (inputArray [1]); //205
+let juryCountInput = Number (inputArray [2]);//4
+
+let allPoints =0;
+
+for (let i = 3; i < juryCountInput ; i ++){ 
+    let juryName = inputArray [i + 2];
+    let juryPoints = Number (inputArray [i + 3]);
+    let totalJuryPoints = startingPointsInput + (juryName.length) * juryPoints / 2;
+    allPoints =  Math.abs(1250.5 - totalJuryPoints);
+    if  (allPoints > 1250.50){
+        console.log (`Congratulations, ${actorNameInput} got a nominee for leading role with ${allPoints}!`);
+        break;
+    }else {
+        console.log (`Sorry, ${actorNameInput} you need ${allPoints} more!`);
+    }  
+}
+}
+//oscars ([""Zahari Baharov"",""205"",""4"",""Johnny Depp"",""45"",""Will Smith"",""29"",""Jet Lee"",""10"",""Matthew Mcconaughey"",""39""]);"
+yXk0YqEU,Perfect Diamond,Spocoman,C#,Sunday 1st of October 2023 09:22:44 AM CDT,"using System;
+
+namespace PerfectDiamond
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            int n = int.Parse(Console.ReadLine());
+
+            for (int i = 1; i <= n; i++)
+            {
+                Console.Write(new string(' ', n - i) + '*');
+                for (int j = 1; j < i; j++)
+                {
+                    Console.Write(""-*"");
+                }
+                Console.WriteLine();
+            }
+
+            for (int i = 1; i < n; i++)
+            {
+                Console.Write(new string(' ', i) + '*');
+                for (int j = n - 2; j >= i; j--)
+                {
+                    Console.Write(""-*"");
+                }
+                Console.WriteLine();
+            }
+        }
+    }
+}
+
+Решение със StringBuilder():
+
+using System;
+using System.Text;
+
+namespace PerfectDiamond
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            int n = int.Parse(Console.ReadLine());
+
+            for (int i = 0; i < n; i++)
+            {
+                Console.WriteLine(new string(' ', n - (i + 1)) + '*' + new StringBuilder().Insert(0, ""-*"", i));
+            }
+
+            for (int i = n - 2; i >= 0; i--)
+            {
+                Console.WriteLine(new string(' ', n - (i + 1)) + '*' + new StringBuilder().Insert(0, ""-*"", i));
+            }
+        }
+    }
+}"
+sZcfk2m2,MOK layout Maguindanao,dksetiavan,YAML,Sunday 1st of October 2023 09:16:48 AM CDT,"{
+""title"":""Maguindanao"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قویرتيَُِڤ"",
+""اسدفݢهجکل"",
+""[SHIFT]زڠْبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""صضـظطئًٌٍث"",
+""ءشذفغحخکل"",
+""[SHIFT]ةعّبنم[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+fwAmsFcN,How to buy fake NHL Stenden diploma?,jf123123,C,Sunday 1st of October 2023 09:04:31 AM CDT,"How to buy fake NHL Stenden diploma? How do I buy a fake Stenden University of Applied Sciences degree certificate? Get a fake Stenden University of Applied Sciences certificate online. Stenden University of Applied Sciences is a state-funded professional university in the north of the Netherlands. The University is the product of the merger in 2008 of Hogeschool Drenthe and Christelijke Hogeschool Nederland. Stenden University of Applied Sciences has more than 11,000 students. How to order fake Hanze University of Applied Sciences diploma?
+
+Stenden University offers a variety of bachelor’s and master’s degree programs in fields such as business, hospitality, tourism, media, technology, and education. It offers a wide range of applied sciences programs to students from all over the world.
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com"
+5Ts5dsRR,Escape sequence,Rakib6k-,Java,Sunday 1st of October 2023 09:02:49 AM CDT,"class Hello {
+    public static void main(String[] args) {
+        System.out.println(""Hello,\nHi!"");
+    }
+}"
+5VU5KcdU,How to order fake NCFE CACHE Level 2 certificate?,jf123123,C,Sunday 1st of October 2023 08:57:38 AM CDT,"How to order fake NCFE CACHE Level 2 certificate? Buy fake NCFE CACHE Level 2 certificate online, Get a fake NCFE CACHE diploma certificate, Phony NCFE CACHE Level 2 Understanding Child and Adolescent Mental Health Certificate, Obtain NCFE CACHE Qualifications online.
+
+What does this qualification cover?
+The purpose of this qualification is to increase learner’s knowledge and awareness of children and young people’s mental health. buy fake certificate, buy fake diploma, fake degree, How to buy fake certificate online? How do I buy a fake Stenden University of Applied Sciences diploma? How much to order NCFE CACHE Level 2 certificate?
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com
+
+"
+UXUJh3CA,oyun,LEGEND2004,C++,Sunday 1st of October 2023 08:57:30 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+//#define int long long
+const int INF = 1e18;
+const int N = 1e3 + 5;
+const int mod = 1e9 + 7;
+
+
+signed main()
+{
+    int n , k;
+    cin >> n;
+    map<int , int> cnt;
+    while(n--){
+        cin >> k;
+        cnt[k]++;
+    }
+    int ans = 0;
+    for(auto i : cnt){
+        ans += (i.second % 2);
+    }
+    cout << ans << endl;
+}
+"
+MKfZjwXH,How to order fake SRH Fernhochschule diploma?,jf123123,Bash,Sunday 1st of October 2023 08:54:11 AM CDT,"How to order fake SRH Fernhochschule diploma? Order fake SRH Fernhochschule Urkunde online, Customize the latest SRH Fernhochschule degree certificate online, Obtain fake The Mobile University degree. The SRH Fernhochschule – nicknamed The Mobile University – is a privately run university. It is represented at 21 locations in Germany, Austria and Switzerland and offers distance learning courses and university certificates to accompany work and training.
+
+It offers 51 bachelor’s, master’s and MBA study programs as well as over 60 certificate programs in the ten topics of communication, psychology, design, health, social affairs, pedagogy, technology, digitalization, business and management. buy fake degree, buy fake diploma, fake certificate, make transcript online, How to buy fake degree certificate? buy SRH Fernhochschule bachelor degree. How to order fake NCFE CACHE Level 2 certificate?
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com"
+9YFVh2E0,Basic Java,Rakib6k-,Java,Sunday 1st of October 2023 08:53:07 AM CDT,"class Java {
+    public static void main(String[] args) {
+        System.out.println(""Java!"");
+    }
+}"
+F1rwvJp0,priority_queue,LEGEND2004,C++,Sunday 1st of October 2023 08:49:42 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+//#define int long long
+const int INF = 1e18;
+const int N = 1e3 + 5;
+const int mod = 1e9 + 7;
+
+
+signed main()
+{
+    priority_queue<int , vector<int> , greater<int> > q;
+    q.push(1);
+    q.push(9);
+    q.push(5);
+    q.push(5);
+    q.push(7);
+    while(!q.empty()){
+        cout << q.top() << endl;
+        q.pop();
+    }
+}
+"
+hRRiFZNX,Untitled,vatman,Python,Sunday 1st of October 2023 08:39:24 AM CDT,"import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+# Определим функцию для системы дифференциальных уравнений
+def system_equations(gamma):
+    def rhs(t, X):
+        x, y = X
+        dxdt = y
+        dydt = +x**5 - 5*x**3 + 4*x
+        return [dxdt, dydt]
+    return rhs
+
+# Создадим функцию для построения векторного поля
+def plot_vector_field(rhs, limits, N=25, arrow_length=0.1):
+    xlims, ylims = limits
+    xs = np.linspace(xlims[0], xlims[1], N)
+    ys = np.linspace(ylims[0], ylims[1], N)
+    U = np.zeros((N, N))
+    V = np.zeros((N, N))
+    for i, y in enumerate(ys):
+        for j, x in enumerate(xs):
+            vfield = rhs(0.0, [x, y])
+            u, v = vfield
+            # Нормализуем вектор
+            length = np.sqrt(u**2 + v**2)
+            if length != 0:
+                u /= length
+                v /= length
+            # Умножаем на фиксированную длину
+            u *= arrow_length
+            v *= arrow_length
+            U[i][j] = u
+            V[i][j] = v
+    return xs, ys, U, V
+
+
+# Функция для построения векторного поля на плоскости
+def plot_on_plane(rhs, limits):
+    plt.close()
+    xlims, ylims = limits
+    plt.xlim(xlims[0], xlims[1])
+    plt.ylim(ylims[0], ylims[1])
+    xs, ys, U, V = plot_vector_field(rhs, limits)
+    plt.quiver(xs, ys, U, V, alpha=0.8)
+
+# Определение параметра gamma и создание функции для системы с этим параметром
+gamma = 1.0
+rhs = system_equations(gamma)
+
+# Построение векторного поля на плоскости
+plot_on_plane(rhs, [(-3.0, 3.0), (-3.0, 3.0)])
+
+# Решение системы дифференциальных уравнений и построение траекторий
+sol1 = solve_ivp(rhs, [0.0, 100.0], (0.01, 0.02), method='RK45', rtol=1e-12)
+x1, y1 = sol1.y
+plt.plot(x1, y1, 'yellow')
+
+sol2 = solve_ivp(rhs, [0.0, 100.0], (2.0, 0.5), method='RK45', rtol=1e-12)
+x2, y2 = sol2.y
+plt.plot(x2, y2, 'red')
+
+sol3 = solve_ivp(rhs, [0.0, 100.0], (-0.01, -0.02), method='RK45', rtol=1e-12)
+x3, y3 = sol3.y
+plt.plot(x3, y3, 'yellow')
+
+sol4 = solve_ivp(rhs, [0.0, -100.0], (2.0, 0.5), method='RK45', rtol=1e-12)
+x4, y4 = sol4.y
+plt.plot(x4, y4, 'red')
+
+sol5 = solve_ivp(rhs, [0.0, 100.0], (2.0, -0.5), method='RK45', rtol=1e-12)
+x5, y5 = sol5.y
+plt.plot(x5, y5, 'red')
+
+sol6 = solve_ivp(rhs, [0.0, -100.0], (2.0, -0.5), method='RK45', rtol=1e-12)
+x6, y6 = sol6.y
+plt.plot(x6, y6, 'red')
+
+sol7 = solve_ivp(rhs, [0.0, 100.0], (2.2, 0.0), method='RK45', rtol=1e-12)
+x7, y7 = sol7.y
+plt.plot(x7, y8, 'red')
+
+sol8 = solve_ivp(rhs, [0.0, -100.0], (-2.2, 0.0), method='RK45', rtol=1e-12)
+x8, y8 = sol8.y
+plt.plot(x8, y8, 'red')
+
+sol9 = solve_ivp(rhs, [0.0, -100.0], (2.2, 0.0), method='RK45', rtol=1e-12)
+x9, y9 = sol9.y
+plt.plot(x9, y9, 'red')
+
+sol10 = solve_ivp(rhs, [0.0, 100.0], (-2.2, 0.0), method='RK45', rtol=1e-12)
+x10, y10 = sol10.y
+plt.plot(x10, y10, 'red')
+
+sol11 = solve_ivp(rhs, [0.0, 100.0], (0.0, 1.0), method='RK45', rtol=1e-12)
+x11, y11 = sol11.y
+plt.plot(x11, y11, 'green')
+
+sol12 = solve_ivp(rhs, [0.0, 100.0], (1.0, 0.0), method='RK45', rtol=1e-12)
+x12, y12 = sol12.y
+plt.scatter(x12, y12, color='blue', marker='o')
+
+sol20 = solve_ivp(rhs, [0.0, 100.0], (2.01, np.sqrt(24)*0.01), method='RK45', rtol=1e-12)
+x20, y20 = sol20.y
+plt.plot(x20, y20, 'yellow')
+
+sol13 = solve_ivp(rhs, [0.0, -100.0], (2.01, np.sqrt(24)*0.01), method='RK45', rtol=1e-12)
+x13, y13 = sol13.y
+plt.plot(x13, y13, 'yellow')
+
+sol14 = solve_ivp(rhs, [0.0, -100.0], (1.99, np.sqrt(24)*0.01), method='RK45', rtol=1e-12)
+x14,y14 = sol14.y
+plt.plot(x14, y14, 'yellow')
+
+sol15 = solve_ivp(rhs, [0.0, 100.0], (1.99, -np.sqrt(24)*0.01), method='RK45', rtol=1e-12)
+x15,y15 = sol15.y
+plt.plot(x15, y15, 'yellow')
+
+sol16 = solve_ivp(rhs, [0.0, 100.0], (-1.0, 0.0), method='RK45', rtol=1e-12)
+x16, y16 = sol16.y
+plt.scatter(x16, y16, color='blue', marker='o')
+
+sol17 = solve_ivp(rhs, [0.0, 100.0], (0.0, 0.0), method='RK45', rtol=1e-12)
+x17, y17 = sol17.y
+plt.plot(x17, y17, 'r+')
+
+sol17 = solve_ivp(rhs, [0.0, 100.0], (-2.0, 0.0), method='RK45', rtol=1e-12)
+x17, y17 = sol17.y
+plt.plot(x17, y17, 'r+')
+
+sol17 = solve_ivp(rhs, [0.0, 100.0], (2.0, 0.0), method='RK45', rtol=1e-12)
+x17, y17 = sol17.y
+plt.plot(x17, y17, 'r+')
+
+sol18 = solve_ivp(rhs, [0.0, 100.0], (0.5, 0.0), method='RK45', rtol=1e-12)
+x18, y18 = sol18.y
+plt.plot(x18, y18, 'green')
+
+sol19 = solve_ivp(rhs, [0.0, 100.0], (-0.5, 0.0), method='RK45', rtol=1e-12)
+x19, y19 = sol19.y
+plt.plot(x19, y19, 'green')
+
+# Отображение результатов
+plt.show()
+"
+XAwG2V3Q,AluminumJoinery,MladenKarachanov,Java,Sunday 1st of October 2023 08:12:28 AM CDT,"package ProgrammingBasics2;
+
+import java.util.Scanner;
+
+public class AluminumJoinery {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int numberOfDogmas = Integer.parseInt(scanner.nextLine());
+        String typeOfJoinery = scanner.nextLine();
+        String shipmentMethod = scanner.nextLine();
+        double discount = 0;
+        int price = 0;
+        if (typeOfJoinery.equals(""90*130"")) {
+            price = 110;
+            if (numberOfDogmas > 30) {
+                discount = price - (price * 0.05);
+            }
+            if (numberOfDogmas > 60) {
+              //  price = 110;
+                discount = price - (price * 0.08);
+
+            }
+
+        } else if (typeOfJoinery.equals(""100*150"")) {
+            price = 140;
+            if (numberOfDogmas > 40) {
+                discount = price - (price * 0.06);
+
+            }
+            if (numberOfDogmas > 80) {
+                discount = price - (price * 0.10);
+
+            }
+            
+        } else if (typeOfJoinery.equals(""130*180"")) {
+            price = 190;
+            if (numberOfDogmas > 20) {
+                discount = price - (price * 0.07);
+            }
+            if (numberOfDogmas > 50) {
+                discount = price - (price * 0.12);
+            }
+        } else if (typeOfJoinery.equals(""200*300"")) {
+            price = 250;
+            if (numberOfDogmas > 25) {
+                discount = price - (price * 0.09);
+            }
+        } else if (numberOfDogmas > 50) {
+            price = 250;
+            discount = price - (price * 0.14);
+        }
+
+        if (numberOfDogmas > 99) {
+            discount = price - (price * 0.04);
+        }
+            if (shipmentMethod.equals(""With delivery"")) {
+                price += 60;
+        }
+        double finish = price * discount;
+
+        if (numberOfDogmas <= 10) {
+            System.out.println(""Invalid order"");
+        } else {
+            System.out.printf(""%.2f BGN"", finish);
+        }
+    }
+}
+
+//НЕ Е РЕШЕНА
+"
+HHaQ92JY,linked_list_array,firzaelbuho,C++,Sunday 1st of October 2023 08:11:17 AM CDT,"/* Program List Dengan Array */
+#include <iostream>
+#define max 12
+#define true 1
+#define false 0
+using std::cout;
+using std::endl;
+
+typedef struct {
+    int info;
+    int next;
+} typenode;
+
+typenode elemen[max];
+int list, akhirlist, kosong, akhirkosong;
+
+int listkosong();
+void buatlist();
+void sisipnode(int IB);
+void hapusnode(int IH);
+void cetaklist();
+
+int main() {
+    buatlist();
+    cetaklist();
+    sisipnode(7);
+    cout << ""\n\nSisip 7 (awal) \n\n"";
+    cetaklist();
+    sisipnode(30);
+    cout << ""\n\nSisip 30 (tengah) \n\n"";
+    cetaklist();
+    sisipnode(65);
+    cout << ""\n\nSisip 65 (akhir) \n\n"";
+    cetaklist();
+    hapusnode(7);
+    cout << ""\n\nHapus 7 (awal) \n\n"";
+    cetaklist();
+    hapusnode(30);
+    cout << ""\n\nHapus 30 (tengah)\n\n"";
+    cetaklist();
+    hapusnode(65);
+    cout << ""\n\nHapus 65 (akhir)\n\n"";
+    cetaklist();
+    cout << ""\n\n------------- \n\n"";
+    
+    
+}
+
+void buatlist() {
+    list = 5;
+    kosong = 3;
+    akhirlist = 10;
+    akhirkosong = 4;
+    elemen[1].info = 25; elemen[1].next = 8;
+    elemen[2].info = 0; elemen[2].next = 9;
+    elemen[3].info = 0; elemen[3].next = 6;
+    elemen[4].info = 0; elemen[4].next = 0;
+    elemen[5].info = 10; elemen[5].next = 7;
+    elemen[6].info = 0; elemen[6].next = 2;
+    elemen[7].info = 15; elemen[7].next = 1;
+    elemen[8].info = 40; elemen[8].next = 10;
+    elemen[9].info = 0; elemen[9].next = 4;
+    elemen[10].info = 60; elemen[10].next = 0;
+}
+
+int listkosong() {
+    if (list == 0)
+        return true;
+    else
+        return false;
+}
+
+void sisipnode(int IB) {
+    int listbaru, k, m, n, x;
+
+    // Sisip di awal
+    if (IB < elemen[list].info) {
+        listbaru = kosong;
+        kosong = elemen[kosong].next;
+        elemen[listbaru].info = IB;
+        elemen[listbaru].next = list;
+        list = listbaru;
+    }
+    else
+    // Sisip di akhir
+    if (IB > elemen[akhirlist].info) {
+        listbaru = kosong;
+        kosong = elemen[kosong].next;
+        elemen[listbaru].info = IB;
+        elemen[listbaru].next = 0;
+        elemen[akhirlist].next = listbaru;
+        akhirlist = listbaru;
+    }
+    else
+    // Sisip di tengah
+    {
+        n = list;
+        x = elemen[n].info;
+        while (IB > x) {
+            m = n;
+            n = elemen[n].next;
+            x = elemen[n].info;
+        }
+        k = elemen[kosong].next;
+        elemen[m].next = kosong;
+        elemen[kosong].info = IB;
+        elemen[kosong].next = n;
+        kosong = k;
+    }
+}
+
+void cetaklist() {
+    int n, m;
+    n = list;
+    m = kosong;
+    cout << ""isi list : \n"";
+    do {
+        cout << elemen[n].info << "" "";
+        n = elemen[n].next;
+    } while (elemen[n].next != 0);
+    cout << "" "" << elemen[akhirlist].info << endl;
+    cout << ""\nIndex tempat-tempat kosong: \n"";
+    do {
+        cout << m << "" "";
+        m = elemen[m].next;
+    } while (elemen[m].next != 0);
+    cout << "" "" << akhirkosong;
+}
+
+void hapusnode(int IH) {
+    int listbaru, k, m, n, x;
+    // Hapus di awal
+    if (IH == elemen[list].info) {
+        listbaru = elemen[list].next;
+        k = kosong;
+        kosong = list;
+        list = listbaru;
+        elemen[kosong].next = k;
+    }
+   
+     //------------------hapus di akhir
+    else if (IH == elemen[akhirlist].info) {
+        n = list;
+        x = elemen[n].info;
+        while (elemen[n].next != akhirlist) {
+            m = n;
+            n = elemen[n].next;
+            x = elemen[n].info;
+        }
+        
+        // cout <<endl;
+        // cout << elemen[n].info;
+        // cout << endl;
+        m = n;
+        n = elemen[n].next;
+        // Menghapus nilai info dari elemen terakhir (akhirlist)
+        elemen[n].info = 0;
+    
+        // Memperbarui next dari elemen sebelumnya menjadi 0
+        elemen[m].next = 0;
+    
+        // Menghubungkan elemen kosong ke elemen yang dihapus
+        elemen[n].next = kosong;
+        kosong = n;
+    
+        // Memperbarui akhirlist
+        akhirlist = m;
+    }
+
+
+
+
+    //------------------hapus di tengah
+    else {
+        n = list;
+        x = elemen[n].info;
+        while (n != 0 && elemen[n].info != IH) {
+            m = n;
+            n = elemen[n].next;
+            x = elemen[n].info;
+        }
+        if (n != 0) {
+            elemen[m].next = elemen[n].next; // Mengubah next dari elemen sebelumnya
+            elemen[n].info = 0; // Menghapus nilai info dari elemen yang dihapus
+            elemen[n].next = kosong; // Menghubungkan elemen yang dihapus ke elemen kosong
+            kosong = n; // Mengupdate indeks elemen yang kosong
+        }
+    }
+    
+    
+
+
+  
+}
+
+
+"
+nccmD59G,News Oct1 23,Newscaster_Ned,Email,Sunday 1st of October 2023 08:09:02 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+I‎t‎'‎s‎ ‎H‎a‎l‎l‎o‎w‎ ‎t‎i‎m‎e‎,‎ ‎b‎e‎e‎e‎e‎e‎i‎i‎i‎t‎c‎h‎e‎s‎!‎ ‎🎃🎃🎃🎃🎃🎃🎃🎃🎃
+
+U‎K‎ ‎H‎o‎m‎e‎ ‎S‎e‎c‎r‎e‎t‎a‎r‎y‎ ‎B‎l‎a‎s‎t‎s‎ ‎'‎P‎a‎m‎p‎e‎r‎e‎d‎'‎ ‎E‎l‎i‎t‎e‎s‎ ‎L‎e‎c‎t‎u‎r‎i‎n‎g‎ ‎P‎u‎b‎l‎i‎c‎ ‎o‎n‎ ‎M‎i‎g‎r‎a‎t‎i‎o‎n‎
+F‎o‎r‎m‎e‎r‎ ‎N‎i‎c‎k‎e‎l‎o‎d‎e‎o‎n‎ ‎C‎h‎i‎l‎d‎ ‎S‎t‎a‎r‎ ‎M‎a‎d‎i‎s‎y‎n‎ ‎S‎h‎i‎p‎m‎a‎n‎ ‎J‎o‎i‎n‎s‎ ‎'‎P‎l‎a‎y‎b‎o‎y‎'‎
+D‎i‎s‎n‎e‎y‎'‎s‎ ‎'‎B‎a‎m‎b‎i‎'‎ ‎R‎e‎m‎a‎k‎e‎ ‎S‎c‎r‎e‎e‎n‎w‎r‎i‎t‎e‎r‎:‎ ‎T‎o‎d‎a‎y‎'‎s‎ ‎K‎i‎d‎s‎ ‎T‎r‎i‎g‎g‎e‎r‎e‎d‎ ‎b‎y‎ ‎D‎e‎a‎t‎h‎ ‎S‎c‎e‎n‎e‎
+S‎e‎r‎b‎i‎a‎n‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎D‎e‎n‎i‎e‎s‎ ‎M‎i‎l‎i‎t‎a‎r‎y‎ ‎B‎u‎i‎l‎d‎u‎p‎ ‎o‎n‎ ‎B‎o‎r‎d‎e‎r‎ ‎w‎i‎t‎h‎ ‎K‎o‎s‎o‎v‎o‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+🚨 ‎J‎a‎m‎a‎a‎l‎ ‎B‎o‎w‎m‎a‎n‎ ‎U‎n‎d‎e‎r‎ ‎I‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎ ‎f‎o‎r‎ ‎P‎u‎l‎l‎i‎n‎g‎ ‎F‎i‎r‎e‎ ‎A‎l‎a‎r‎m‎ ‎t‎o‎ ‎D‎e‎l‎a‎y‎ ‎V‎o‎t‎e‎ ‎t‎o‎ ‎A‎v‎o‎i‎d‎ ‎G‎o‎v‎’‎t‎ ‎S‎h‎u‎t‎d‎o‎w‎n‎
+
+R‎a‎d‎i‎c‎a‎l‎ ‎D‎e‎m‎o‎c‎r‎a‎t‎ ‎’‎S‎q‎u‎a‎d‎’‎ ‎M‎e‎m‎b‎e‎r‎ ‎S‎e‎z‎ ‎‘‎I‎ ‎T‎h‎o‎u‎g‎h‎t‎ ‎t‎h‎e‎ ‎A‎l‎a‎r‎m‎ ‎W‎o‎u‎l‎d‎ ‎O‎p‎e‎n‎ ‎t‎h‎e‎ ‎D‎o‎o‎r‎’‎
+
+*‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎P‎h‎o‎t‎o‎s‎ ‎D‎i‎s‎p‎r‎o‎v‎e‎ ‎O‎u‎t‎l‎a‎n‎d‎i‎s‎h‎ ‎C‎l‎a‎i‎m‎
+C‎l‎o‎c‎k‎ ‎r‎o‎m‎ ‎t‎o‎p‎ ‎r‎i‎g‎h‎t‎:‎ ‎R‎e‎p‎.‎ ‎J‎a‎m‎a‎a‎l‎ ‎B‎o‎w‎m‎a‎n‎ ‎(‎D‎-‎N‎Y‎)‎ ‎(‎t‎o‎p‎ ‎l‎e‎f‎t‎)‎ ‎w‎i‎t‎h‎ ‎p‎h‎o‎t‎o‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎C‎a‎p‎i‎t‎o‎l‎ ‎H‎i‎l‎l‎ ‎f‎i‎r‎e‎ ‎a‎l‎a‎r‎m‎ ‎h‎e‎ ‎i‎s‎ ‎a‎c‎c‎u‎s‎e‎d‎ ‎o‎f‎ ‎p‎u‎l‎l‎i‎n‎g‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎p‎h‎o‎t‎o‎ ‎r‎e‎l‎e‎a‎s‎e‎d‎ ‎b‎y‎ ‎C‎a‎p‎i‎t‎o‎l‎ ‎H‎i‎l‎l‎ ‎p‎o‎l‎i‎c‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎p‎e‎r‎s‎o‎n‎ ‎p‎u‎l‎l‎i‎n‎g‎ ‎t‎h‎e‎ ‎a‎l‎a‎r‎m‎ ‎(‎b‎o‎t‎t‎o‎m‎ ‎r‎i‎g‎h‎t‎)‎.‎ ‎(‎P‎h‎o‎t‎o‎s‎:‎ ‎A‎l‎e‎x‎ ‎W‎o‎n‎g‎/‎G‎e‎t‎t‎y‎ ‎I‎m‎a‎g‎e‎s‎;‎ ‎B‎N‎N‎)‎
+R‎e‎p‎.‎ ‎J‎a‎m‎a‎a‎l‎ ‎B‎o‎w‎m‎a‎n‎ ‎(‎D‎-‎N‎Y‎)‎ ‎r‎i‎p‎p‎e‎d‎ ‎d‎o‎w‎n‎ ‎t‎w‎o‎ ‎s‎i‎g‎n‎s‎ ‎w‎a‎r‎n‎i‎n‎g‎ ‎a‎ ‎s‎e‎c‎o‎n‎d‎ ‎f‎l‎o‎o‎r‎ ‎d‎o‎o‎r‎ ‎i‎n‎ ‎t‎h‎e‎ ‎C‎a‎n‎n‎o‎n‎ ‎H‎o‎u‎s‎e‎ ‎O‎f‎f‎i‎c‎e‎ ‎B‎u‎i‎l‎d‎i‎n‎g‎ ‎w‎a‎s‎ ‎f‎o‎r‎ ‎e‎m‎e‎r‎g‎e‎n‎c‎y‎ ‎u‎s‎e‎ ‎o‎n‎l‎y‎ ‎b‎e‎f‎o‎r‎e‎ ‎p‎u‎l‎l‎i‎n‎g‎ ‎t‎h‎e‎ ‎f‎i‎r‎e‎ ‎a‎l‎a‎r‎m‎ ‎a‎n‎d‎ ‎r‎u‎n‎n‎i‎n‎g‎ ‎o‎u‎t‎ ‎t‎h‎r‎o‎u‎g‎h‎ ‎a‎ ‎d‎i‎f‎f‎e‎r‎e‎n‎t‎ ‎d‎o‎o‎r‎ ‎o‎n‎ ‎a‎ ‎d‎i‎f‎f‎e‎r‎e‎n‎t‎ ‎f‎l‎o‎o‎r‎,‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎h‎a‎s‎ ‎l‎e‎a‎r‎n‎e‎d‎ ‎e‎x‎c‎l‎u‎s‎i‎v‎e‎l‎y‎.‎
+
+U‎K‎ ‎D‎e‎f‎e‎n‎c‎e‎ ‎S‎e‎c‎r‎e‎t‎a‎r‎y‎ ‎S‎u‎g‎g‎e‎s‎t‎s‎ ‎S‎e‎n‎d‎i‎n‎g‎ ‎B‎r‎i‎t‎i‎s‎h‎ ‎T‎r‎o‎o‎p‎s‎ ‎t‎o‎ ‎U‎k‎r‎a‎i‎n‎e‎
+U‎K‎ ‎D‎e‎f‎e‎n‎c‎e‎ ‎S‎e‎c‎r‎e‎t‎a‎r‎y‎ ‎S‎u‎g‎g‎e‎s‎t‎s‎ ‎S‎e‎n‎d‎i‎n‎g‎ ‎B‎r‎i‎t‎i‎s‎h‎ ‎T‎r‎o‎o‎p‎s‎ ‎t‎o‎ ‎U‎k‎r‎a‎i‎n‎e‎
+6‎2‎
+R‎a‎n‎k‎i‎n‎g‎ ‎m‎e‎m‎b‎e‎r‎ ‎S‎e‎n‎.‎ ‎D‎i‎a‎n‎n‎e‎ ‎F‎e‎i‎n‎s‎t‎e‎i‎n‎,‎ ‎D‎-‎C‎A‎,‎ ‎C‎h‎a‎i‎r‎m‎a‎n‎ ‎L‎i‎n‎d‎s‎e‎y‎ ‎G‎r‎a‎h‎a‎m‎,‎ ‎R‎-‎S‎C‎,‎ ‎,‎ ‎a‎n‎d‎ ‎S‎e‎n‎.‎ ‎D‎i‎c‎k‎ ‎D‎u‎r‎b‎i‎n‎(‎R‎)‎,‎ ‎D‎-‎I‎L‎ ‎a‎t‎t‎e‎n‎d‎ ‎t‎h‎e‎ ‎f‎o‎u‎r‎t‎h‎ ‎d‎a‎y‎ ‎o‎f‎ ‎U‎S‎ ‎S‎e‎n‎a‎t‎e‎ ‎J‎u‎d‎i‎c‎i‎a‎r‎y‎ ‎C‎o‎m‎m‎i‎t‎t‎e‎e‎ ‎c‎o‎n‎f‎i‎r‎m‎a‎t‎i‎o‎n‎ ‎h‎e‎a‎r‎i‎n‎g‎s‎ ‎f‎o‎r‎ ‎S‎u‎p‎r‎e‎m‎e‎ ‎C‎o‎u‎r‎t‎ ‎n‎o‎m‎i‎n‎e‎e‎ ‎J‎u‎d‎g‎e‎ ‎A‎m‎y‎ ‎C‎o‎n‎e‎y‎ ‎B‎a‎r‎r‎e‎t‎t‎ ‎o‎n‎ ‎C‎a‎p‎i‎t‎o‎l‎ ‎H‎i‎l‎l‎ ‎i‎n‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎,‎ ‎D‎C‎,‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎1‎5‎,‎ ‎2‎0‎2‎0‎.‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎T‎o‎m‎ ‎W‎i‎l‎l‎i‎a‎m‎s‎ ‎/‎ ‎P‎O‎O‎L‎ ‎/‎ ‎A‎F‎P‎)‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎T‎O‎M‎ ‎W‎I‎L‎L‎I‎A‎M‎S‎/‎P‎O‎O‎L‎/‎A‎F‎P‎ ‎v‎i‎a‎ ‎G‎e‎t‎t‎y‎ ‎I‎m‎a‎g‎e‎s‎)‎
+D‎i‎a‎n‎n‎e‎ ‎F‎e‎i‎n‎s‎t‎e‎i‎n‎ ‎(‎1‎9‎3‎3‎-‎2‎0‎2‎3‎)‎:‎ ‎A‎ ‎L‎i‎b‎e‎r‎a‎l‎,‎ ‎L‎e‎f‎t‎ ‎B‎e‎h‎i‎n‎d‎ ‎b‎y‎ ‎H‎e‎r‎ ‎P‎a‎r‎t‎y‎
+9‎,‎0‎7‎7‎
+L‎A‎ ‎C‎r‎o‎w‎d‎ ‎C‎h‎e‎e‎r‎s‎ ‎f‎o‎r‎ ‎T‎r‎u‎m‎p‎ ‎a‎s‎ ‎H‎e‎ ‎M‎a‎k‎e‎s‎ ‎S‎t‎o‎p‎ ‎a‎t‎ ‎I‎c‎e‎ ‎C‎r‎e‎a‎m‎ ‎S‎h‎o‎p‎ ‎
+L‎A‎ ‎C‎r‎o‎w‎d‎ ‎C‎h‎e‎e‎r‎s‎ ‎f‎o‎r‎ ‎T‎r‎u‎m‎p‎ ‎a‎s‎ ‎H‎e‎ ‎M‎a‎k‎e‎s‎ ‎S‎t‎o‎p‎ ‎a‎t‎ ‎I‎c‎e‎ ‎C‎r‎e‎a‎m‎ ‎S‎h‎o‎p‎ ‎
+4‎,‎0‎2‎7‎
+D‎e‎m‎o‎c‎r‎a‎t‎ ‎R‎e‎p‎.‎ ‎A‎l‎l‎e‎g‎e‎d‎l‎y‎ ‎P‎u‎l‎l‎s‎ ‎C‎a‎p‎i‎t‎o‎l‎ ‎F‎i‎r‎e‎ ‎A‎l‎a‎r‎m‎ ‎t‎o‎ ‎D‎e‎l‎a‎y‎ ‎G‎o‎v‎t‎ ‎F‎u‎n‎d‎i‎n‎g‎ ‎V‎o‎t‎e‎
+D‎e‎m‎o‎c‎r‎a‎t‎ ‎R‎e‎p‎.‎ ‎A‎l‎l‎e‎g‎e‎d‎l‎y‎ ‎P‎u‎l‎l‎s‎ ‎C‎a‎p‎i‎t‎o‎l‎ ‎F‎i‎r‎e‎ ‎A‎l‎a‎r‎m‎ ‎t‎o‎ ‎D‎e‎l‎a‎y‎ ‎G‎o‎v‎t‎ ‎F‎u‎n‎d‎i‎n‎g‎ ‎V‎o‎t‎e‎
+4‎,‎9‎3‎9‎
+J‎a‎m‎a‎a‎l‎ ‎B‎o‎w‎m‎a‎n‎:‎ ‎I‎ ‎T‎h‎o‎u‎g‎h‎t‎ ‎P‎u‎l‎l‎i‎n‎g‎ ‎F‎i‎r‎e‎ ‎A‎l‎a‎r‎m‎ ‎W‎o‎u‎l‎d‎ ‎‘‎O‎p‎e‎n‎ ‎t‎h‎e‎ ‎D‎o‎o‎r‎’‎
+J‎a‎m‎a‎a‎l‎ ‎B‎o‎w‎m‎a‎n‎:‎ ‎I‎ ‎T‎h‎o‎u‎g‎h‎t‎ ‎P‎u‎l‎l‎i‎n‎g‎ ‎F‎i‎r‎e‎ ‎A‎l‎a‎r‎m‎ ‎W‎o‎u‎l‎d‎ ‎‘‎O‎p‎e‎n‎ ‎t‎h‎e‎ ‎D‎o‎o‎r‎’‎
+4‎9‎2‎
+K‎e‎i‎t‎h‎ ‎R‎i‎c‎h‎a‎r‎d‎s‎ ‎o‎n‎ ‎R‎a‎p‎ ‎M‎u‎s‎i‎c‎:‎ ‎'‎I‎ ‎D‎o‎n‎'‎t‎ ‎R‎e‎a‎l‎l‎y‎ ‎L‎i‎k‎e‎ ‎t‎o‎ ‎H‎e‎a‎r‎ ‎P‎e‎o‎p‎l‎e‎ ‎Y‎e‎l‎l‎i‎n‎g‎'‎
+K‎e‎i‎t‎h‎ ‎R‎i‎c‎h‎a‎r‎d‎s‎ ‎o‎n‎ ‎R‎a‎p‎ ‎M‎u‎s‎i‎c‎:‎ ‎'‎I‎ ‎D‎o‎n‎'‎t‎ ‎R‎e‎a‎l‎l‎y‎ ‎L‎i‎k‎e‎ ‎t‎o‎ ‎H‎e‎a‎r‎ ‎P‎e‎o‎p‎l‎e‎ ‎Y‎e‎l‎l‎i‎n‎g‎'‎
+3‎3‎5‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎S‎o‎u‎r‎c‎e‎s‎:‎ ‎B‎o‎w‎m‎a‎n‎ ‎T‎h‎r‎e‎w‎ ‎S‎i‎g‎n‎s‎ ‎W‎a‎r‎n‎i‎n‎g‎ ‎D‎o‎o‎r‎ ‎W‎a‎s‎ ‎E‎m‎e‎r‎g‎e‎n‎c‎y‎ ‎o‎n‎ ‎F‎l‎o‎o‎r‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎S‎o‎u‎r‎c‎e‎s‎:‎ ‎B‎o‎w‎m‎a‎n‎ ‎T‎h‎r‎e‎w‎ ‎S‎i‎g‎n‎s‎ ‎W‎a‎r‎n‎i‎n‎g‎ ‎D‎o‎o‎r‎ ‎W‎a‎s‎ ‎E‎m‎e‎r‎g‎e‎n‎c‎y‎ ‎o‎n‎ ‎F‎l‎o‎o‎r‎
+6‎,‎5‎3‎9‎
+M‎i‎l‎l‎e‎y‎ ‎L‎a‎s‎h‎e‎s‎ ‎O‎u‎t‎ ‎a‎t‎ ‎T‎r‎u‎m‎p‎ ‎i‎n‎ ‎F‎i‎n‎a‎l‎ ‎A‎c‎t‎ ‎o‎f‎ ‎P‎o‎l‎i‎t‎i‎c‎s‎ ‎W‎h‎i‎l‎e‎ ‎i‎n‎ ‎U‎n‎i‎f‎o‎r‎m‎
+M‎i‎l‎l‎e‎y‎ ‎L‎a‎s‎h‎e‎s‎ ‎O‎u‎t‎ ‎a‎t‎ ‎T‎r‎u‎m‎p‎ ‎i‎n‎ ‎F‎i‎n‎a‎l‎ ‎A‎c‎t‎ ‎o‎f‎ ‎P‎o‎l‎i‎t‎i‎c‎s‎ ‎W‎h‎i‎l‎e‎ ‎i‎n‎ ‎U‎n‎i‎f‎o‎r‎m‎
+3‎,‎8‎9‎7‎
+B‎i‎d‎e‎n‎'‎s‎ ‎D‎O‎E‎ ‎R‎e‎l‎e‎a‎s‎e‎s‎ ‎E‎n‎e‎r‎g‎y‎ ‎E‎f‎f‎i‎c‎i‎e‎n‎t‎ ‎S‎t‎a‎n‎d‎a‎r‎d‎s‎ ‎f‎o‎r‎ ‎G‎a‎s‎ ‎F‎u‎r‎n‎a‎c‎e‎s‎
+B‎i‎d‎e‎n‎'‎s‎ ‎D‎O‎E‎ ‎R‎e‎l‎e‎a‎s‎e‎s‎ ‎E‎n‎e‎r‎g‎y‎ ‎E‎f‎f‎i‎c‎i‎e‎n‎t‎ ‎S‎t‎a‎n‎d‎a‎r‎d‎s‎ ‎f‎o‎r‎ ‎G‎a‎s‎ ‎F‎u‎r‎n‎a‎c‎e‎s‎
+7‎2‎9‎
+B‎i‎d‎e‎n‎:‎ ‎W‎e‎ ‎C‎a‎n‎n‎o‎t‎ ‎A‎l‎l‎o‎w‎ ‎S‎u‎p‎p‎o‎r‎t‎ ‎f‎o‎r‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎t‎o‎ ‎B‎e‎ ‎I‎n‎t‎e‎r‎r‎u‎p‎t‎e‎d‎
+B‎i‎d‎e‎n‎:‎ ‎W‎e‎ ‎C‎a‎n‎n‎o‎t‎ ‎A‎l‎l‎o‎w‎ ‎S‎u‎p‎p‎o‎r‎t‎ ‎f‎o‎r‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎t‎o‎ ‎B‎e‎ ‎I‎n‎t‎e‎r‎r‎u‎p‎t‎e‎d‎
+
+J‎i‎g‎a‎b‎o‎o‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎S‎h‎o‎o‎t‎i‎n‎g‎ ‎P‎h‎i‎l‎l‎y‎ ‎S‎t‎r‎e‎e‎t‎s‎ ‎D‎e‎p‎a‎r‎t‎m‎e‎n‎t‎ ‎W‎o‎r‎k‎e‎r‎.‎
+
+D‎a‎t‎ ‎c‎r‎a‎c‎k‎a‎ ‎m‎e‎z‎z‎e‎d‎ ‎w‎i‎v‎ ‎d‎a‎ ‎w‎r‎o‎n‎g‎ ‎n‎i‎g‎g‎a‎.‎
+
+
+N‎i‎g‎f‎o‎r‎m‎e‎ ‎A‎r‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎F‎a‎t‎a‎l‎ ‎S‎h‎o‎o‎t‎i‎n‎g‎ ‎o‎n‎ ‎S‎a‎n‎ ‎J‎a‎c‎i‎n‎t‎o‎ ‎S‎t‎r‎e‎e‎t‎ ‎i‎n‎ ‎H‎o‎u‎s‎t‎o‎n‎.‎
+
+
+B‎r‎o‎o‎k‎l‎y‎n‎ ‎B‎a‎b‎o‎o‎n‎ ‎S‎t‎o‎p‎p‎e‎d‎ ‎b‎y‎ ‎S‎a‎m‎a‎r‎i‎t‎a‎n‎s‎ ‎A‎f‎t‎e‎r‎ ‎T‎r‎y‎i‎n‎g‎ ‎t‎o‎ ‎R‎a‎p‎e‎ ‎W‎o‎m‎a‎n‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎M‎u‎r‎d‎e‎r‎e‎r‎ ‎S‎h‎o‎t‎ ‎b‎y‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎ ‎A‎f‎t‎e‎r‎ ‎B‎r‎e‎a‎k‎i‎n‎g‎ ‎i‎n‎t‎o‎ ‎H‎i‎s‎ ‎F‎a‎y‎e‎t‎t‎e‎ ‎C‎o‎u‎n‎t‎y‎ ‎H‎o‎m‎e‎.‎
+
+
+S‎p‎i‎c‎ ‎F‎a‎g‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎i‎n‎ ‎L‎A‎ ‎f‎o‎r‎ ‎R‎a‎p‎i‎n‎g‎ ‎4‎ ‎B‎o‎y‎s‎.‎
+
+
+C‎i‎n‎c‎i‎n‎n‎a‎t‎i‎:‎ ‎J‎i‎g‎r‎o‎ ‎J‎a‎i‎l‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎P‎i‎s‎t‎o‎l‎-‎W‎h‎i‎p‎p‎i‎n‎g‎ ‎Q‎w‎o‎p‎ ‎D‎u‎r‎i‎n‎g‎ ‎F‎a‎k‎e‎ ‎R‎o‎b‎b‎e‎r‎y‎.‎
+
+
+M‎o‎n‎k‎e‎y‎ ‎P‎l‎e‎a‎d‎s‎ ‎G‎u‎i‎l‎t‎y‎ ‎t‎o‎ ‎M‎u‎r‎d‎e‎r‎i‎n‎g‎ ‎9‎6‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎K‎a‎n‎s‎a‎s‎ ‎C‎i‎t‎y‎ ‎W‎o‎m‎a‎n‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎R‎a‎p‎p‎e‎r‎ ‎K‎e‎n‎j‎u‎a‎n‎ ‎M‎c‎D‎a‎n‎i‎e‎l‎ ‎W‎h‎o‎ ‎R‎a‎p‎p‎e‎d‎ ‎A‎b‎o‎u‎t‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎S‎o‎m‎e‎o‎n‎e‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+9‎6‎°‎
+/‎7‎0‎°‎
+2‎%‎
+E‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎1‎ ‎|‎ ‎D‎a‎y‎
+9‎6‎°‎
+2‎%‎
+E‎
+1‎2‎
+ ‎
+m‎p‎h‎
+A‎ ‎m‎i‎x‎ ‎o‎f‎ ‎c‎l‎o‎u‎d‎s‎ ‎a‎n‎d‎ ‎s‎u‎n‎.‎ ‎H‎i‎g‎h‎ ‎9‎6‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+5‎5‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+8‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎2‎3‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎1‎5‎ ‎p‎m‎
+S‎u‎n‎ ‎0‎1‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+7‎0‎°‎
+5‎%‎
+E‎
+9‎
+ ‎
+m‎p‎h‎
+P‎a‎r‎t‎l‎y‎ ‎c‎l‎o‎u‎d‎y‎ ‎s‎k‎i‎e‎s‎.‎ ‎L‎o‎w‎ ‎a‎r‎o‎u‎n‎d‎ ‎7‎0‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎E‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+6‎4‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+8‎:‎5‎1‎ ‎p‎m‎
+W‎a‎n‎i‎n‎g‎ ‎G‎i‎b‎b‎o‎u‎s‎
+M‎o‎o‎n‎s‎e‎t‎
+9‎:‎4‎6‎ ‎a‎m‎
+M‎o‎n‎ ‎0‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+9‎7‎°‎
+/‎7‎1‎°‎
+8‎%‎
+E‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎3‎
+P‎M‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+9‎5‎°‎
+/‎7‎4‎°‎
+3‎5‎%‎
+E‎S‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎0‎4‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+9‎4‎°‎
+/‎7‎3‎°‎
+4‎4‎%‎
+S‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎5‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎8‎°‎
+/‎7‎1‎°‎
+5‎8‎%‎
+E‎N‎E‎ ‎8‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎6‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎4‎°‎
+/‎6‎6‎°‎
+4‎5‎%‎
+N‎N‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎7‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+7‎9‎°‎
+/‎6‎1‎°‎
+3‎5‎%‎
+N‎N‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎8‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎3‎°‎
+/‎5‎9‎°‎
+1‎0‎%‎
+N‎N‎E‎ ‎9‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎5‎9‎°‎
+1‎2‎%‎
+E‎S‎E‎ ‎7‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎8‎°‎
+/‎6‎3‎°‎
+4‎%‎
+S‎E‎ ‎7‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎7‎°‎
+/‎6‎5‎°‎
+1‎7‎%‎
+S‎E‎ ‎7‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎8‎°‎
+/‎6‎5‎°‎
+2‎4‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎3‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎8‎°‎
+/‎6‎5‎°‎
+3‎4‎%‎
+N‎E‎ ‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎4‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎7‎°‎
+/‎6‎4‎°‎
+2‎4‎%‎
+N‎ ‎1‎0‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎5‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎7‎°‎
+/‎6‎3‎°‎
+2‎2‎%‎
+N‎ ‎9‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎F‎r‎a‎n‎k‎e‎n‎s‎t‎e‎i‎n‎'‎s‎ ‎r‎e‎s‎u‎r‎r‎e‎c‎t‎i‎o‎n‎.‎ ‎🧟
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+N‎i‎h‎i‎l‎i‎s‎m‎
+N‎i‎h‎i‎l‎i‎s‎m‎ ‎i‎s‎ ‎t‎h‎e‎ ‎p‎u‎r‎p‎o‎r‎t‎e‎d‎ ‎i‎d‎e‎o‎l‎o‎g‎y‎ ‎o‎f‎ ‎A‎n‎o‎n‎y‎m‎o‎u‎s‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎m‎o‎r‎a‎l‎ ‎f‎r‎a‎m‎e‎w‎o‎r‎k‎ ‎f‎o‎r‎ ‎E‎n‎c‎y‎c‎l‎o‎p‎e‎d‎i‎a‎ ‎D‎r‎a‎m‎a‎t‎i‎c‎a‎.‎ ‎A‎ ‎n‎i‎h‎i‎l‎i‎s‎t‎i‎c‎ ‎a‎t‎t‎i‎t‎u‎d‎e‎ ‎i‎n‎v‎o‎l‎v‎e‎s‎ ‎e‎x‎i‎s‎t‎e‎n‎t‎i‎a‎l‎l‎y‎ ‎d‎e‎n‎y‎i‎n‎g‎ ‎t‎h‎e‎ ‎m‎e‎t‎a‎p‎h‎y‎s‎i‎c‎a‎l‎,‎ ‎e‎p‎i‎s‎t‎e‎m‎o‎l‎o‎g‎i‎c‎a‎l‎ ‎a‎n‎d‎,‎ ‎e‎s‎p‎e‎c‎i‎a‎l‎l‎y‎,‎ ‎e‎t‎h‎i‎c‎a‎l‎ ‎t‎r‎u‎t‎h‎-‎v‎a‎l‎u‎e‎s‎ ‎o‎f‎ ‎e‎v‎e‎r‎y‎t‎h‎i‎n‎g‎ ‎p‎e‎r‎t‎a‎i‎n‎i‎n‎g‎ ‎t‎o‎ ‎t‎h‎e‎ ‎w‎o‎r‎l‎d‎.‎ ‎I‎n‎ ‎o‎t‎h‎e‎r‎ ‎w‎o‎r‎d‎s‎,‎ ‎t‎h‎e‎ ‎w‎e‎a‎k‎e‎s‎t‎ ‎i‎n‎t‎e‎l‎l‎e‎c‎t‎u‎a‎l‎ ‎e‎x‎c‎u‎s‎e‎ ‎t‎o‎ ‎d‎o‎ ‎i‎t‎ ‎f‎o‎r‎ ‎t‎h‎e‎ ‎l‎u‎l‎z‎.‎ ‎W‎h‎e‎n‎ ‎a‎p‎p‎l‎i‎e‎d‎ ‎i‎n‎ ‎p‎r‎a‎c‎t‎i‎s‎e‎,‎ ‎n‎i‎h‎i‎l‎i‎s‎m‎ ‎b‎e‎c‎o‎m‎e‎s‎ ‎t‎h‎e‎ ‎s‎w‎e‎e‎t‎ ‎p‎h‎i‎l‎o‎s‎o‎p‎h‎i‎c‎a‎l‎ ‎n‎e‎c‎t‎a‎r‎ ‎f‎r‎o‎m‎ ‎w‎h‎i‎c‎h‎ ‎a‎l‎l‎ ‎w‎i‎n‎ ‎f‎l‎o‎w‎s‎ ‎f‎o‎r‎t‎h‎.‎ ‎W‎i‎e‎l‎d‎i‎n‎g‎ ‎t‎h‎i‎s‎ ‎w‎e‎a‎p‎o‎n‎ ‎o‎f‎ ‎t‎h‎o‎u‎g‎h‎t‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎o‎n‎e‎'‎s‎ ‎e‎n‎e‎m‎y‎ ‎w‎i‎l‎l‎ ‎b‎r‎i‎n‎g‎ ‎m‎u‎c‎h‎ ‎j‎o‎y‎ ‎a‎n‎d‎ ‎w‎i‎l‎l‎ ‎h‎a‎r‎d‎e‎n‎ ‎t‎h‎e‎ ‎h‎e‎a‎r‎t‎s‎ ‎o‎f‎ ‎a‎n‎y‎ ‎m‎a‎n‎.‎ ‎I‎t‎ ‎i‎s‎ ‎w‎e‎l‎l‎ ‎k‎n‎o‎w‎n‎ ‎t‎h‎a‎t‎ ‎w‎o‎m‎e‎n‎ ‎c‎a‎n‎'‎t‎ ‎b‎e‎ ‎n‎i‎h‎i‎l‎i‎s‎t‎s‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎e‎y‎ ‎a‎r‎e‎ ‎e‎m‎o‎t‎i‎o‎n‎a‎l‎,‎ ‎g‎e‎t‎ ‎e‎a‎s‎i‎l‎y‎ ‎s‎a‎d‎d‎e‎n‎e‎d‎,‎ ‎a‎n‎d‎ ‎a‎r‎e‎ ‎t‎h‎u‎s‎ ‎m‎a‎d‎e‎ ‎o‎f‎ ‎d‎i‎s‎g‎u‎s‎t‎i‎n‎g‎ ‎f‎a‎i‎l‎.‎ ‎T‎h‎i‎s‎ ‎i‎s‎ ‎w‎h‎y‎ ‎t‎h‎e‎y‎ ‎b‎e‎l‎o‎n‎g‎ ‎w‎h‎e‎r‎e‎ ‎t‎h‎e‎y‎ ‎a‎r‎e‎ ‎m‎o‎s‎t‎ ‎c‎o‎m‎f‎o‎r‎t‎a‎b‎l‎e‎.‎
+
+
+(‎(‎ ‎T‎h‎e‎r‎e‎'‎s‎ ‎N‎o‎t‎h‎i‎n‎g‎ ‎W‎a‎i‎t‎i‎n‎g‎ ‎F‎o‎r‎ ‎Y‎o‎u‎ ‎A‎t‎ ‎T‎h‎e‎ ‎E‎n‎d‎.‎ ‎B‎e‎ ‎L‎i‎k‎e‎ ‎U‎s‎.‎ ‎S‎p‎e‎n‎d‎ ‎E‎v‎e‎r‎y‎ ‎M‎i‎n‎u‎t‎e‎ ‎Y‎o‎u‎ ‎H‎a‎v‎e‎ ‎L‎e‎f‎t‎ ‎W‎i‎t‎h‎ ‎W‎o‎m‎e‎n‎,‎ ‎C‎o‎k‎e‎ ‎A‎n‎d‎ ‎I‎n‎s‎a‎n‎e‎ ‎A‎m‎o‎u‎n‎t‎s‎ ‎O‎f‎ ‎C‎a‎s‎h‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+P‎o‎l‎i‎s‎t‎e‎s‎ ‎g‎a‎l‎l‎i‎c‎u‎s‎ ‎i‎s‎ ‎a‎ ‎s‎p‎e‎c‎i‎e‎s‎ ‎o‎f‎ ‎p‎a‎p‎e‎r‎ ‎w‎a‎s‎p‎ ‎f‎o‎u‎n‎d‎ ‎i‎n‎ ‎a‎ ‎r‎e‎g‎i‎o‎n‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎A‎l‎p‎s‎ ‎s‎o‎u‎t‎h‎ ‎i‎n‎t‎o‎ ‎n‎o‎r‎t‎h‎w‎e‎s‎t‎ ‎A‎f‎r‎i‎c‎a‎ ‎a‎n‎d‎ ‎e‎a‎s‎t‎ ‎t‎o‎ ‎C‎r‎o‎a‎t‎i‎a‎ ‎a‎n‎d‎ ‎C‎o‎r‎f‎u‎.‎ ‎I‎t‎ ‎c‎a‎n‎ ‎l‎i‎v‎e‎ ‎i‎n‎ ‎a‎ ‎r‎a‎n‎g‎e‎ ‎o‎f‎ ‎t‎e‎m‎p‎e‎r‎a‎t‎u‎r‎e‎s‎ ‎i‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎w‎a‎r‎m‎e‎r‎ ‎c‎l‎i‎m‎a‎t‎e‎s‎ ‎a‎n‎d‎ ‎c‎o‎o‎l‎e‎r‎ ‎r‎e‎g‎i‎o‎n‎s‎ ‎n‎o‎r‎t‎h‎ ‎o‎f‎ ‎t‎h‎e‎ ‎A‎l‎p‎s‎,‎ ‎w‎i‎t‎h‎ ‎n‎e‎s‎t‎s‎ ‎c‎r‎e‎a‎t‎e‎d‎ ‎i‎n‎ ‎t‎h‎e‎s‎e‎ ‎v‎a‎r‎i‎o‎u‎s‎ ‎c‎o‎n‎d‎i‎t‎i‎o‎n‎s‎.‎ ‎A‎ ‎s‎o‎c‎i‎a‎l‎ ‎i‎n‎s‎e‎c‎t‎,‎ ‎t‎h‎e‎ ‎s‎p‎e‎c‎i‎e‎s‎ ‎u‎s‎e‎s‎ ‎a‎n‎ ‎o‎r‎a‎l‎ ‎s‎e‎c‎r‎e‎t‎i‎o‎n‎ ‎t‎o‎ ‎c‎o‎n‎s‎t‎r‎u‎c‎t‎ ‎i‎t‎s‎ ‎n‎e‎s‎t‎s‎,‎ ‎w‎h‎i‎c‎h‎ ‎c‎o‎n‎s‎i‎s‎t‎ ‎o‎f‎ ‎a‎ ‎c‎o‎m‎b‎i‎n‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎s‎a‎l‎i‎v‎a‎ ‎a‎n‎d‎ ‎c‎h‎e‎w‎e‎d‎ ‎p‎l‎a‎n‎t‎ ‎f‎i‎b‎e‎r‎s‎.‎ ‎T‎h‎i‎s‎ ‎s‎t‎r‎u‎c‎t‎u‎r‎a‎l‎ ‎m‎i‎x‎t‎u‎r‎e‎ ‎p‎h‎y‎s‎i‎c‎a‎l‎l‎y‎ ‎p‎r‎o‎t‎e‎c‎t‎s‎ ‎t‎h‎e‎ ‎n‎e‎s‎t‎ ‎f‎r‎o‎m‎ ‎v‎a‎r‎i‎o‎u‎s‎ ‎h‎a‎r‎s‎h‎ ‎e‎l‎e‎m‎e‎n‎t‎s‎ ‎a‎n‎d‎ ‎f‎r‎o‎m‎ ‎w‎e‎a‎t‎h‎e‎r‎i‎n‎g‎ ‎o‎v‎e‎r‎ ‎t‎i‎m‎e‎.‎ ‎L‎i‎k‎e‎ ‎o‎t‎h‎e‎r‎ ‎m‎e‎m‎b‎e‎r‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎s‎u‎b‎g‎e‎n‎u‎s‎ ‎P‎o‎l‎i‎s‎t‎e‎s‎,‎ ‎P‎.‎ ‎g‎a‎l‎l‎i‎c‎u‎s‎ ‎h‎a‎s‎ ‎r‎e‎c‎o‎g‎n‎i‎z‎a‎b‎l‎e‎ ‎b‎r‎i‎g‎h‎t‎ ‎y‎e‎l‎l‎o‎w‎ ‎a‎n‎d‎ ‎b‎l‎a‎c‎k‎ ‎m‎a‎r‎k‎i‎n‎g‎s‎.‎ ‎I‎t‎ ‎h‎a‎s‎ ‎a‎ ‎s‎m‎a‎l‎l‎e‎r‎ ‎b‎o‎d‎y‎ ‎t‎h‎a‎n‎ ‎m‎a‎n‎y‎ ‎o‎t‎h‎e‎r‎s‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎g‎e‎n‎u‎s‎ ‎t‎h‎a‎t‎ ‎o‎v‎e‎r‎l‎a‎p‎ ‎i‎n‎ ‎r‎a‎n‎g‎e‎.‎ ‎T‎h‎i‎s‎ ‎P‎.‎ ‎g‎a‎l‎l‎i‎c‎u‎s‎ ‎i‎n‎d‎i‎v‎i‎d‎u‎a‎l‎ ‎w‎a‎s‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎d‎ ‎i‎n‎ ‎B‎a‎v‎a‎r‎i‎a‎,‎ ‎G‎e‎r‎m‎a‎n‎y‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎R‎e‎i‎n‎h‎o‎l‎d‎ ‎M‎ö‎l‎l‎e‎r‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎l‎e‎a‎v‎e‎ ‎n‎o‎w‎ ‎t‎o‎ ‎f‎u‎l‎f‎i‎l‎l‎ ‎m‎y‎ ‎d‎o‎u‎b‎l‎e‎ ‎l‎i‎f‎e‎ ‎a‎s‎ ‎a‎ ‎c‎r‎i‎m‎e‎ ‎f‎i‎g‎h‎t‎e‎r‎,‎ ‎t‎r‎y‎i‎n‎g‎ ‎t‎o‎ ‎g‎e‎t‎ ‎b‎a‎n‎k‎ ‎r‎o‎b‎b‎e‎r‎ ‎M‎r‎.‎ ‎N‎e‎g‎r‎o‎l‎i‎p‎s‎ ‎a‎n‎d‎ ‎h‎i‎s‎ ‎g‎a‎n‎g‎ ‎o‎f‎ ‎g‎h‎e‎t‎t‎o‎ ‎l‎o‎b‎s‎t‎e‎r‎s‎.‎"
+JBPnng7N,LSD_v5_TL,Korotkodul,C++,Sunday 1st of October 2023 07:46:11 AM CDT,"#include <cmath>
+#include <iostream>
+#include <string>
+#include <vector>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+using Ll = long long;
+const auto k8 = 8;
+const auto k64 = 64;
+
+Ll Amount(string st) {
+  Ll res = 0;
+  for (int id = 0; id < k8; ++id) {
+    Ll add = (Ll)(st[id] - '0') * pow(2LL, id);
+    res += add;
+  }
+  return res;
+}
+
+vector<vector<string>> MergeSort(vector<vector<string>> ar, int par) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<vector<string>> lt;
+  vector<vector<string>> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt, par);
+  rt = MergeSort(rt, par);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<vector<string>> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (Amount(lt[lid][par]) <= Amount(rt[rid][par])) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+string Bin(Ll num) {
+  string st;
+  while (num > 0) {
+    st += std::to_string(num % 2);
+    num /= 2;
+  }
+  while ((int)st.size() < k64) {
+    st += '0';
+  }
+  return st;
+}
+
+vector<string> Get(string st) {
+  vector<string> res;
+  for (int id = 0; id < k64; id += k8) {
+    string add = st.substr(id, k8);
+    res.push_back(add);
+  }
+  return res;
+}
+
+Ll From(vector<string> vec) {
+  string st;
+  for (int id = 0; id < k8; ++id) {
+    st += vec[id];
+  }
+  Ll res = 0;
+  for (int id = 0; id < k64; ++id) {
+    Ll add = (Ll)(st[id] - '0') * pow(2LL, id);
+    res += add;
+  }
+  return res;
+}
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  int len;
+  cin >> len;
+  vector<vector<string>> ar;
+  for (int id = 0; id < len; ++id) {
+    Ll num;
+    cin >> num;
+    string st = Bin(num);
+    vector<string> vec = Get(st);
+    ar.push_back(vec);
+  }
+  for (int par = 0; par < k8; ++par) {
+    ar = MergeSort(ar, par);
+  }
+  vector<Ll> res;
+  for (int id = 0; id < len; ++id) {
+    Ll num = From(ar[id]);
+    res.push_back(num);
+  }
+  for (int id = 0; id < len; ++id) {
+    cout << res[id] << ""\n"";
+  }
+}
+/*
+9223372036854775807
+
+111111111111111111111111111111111111111111111111111111111111111
+1111111111111111111111111111111111111111111111111111111111111110
+
+5
+9244894871689
+9521193378807
+1748929606960
+1006499032553
+3289527480072
+*/
+"
+zUV314Zw,Untitled,Zarkli,Java,Sunday 1st of October 2023 07:40:06 AM CDT,El Psy Kongraoo!
+m4vD8CER,Untitled,WouterB,C#,Sunday 1st of October 2023 07:39:41 AM CDT,"            float TimeToStop = (Task_Ship_AI.ShipRigid.velocity.magnitude / (Task_Ship_AI.Ship.ShipEnginePower * World_Processor.WorldProc.SolarShips_Delay));
+            float TimeToStop2 = (DistanceToTarget / (Task_Ship_AI.ShipRigid.velocity.magnitude));
+            float TimeToDestination = (DistanceToTarget / Task_Ship_AI.ShipRigid.velocity.magnitude);
+            Debug.LogError(""Times for ship: STOP: "" + TimeToStop + ""STOPTIME2 "" + TimeToStop2 + "" DEST: "" + TimeToDestination);
+            Debug.LogError(""Dist= "" + DistanceToTarget + "" HalfWay= "" + HalfWayPoint);
+			//THE SHIP SHOULD CHECK IF IT IS TIME/CLOSE ENOUGH TO START COMING TO A STOP HERE.
+            if (TimeToStop >= (TimeToDestination+1) /*< TimeToStop + 1 || DistanceToTarget < MinDistToTarget*1.1*/)
+            {
+                Ship_MoveStatus = MoveTask_Status.Moving_Decelerate;
+                Task_Ship_AI.ShipRigid.AddRelativeForce(0, -Task_Ship_AI.Ship.ShipEnginePower, 0);
+            } //OTHERWISE, WE WILL CONTINUE ON TOWARD THE TARGET UNTIL THE ABOVE IF APPLIES.
+            else if (Task_Ship_AI.ShipRigid.velocity.magnitude < (Task_Ship_AI.Ship.ShipMaxSpeed - 1) && Ship_MoveStatus != MoveTask_Status.Moving_Decelerate && DistanceToTarget > MinDistToTarget * 1.2 /*&& DistanceToTarget > HalfWayPoint*/)
+            {//We are not doing the speed limit, and shouldn't be slowing down yet.
+                Ship_MoveStatus = MoveTask_Status.Moving_Accelerate;
+                Task_Ship_AI.ShipRigid.AddRelativeForce(0, Task_Ship_AI.Ship.ShipEnginePower, 0);
+            }"
+EctpKwMU,turn off windows co-pilot,ibi,REG,Sunday 1st of October 2023 07:38:54 AM CDT,"[HKEY_CURRENT_USER\Software\Policies\Microsoft\Windows\WindowsCopilot]
+""TurnOffWindowsCopilot""=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot]
+""TurnOffWindowsCopilot""=dword:00000001"
+BiT59t0h,Untitled,Esentasse,C++,Sunday 1st of October 2023 07:34:37 AM CDT,"#include <iostream>
+
+#include <vector>
+
+#include <string>
+
+#include <map>
+
+using namespace std;
+
+
+
+int main() {
+
+  map<string, string> classeAllenatoreDizionario = {
+
+      {""Backpacker"", ""Giramondo""},
+
+      {""Black Belt"", ""Cintura nera""},
+
+      {""Courier"", ""Corriere""},
+
+      {""Delinquent"", ""Ragazzaccia""},
+
+      {""Dragon Tamer"", ""Domadraghi""},
+
+      {""Festival Boy"", ""Ragazzo della festa""},
+
+      {""Festival Girl"", ""Ragazza della festa""},
+
+      {""Glitterati"", ""Celebrità""},
+
+      {""Hiker"", ""Montanara""},
+
+      {""Kitakami Ogre Clan"", ""Orchi di Nordivia""},
+
+      {""Photographer"", ""Fotografa""},
+
+      {""Poké Maniac"", ""Pokéfanatico""},
+
+      {""Ruffian"", ""Ragazzaccio""}
+
+  };
+
+
+  cout << ""NOTA: IL SESSO E IL NOME GIAPPONESE POTREBBERO NON FUNZIONARE!!!\n\n"" << endl;
+
+
+  string generazione;
+
+  cout << ""Scrivi la generazione: "";
+
+  cin >> generazione;
+
+  string classeAllenatore;
+
+  int sessoAllenatore;
+
+  cout << ""Scrivi la classe dell'allenatore (inglese): "";
+
+  cin.ignore();
+
+  getline(cin, classeAllenatore);
+
+  if (classeAllenatore == ""Office Worker"" || classeAllenatore == ""Pokémon Trainer"") {
+
+      cout << ""E' maschio o femmina? (1 = maschio, 2 = femmina): "";
+
+      cin >> sessoAllenatore;
+
+      if (classeAllenatore == ""Office Worker"") {
+
+          classeAllenatore = (sessoAllenatore == 1) ? ""Impiegato"" : ""Donna in carriera"";
+
+      }
+
+      else {
+
+          classeAllenatore = (sessoAllenatore == 1) ? ""Allenatore"" : ""Allenatrice"";
+
+      }
+
+  }
+
+  else {
+
+      auto it = classeAllenatoreDizionario.find(classeAllenatore);
+
+      if (it != classeAllenatoreDizionario.end()) {
+
+          classeAllenatore = it->second;
+
+      }
+
+  }
+
+  string immagine = ""SV VS"" + classeAllenatore + "" NNN.png"";
+
+  string nomeAllenatore;
+
+  cout << ""Scrivi il nome dell'allenatore: "";
+
+  cin.ignore();
+
+  getline(cin, nomeAllenatore);
+
+  string soldi1, soldi2, totalePokemon;
+
+  cout << ""Scrivi i soldi [1] (pre): "";
+
+  cin >> soldi1;
+
+  cout << ""Scrivi i soldi [2] (post): "";
+
+  cin >> soldi2;
+
+  cout << ""Scrivi quanti Pokemon sono presenti nella squadra: "";
+
+  cin >> totalePokemon;
+
+  vector<string> vettore(stoi(totalePokemon));
+
+  string sonoNabbo = ""|"";
+
+  for (int i = 0; i < stoi(totalePokemon); i++) {
+
+      cout << """" << endl;
+
+      string ndex, nomePokemon, sesso, livello1, livello2;
+
+      cout << (i + 1) << "") Scrivi il numero del Pokedex: "";
+
+      cin >> ndex;
+
+      cout << (i + 1) << "") Scrivi il nome del Pokemon: "";
+
+      cin >> nomePokemon;
+
+      cout << (i + 1) << "") Sesso del Pokemon (1 = maschio, 2 = femmina, 3 = no): "";
+
+      cin >> sesso;
+
+      if (sesso == ""1"") {
+
+          sesso = ""♂"";
+
+      }
+
+      else if (sesso == ""2"") {
+
+          sesso = ""♀"";
+
+      }
+
+      else {
+
+          sesso = "" "";
+
+      }
+
+      cout << (i + 1) << "") Scrivi il livello [1] (pre): "";
+
+      cin >> livello1;
+
+      cout << (i + 1) << "") Scrivi il livello [2] (post): "";
+
+      cin >> livello2;
+
+      sonoNabbo += ndex + ""|"" + nomePokemon + ""|"" + sesso + ""|{{tt|"" + livello1 + ""|Prima del completamento di Sulla via di casa}}/{{tt|"" + livello2 + ""|Dopo il completamento di Sulla via di casa}}"";
+
+      if (i < stoi(totalePokemon) - 1) {
+
+          sonoNabbo += ""||"";
+
+      }
+
+  }
+
+  string nomeGiapponese, nomeInglese;
+
+  cout << ""\nScrivi il nome giapponese: "";
+
+  cin >> nomeGiapponese;
+
+  cout << ""Scrivi il nome in inglese: "";
+
+  cin >> nomeInglese;
+
+  string testoFinale = ""\n\n{{Trainerlist/entry|gen="" + generazione + ""|"" + immagine + ""|"" + classeAllenatore + ""|"" + nomeAllenatore + ""|{{tt|"" + soldi1 +
+
+      ""|Prima del completamento di Sulla via di casa}}/{{tt|"" + soldi2 + ""|Dopo il completamento di Sulla via di casa}}|"" + totalePokemon +
+
+      sonoNabbo + ""|36="" + nomeGiapponese + ""|37="" + nomeInglese + ""|39="" + nomeInglese + ""}}"";
+
+  cout << testoFinale;
+
+  int sicurezza;
+
+  cout << ""\n\nNon ti preoccupare, non mi chiudo C_C"";
+
+  cin >> sicurezza;
+
+  return 0;
+
+}"
+6NEmSzT3,LSD_v4,Korotkodul,C++,Sunday 1st of October 2023 07:28:22 AM CDT,"#include <cmath>
+#include <iostream>
+#include <vector>
+#include <string>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+using ll = long long;
+
+int inv = 0;
+
+vector<vector<string>> MergeSort(vector<vector<string>> ar, int par) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<vector<string>> lt;
+  vector<vector<string>> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt, par);
+  rt = MergeSort(rt, par);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<vector<string>> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (lt[lid][par] <= rt[rid][par]) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+        inv += ln - lid;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+string Bin(ll num) {
+    string st = """";
+    while (num > 0) {
+      st += std::to_string(num % 2);
+      num /= 2;
+    }
+    while ((int)st.size() < 64) {
+      st += '0';
+    }
+    return st;
+}
+
+vector<string> Get(string st) {
+  vector<string> res;
+  for (int id = 0; id < 64; id += 8) {
+    string add = st.substr(id, 8);
+    res.push_back(add);
+  }
+  return res;
+}
+
+ll from(vector<string> vec) {
+  string st = """";
+  for (int id = 0; id < 8; ++id) {
+    st += vec[id];
+  }
+  /*cout << ""from\n"";
+  cout << ""st\n"";
+  cout << st << ""\n"";*/
+  ll res = 0;
+  for (int id = 0; id < 64; ++id) {
+    ll add = (ll)(st[id] - '0') * pow(2LL, id);
+    //cout << ""id = "" << id << ""\n"";
+    //cout << ""add = "" << add << ""\n"";
+    res += add;
+  }
+  return res;
+}
+
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  /*
+  ll kk;
+  cin >> kk;
+  string st = Bin(kk);
+  //cout << st << ""\n"";
+  vector<string> vec = Get(st);
+  for (int id = 0; id < 8; ++id) {
+    cout << vec[id] << ' ';
+  } cout << ""\n"";
+  */
+  /*ll num;
+  cin >> num;
+  string st = Bin(num);
+  cout << st << ""\n"";
+  vector<string> vec = Get(st);
+  for (string st: vec) {
+    cout << st << ' ';
+  }
+  cout << ""\n"";
+  ll cmp = from(vec);
+  cout << cmp << ""\n"";*/
+  /*int len;
+  cin >> len;
+  vector<vector<string>> ar;
+  for (int id = 0; id < len; ++id) {
+    ll num; cin >> num;
+    string st = Bin(num);
+    vector<string> vec = Get(st);
+    ar.push_back(vec);
+  }
+  for (int par = 0; par < 8; ++par) {
+    ar = MergeSort(ar, par);
+  }
+  vector<ll>res;
+  for (int id = 0; id < len; ++id) {
+    ll num = from(ar[id]);
+    res.push_back(num);
+  }
+  for (int id = 0; id < len; ++id) {
+    cout << res[id] << ""\n"";
+  }
+  cout << ""\n"";*/
+}
+/*
+9223372036854775807
+
+111111111111111111111111111111111111111111111111111111111111111
+1111111111111111111111111111111111111111111111111111111111111110
+
+*/
+"
+ATceJgTR,LSD_v3,Korotkodul,C++,Sunday 1st of October 2023 07:17:40 AM CDT,"#include <cmath>
+#include <iostream>
+#include <vector>
+#include <string>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+using ll = long long;
+
+int inv = 0;
+
+vector<vector<string>> MergeSort(vector<vector<string>> ar, int par) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<vector<string>> lt;
+  vector<vector<string>> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt, par);
+  rt = MergeSort(rt, par);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<vector<string>> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (lt[lid][par] <= rt[rid][par]) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+        inv += ln - lid;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+string Bin(ll num) {
+    string st = """";
+    while (num > 0) {
+      st += std::to_string(num % 2);
+      num /= 2;
+    }
+    while ((int)st.size() < 64) {
+      st += '0';
+    }
+    return st;
+}
+
+vector<string> Get(string st) {
+  vector<string> res;
+  for (int id = 0; id < 64; id += 8) {
+    string add = st.substr(id, 8);
+    res.push_back(add);
+  }
+  return res;
+}
+
+ll from(vector<string> vec) {
+  string st;
+  for (int id = 0; id < 8; ++id) {
+    st += vec[id];
+  }
+  ll res = 0;
+  for (int id = 0; id < 64; ++id) {
+    ll add = pow(2LL, id);
+    res += add;
+  }
+  return res;
+}
+
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  /*
+  ll kk;
+  cin >> kk;
+  string st = Bin(kk);
+  //cout << st << ""\n"";
+  vector<string> vec = Get(st);
+  for (int id = 0; id < 8; ++id) {
+    cout << vec[id] << ' ';
+  } cout << ""\n"";
+  */
+  int len;
+  cin >> len;
+  vector<vector<string>> ar;
+  for (int id = 0; id < len; ++id) {
+    ll num; cin >> num;
+    string st = Bin(num);
+    vector<string> vec = Get(st);
+    ar.push_back(vec);
+  }
+  vector<ll>res;
+  for (int id = 0; id < len; ++id) {
+    ll num = from(ar[id]);
+    res.push_back(num);
+  }
+  for (int id = 0; id < len; ++id) {
+    cout << res[id] << ' ';
+  }
+  cout << ""\n"";
+}
+/*
+9223372036854775807
+*/
+"
+Pv1WCTCk,LSD_v2,Korotkodul,C++,Sunday 1st of October 2023 07:11:44 AM CDT,"#include <cmath>
+#include <iostream>
+#include <vector>
+#include <string>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+using ll = long long;
+
+int inv = 0;
+
+vector<vector<string>> MergeSort(vector<vector<string>> ar, int par) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<vector<string>> lt;
+  vector<vector<string>> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt, par);
+  rt = MergeSort(rt, par);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<vector<string>> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (lt[lid][par] <= rt[rid][par]) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+        inv += ln - lid;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+string Bin(ll num) {
+    string st = """";
+    while (num > 0) {
+      st += std::to_string(num % 2);
+      num /= 2;
+    }
+    while ((int)st.size() < 64) {
+      st += '0';
+    }
+    return st;
+}
+
+vector<string> Get(string st) {
+  vector<string> res;
+  for (int id = 0; id < 64; id += 8) {
+    string add = st.substr(id, 8);
+    res.push_back(add);
+  }
+  return res;
+}
+
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  ll k;
+  cin >> k;
+  string st = Bin(k);
+  cout << st << ""\n"";
+  /*int len;
+  cin >> len;
+  vector<vector<string>> ar;
+  for (int id = 0; id < len; ++id) {
+    ll num; cin >> num;
+    string st = Bin(num);
+    vector<string> vec = Get(st);
+    ar.push_back(vec);
+  }
+  vector<ll>res*/
+}
+/*
+9223372036854775807
+*/
+"
+cNeX56mP,ffmpegStripAudioMetadata,jcunews,Batch,Sunday 1st of October 2023 06:58:08 AM CDT,"@echo off
+setlocal
+
+rem Context: https://old.reddit.com/r/software/comments/16wuuo1/old_qobuz_downloader_software/
+
+if ""%~1"" == """" (
+  echo Drag and drop onto this batch file,
+  echo an audio file or a folder which *directly* contain audio files.
+  pause
+  goto :eof
+)
+if not exist %1 (
+  echo File/folder is not found: ""%~1""
+  pause
+  goto :eof
+)
+2>nul cd /d %1
+if errorlevel 1 (
+  rem file was given
+  ""%~dp0\ffmpeg.exe"" -hide_banner -i %1 -vn -acodec copy -map_metadata 0 -y ""%~dpn1 out%~x1""
+  if not exist ""%~dpn1 out%~x1"" (
+    echo Non media file was given?
+    pause
+  )
+  goto :eof
+)
+rem folder was given. process WAV files
+set c=0
+for %%A in (*.wav) do (
+  set c=1
+  ""%~dp0\ffmpeg.exe"" -hide_banner -i ""%%~fA"" -vn -acodec copy -map_metadata 0 -y ""%%~dpnA out%%~xA""
+)
+if %c% == 0 (
+  echo No WAV files in folder: ""%~1""
+  pause
+)
+"
+MGa3iCku,LSD,Korotkodul,C++,Sunday 1st of October 2023 06:49:57 AM CDT,"#include <cmath>
+#include <iostream>
+#include <vector>
+#include <string>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+using ll = long long;
+
+int inv = 0;
+
+vector<int> MergeSort(vector<vector<string>> ar, int par) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<int> lt;
+  vector<int> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt, par);
+  rt = MergeSort(rt, par);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<int> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (lt[lid][par] <= rt[rid][par]) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+        inv += ln - lid;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  int len;
+  cin >> len;
+  vector<vector<string>> ar;
+  for (int id = 0; id < len; ++id) {
+    ll num; cin >> num;
+    string st = Bin(num);
+    vector<string> vec = Get(st);
+    ar.push_back(vec);
+  }
+  vector<ll>res
+}
+"
+4RiG0VNf,MOK layout Tausug,dksetiavan,YAML,Sunday 1st of October 2023 06:49:57 AM CDT,"{
+""title"":""Tausug"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ڠورتيَُِف"",
+""اسدْگهجکل"",
+""[SHIFT]زأئؤبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""عةظطيًٌٍق"",
+""ءشذّغحخكل"",
+""[SHIFT]زـصضثنم[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+zbn1Ri8e,named later,rfq,Bash,Sunday 1st of October 2023 06:42:43 AM CDT,"find ""stroke"" ""non stroke"" -type f -iname ""*.txt"" -exec sh -c 'txt=""{}""; txt_basename=$(basename ""$txt"" .txt); img=$(find ""FOLDER_GAMBAR"" -type f -iname ""$txt_basename.*""); [ -n ""$img"" ] && cp ""$img"" ""$(dirname ""$txt"")""/' \;"
+2WBg2421,MergeSort,Korotkodul,C++,Sunday 1st of October 2023 06:24:23 AM CDT,"#include <cmath>
+#include <iostream>
+#include <vector>
+
+using std::cin;
+using std::cout;
+using std::max;
+using std::min;
+using std::string;
+using std::vector;
+
+int inv = 0;
+
+vector<int> MergeSort(vector<int> ar) {
+  int len = ar.size();
+  if (len == 1) {
+    return ar;
+  }
+  vector<int> lt;
+  vector<int> rt;
+  for (int id = 0; id < len / 2; ++id) {
+    lt.push_back(ar[id]);
+  }
+  for (int id = len / 2; id < len; ++id) {
+    rt.push_back(ar[id]);
+  }
+  lt = MergeSort(lt);
+  rt = MergeSort(rt);
+  int ln = lt.size();
+  int rn = rt.size();
+  int lid = 0;
+  int rid = 0;
+  vector<int> res;
+  while (lid < ln || rid < rn) {
+    if (lid < ln && rid < rn) {
+      if (lt[lid] <= rt[rid]) {
+        res.push_back(lt[lid]);
+        lid++;
+      } else {
+        res.push_back(rt[rid]);
+        rid++;
+        inv += ln - lid;
+      }
+    } else if (lid < ln) {
+      res.push_back(lt[lid]);
+      lid++;
+
+    } else if (rid < rn) {
+      res.push_back(rt[rid]);
+      rid++;
+    }
+  }
+  return res;
+}
+
+int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
+  std::cout.tie(0);
+  int len;
+  cin >> len;
+  vector<int> ar(len);
+  for (int& el : ar) {
+    cin >> el;
+  }
+  ar = MergeSort(ar);
+  /*for (int el: ar) {
+    cout << el << ' ';
+  }
+  cout << ""\n"";*/
+  cout << inv << ""\n"";
+}
+"
+3PL4H9xA,JPanel template #1,mullerdaniil,Java,Sunday 1st of October 2023 06:19:03 AM CDT,"package org.example;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+
+public class Panel extends JPanel {
+    private static final Dimension WINDOW_SIZE = new Dimension(800, 600);
+    private static final Color WINDOW_BACKGROUND_COLOR = new Color(0, 0, 64);
+    private static final String WINDOW_NAME = ""WINDOW_NAME"";
+    private static final int TIMER_DELAY = 10;
+
+    public static void main(String[] args) {
+        new Panel();
+    }
+
+    public Panel() {
+        setupFrameAndPanel();
+        new Timer(TIMER_DELAY, new TimerListener()).start();
+    }
+
+
+    private class TimerListener implements ActionListener {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+            //
+        }
+    }
+
+    private class KeyListener extends KeyAdapter {
+        @Override
+        public void keyPressed(KeyEvent e) {
+            int keyCode = e.getKeyCode();
+
+            //
+        }
+
+        @Override
+        public void keyReleased(KeyEvent e) {
+            int keyCode = e.getKeyCode();
+
+            //
+        }
+    }
+
+    private class MouseListener extends MouseAdapter {
+        //
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+		
+		//
+    }
+
+    private void setupFrameAndPanel() {
+        var frame = new JFrame(WINDOW_NAME);
+        frame.setSize(WINDOW_SIZE);
+        setFocusTraversalKeysEnabled(true);
+        setFocusable(true);
+        addKeyListener(new KeyListener());
+        addMouseListener(new MouseListener());
+        frame.add(this);
+        setBackground(WINDOW_BACKGROUND_COLOR);
+        frame.setResizable(true);
+        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        frame.setVisible(true);
+    }
+}"
+1dxUH37S,data712,TestGuy1,JSON,Sunday 1st of October 2023 06:00:07 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'c7135fb47d5e653f7a2e56bb15b7ccc55d4c2387859a1fb30506cad300f7906e19f3f09ba5be09e3676b7be8975d5ad53728d454df9e7d2ee71726de5f1fa4fa001ec42a6ce769b13079a56afbb8c214a595665f0baf350d087fd0c60474e9d1a987091175e3ad8584b257f8543d990c9ba309514b42884de38aa9543ecb3fb2',
+  otherdata: [
+    '77213840cb51bc032ed60e68be115773',
+    '52fc10c55589e86a288d89cea62e455a',
+    'd5a3d396a6497ab4a618d3dfc0cd5528',
+    '20aba52754fd46de93a28a333857cc48',
+    '874312a552d2b0fdf4ab1bf851f733db',
+    'de68b8704c7ad67ace31aa7f62f7b6bd',
+    'ea9fc6300196cab1d78968b3001e08ed',
+    'dcbf8b007e30499aa3b0636d95005562'
+  ]
+}"

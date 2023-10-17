@@ -1,0 +1,4180 @@
+id,title,username,language,date,content
+0QsGZaYL,Can't Stop final,PrezesSmoku,Python,Sunday 4th of June 2023 06:57:24 AM CDT,"import pygame
+import random
+#szerokość i wysokość ekranu
+SZEROKOSC_EKRANU = 1280
+WYSOKOSC_EKRANU = 960
+
+pygame.init()
+ekran = pygame.display.set_mode([SZEROKOSC_EKRANU, WYSOKOSC_EKRANU])
+zegar = pygame.time.Clock()
+obraz_tla = pygame.image.load('images/mountain.png') 
+czcionka = pygame.font.SysFont('Comic Sans MS', 35) #nazwa i rozmiar czcionki
+obrazki_kosci = []
+#wyniki kości
+kosci = [1,1,1,1]
+#kombinacje na kościach
+kombinacje = []
+mozliwe_ruchy = []
+wybrane_kolumny = []
+zablokowane_kolumny = []
+for i in range(4):
+    obrazki_kosci.append(pygame.image.load('images/kosc-1.png'))
+
+teksty = [""Naciśnij Spacje""]
+liczba_pol = [3,5,7,9,11,13,11,9,7,5,3]
+skok_x = 70
+skok_y = 50
+start_x = 240
+start_y = 900
+aktywny_gracz = 0
+czekanie_na_wybor_kolumny = False
+czekanie_na_kontynuacje = False
+
+def budowa_planszy():
+    #współrzędne pierwszego pola
+    x = start_x
+    y = start_y
+    #numer kolumny
+    num = 2
+    #Operacje wykonywane dla każdej kolumny
+    for kolumna in liczba_pol:
+        #modyfikacja współrzędnych
+        #przesuwamy x w prawo po każdej zbudowanej kolumnie
+        x += skok_x
+        #Wracamy na dół kolumny aby zacząć budować nową
+        y = start_y
+        #budowa jednej kolumny
+        for i in range(kolumna):
+            #Przesuwamy współrzędną y w górę
+            y -= skok_y
+            #rysowanie koła które będzie czarną obwódką 
+            pygame.draw.circle(ekran, (0, 0, 0), (x,y), 22)
+            #rysowanie środka pola - kolor dowolny
+            #ważne aby dać inne kolory graczom potem
+            pygame.draw.circle(ekran, (255, 230, 0), (x,y), 20)
+        #przekształcamy liczbę na tekst 
+        numer_kolumny = czcionka.render(str(num), True,(0,0,0))
+        #Wyświetlamy to nad kolumną
+        #cofamy x odrobinę aby wyśrodkować napis
+        ekran.blit(numer_kolumny, (x-10,y-70))
+        #Przechodzimy do kolejnej kolumny
+        num += 1
+
+def pokaz_teksty():
+    #współrzędne tekstu
+    x_tekstu = 800
+    y_tekstu = 40
+    #przesunięcie tekstu między linijkami
+    skok_tekstu = 50
+    for tekst in teksty:
+        #stworzenie linijki. 
+        #Kolor potem zmienimy na kolor aktywnego gracza
+        linijka = czcionka.render(tekst, True,kolory_pionkow[aktywny_gracz])
+        ekran.blit(linijka, (x_tekstu,y_tekstu))
+        y_tekstu += skok_tekstu
+
+def rzut_kosci():
+    for i in range(4):
+        #losowanie dla jednej kostki
+        kosci[i] = random.randrange(1,6)
+        #załadowanie obrazka o nazwie zależnej od wyniku losowania
+        obrazki_kosci[i] = pygame.image.load(f'images/kosc-{kosci[i]}.png')
+
+def sprawdz_mozliwe_ruchy():
+    kombinacje.clear()
+    #Wyznaczenie wszystkich kombinacji
+    kombinacje.append([kosci[0]+kosci[1], kosci[2]+kosci[3]])
+    kombinacje.append([kosci[0]+kosci[2], kosci[1]+kosci[3]])
+    kombinacje.append([kosci[0]+kosci[3], kosci[1]+kosci[2]])
+    mozliwe_ruchy.clear()
+    liczba_opcji = 0
+    for i in range(len(kombinacje)):
+        # tworzymy nową pustą listę na możliwe ruchy z tej kombinacji kości, 
+        # jeśli ruch nie będzie możliwy z tej kombinacji to 
+        # pustą listę później usuniemy
+        mozliwe_ruchy.append([])
+        #3 pionki postawione
+        if len(wybrane_kolumny) == 3:
+            #Sprawdzamy czy pierwsza suma kości znajduje się 
+            # w liście wybranych kolumn
+            if kombinacje[i][0] in wybrane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][0])
+            #analogicznie z drugą wartością
+            if kombinacje[i][1] in wybrane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+        #2 pionki postawione
+        elif len(wybrane_kolumny) == 2:
+            # Sprawdzenie czy pierwszy wynik jest już wybrany 
+            if kombinacje[i][0] in wybrane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][0])
+                #Jeśli pierwsza opcja jest w liście wybranych to druga jeśli 
+                # nie jest zablokowana to możemy się poruszyć również w tej kolumnie
+                if not kombinacje[i][1] in zablokowane_kolumny:
+                    mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+            #analogiczne sprawdzenie drugiego wyniku
+            elif kombinacje[i][1] in wybrane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+                if not kombinacje[i][0] in zablokowane_kolumny:
+                    mozliwe_ruchy[liczba_opcji].append(kombinacje[i][0])
+            #Jeśli obie wartości nie znajdują się w liście wybranych 
+            #to sprawdzam czy pierwsza jest nie zablokowana
+            elif not kombinacje[i][0] in zablokowane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+                #Jeśli obie nie są zablokowane to musze je dodać oddzielnie 
+                # jest to przypadek gdy mamy dwa pionki na planszy 
+                # A dodać możemy tylko jeden, więc musimy wybrać który
+                #Dlatego zwiększamy liczbę opcji i dodajemy kolejną opcję jako nową listę 
+                if not kombinacje[i][1] in zablokowane_kolumny:
+                    liczba_opcji += 1
+                    mozliwe_ruchy.append([kombinacje[i][1]])
+            #Sprawdzenie czy choć druga opcja jest dostępna
+            elif not kombinacje[i][1] in zablokowane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+        #jeden lub zero użytych pionków
+        else:
+            if not kombinacje[i][0] in zablokowane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][0])
+            if not kombinacje[i][1] in zablokowane_kolumny:
+                mozliwe_ruchy[liczba_opcji].append(kombinacje[i][1])
+        liczba_opcji += 1
+    #Usunięcie pustych elementów
+    while [] in mozliwe_ruchy:
+        mozliwe_ruchy.remove([])
+    #wyświetlenie tekstów
+    teksty.clear()
+    for i in range(len(mozliwe_ruchy)):
+        teksty.append(f'{i+1}. Ruch w kolumnach {mozliwe_ruchy[i]}')
+        
+pozycje_pionkow_graczy = [[],[],[]]
+for i in range(len(pozycje_pionkow_graczy)):
+    for j in range(11):
+        pozycje_pionkow_graczy[i].append(0)
+czarne_pionki = []
+def czysc_czarne():
+    czarne_pionki.clear()
+    for j in range(11):
+        czarne_pionki.append(0)
+czysc_czarne()
+
+def ruch(opcja):
+    kolumny = mozliwe_ruchy[opcja]
+    for kolumna in kolumny:
+        # Jeśli pionek w danej kolumnie w danej turze nie był użyty
+        # to pobieramy wartość startową z listy pionków danego gracza
+        # odejmujemy dwa bo numeracja kolumn zaczyna się od 2 a w programowaniu od 0
+        if czarne_pionki[kolumna-2] == 0:
+            czarne_pionki[kolumna-2] = pozycje_pionkow_graczy[aktywny_gracz][kolumna-2]
+        # poruszamy pionkiem w konkretnej kolumnie o jedno pole do przodu
+        czarne_pionki[kolumna-2] += 1
+        # Jeśli kolumna nie była użyta w tej turze to doklejamy ją do kolumn wybranych 
+        if not kolumna in wybrane_kolumny:
+            wybrane_kolumny.append(kolumna)
+        #blokada nie pozwalająca jechać ponad kolumnę
+        if czarne_pionki[kolumna-2] >= liczba_pol[kolumna-2]:
+            czarne_pionki[kolumna-2] = liczba_pol[kolumna-2]
+
+# podajemy kolejno kolory dla każdego gracza
+# ostatni kolor to kolor czarny pionków tury
+kolory_pionkow = [(255,0,0),(0,255,0),(0,0,255),(0,0,0)]            
+def postaw_pionki():
+    #dla każdego gracza
+    for numer_gracza in range(len(pozycje_pionkow_graczy)):
+        #dla każdego pionka danego gracza
+        for i in range(len(pozycje_pionkow_graczy[numer_gracza])):
+            #z listy wyciągamy numer pola, na którym się najduję
+            pozycja_pionka = pozycje_pionkow_graczy[numer_gracza][i]
+            #jeśli jest różne od zera, czyli wszedł pionek już na planszę
+            if pozycja_pionka != 0:
+                #obliczamy współrzędne danego pionka
+                # (numer_gracza * 5) - pozwala nam przesunąć 
+                # delikatnie w prawo każdy kolejny pionek, aby nie 
+                # zasłaniały się wzajemnie gdy zajmują to samo pole
+                x = start_x + skok_x * (i + 1) + (numer_gracza * 5)
+                y = start_y - (skok_y * pozycja_pionka) 
+                # rysujemy pionek o kolorze gracza
+                pygame.draw.circle(ekran, kolory_pionkow[numer_gracza], (x,y), 10)
+    #wykonujemy analogiczne czynności dla czarnych pionków
+    for i in range(len(czarne_pionki)):
+        pozycja_pionka = czarne_pionki[i]
+        if pozycja_pionka != 0:
+            x = start_x + skok_x * (i + 1) + (numer_gracza * 5)
+            y = start_y - (skok_y * pozycja_pionka) 
+            #kolory[-1] oznaczają ostatni element listy
+            pygame.draw.circle(ekran, kolory_pionkow[-1], (x,y), 10)
+
+def stop_tury():
+    #Sprawdzenie każdego czarnego pionka
+    for i in range(len(czarne_pionki)):
+        #Jeśli zdobyliśmy nim jakieś pola to aktualizujemy pozycje pionków gracza
+        if czarne_pionki[i] != 0:
+            pozycje_pionkow_graczy[aktywny_gracz][i] = czarne_pionki[i]
+    #czyścimy wszystko przed turą kolejnego gracza
+    czysc_czarne()
+    teksty.clear()
+    wybrane_kolumny.clear()
+    
+    ilosc_wygranych = 0
+    for i in range(len(pozycje_pionkow_graczy[aktywny_gracz])):
+        #Sprawdzamy czy aktywny gracz odsiągnął gdzieś szczyt kolumny
+        if pozycje_pionkow_graczy[aktywny_gracz][i] >= liczba_pol[i]:
+            #jeśli tak to dodajemy taką kolumnę do zablokowanych
+            zablokowane_kolumny.append(i+2)
+            #oraz naliczamy wygraną
+            ilosc_wygranych += 1
+    #jeśli naliczymy przynajmniej 3 wygrane kończymy grę
+    if ilosc_wygranych >= 3:
+        teksty.append(""Wygrywasz"")
+        teksty.append(""naciśnij Esc, aby zakończyć"")
+    # w przeciwnym wypadku zmieniamy gracza
+    else:
+        teksty.append(""Tura następnego gracza"")
+        
+
+
+program_dziala = True
+while program_dziala:
+    for zdarzenie in pygame.event.get():
+        if zdarzenie.type == pygame.KEYDOWN:
+            if zdarzenie.key == pygame.K_ESCAPE:
+                program_dziala = False
+            if zdarzenie.key == pygame.K_SPACE and not czekanie_na_wybor_kolumny and not czekanie_na_kontynuacje:
+                rzut_kosci()
+                sprawdz_mozliwe_ruchy()
+                if len(mozliwe_ruchy) == 0:
+                    teksty.append(""Brak możliwości ruchu"")
+                    teksty.append(""Twoja tura kończy się"")
+                    wybrane_kolumny.clear()
+                    aktywny_gracz += 1
+                    if aktywny_gracz == 3:
+                        aktywny_gracz = 0 
+                    czekanie_na_wybor_kolumny = False
+                    czysc_czarne()
+                else:
+                    czekanie_na_wybor_kolumny = True
+            #Zdarzenie może się uruchomić jedynie, gdy czekamy na wybór kolumny 
+            # i ilość opcji wynosi przynajmniej jeden 
+            if zdarzenie.key == pygame.K_1 and czekanie_na_wybor_kolumny and len(teksty) >= 1:
+                # Używamy opcji zero bo stosujemy numerację listy
+                ruch(0)
+                # Kończymy czekanie na wybór kolumn bo została wybrana
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_2 and czekanie_na_wybor_kolumny and len(teksty) >= 2:
+                ruch(1)
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_3 and czekanie_na_wybor_kolumny and len(teksty) >= 3:
+                ruch(2)
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_4 and czekanie_na_wybor_kolumny and len(teksty) >= 4:
+                ruch(3)
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_5 and czekanie_na_wybor_kolumny and len(teksty) >= 5:
+                ruch(4)
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_6 and czekanie_na_wybor_kolumny and len(teksty) >= 6:
+                ruch(5)
+                czekanie_na_wybor_kolumny = False
+                czekanie_na_kontynuacje = True
+            if zdarzenie.key == pygame.K_d and czekanie_na_kontynuacje:
+                czekanie_na_kontynuacje = False
+                teksty.clear()
+            if zdarzenie.key == pygame.K_s and czekanie_na_kontynuacje:
+                stop_tury()
+                aktywny_gracz += 1
+                if aktywny_gracz == 3:
+                    aktywny_gracz = 0 
+                czekanie_na_kontynuacje = False
+        elif zdarzenie.type == pygame.QUIT:
+            program_dziala = False
+    
+    if czekanie_na_kontynuacje:
+        teksty = [""s. Stop"", ""d. Dalej""]
+    #wyświetl tło
+    ekran.blit(obraz_tla, (0,0))
+    #Kosci
+    ekran.blit(obrazki_kosci[0], (16,16))
+    ekran.blit(obrazki_kosci[1], (116,16))
+    ekran.blit(obrazki_kosci[2], (16,116))
+    ekran.blit(obrazki_kosci[3], (116,116))
+    #Plansza
+    budowa_planszy()
+    #TekstyWybór
+    pokaz_teksty()
+    #Pionki
+    postaw_pionki()
+    #odświerz ekran
+    pygame.display.flip()
+    zegar.tick(60) #liczba klatek na sekunde
+
+pygame.quit() "
+M0v1KG9r,Untitled,MagoBen,Python,Sunday 4th of June 2023 06:24:58 AM CDT,"import razdel
+
+tokens = razdel.tokenize(""Чурт санна лаьтта г1умг1азин арахь"")
+sentences = razdel.sentenize(""Чурт санна лаьтта г1умг1азин арахь. Чурт санна лаьтта г1умг1азин арахь."")
+
+# for t in tokens:
+#     #t.
+
+# 1
+# /api/v1/sentenize
+# REQUEST -> body: {text: ""Чурт санна лаьтта г1умг1азин арахь. Чурт санна лаьтта г1умг1азин арахь.""}
+# RESPONSE: { sentences: [{start: 0, stop: 20, text: ""Чурт санна лаьтта г1умг1азин арахь.""}] }
+
+# 2
+# api/v1/tokenize POST
+# REQUEST -> body: {text: ""Чурт санна лаьтта г1умг1азин арахь""}
+# RESPONSE: { tokens: [{start: 0, stop: 4, text: ""Чурт""}] }
+
+# pip install git+https://github.com/nmago/razdel-che.git"
+RuVctqQM,ЛШКН отбор 2023 задача 3 B-A',kjmkj,C++,Sunday 4th of June 2023 06:10:20 AM CDT,//хахахахаха заскамил!
+z8vY1RBy,06. Cinema Tickets,myrdok123,Java,Sunday 4th of June 2023 06:02:03 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P06_CinemaTickets {
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+
+
+        String movieName = scanner.nextLine();
+
+        int totalTickets = 0;
+        int totalKidTickets = 0;
+        int totalStudentTickets = 0;
+        int totalStandardTickets = 0;
+
+        while (!movieName.equals(""Finish"")){
+
+            int countFreeSeats = Integer.parseInt(scanner.nextLine());
+            String ticketType = scanner.nextLine();
+
+            int countTicketsPerMovie = 0;
+
+
+            while (!ticketType.equals(""End"")){
+                countTicketsPerMovie ++;
+
+                switch (ticketType){
+
+                    case ""kid"":
+                        totalKidTickets++;
+                        break;
+
+                    case ""student"":
+                        totalStudentTickets++;
+                        break;
+
+                    case ""standard"":
+                        totalStandardTickets ++;
+                        break;
+
+                }
+
+                if(countTicketsPerMovie == countFreeSeats ){
+                    break;
+                }
+
+
+                ticketType = scanner.nextLine();
+            }
+
+            totalTickets += countTicketsPerMovie;
+
+            double percentFilled = (countTicketsPerMovie * 1.0 / countFreeSeats) * 100;
+            System.out.printf(""%s - %.2f%% full.%n"", movieName, percentFilled);
+
+
+            movieName = scanner.nextLine();
+        }
+
+
+        double percentKidTickets = totalKidTickets * 1.0 / totalTickets * 100;
+        double percentStandardTickets = totalStandardTickets * 1.0 / totalTickets * 100;
+        double percentStudentTickets = totalStudentTickets * 1.0 / totalTickets * 100;
+
+        System.out.printf(""Total tickets: %d%n"", totalTickets);
+        System.out.printf(""%.2f%% student tickets.%n"", percentStudentTickets);
+        System.out.printf(""%.2f%% standard tickets.%n"", percentStandardTickets);
+        System.out.printf(""%.2f%% kids tickets.%n"", percentKidTickets);
+    }
+}
+"
+Z5yFMDBu,Wikipedia Article Summarizer,dx4iot,Python,Sunday 4th of June 2023 06:01:27 AM CDT,"#follow me on instagram for more @pycodehub
+#follow me on instagram for more @pycodehub
+#follow me on instagram for more @pycodehub
+ 
+
+import wikipedia
+input_val = input(""Enter Text: "")
+article = wikipedia.page(input_val)
+summary = wikipedia.summary(article)
+print(summary)
+ "
+mWS4YyVC,05. Special Numbers(Second),myrdok123,Java,Sunday 4th of June 2023 06:01:24 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P05_SpecialNumbersSecond {
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+
+        int number = Integer.parseInt(scanner.nextLine());
+
+        for (int i = 1; i <= 9; i++) {
+
+            for (int j = 1; j <=9 ; j++) {
+
+                for (int k = 1; k <= 9 ; k++) {
+
+                    for (int l = 1; l <= 9 ; l++) {
+
+                        // 1111 -> 9999
+
+                        if (number % i == 0 && number % j == 0 && number % k == 0 && number % l == 0){
+
+                            System.out.printf(""%d%d%d%d "", i, j, k, l);
+                        }
+                    }
+
+                }
+
+            }
+
+        }
+    }
+}
+"
+1WK511Jm,05. Special Numbers,myrdok123,Java,Sunday 4th of June 2023 06:00:54 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P05_SpecialNumbers {
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+        int number = Integer.parseInt(scanner.nextLine());
+
+        //for -> 1111  до 9999 -> проверяваме дали конкретното число е специално
+
+        for (int i = 1111; i <= 9999 ; i++) {
+
+            //намираме всяка една цифра
+            int firstDigit = i / 1000;
+            int secondDigit = i / 100 % 10;
+            int thirdDigit = i / 10 % 10;
+            int fourthDigit = i % 10;
+
+            // проверяваме дали числото е специално
+            boolean checkFirst = number % firstDigit == 0;
+            boolean checkSecond = secondDigit != 0 && number % secondDigit == 0;
+            boolean checkThird = thirdDigit != 0 && number % thirdDigit == 0;
+            boolean checkFourth = fourthDigit != 0 && number % fourthDigit == 0;
+
+            //проверяваме дали имаме 4 пъти true
+
+            if(checkFirst && checkSecond && checkThird && checkFourth){
+                System.out.printf(""%d "", i);
+            }
+
+        }
+
+
+
+
+    }
+}
+"
+a9hia9J5,04. Train The Trainers,myrdok123,Java,Sunday 4th of June 2023 06:00:14 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P04_TrainTheTrainers {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+
+        int countPeople = Integer.parseInt(scanner.nextLine());
+        String input = scanner.nextLine();
+
+        int countGrades = 0;
+        double sumAllGrades = 0;
+
+        //while -> докато не получим Finish
+        while (!input.equals(""Finish"")){
+
+            double sumGradesPerPresentation = 0;
+            // for -> прочитаме всяка една оценка
+            for (int i = 1; i <= countPeople ; i++) {
+                double currentGrade = Double.parseDouble(scanner.nextLine());
+                sumGradesPerPresentation += currentGrade;
+
+                //прибяваме  currentGrade към sumAllGrades
+                sumAllGrades += currentGrade;
+
+                //увеличаваме броката на оценките
+                countGrades++;
+
+            }
+            //изчисляваме средната оценка за презентация
+            double averageGradePerPresentation = sumGradesPerPresentation / countPeople;
+
+            
+
+            System.out.printf(""%s - %.2f.%n"", input, averageGradePerPresentation);
+
+
+            input = scanner.nextLine();
+        }
+
+
+        //изчисляваме средната оценка за вдички студенти
+        double averageStudentsGrade = sumAllGrades / countGrades;
+
+        System.out.printf(""Student's final assessment is %.2f."", averageStudentsGrade);
+    }
+}
+"
+yA6qnhMz,data593,TestGuy1,JSON,Sunday 4th of June 2023 06:00:04 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '30a071386cc3d0b9f95687b9e1afd276cd25bc70cbf844de8528b60fb4e4d8649745ac7357af79ee98ff4be0832066d935323d368ce59848703e5cd886d01840ae28d964188c2f33dcbad252bdb9e72e1fb11d9d06726bb9d11a81e09d529eede34b32b156404013ae569f73e71732acbac1e37f0eee634c3da7d79a72f82f77',
+  otherdata: [
+    '1f1a3778e0eb21337e630923cde51127',
+    '176ffedb58d99864704ee28fc787bed8',
+    'b56acd97e64c8b59e6c9cf4ff2d14600',
+    'ed6822598aff5ceff1103839ba87d3f3',
+    '04f9bda77912128b32dd182b5bbd38ed',
+    '8e2e84220711b82033282c076766f68b',
+    'd6871f6a07f4919a5112980dbe90d7bb',
+    'd43bb297f568690769a2262ad69642cf'
+  ]
+}"
+AREAf6tV,03. Sum Prime Non Prime,myrdok123,Java,Sunday 4th of June 2023 05:58:56 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P03_SumPrimeNonPrime {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+
+        String input = scanner.nextLine();
+
+        int sumPrimeNumbers = 0;
+        int sumNonPrimeNumbers = 0;
+
+        //while -> докато не получим команда стоп
+
+        while (!input.equals(""stop"")){
+
+            //парсваме input към инт число
+            int currentNumber = Integer.parseInt(input);
+
+            boolean isPrime = true;
+
+            // проверяваме дали числото е негативно
+            if(currentNumber < 0){
+                System.out.println(""Number is negative."");
+                input = scanner.nextLine();
+                continue;
+            }
+
+            //правим for цикъл от 2 до прочетеното число
+            for (int i = 2; i < currentNumber ; i++) {
+
+                // правим проверка дали можем да разделим целочислено currentNumber с i
+                if(currentNumber % i == 0){
+                    sumNonPrimeNumbers += currentNumber;
+                    isPrime = false;
+                    break;
+                }
+
+            }
+
+            //проверяваме дали isPrime = true
+            if (isPrime){
+                sumPrimeNumbers += currentNumber;
+            }
+
+
+            input = scanner.nextLine();
+        }
+
+        System.out.printf(""Sum of all prime numbers is: %d%n"", sumPrimeNumbers);
+        System.out.printf(""Sum of all non prime numbers is: %d%n"", sumNonPrimeNumbers);
+    }
+}
+"
+40QTrZpc,02. Equal Sums Even Odd Position,myrdok123,Java,Sunday 4th of June 2023 05:58:10 AM CDT,"package L06_NestedLoops;
+
+import java.util.Scanner;
+
+public class P02_SumsEvenOddPosition {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+        int firstNumber = Integer.parseInt(scanner.nextLine());
+        int secondNumber = Integer.parseInt(scanner.nextLine());
+
+
+        //правим фор цикъл -> преминаваме през всички числа от първото до последното
+
+        for (int currentNumber = firstNumber; currentNumber <= secondNumber ; currentNumber++) {
+
+            //намираме първото, второто... шестото число
+            int firstDigit = currentNumber / 100000;
+            int secondDigit = currentNumber / 10000 % 10;
+            int thirdDigit = currentNumber / 1000 % 10;
+            int fourthDigit = currentNumber / 100 % 10;
+            int fifthDigit = currentNumber / 10 % 10;
+            int sixthDigit = currentNumber % 10;
+
+            int oddSum = firstDigit + thirdDigit + fifthDigit;
+            int evenSum = secondDigit + fourthDigit + sixthDigit;
+
+            //проверяваме дали сумата на четните е равна на сумата на нечетните
+            if(oddSum == evenSum){
+                System.out.printf(""%d "", currentNumber);
+            }
+
+
+
+        }
+    }
+}
+"
+pXwfwSfL,Untitled,JackOUT,Java,Sunday 4th of June 2023 05:57:39 AM CDT,"package games.coob.hologram;
+
+import games.coob.nmsinterface.HologramRegistry;
+import games.coob.nmsinterface.NMSHologramI;
+import lombok.RequiredArgsConstructor;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.mineacademy.fo.remain.Remain;
+
+/**
+ * Represents a self-repeating task managing hologram.
+ */
+@RequiredArgsConstructor
+public final class HologramTask extends BukkitRunnable {
+
+	@Override
+	public void run() {
+		final double range = 20;
+
+		for (final Player player : Remain.getOnlinePlayers()) {
+			for (final HologramRegistry registry : HologramRegistry.getHolograms()) {
+				final NMSHologramI hologram = registry.getHologram();
+
+				System.out.println(""Holograms: "" + HologramRegistry.getHolograms());
+				System.out.println(""Hologram IDs: "" + HologramRegistry.getHologramIDs());
+
+				if (hologram == null)
+					continue;
+
+				if (!player.hasMetadata(hologram.getUniqueId().toString())/* && registry.getHologram().isRegistered(hologram)*/)
+					showPlayersInRange(hologram, player, range);
+
+				if (player.getLocation().distance(hologram.getLocation()) > range && hologram.isShown())
+					hologram.hide(player);
+			}
+		}
+	}
+
+	/*
+	 * Shows the hologram to players within the set range
+	 */
+	private void showPlayersInRange(final NMSHologramI hologram, final Player player, final double range) {
+		final Location hologramLocation = hologram.getLocation();
+		final Location playerLocation = player.getLocation();
+		final String[] array = new String[hologram.getLines().size()];
+
+		if (player.getWorld().equals(hologramLocation.getWorld()) && playerLocation.distance(hologramLocation) <= range)
+			hologram.show(hologramLocation, player, hologram.getLines().toArray(array));
+	}
+}"
+1MiiU1E8,Untitled,JackOUT,Java,Sunday 4th of June 2023 05:48:53 AM CDT,"package games.coob.nmsinterface;
+
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.mineacademy.fo.model.ConfigSerializable;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface NMSHologramI extends ConfigSerializable {
+
+	void createHologram(String id, Location location, final Player player, final String... linesOfText);
+
+	void sendPackets(Player player, Object nmsArmorStand);
+
+	UUID getUniqueId();
+
+	Location getLocation();
+
+	void setLines(List<String> lines);
+
+	List<String> getLines();
+
+	void remove(Player player);
+
+	void hide(Player player);
+
+	void show(final Location location, final Player player, final String... linesOfText);
+
+	boolean isShown();
+}
+"
+dk5hdfSj,Untitled,JackOUT,Java,Sunday 4th of June 2023 05:46:54 AM CDT,"package games.coob.v1_19;
+
+import games.coob.nmsinterface.HologramRegistry;
+import games.coob.nmsinterface.NMSHologramI;
+import lombok.Getter;
+import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+import org.bukkit.metadata.FixedMetadataValue;
+import org.mineacademy.fo.Common;
+import org.mineacademy.fo.Messenger;
+import org.mineacademy.fo.ReflectionUtil;
+import org.mineacademy.fo.collection.SerializedMap;
+import org.mineacademy.fo.plugin.SimplePlugin;
+import org.mineacademy.fo.remain.Remain;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
+public class NMSHologram_v1_19 implements NMSHologramI {
+
+	/**
+	 * The spawned NMS entity
+	 */
+	@Getter
+	private ArmorStand entityArmorStand;
+
+	private List<ArmorStand> entityLinesList = new ArrayList<>();
+
+	private List<String> lines;
+
+	public ArmorStand createEntity(final Object nmsWorld, final Location location) {
+		entityArmorStand = new ArmorStand((ServerLevel) nmsWorld, location.getX(), location.getY(), location.getZ());
+
+		this.entityArmorStand.valid = true;
+		this.entityArmorStand.setInvisible(true);
+
+		return entityArmorStand;
+	}
+
+	@Override
+	public UUID getUniqueId() {
+		return this.entityArmorStand.getBukkitEntity().getUniqueId();
+	}
+
+	/**
+	 * Convenience method to return the location of this Hologram.
+	 *
+	 * @return
+	 */
+	@Override
+	public Location getLocation() {
+		//Valid.checkBoolean(this.isShown(), ""Cannot call getLocation when "" + this + "" is not created"");
+
+		return this.entityArmorStand.getBukkitEntity().getLocation();
+	}
+
+	@Override
+	public void sendPackets(final Player player, final Object nmsArmorStand) {
+		final ArmorStand nmsStand = (ArmorStand) nmsArmorStand;
+
+		Remain.sendPacket(player, new ClientboundAddEntityPacket(nmsStand));
+		Remain.sendPacket(player, new ClientboundSetEntityDataPacket(nmsStand.getId(), nmsStand.getEntityData().getNonDefaultValues())); // TODO fix error
+
+		player.setMetadata(getUniqueId().toString(), new FixedMetadataValue(SimplePlugin.getInstance(), """"));
+	}
+
+	@Override
+	public void setLines(final List<String> lines) {
+		this.lines = lines;
+	}
+
+	public void setEntityList(final List<ArmorStand> armorStandList) {
+		this.entityLinesList = armorStandList;
+	}
+
+	public void setEntity(final ArmorStand armorStand) {
+		this.entityArmorStand = armorStand;
+	}
+
+	@Override
+	public List<String> getLines() {
+		return this.lines;
+	}
+
+	@Override
+	public void remove(final Player player) {
+		for (final ArmorStand armorStand : this.entityLinesList)
+			Remain.sendPacket(player, new ClientboundRemoveEntitiesPacket(armorStand.getId()));
+
+		//HologramRegistry_v1_19.getInstance().unregister(this);
+		HologramRegistry.removeHologram(this);
+		player.removeMetadata(getUniqueId().toString(), SimplePlugin.getInstance());
+	}
+
+	@Override
+	public void hide(final Player player) {
+		for (final ArmorStand armorStand : this.entityLinesList) {
+			armorStand.valid = false;
+			// armorStand.setRemoved(Entity.RemovalReason.DISCARDED);
+			// armorStand.discard();
+			armorStand.remove(Entity.RemovalReason.DISCARDED);
+			Remain.sendPacket(player, new ClientboundRemoveEntitiesPacket(armorStand.getId()));
+		}
+
+		player.removeMetadata(getUniqueId().toString(), SimplePlugin.getInstance());
+	}
+
+	@Override
+	public void show(final Location location, final Player player, final String... linesOfText) {
+		for (final ArmorStand nmsArmorStand : this.entityLinesList) { // TODO
+			final String line = nmsArmorStand.getName().getString();
+			final org.bukkit.entity.ArmorStand armorStand = ReflectionUtil.invoke(""getBukkitEntity"", nmsArmorStand);
+
+			nmsArmorStand.valid = true;
+			Remain.setCustomName(armorStand, line);
+			this.sendPackets(player, nmsArmorStand);
+		}
+
+		/*for (int i = 0; i < this.lines.size(); i++) {
+			System.out.println(""count: "" + i);
+			final String line = this.lines.get(i);
+			final ArmorStand nmsArmorStand = this.entityLinesList.get(i);
+
+			System.out.println(""Line: "" + line);
+			System.out.println(""Hologram: "" + nmsArmorStand);
+
+			final org.bukkit.entity.ArmorStand armorStand = ReflectionUtil.invoke(""getBukkitEntity"", nmsArmorStand);
+
+			Remain.setCustomName(armorStand, line);
+			this.sendPackets(player, nmsArmorStand);
+		}*/
+
+		player.setMetadata(getUniqueId().toString(), new FixedMetadataValue(SimplePlugin.getInstance(), """"));
+	}
+
+	@Override
+	public boolean isShown() {
+		return this.entityArmorStand.valid;
+	}
+
+	@Override
+	public void createHologram(final String id, Location location, final Player player, final String... linesOfText) {
+		if (!this.entityLinesList.isEmpty()) {
+			Messenger.error(player, ""Hologram cannot be created."");
+			return;
+		}
+
+		if (HologramRegistry.getHologramIDs().contains(id)) {
+			Messenger.error(player, ""A hologram named test has already been created."");
+			return;
+		}
+
+		final World world = location.getWorld();
+
+		if (world == null)
+			return;
+
+		final Object nmsWorld = Remain.getHandleWorld(location.getWorld());
+
+		setLines(Arrays.asList(linesOfText));
+
+		for (final String line : linesOfText) {
+			final ArmorStand nmsArmorStand = this.createEntity(nmsWorld, location);
+			final org.bukkit.entity.ArmorStand armorStand = ReflectionUtil.invoke(""getBukkitEntity"", nmsArmorStand);
+
+			//armorStand.setVisible(false);
+			Remain.setCustomName(armorStand, line);
+			this.sendPackets(player, nmsArmorStand);
+			location = location.subtract(0, 0.26, 0);
+
+			this.entityLinesList.add(nmsArmorStand);
+		}
+
+		player.setMetadata(getUniqueId().toString(), new FixedMetadataValue(SimplePlugin.getInstance(), """"));
+		Common.runLater(() -> HologramRegistry.createHologram(id, this));
+	}
+
+	@Override
+	public SerializedMap serialize() {
+		//Valid.checkBoolean(this.isShown(), ""Cannot save non-created holograms"");
+
+		return SerializedMap.ofArray(
+				""Lines"", this.lines,
+				""Last_Location"", this.getLocation());
+	}
+
+	public static NMSHologram_v1_19 deserialize(final SerializedMap map) { // TODO
+		final List<String> lines = map.getStringList(""Lines"");
+		Location lastLocation = map.getLocation(""Last_Location"");
+
+		final Object nmsWorld = Remain.getHandleWorld(lastLocation.getWorld());
+		final NMSHologram_v1_19 hologram = new NMSHologram_v1_19();
+		final List<ArmorStand> armorStandList = new ArrayList<>();
+
+		hologram.setLines(lines);
+		hologram.setEntity(hologram.createEntity(nmsWorld, lastLocation));
+
+		for (int i = 0; i < lines.size(); i++) {
+			armorStandList.add(hologram.createEntity(nmsWorld, lastLocation));
+			lastLocation = lastLocation.subtract(0, 0.26, 0);
+		}
+
+		hologram.setEntityList(armorStandList);
+
+		return hologram;
+	}
+}"
+Mg07LJkx,Untitled,Atticool,Java,Sunday 4th of June 2023 05:03:59 AM CDT,"public class Board {
+    /*
+          1 2 3 4 5 6 7 8 9 10
+        A . . . . . . . . . .
+        B . . . . . . . . . .
+        C . . . . . . . . . .
+        D . . . . . . . . . .
+        E . . . . . . . . . .
+        F . . . . . . . . . .
+        G . . . . . . . . . .
+        H . . . . . . . . . .
+        I . . . . . . . . . .
+        J . . . . . . . . . .
+
+        cells[x][y]
+        x is number, y is letter
+
+        
+    */
+    Cell[][] cells = new Cell[10][10];
+
+
+    public Board() {
+            //place cells
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 10; j++) {
+                cells[i][j] = new Cell();
+            }
+        }
+    }
+
+
+    private static int convertLetterIndex(String letter) throws InvalidPositionException {
+        return switch (letter.toLowerCase()) {
+            case ""a"" -> 0;
+            case ""b"" -> 1;
+            case ""c"" -> 2;
+            case ""d"" -> 3;
+            case ""e"" -> 4;
+            case ""f"" -> 5;
+            case ""g"" -> 6;
+            case ""h"" -> 7;
+            case ""i"" -> 8;
+            case ""j"" -> 9;
+            default -> {
+                throw new InvalidPositionException();
+            }
+        };
+    }
+
+    private static int convertNumberIndex(String letter) throws InvalidPositionException {
+        return switch (letter.toLowerCase()) {
+            case ""1"" -> 0;
+            case ""2"" -> 1;
+            case ""3"" -> 2;
+            case ""4"" -> 3;
+            case ""5"" -> 4;
+            case ""6"" -> 5;
+            case ""7"" -> 6;
+            case ""8"" -> 7;
+            case ""9"" -> 8;
+            case ""10"" -> 9;
+            default -> {
+                throw new InvalidPositionException();
+            }
+        };
+    }
+
+    private static String indexConvert(int index) {
+        return switch (index) {
+            case 0 -> ""A"";
+            case 1 -> ""B"";
+            case 2 -> ""C"";
+            case 3 -> ""D"";
+            case 4 -> ""E"";
+            case 5 -> ""F"";
+            case 6 -> ""G"";
+            case 7 -> ""H"";
+            case 8 -> ""I"";
+            case 9 -> ""J"";
+            default -> null;
+        };
+    }
+
+    private static String[] readPos(String position) {
+        String[] splitPosition = new String[2];
+        String stripPos = position.strip();
+        splitPosition[0] = String.valueOf(stripPos.charAt(0));
+        splitPosition[1] = stripPos.substring(1);
+        return splitPosition;
+    }
+
+    public void placeShip(Ship target, String position, String direction) throws InvalidPlacementException, InvalidPositionException, InvalidShipTypeException{
+        try {
+            if (target == null) {
+                throw new InvalidShipTypeException();
+            }
+
+            String[] posArray = new String[2];
+            posArray = readPos(position);
+
+            int y = convertNumberIndex(posArray[1]);
+            int x = convertLetterIndex(posArray[0]);
+
+            switch (direction) {
+                case ""down"":
+                    if (x > (10 - target.length())) {
+                        throw new InvalidPlacementException();
+                    }
+
+                    for (int i = 0; i < target.length(); i++) {
+                        int j = i + x;
+                        if (cells[j][y].isOccupied()) {
+                            throw new InvalidPlacementException();
+                        };
+                        cells[j][y].placeSegment(target.getSegment(i + 1));
+                    }
+                    break;
+                case ""across"":
+                    if (y > (10 - target.length())) {
+                        System.err.println(y);
+                        throw new InvalidPlacementException();
+                    }
+                    for (int i = 0; i < target.length(); i++) {
+                        int j = i + y;
+                        if (cells[x][j].isOccupied()) {
+                            throw new InvalidPlacementException();
+                        };
+                        cells[x][j].placeSegment(target.getSegment(i + 1));
+                    }
+                    break; 
+                default:
+                    throw new InvalidPlacementException();
+
+            }
+        }
+        catch (StringIndexOutOfBoundsException e) {
+            throw new InvalidPositionException();
+        }
+    }
+    public void attack(String position) throws InvalidPositionException{
+        try {
+            String[] posArray = new String[2];
+            posArray = readPos(position);
+            int y = convertNumberIndex(posArray[1]);
+            int x = convertLetterIndex(posArray[0]);
+            cells[x][y].attack();
+        }
+        catch (StringIndexOutOfBoundsException e) {
+            throw new InvalidPositionException();
+        }
+    }
+
+    public boolean hasBeenHit(String position) throws InvalidPositionException{
+        try {
+            String[] posArray = new String[2];
+            posArray = readPos(position);
+            int y = convertNumberIndex(posArray[1]);
+            int x = convertLetterIndex(posArray[0]);
+            return cells[x][y].hasBeenHit();
+        }
+        catch (StringIndexOutOfBoundsException e) {
+            throw new InvalidPositionException();
+        } 
+    }
+
+    public String displaySetup() {
+        StringBuilder sb = new StringBuilder(""  1 2 3 4 5 6 7 8 9 10\n"");
+        for (int i = 0; i < 10; i++) {
+            sb.append(indexConvert(i));
+            for (int j = 0; j < 10; j++) {
+                sb.append("" ""+this.cells[i][j].displaySetup());
+            }
+            sb.append(""\n"");
+        }
+        return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder(""  1 2 3 4 5 6 7 8 9 10\n"");
+        for (int i = 0; i < 10; i++) {
+            sb.append(indexConvert(i));
+            for (int j = 0; j < 10; j++) {
+                sb.append("" ""+this.cells[i][j]);
+            }
+            sb.append(""\n"");
+        }
+        return sb.toString();
+    }
+
+
+}"
+vQurzZEY,Index,gatunes,Lua,Sunday 4th of June 2023 05:02:36 AM CDT,"camera.setPosition(0, 0, 10);
+
+shader = Shader(
+[[
+out vec2 vUV;
+void main() {
+  vUV = (uv - 0.5) * 2.0;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+}
+]],
+[[
+in vec2 vUV;
+uniform vec3 color;
+void main() {
+  float d = min(length(vUV), 1.0);
+  float v = smoothstep(-0.2, 0.2, 0.6 - distance(gl_FragCoord.xy / resolution, vec2(0.5, 0.5)));
+  float l = 0.5 + fract(gl_FragCoord.y / 3.0) * 0.5;
+  fragColor = vec4(color * (1.0 - d) * v * l, smoothstep(1.0, 0.8, d));
+}
+]]
+)
+shader:setBlend(true)
+shader:setDepthTest(false)
+
+numExamples = 4
+data = {
+  { name= ""Dots"", url= ""pastebin://hnd0vLja"", color= { r = 1, g = 0, b = 0 } },
+  { name= ""Physics"", url=""pastebin://QqQ7L4MH"", color= { r = 0, g = 0, b = 1 } },
+  { name= ""Log"", url=""pastebin://3imN33i4"", color= { r = 1, g = 1, b = 0 } },
+  { name= ""Phong"", url=""pastebin://4bb6PKjM"", color= { r = 0, g = 1, b = 0 } }
+}
+meshes = {}
+for i=1,numExamples do
+  local mesh = Mesh(""plane"", shader)
+  meshes[i] = mesh
+end
+
+function loop()
+  raycaster.setFromCamera(mouse.x, mouse.y)
+  local hit = raycaster.intersect(table.unpack(meshes))
+  for i=1,numExamples do
+    if hit == meshes[i]:getId() then
+      local x, y, z = raycaster.getResult()
+      setCursor(""hand"")
+      if mouse.primaryUp then
+        navigate(data[i].url)
+      end
+    end
+    local a = i * math.pi * 2 / numExamples - math.pi * 0.5
+    local r = 3.5 + math.sin(time + i * 0.5) * 0.1
+    shader:uniformVec3(""color"", data[i].color.r, data[i].color.g, data[i].color.b)
+    local x = math.sin(a) * r
+    local y = math.cos(a) * r
+    local z = 0
+    meshes[i]:setPosition(x, y, z)
+    meshes[i]:render()
+    showTooltip(data[i].name, x, y + 1, z)
+  end
+end
+"
+4bb6PKjM,Phong,gatunes,Lua,Sunday 4th of June 2023 05:02:07 AM CDT,"background = ""vec3(0.05, 0.05, 0.1)""
+fog = [[
+  vec4 fog(in vec4 color) {
+    float depth = distance(vPosition, viewPosition);
+    float fog = 1.0 - exp(-0.02 * 0.02 * depth * depth);
+    return vec4(mix(color.rgb, ]] .. background .. [[, fog), color.a);
+  }
+]]
+phong = [[
+  uniform vec3 lightPosition;
+  vec4 phong(in vec3 color) {
+    float ambient = 0.03;
+    vec3 lightDir = normalize(lightPosition - vPosition);
+    vec3 normal = normalize(vNormal);
+    float diffuse = max(dot(lightDir, normal), 0.0);
+    float specular = pow(max(dot(normal, normalize(lightDir + normalize(viewPosition - vPosition))), 0.0), 32.0) * 0.5;
+    return vec4(color * (ambient + diffuse + specular), 1.0);
+  }
+]]
+
+shader = Shader(
+[[
+out vec3 vNormal;
+out vec3 vPosition;
+void main() {
+  vec4 pos = modelMatrix * vec4(position, 1.0);
+  vNormal = normalMatrix * normal;
+  vPosition = pos.xyz;
+  gl_Position = projectionMatrix * viewMatrix * pos;
+}
+]],
+[[
+in vec3 vNormal;
+in vec3 vPosition;
+uniform vec3 color;
+]] .. fog .. phong .. [[
+void main() {
+  fragColor = fog(sRGB(phong(color)));
+}
+]]
+)
+
+gridShader = Shader(
+[[
+out vec3 vNormal;
+out vec3 vPosition;
+void main() {
+  vec4 pos = modelMatrix * vec4(position, 1.0);
+  vNormal = normalMatrix * normal;
+  vPosition = pos.xyz;
+  gl_Position = projectionMatrix * viewMatrix * pos;
+}
+]],
+[[
+in vec3 vNormal;
+in vec3 vPosition;
+]] .. fog .. phong .. [[
+void main() {
+  vec2 coord = vPosition.xz * 0.25;
+  vec2 grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+  float line = min(grid.x, grid.y);
+  vec3 color = vec3(0.5, 0.5, 1.0) * (1.0 - min(line, 1.0));
+  fragColor = fog(sRGB(phong(color)));
+}
+]]
+)
+
+grid = Mesh(""plane"", gridShader)
+grid:setPosition(0, 0, 0)
+grid:setRotation(1, 0, 0, math.pi * -0.5)
+grid:setScale(100, 100, 1)
+
+light = Mesh(""sphere"", shader)
+light:uniformVec3(""color"", 1, 1, 1)
+light:setScale(0.5, 0.5, 0.5)
+
+numMeshes = 5
+meshes = {}
+for i=1,numMeshes do
+  meshes[i] = Mesh((i == 1 or i == numMeshes) and ""box"" or ""sphere"", shader)
+  meshes[i]:uniformVec3(""color"", math.random(), math.random(), math.random())
+  meshes[i]:setPosition((i - 0.5) * 3 - (numMeshes * 0.5 * 3), 4, 0)
+end
+
+framebuffer = Framebuffer(1, true, 8)
+
+log(""## Phong"")
+
+function loop()
+  local hit = 0
+  if not Controls.dragging then
+    raycaster.setFromCamera(mouse.x, mouse.y)
+    hit = raycaster.intersect(table.unpack(meshes))
+    if hit then
+      setCursor(""hand"")
+    end
+  end
+  Controls:update()
+
+  framebuffer:bind(resolution.x, resolution.y)
+  framebuffer:clear(0.05, 0.05, 0.1)
+  local x, y, z = math.spherical(math.pi * 0.3, time, 12)
+  y = y + 4;
+  light:setPosition(x, y, z)
+  light:render()
+  shader:uniformVec3(""lightPosition"", x, y, z)
+  gridShader:uniformVec3(""lightPosition"", x, y, z)
+  for i=1,numMeshes do
+    if mouse.primaryUp and meshes[i]:getId() == hit then
+      meshes[i]:uniformVec3(""color"", math.random(), math.random(), math.random())
+    end
+    meshes[i]:setRotation(0, 1, 1, time + i)
+    meshes[i]:render()
+  end
+  grid:render()
+  framebuffer:blit()
+end
+
+Controls = {
+  dragging = false,
+  phi = math.pi * 0.5,
+  theta = 0,
+  radius = 15,
+  target = { x = 0, y = 4, z = 0 }
+}
+
+function Controls:update()
+  if mouse.primaryUp then
+    self.dragging = false
+  end
+
+  if self.dragging then
+    self.phi = self.phi + mouse.dy * resolution.y * 0.003
+    self.theta = self.theta - mouse.dx * resolution.x * 0.003
+  elseif mouse.primary and (math.abs(mouse.dx) > 0.0001 or math.abs(mouse.dy) > 0.0001) then
+    self.dragging = true
+  end
+
+  if mouse.wheel ~= 0 then
+    self.radius = math.clamp(self.radius * (1 - mouse.wheel * 0.1), 2, 32)
+  end
+
+  if (
+    math.abs(self.phi - self.dphi) > 0.0001
+    or math.abs(self.theta - self.dtheta) > 0.0001
+    or math.abs(self.radius - self.dradius) > 0.0001
+  ) then
+    local damp = 1 - math.exp(-20 * delta)
+    self.dphi = math.lerp(self.dphi, self.phi, damp)
+    self.dtheta = math.lerp(self.dtheta, self.theta, damp)
+    self.dradius = math.lerp(self.dradius, self.radius, damp)
+    Controls:setView()
+  end
+end
+
+function Controls:setView()
+  local x, y, z = math.spherical(self.dphi, self.dtheta, self.dradius)
+  camera.setPosition(self.target.x + x, math.max(self.target.y + y, 0.1), self.target.z + z)
+  camera.lookAt(self.target.x, self.target.y, self.target.z)
+end
+
+Controls.dphi = Controls.phi
+Controls.dtheta = Controls.theta
+Controls.dradius = Controls.radius
+Controls:setView()
+"
+3imN33i4,Log,gatunes,Lua,Sunday 4th of June 2023 05:01:36 AM CDT,"frame = 0
+function loop()
+  clearLog()
+  log(""# Log"")
+  log(""*Frame:* "" .. frame)
+  log(""*Mouse:* **x** "" .. math.floor((mouse.x * 0.5 + 0.5) * 100) .. ""% **y** "" .. math.floor((mouse.y * 0.5 + 0.5) * 100) .. ""%"")
+  log(""*Time:* "" .. math.floor(time * 10) / 10)
+  frame = frame + 1
+end
+"
+QqQ7L4MH,Physics,gatunes,Lua,Sunday 4th of June 2023 05:00:51 AM CDT,"background = ""vec3(0.1, 0.2, 0.3)""
+fog = [[
+  vec4 fog(in vec4 color) {
+    float depth = distance(vPosition, viewPosition);
+    float fog = 1.0 - exp(-0.02 * 0.02 * depth * depth);
+    return vec4(mix(color.rgb, ]] .. background .. [[, fog), color.a);
+  }
+]]
+
+shader = Shader(
+[[
+out vec3 vNormal;
+out vec3 vPosition;
+void main() {
+  vec4 pos = modelMatrix * vec4(position, 1.0);
+  vNormal = normalMatrix * normal;
+  vPosition = pos.xyz;
+  gl_Position = projectionMatrix * viewMatrix * pos;
+}
+]],
+[[
+in vec3 vNormal;
+in vec3 vPosition;
+uniform vec3 color;
+]] .. fog .. [[
+vec4 phong(in vec3 color) {
+  float ambient = 0.03;
+  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));
+  vec3 normal = normalize(vNormal);
+  float diffuse = max(dot(lightDir, normal), 0.0);
+  float specular = pow(max(dot(normal, normalize(lightDir + normalize(viewPosition - vPosition))), 0.0), 32.0) * 0.5;
+  return vec4(color * (ambient + diffuse + specular), 1.0);
+}
+void main() {
+  fragColor = fog(phong(color));
+}
+]]
+)
+
+gridShader = Shader(
+[[
+out vec3 vPosition;
+void main() {
+  vec4 pos = modelMatrix * vec4(position + vec3(0, 0, 1), 1.0);
+  vPosition = pos.xyz;
+  gl_Position = projectionMatrix * viewMatrix * pos;
+}
+]],
+[[
+in vec3 vPosition;
+]] .. fog .. [[
+void main() {
+  vec2 coord = vPosition.xz;
+  vec2 grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+  float line = min(grid.x, grid.y);
+  vec3 color = mix(vec3(1.0), vec3(0.2,0.3,0.1), min(line, 1.0));
+  fragColor = fog(vec4(color * 0.5, 1.0));
+}
+]]
+)
+
+postrocessing = Shader(
+[[
+out vec2 vUV;
+void main() {
+  vUV = uv;
+  gl_Position = vec4(position, 1.0);
+}
+]],
+[[
+in vec2 vUV;
+uniform sampler2DMS colorTexture;
+void main() {
+  float v = smoothstep(-0.4, 0.4, 0.5 - distance(vUV, vec2(0.5, 0.5)));
+  float l = 0.5 + fract(gl_FragCoord.y / 3.0) * 0.5;
+  vec4 color = textureMS(colorTexture, ivec2(vUV * resolution), 8);
+  fragColor = sRGB(vec4(
+    mix(color.rgb / (color.a > 0.0 ? color.a : 1.0), ]] .. background .. [[, 1.0 - color.a) * v * l,
+    1.0
+  ));
+}
+]]
+)
+postrocessing:uniformInt(""colorTexture"", 0)
+framebuffer = Framebuffer(1, true, 8)
+
+grid = Mesh(""plane"", gridShader)
+grid:setPosition(0, -1, 0)
+grid:setRotation(1, 0, 0, math.pi * -0.5)
+grid:setScale(512, 512, 1)
+grid:enablePhysics()
+
+wall = Mesh(""box"", shader)
+wall:uniformVec3(""color"", 1, 1, 1)
+wall:setPosition(0, 4, -10)
+wall:setScale(10, 4, 1)
+wall:enablePhysics()
+
+projectile = 1
+numMeshes = 100
+meshes = {}
+for i=1,numMeshes do
+  meshes[i] = Mesh((math.random() > 0.5) and ""box"" or ""sphere"", shader)
+  meshes[i]:uniformVec3(""color"", math.random(), math.random(), math.random())
+  meshes[i]:setPosition((math.random() - 0.5) * numMeshes * 0.5, 4 + math.random() * 2, (math.random() - 0.5) * 8)
+  meshes[i]:enablePhysics(0.5)
+end
+
+log(""## Physics"")
+
+function loop()
+  Controls:update()
+  if mouse.primaryDown then
+    raycaster.setFromCamera(mouse.x, mouse.y)
+    local x, y, z, dx, dy, dz = raycaster.getRay()
+    meshes[projectile]:setPosition(x + dx * 4, y + dy * 4, z + dz * 4)
+    meshes[projectile]:applyImpulse(dx * 20, dy * 20, dz * 20)
+    projectile = 1 + (projectile % numMeshes)
+  end
+
+  framebuffer:bind(resolution.x, resolution.y)
+  framebuffer:clear()
+  for i=1,numMeshes do
+    meshes[i]:render()
+  end
+  wall:render()
+  grid:render()
+  framebuffer:unbind()
+
+  framebuffer:bindTexture(0, 0)
+  postrocessing:render()
+end
+
+Controls = {
+  dragging = false,
+  phi = math.pi * 0.35,
+  theta = 0,
+  radius = 20,
+  target = { x = 0, y = 4, z = 0 }
+}
+
+function Controls:update()
+  if mouse.secondaryUp then
+    self.dragging = false
+  end
+
+  if self.dragging then
+    self.phi = self.phi + mouse.dy * resolution.y * 0.003
+    self.theta = self.theta - mouse.dx * resolution.x * 0.003
+  elseif mouse.secondary and (math.abs(mouse.dx) > 0.0001 or math.abs(mouse.dy) > 0.0001) then
+    self.dragging = true
+  end
+
+  if mouse.wheel ~= 0 then
+    self.radius = math.clamp(self.radius * (1 - mouse.wheel * 0.1), 2, 32)
+  end
+
+  if (
+    math.abs(self.phi - self.dphi) > 0.0001
+    or math.abs(self.theta - self.dtheta) > 0.0001
+    or math.abs(self.radius - self.dradius) > 0.0001
+  ) then
+    local damp = 1 - math.exp(-20 * delta)
+    self.dphi = math.lerp(self.dphi, self.phi, damp)
+    self.dtheta = math.lerp(self.dtheta, self.theta, damp)
+    self.dradius = math.lerp(self.dradius, self.radius, damp)
+    Controls:setView()
+  end
+end
+
+function Controls:setView()
+  local x, y, z = math.spherical(self.dphi, self.dtheta, self.dradius)
+  camera.setPosition(self.target.x + x, math.max(self.target.y + y, 0.1), self.target.z + z)
+  camera.lookAt(self.target.x, self.target.y, self.target.z)
+end
+
+Controls.dphi = Controls.phi
+Controls.dtheta = Controls.theta
+Controls.dradius = Controls.radius
+Controls:setView()
+"
+hnd0vLja,Dots,gatunes,Lua,Sunday 4th of June 2023 04:55:06 AM CDT,"shader = Shader(
+[[
+out vec2 vUV;
+void main() {
+  vUV = (uv - 0.5) * 2.0;
+  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+}
+]],
+[[
+in vec2 vUV;
+uniform vec3 color;
+void main() {
+  float d = min(length(vUV), 1.0);
+  float v = smoothstep(-0.2, 0.2, 0.6 - distance(gl_FragCoord.xy / resolution, vec2(0.5, 0.5)));
+  float l = 0.5 + fract(gl_FragCoord.y / 3.0) * 0.5;
+  fragColor = vec4(color * (1.0 - d) * v * l, smoothstep(1.0, 0.8, d));
+}
+]]
+)
+shader:setBlend(true)
+shader:setDepthTest(false)
+
+camera.setPosition(0, 0, 64);
+
+numDots = 128
+dots = {}
+local width = resolution.x / 16
+local height = resolution.y / 16
+for i=1,numDots do
+  local r = 2 + math.random() * 4
+  local mesh = Mesh(""plane"", shader)
+  mesh:uniformVec3(""color"", math.random(), math.random(), math.random())
+  mesh:setPosition(
+    (math.random() - 0.5) * width * 2,
+    (math.random() - 0.5) * height * 2,
+    0
+  )
+  mesh:setScale(r, r, r)
+  dots[i] = {
+    mesh = mesh,
+    dx = (math.random() - 0.5) * 2,
+    dy = (math.random() - 0.5) * 2
+  }
+end
+
+log(""## Dots"")
+
+function loop()
+  local width = resolution.x / 16
+  local height = resolution.y / 16
+  local damp = 1 - math.exp(-20 * delta)
+  for i=1,numDots do
+    local x, y = dots[i].mesh:getPosition()
+    local r = dots[i].mesh:getScale()
+    for j=1,numDots do
+      if i ~= j then
+        local jX, jY = dots[j].mesh:getPosition()
+        local jR = dots[j].mesh:getScale()
+        local dx = x - jX
+        local dy = y - jY
+        local d = math.sqrt(dx * dx + dy * dy)
+        if d < (r + jR) then
+          nx = dx / (d > 1 and d or 1) * 4
+          ny = dy / (d > 1 and d or 1) * 4
+          dots[i].dx = dots[i].dx * (1 - damp) + nx * damp
+          dots[i].dy = dots[i].dy * (1 - damp) + ny * damp
+        end
+      end
+    end
+
+    local jX = mouse.x * resolution.x / resolution.y * 50;
+    local jY = mouse.y * 50;
+    local jR = 4;
+    local dx = x - jX
+    local dy = y - jY
+    local d = math.sqrt(dx * dx + dy * dy)
+    if d < (r + jR) then
+      nx = dx / (d > 1 and d or 1) * 10
+      ny = dy / (d > 1 and d or 1) * 10
+      dots[i].dx = dots[i].dx * (1 - damp) + nx * damp
+      dots[i].dy = dots[i].dy * (1 - damp) + ny * damp
+    end
+
+    x = x + dots[i].dx * delta
+    y = y + dots[i].dy * delta
+    if x < r - width or x > width - r then
+      x = math.clamp(x, r - width, width - r)
+      dots[i].dx = dots[i].dx * -1
+    end
+    if y < r - height or y > height - r then
+      y = math.clamp(y, r - height, height - r)
+      dots[i].dy = dots[i].dy * -1
+    end
+
+    dots[i].mesh:setPosition(x, y, 0)
+    dots[i].mesh:render()
+  end
+end
+"
+waMUY5x7,Untitled,ensbro,C#,Sunday 4th of June 2023 04:49:15 AM CDT,"using labvezbaAPI.Data.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace labvezbaAPI.Data
+{
+    public class AppDbContext : DbContext
+    {
+        private readonly IConfiguration conf;
+        public AppDbContext(IConfiguration configuration)
+        {
+            conf = configuration;
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.UseSqlServer(conf.GetConnectionString(""Default""));
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Karta>()
+                .HasOne(k => k.PovratnaKarta)
+                .WithOne(k => k.RoditeljskaKarta)
+                .OnDelete(DeleteBehavior.NoAction);
+        }
+
+        public DbSet<Karta> Karte { get; set; }
+        public DbSet<Polazak> Polasci { get; set; }
+        public DbSet<Putnik> Putnici { get; set; }
+    }
+}
+"
+CY98HZLG,Untitled,ensbro,C#,Sunday 4th of June 2023 04:47:37 AM CDT,"using HR_API.Data.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace HR_API.Data
+{
+    public class AppDBContext : DbContext
+    {
+        private IConfiguration _configuration;
+        public AppDBContext(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.UseSqlServer(_configuration.GetConnectionString(""DefaultConnectionString""));
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<IstorijaRadnogMesta>()
+                 .HasKey(irm => new { irm.RadnoMestoId, irm.ZaposleniId, irm.OdeljenjeId, irm.DatumPocetka });
+
+            modelBuilder.Entity<Zaposleni>()
+                .HasOne(z => z.RadnoMesto)
+                .WithMany(z => z.Zaposleni)
+                .HasForeignKey(z => z.RadnoMestoId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<Zaposleni>()
+                .HasOne(z => z.Odeljenje)
+                .WithMany(o => o.Zaposleni)
+                .HasForeignKey(z => z.OdeljenjeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<IstorijaRadnogMesta>()
+                .HasOne(irm => irm.Odeljenje)
+                .WithMany(o => o.IstorijaRadnihMesta)
+                .HasForeignKey(irm => irm.OdeljenjeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<IstorijaRadnogMesta>()
+                .HasOne(irm => irm.RadnoMesto)
+                .WithMany(rm => rm.IstorijaRadnihMesta)
+                .HasForeignKey(irm => irm.RadnoMestoId)
+                 .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<IstorijaRadnogMesta>()
+                .HasOne(irm => irm.Zaposleni)
+                .WithMany(rm => rm.IstorijaRadnihMesta)
+                .HasForeignKey(irm => irm.ZaposleniId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<Odeljenje>()
+                .HasData(
+                    new Odeljenje()
+                    {
+                        Id = 1,
+                        Naziv = ""Odeljenje 1"",
+                        Lokacija = ""Tu Negde"",
+                    },
+                    new Odeljenje()
+                    {
+                        Id = 2,
+                        Naziv = ""Odeljenje 2"",
+                        Lokacija = ""Pazar""
+                    }
+                );
+
+            modelBuilder.Entity<RadnoMesto>()
+                .HasData(
+                    new RadnoMesto()
+                    {
+                        Id = 1,
+                        Naziv = ""Prvo RM"",
+                        MinPlata = 100,
+                        MaxPlata = 200,
+                    },
+                    new RadnoMesto()
+                    {
+                        Id = 2,
+                        Naziv = ""Drugo RM"",
+                        MinPlata = 1000,
+                        MaxPlata = 2000,
+                    }
+                );
+        }
+
+        public DbSet<Zaposleni> Zaposleni { get; set; }
+        public DbSet<RadnoMesto> RadnaMesta { get; set; }
+        public DbSet<Odeljenje> Odeljenja { get; set; }
+        public DbSet<IstorijaRadnogMesta> IstorijaRadnihMesta { get; set; }
+
+    }
+}
+"
+9qefDany,dig.turtle.lua,dracowhitefire,Lua,Sunday 4th of June 2023 04:20:47 AM CDT,"local function refuel()
+    local selected = turtle.getSelectedSlot()
+    for i = 1, 16 do
+        turtle.select(i)
+        if turtle.refuel(0) then
+            if turtle.getFuelLevel() < turtle.getFuelLimit() then
+                turtle.refuel()
+            end
+        end
+    end
+    turtle.select(selected)
+end
+
+local function digForward(distance)
+    for i = 1, distance do
+        if turtle.detect() then
+            turtle.dig()
+        end
+        turtle.forward()
+    end
+end
+
+local function digLayer(forwardSize, rightwardSize)
+    local forward = forwardSize - 1
+    local rightward = rightwardSize - 1
+    for i = 1, forwardSize do
+        turtle.turnRight()
+        digForward(rightward)
+        for j = 1, rightward do
+            turtle.back()
+        end
+        turtle.turnLeft()
+
+        if i < forwardSize then
+            digForward(1)
+        end
+    end
+    for k = 1, forward do
+        turtle.back()
+    end
+end
+
+
+
+-- init, process input arguments
+local tArgs = { ... }
+if #tArgs ~= 3 then
+    print(""gebruik: dig [vooruit] [rechts] [omlaag]"")
+    return
+end
+local forwardSize = tonumber(tArgs[1])
+local rightwardSize = tonumber(tArgs[2])
+local downwardSize = tonumber(tArgs[3])
+print(""Ik begin bij het vakje voor me, linksboven aan de kubus, ga "" .. forwardSize .. "" vooruit, "" .. rightwardSize .. "" naar rechts en "" .. downwardSize .. "" omlaag."")
+print(""Doorgaan? [J/n]"")
+local response = io.read()
+if response == ""j""
+or response == ""J""
+or response == """"
+then
+    print(""Daar gaan we..."")
+else
+    print(""Ok, tot ziens!"")
+    return
+end
+-- end of init
+
+-- Main
+refuel()
+
+-- Turtle starts outside of digging area; move into top right corner
+if turtle.detect() then
+    turtle.dig()
+end
+turtle.forward()
+
+-- main loop
+for i = 1, downwardSize do
+    digLayer(forwardSize, rightwardSize)
+    if i < downwardSize then
+        if turtle.detectDown() then
+            turtle.digDown()
+        end
+        turtle.down()
+    end
+    refuel()
+end
+
+-- return to initial pos
+for i = 1, downwardSize - 1 do
+    turtle.up()
+end
+turtle.back()
+"
+mmybM12N,Untitled,Sandbird,PHP,Sunday 4th of June 2023 04:02:11 AM CDT,"$w = 16;
+$p = $this->data['ecdc']['DoseAdditional2']/100;
+$v='';
+for($i=1; $i< $w-1;){
+	$v.=($i++==$w/2-1) ? '' : (($i<$w*$p)?'█':'░');
+}
+$DoseAdditional2 = $v;
+...
+....
+2η Αναμνηστική:
+{$DoseAdditional2}
+{$this->data['ecdc']['DoseAdditional2']}%
+
+"
+bZbgef27,Untitled,MeehoweCK,C++,Sunday 4th of June 2023 03:55:59 AM CDT,"#include <iostream>
+
+using namespace std;
+
+class Samochod
+{
+private:		// pola prywatne (cechy obiektu)
+	int predkosc;
+	float paliwo;
+	int pasazerowie;
+public:			// metody publiczne (działania obiektu)
+	Samochod();			// konstruktor domyślny (bezargumentowy)
+	Samochod(int speed, float fuel, int pass);		// kontruktor 3-argumentowy
+	void dotankuj(float ilosc);
+	void przyspiesz();
+	void zwolnij();
+	// metody dostępowe:
+	void setPredkosc(int speed) { predkosc = speed; }
+	void setPaliwo(float fuel) { paliwo = fuel; }
+	void setPasazerowie(int pass) { pasazerowie = pass; }
+	int getPredkosc() { return predkosc; }
+	float getPaliwo() { return paliwo; }
+	int getPasazerowie() { return pasazerowie; }
+	void wypiszStan();
+};
+
+Samochod::Samochod()
+{
+	cout << ""Samochod()\n"";
+	predkosc = 0;
+	paliwo = 0;
+	pasazerowie = 5;
+}
+
+Samochod::Samochod(int speed, float fuel, int pass)
+{
+	cout << ""Samochod(int, float, int)\n"";
+	predkosc = speed;
+	paliwo = fuel;
+	pasazerowie = pass;
+}
+
+void Samochod::dotankuj(float ilosc)
+{
+	cout << ""Dotankowuje samochod iloscia "" << ilosc << endl;
+	paliwo += ilosc;
+}
+
+void Samochod::przyspiesz()
+{
+	predkosc += 10;
+	cout << ""Przyspieszam, teraz jade z predkoscia "" << predkosc << endl;
+	--paliwo;
+}
+
+void Samochod::zwolnij()
+{
+	cout << ""Zwalniam, teraz jade z predkoscia "" << predkosc << endl;
+	predkosc -= 10;
+}
+
+void Samochod::wypiszStan()
+{
+	cout << ""Paliwo: "" << paliwo << endl;
+	cout << ""Pasazerowie: "" << pasazerowie << endl;
+	cout << ""Predkosc: "" << predkosc << endl;
+}
+
+int main()
+{
+	Samochod s1;			// wywołanie konstruktora domyślnego
+
+	// s1.predkosc = 0;		// operacja niedozwolona, gdyż predkosc jest składową prywatną
+
+	//s1.setPaliwo(0);
+	//s1.setPasazerowie(5);
+	//s1.setPredkosc(0);
+
+	s1.dotankuj(20);
+	s1.przyspiesz();
+
+	s1.wypiszStan();
+
+	Samochod s2(15, 30, 3);		// wywołanie konstruktora 3-argumentowego
+	s2.wypiszStan();
+	
+	return 0;
+}"
+dLXhJy7B,Untitled,kjmkj,C++,Sunday 4th of June 2023 03:52:14 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+#define int long long
+#define double long double
+#define pb push_back
+#define randGen mt19937 rng(chrono::steady_clock::now().time_since_epoch().count())
+
+const int INF = 1e18;
+const int MOD = 1e9 + 7;
+map<int, int> a;
+
+signed main() {
+  ios_base::sync_with_stdio(false);
+  cin.tie(NULL);
+  cout.tie(NULL);
+  int t;
+  cin >> t;
+  while (t--) {
+    int n, m;
+    cin >> n >> m;
+    set<int> c;
+    for (int i = 0; i < n; ++i) {
+      c.insert(i);
+    }
+    vector<int> g[n];
+    for (int i = 0; i < m; ++i) {
+      int a1, b1;
+      cin >> a1 >> b1;
+      a1--;
+      b1--;
+      g[a1].pb(b1);
+      g[b1].pb(a1);
+    }
+    vector<int> res;
+    while (!c.empty()) {
+      int u = *c.begin();
+      res.pb(u);
+      c.erase(c.begin());
+      for (auto it : g[u]) {
+        if (c.find(it) != c.end()) {
+          c.erase(it);
+        }
+      }
+    }
+    cout << res.size() << '\n';
+    for (auto it : res) {
+      cout << it + 1 << ' ';
+    }
+    cout << '\n';
+  }
+  return 0;
+}
+"
+EmbXvydj,Untitled,Salvens,C++,Sunday 4th of June 2023 03:47:46 AM CDT,"#include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <set>
+#include <map>
+#include <string>
+#include <cassert>
+#include <numeric>
+#include <queue>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+using namespace std;
+
+#define int long long
+#define IOS ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);
+
+const long long INF = 1e18 + 7;
+const double EPS = 1e-9;
+const int N = 5010;
+const int MOD = 1e9 + 7;
+
+inline void solve() {
+    int n = 1e5;
+//    cin >> n;
+    unordered_map<int, int> mp;
+    mp[0] = 1;
+    int ans = 0;
+    for (int i = 1; i <= n; ++i) {
+        int x = i;
+//        cin >> x;
+        map<int, bool> used;
+        unordered_map<int, int> tmp = mp;
+        for (int j = 1; j <= round(double(x)); ++j) {
+            if (x % j == 0) {
+//                cout << j << endl;
+                if (!used[j]) {
+                    ans = (ans + mp[j - 1]) % MOD;
+                    tmp[j] = (tmp[j] + mp[j - 1]) % MOD;
+                    used[j] = true;
+                } else {
+
+                }
+//                if (!used[x / j]) {
+//                    ans = (ans + mp[j - 1]) % MOD;
+//                    mp[j] = (mp[j] + mp[j - 1]) % MOD;
+//                    used[x / j] = true;
+//                    x /= x / j;
+//                }
+            }
+        }
+        mp = tmp;
+    }
+//    for (auto i: mp) {
+//        cout << i.first << ' ' << i.second << endl;
+//    }
+    cout << ans << '\n';
+}
+
+int32_t main() {
+    IOS;
+
+    int tt = 1;
+//    cin >> tt;
+    while (tt--) {
+        solve();
+    }
+    return 0;
+}
+
+/*
+1.  数组开够了没
+2.  文件名写对了没，文件夹建了吗
+3.  内存会不会MLE
+4.  多测清空？
+5.  调试删干净了没
+6.  取模有没有溢出
+7.  快速幂底数要取模，幂对 mod-1 取模
+8.  前向星和欧拉序要开2倍数组
+9.  比较函数如果值相同的话有没有第二优先级
+10. 线段树 4 倍空间，线段树合并和可持久化线段树 32 倍空间
+11. 看清楚 log 的底数是啥，log后面的数是啥
+12. long long 只有正负 2^63-1
+*/"
+n1envAB9,Untitled,MeehoweCK,C++,Sunday 4th of June 2023 03:32:22 AM CDT,"#include <iostream>
+#include <vector>
+
+using namespace std;
+
+void fMaxMin(vector<int*> vec, int* max, int**& min, int** cMax, int& cMin)
+{
+	int val_max, val_min, val_cMax, val_cMin;
+
+	val_max = *(vec[0]);
+	val_min = *(vec[0]);
+	val_cMax = 1;
+	val_cMin = 1;
+
+	int size = vec.size();
+	for (int i = 1; i < size; ++i)
+	{
+		if (*(vec[i]) > val_max)
+		{
+			val_max = *(vec[i]);
+			val_cMax = 1;
+		}
+		else if (*(vec[i]) == val_max)
+			++val_cMax;
+		if (*(vec[i]) < val_min)
+		{
+			val_min = *(vec[i]);
+			val_cMin = 1;
+		}
+		else if (*(vec[i]) == val_min)
+			++val_cMin;
+	}
+
+	*max = val_max;
+	*(*min) = val_min;
+	*(*cMax) = val_cMax;
+	cMin = val_cMin;
+}
+
+int main()
+{
+	auto vec = vector<int>{ 1, 2, 1, 42, 2, 2, 42, 1, 1, 2, 1, 42 };		// utworzenie wektora typu int
+	auto vecP = vector<int*>();												// utworzenie pustego wektora typu wskaźnik na int (int*)
+	for (auto& item : vec)													// nagłówek zakresowej pętli for
+	{
+		vecP.push_back(&item);												// wstawienie do wektora vecP wskaźników do elementów wektora vec
+	}
+
+	int max, min, cMax, cMin;												// utworzenie zmiennych przechowujących wyniki
+
+	int* ptr_min = &min;													// utworzenie wskaźnika przechowującego adres zmiennej min
+	int** ptr2_min = &ptr_min;												// utworzenie wskaźnika przechowującego adres wskaźnika ptr_min
+
+	int* ptr_cMax = &cMax;													// utworzenie wskaźnika przechowującego adres zmiennej cMax
+
+	fMaxMin(vecP, &max, ptr2_min, &ptr_cMax, cMin);							// wywołanie funkcji fMaxMin
+
+	cout << ""max: "" << max << endl;
+	cout << ""min: "" << min << endl;
+	cout << ""cMax: "" << cMax << endl;
+	cout << ""cMin: "" << cMin << endl;
+
+	return 0;
+}"
+wWGTsapX,Untitled,MeehoweCK,C++,Sunday 4th of June 2023 03:08:57 AM CDT,"#include <iostream>
+
+using namespace std;
+
+int main()
+{
+	int tablica[20]{ 11, 0, 12, 5, 6, 8, 13, 4, 11, 8, 13, 2, 6, 14, 1, 3, 3, 1, 13, 14 };
+	int max, cMax, min, cMin;
+
+	// miejsce na Twój kod
+
+	cout << ""Najwieksza wartosc z tablicy to "" << max << "", wystepuje ona "" << cMax << "" razy.\n"";
+	cout << ""Najmniejsza wartosc w tablicy to "" << min << "", wystepuje ona "" << cMin << "" razy.\n"";
+
+	return 0;
+}"
+rFy0zfLM,Untitled,MeehoweCK,C++,Sunday 4th of June 2023 03:05:37 AM CDT,"#include <iostream>
+#include <vector>
+
+using namespace std;
+
+void fMaxMin(vector<int*> vec, int* max, int**& min, int** cMax, int& cMin)
+{
+	int val_max, val_min, val_cMax, val_cMin;
+
+	// miejsce na Twój kod
+}
+
+int main()
+{
+	auto vec = vector<int>{ 1, 2, 1, 42, 2, 2, 42, 1, 1, 2, 1, 42 };		// utworzenie wektora typu int
+	auto vecP = vector<int*>();												// utworzenie pustego wektora typu wskaźnik na int (int*)
+	for (auto& item : vec)													// nagłówek zakresowej pętli for
+	{
+		vecP.push_back(&item);												// wstawienie do wektora vecP wskaźników do elementów wektora vec
+	}
+
+	int max, min, cMax, cMin;												// utworzenie zmiennych przechowujących wyniki
+
+	int* ptr_min = &min;													// utworzenie wskaźnika przechowującego adres zmiennej min
+	int** ptr2_min = &ptr_min;												// utworzenie wskaźnika przechowującego adres wskaźnika ptr_min
+
+	int* ptr_cMax = &cMax;													// utworzenie wskaźnika przechowującego adres zmiennej cMax
+
+	fMaxMin(vecP, &max, ptr2_min, &ptr_cMax, cMin);							// wywołanie funkcji fMaxMin
+
+	cout << ""max: "" << max << endl;
+	cout << ""min: "" << min << endl;
+	cout << ""cMax: "" << cMax << endl;
+	cout << ""cMin: "" << cMin << endl;
+
+	return 0;
+}"
+fjXG9iCT,My New Leaderboard Story Game(Lobby),Sungmingamerpro13,CSS,Sunday 4th of June 2023 02:52:36 AM CDT,"local TeleportService = game:GetService(""TeleportService"")
+local SaveCurrency = game:GetService(""DataStoreService""):GetDataStore(""Wins"")
+local SaveCurrency2 = game:GetService(""DataStoreService""):GetDataStore(""Rounds"")
+local SaveCurrency3 = game:GetService(""DataStoreService""):GetDataStore(""Coins"")
+local SaveRevives = game:GetService(""DataStoreService""):GetDataStore(""Lives"")
+
+local VIPGamepassId = 26362066
+
+game.Players.PlayerAdded:Connect(function(player)
+	if game.ReplicatedStorage.Tags.Leaderstats.Value == true then
+		local Folder = Instance.new(""Folder"",player)
+		Folder.Name = ""leaderstats""
+
+		local Currency = Instance.new(""NumberValue"",Folder)
+		Currency.Name = game.ReplicatedStorage.Tags.WinsValue.Value
+		Currency.Value = SaveCurrency:GetAsync(player.UserId) or 0
+
+		local Currency2 = Instance.new(""NumberValue"",Folder)
+		Currency2.Name = game.ReplicatedStorage.Tags.RoundsValue.Value
+		Currency2.Value = SaveCurrency2:GetAsync(player.UserId) or 0
+
+		local previousData = SaveCurrency3:GetAsync(player.UserId) 
+		local Coins
+
+		if previousData ~= nil then
+			Coins = previousData
+		else
+			Coins = 0
+			SaveCurrency3:SetAsync(player.UserId, 0)
+		end
+
+		local CoinsValue = Instance.new(""NumberValue"", player)
+		CoinsValue.Name = ""Coins""
+		CoinsValue.Value = Coins
+
+		local val1 = Instance.new(""StringValue"",player)
+		val1.Name = 'GotPet'
+		val1.Value = ''
+
+		local val2 = Instance.new(""StringValue"",player)
+		val2.Name = 'OpenValue'
+		val2.Value = ''
+
+		local Rank = Instance.new(""StringValue"", player)
+		Rank.Name = ""Rank""
+		Rank.Value = Rank.Value
+
+		if game:GetService(""MarketplaceService""):UserOwnsGamePassAsync(player.UserId, VIPGamepassId) then
+			player.Coins.Value = player.Coins.Value * 2
+		end
+	end
+end)
+
+game.Players.PlayerRemoving:Connect(function(player)
+	if game.ReplicatedStorage.Tags.Leaderstats.Value == true then	
+		SaveCurrency:SetAsync(player.UserId,player.leaderstats[game.ReplicatedStorage.Tags.WinsValue.Value].Value)
+		SaveCurrency2:SetAsync(player.UserId,player.leaderstats[game.ReplicatedStorage.Tags.RoundsValue.Value].Value)
+	end
+end)
+
+game:BindToClose(function() -- Runs whenver the server is about to shut down/stop.
+	print(""STOPPED!"")
+
+	for i,player in pairs(game.Players:GetPlayers()) do
+		local value = player.Coins.Value
+		SaveCurrency3:SetAsync(player.UserId, value)
+		print(""Saved data for ""..player.Name)
+	end
+end)
+
+game.Players.PlayerRemoving:Connect(function(player)
+	local value = player.Coins.Value
+
+	if value ~= nil then
+		print(""Found data to save for ""..player.Name..""!"")
+		SaveCurrency3:SetAsync(player.UserId, value)
+		print(""Saved data for ""..player.Name)
+	else
+		print(""Did not manage to find data to save for ""..player.Name..""!"")
+	end
+end)
+
+game.Players.PlayerAdded:Connect(function(player)
+	local previousData2 = SaveRevives:GetAsync(player.UserId)
+	local Lives
+
+	if previousData2 ~= nil then
+		Lives = previousData2
+	else
+		Lives = 0
+		SaveRevives:SetAsync(player.UserId, 0)
+	end
+
+	local ExtraLivesValue = Instance.new(""NumberValue"", player)
+	ExtraLivesValue.Name = ""Lives""
+	ExtraLivesValue.Value = Lives
+end)
+
+game:BindToClose(function()
+	print(""STOPPED!"")
+
+	for i, player in pairs(game.Players:GetPlayers()) do
+		local value2 = player.Lives.Value
+		SaveRevives:SetAsync(player.UserId, value2)
+	end
+end)
+
+game.Players.PlayerRemoving:Connect(function(player)
+	local value2 = player.Lives.Value
+
+	if value2 ~= nil then
+		print(""Found data to save for ""..player.Name..""!"")
+		SaveRevives:SetAsync(player.UserId, value2)
+		print(""Saved data for ""..player.Name)
+	else
+		print(""Did not manage to find data to save for ""..player.Name..""!"")
+	end
+end)
+
+local teleportData = TeleportService:GetLocalPlayerTeleportData()
+
+if teleportData then
+	local Player = game.Players:GetPlayerByUserId(teleportData.PlayerName)
+	Player.leaderstats.Wins.Value = Player.leaderstats.Wins.Value + 1
+end
+"
+drPcLCa5,Untitled,kjmkj,C++,Sunday 4th of June 2023 02:48:37 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+#define int long long
+#define double long double
+#define pb push_back
+#define randGen mt19937 rng(chrono::steady_clock::now().time_since_epoch().count())
+
+const int INF = 1e18;
+const int MOD = 1e9 + 7;
+map<int, int> a;
+
+signed main() {
+  ios_base::sync_with_stdio(false);
+  cin.tie(NULL);
+  cout.tie(NULL);
+  int n;
+  cin >> n;
+  vector<int> sum[n + 1], sum1[n + 1];
+  for (int i = 0; i < n; ++i) {
+    int h;
+    cin >> h;
+    for (int j = 1; j * j <= h && j <= n; ++j) {
+      if (h % j != 0) {
+        continue;
+      }
+      if (h / j <= n && h / j != j) {
+        sum[h / j].pb(i);
+      }
+      sum[j].pb(i);
+    }
+  }
+
+  for (int i = 0; i < n; ++i) {
+    if (i > 0) {
+      sum1[1].pb(sum1[1].back() + 1);
+    } else {
+      sum1[1].pb(1);
+    }
+    sum1[1][sum1[1].size() - 1] %= MOD;
+  }
+  for (int i = 2; i <= n; ++i) {
+    for (int j = 0; j < sum[i].size(); ++j) {
+      auto it = lower_bound(sum[i - 1].begin(), sum[i - 1].end(), sum[i][j]);
+      int u = it - sum[i - 1].begin(), pl = 0;
+      if (u != 0) {
+        pl = sum1[i - 1][u - 1];
+      }
+      if (sum1[i].empty()) {
+        sum1[i].pb(pl % MOD);
+      } else {
+        sum1[i].pb(sum1[i].back() + pl);
+        sum1[i][sum1[i].size() - 1] %= MOD;
+      }
+    }
+  }
+  int suma = 0;
+  for (int i = 1; i <= n; ++i) {
+    if (sum1[i].empty()) {
+      continue;
+    }
+    suma += sum1[i].back();
+    suma %= MOD;
+  }
+  cout << suma % MOD;
+  return 0;
+}
+"
+0SfWudGC,2345,Damonwei,JSON,Sunday 4th of June 2023 02:19:05 AM CDT,"{
+""author"":""Dwei-0518"",
+""ua"":""Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36"",
+""homeUrl"": ""https://tv.2345.com/top/hot.html"",
+""cateManual"": {
+""国产剧"":""tv.2345.com/-neidi----"",
+""剧集库"": ""tv.2345.com/-----"",
+""电影库"": ""dianying.2345.com/list/-------"",
+""战争片"":""dianying.2345.com/list/zhanzheng-------"",
+""喜剧片"":""dianying.2345.com/list/xiju-------"",
+""动作片"":""dianying.2345.com/list/dongzuo-------"",
+""动漫"": ""dongman.2345.com/lt/"",
+""少儿"": ""dongman.2345.com/ltlxshaoer/""
+
+},
+
+""homeVodNode"": ""//ul[@class='picList clearfix']/li"",
+""homeVodName"": ""//span[@class='sTit']/a/text()"",
+""homeVodNameR"": """",
+""homeVodId"": ""//span[@class='sTit']/a/@href"",
+""homeVodIdR"": """",
+""homeVodImg"": ""//img[@onerror]/@src"",
+""homeVodImgR"": """",
+""homeVodMark"": ""concat(//span[@class='sIntro']/text(),'-',concat(//i[contains(@class,'iNum')]//text()))"",
+
+""cateUrl"": ""https://{cateId}{catePg}.html"",
+""cateVodNode"": ""//li[@media]"",
+""cateVodName"": ""//h3/span/text()"",
+""cateVodId"": ""//a[@class='aPlayBtn']/@href"",
+""cateVodIdR"": """",
+""cateVodImg"": ""//img/@data-src"",
+""cateVodImgR"": """",
+""cateVodMark"": ""//h3/em/text()"",
+""dtUrl"": ""https:{vid}"",
+""dtNode"": ""//div[@id='detailMain']"",
+""dtName"": ""concat(//h1//text())"",
+""dtNameR"": ""(.+)\\d.\\d"",
+""dtImg"": ""'https://tuapi.eees.cc/api.php?category={fengjing,jianyue}&type=302'"",
+""dtCate"": ""concat(//em[contains(text(),'类')]/following-sibling::div//text())"",
+""dtCateR"":"""",
+""dtActor"": ""concat(//em[contains(text(),'员')]/following-sibling::div//text())"",
+""dtActorR"":"""",
+""dtDesc"": ""//p[@class='pIntro pShow']/span/text()"",
+""dtDescR"":"""",
+""dtFromNode"": ""//div[@class='a-ii']"",
+""dtFromName"": ""/text()"",
+""dtFromNameR"": """",
+""dtUrlNode"": ""//div[contains(@class,'series-con-i')]"",
+""dtUrlSubNode"": ""//a[@data-ajax25module]"",
+""dtUrlId"": ""/@href"",
+""dtUrlIdR"": """",
+""dtUrlName"": ""//text()"",
+""dtUrlNameR"": """",
+""playUrl"": ""{playUrl}"",
+""playUa"": """",
+""searchUrl"": ""https://so-kan.2345.com/search_{wd}"",
+""scVodNode"": ""//div[@id='searchListUl']//div[@class='pic']"",
+""scVodName"": ""/img/@title"",
+""scVodId"": ""/a/@href"",
+""scVodIdR"": """",
+""scVodImg"": ""concat('https:',/img/@data-src)"",
+""scVodImgR"": """",
+""scVodMark"": ""/p/em/text()""
+}"
+urhfsb6h,zbk,Damonwei,JSON,Sunday 4th of June 2023 02:17:31 AM CDT,"{
+  ""author"": """",
+  ""desc"": ""https://www.zbkk.net https://www.bkyb.net https://www.zbkyy.net"",
+  ""ua"": ""Mozilla/5.0 (Linux; Android 11; SM-G715FN) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.40 Mobile Safari/537.36"",
+  ""homeUrl"": ""https://www.zbkk.net/"",
+  ""dcVipFlag"": ""false"",
+  ""pCfgJs"": ""https://www.zbkk.net/static/js/playerconfig.js"",
+  ""pCfgJsR"": ""MacPlayerConfig.player_list=([\\w\\W]*?),MacPlayerConfig.downer_list="",
+  ""dcShow2Vip"": {},
+  ""dcPlayUrl"": ""true"",
+  ""cateManual"": {""国产"":""13"",""韩国"":""15"",""欧美"":""16"",""剧集"":""2"",""电影"":""1"",""动漫"":""4"",""综艺"":""3""},
+  ""homeVodNode"": ""//div[@class='stui-pannel stui-pannel-bg clearfix'][position()>1]//ul[@class='stui-vodlist clearfix']/li[position()<7]/div/a"",
+  ""homeVodName"": ""/@title"",
+  ""homeVodId"": ""/@href"",
+  ""homeVodIdR"": ""/zbkdetail/(\\w+).html"",
+  ""homeVodImg"": ""/@data-original"",
+  ""homeVodImgR"": """",
+  ""homeVodMark"": ""/span[@class='pic-text text-right']/text()"",
+  ""cateUrl"": ""https://www.zbkk.net/vodshow/{cateId}-{area}-{by}-{class}-----{catePg}---{year}.html"",
+  ""cateVodNode"": ""//ul[@class='stui-vodlist clearfix']/li/div/a"",
+  ""cateVodName"": ""/@title"",
+  ""cateVodId"": ""/@href"",
+  ""cateVodIdR"": ""/zbkdetail/(\\w+).html"",
+  ""cateVodImg"": ""/@data-original"",
+  ""cateVodImgR"": """",
+  ""cateVodMark"": ""/span[@class='pic-text text-right']/text()"",
+  ""dtUrl"": ""https://www.zbkk.net/zbkdetail/{vid}.html"",
+  ""dtNode"": ""//body"",
+  ""dtName"": ""//h1[contains(@class,'title')]/text()"",
+  ""dtNameR"": """",
+  ""dtImg"": ""//div[@class='stui-content__thumb']/a/img/@data-original"",
+  ""dtImgR"": """",
+  ""dtCate"": ""//p[@class='data' and contains(./span/text(),'类型')]/allText()"",
+  ""dtCateR"": ""类型：(.*)地区"",
+  ""dtYear"": ""//p[@class='data' and contains(./span/text(),'类型')]/allText()"",
+  ""dtYearR"": ""年份：(.*)"",
+  ""dtArea"": ""//p[@class='data' and contains(./span/text(),'类型')]/allText()"",
+  ""dtAreaR"": ""地区：(.*)年份"",
+  ""dtActor"": ""//p[@class='data' and contains(./span/text(),'主演')]/allText()"",
+  ""dtActorR"": ""主演：(.*)"",
+  ""dtDirector"": ""//p[@class='data' and contains(./span/text(),'导演')]/allText()"",
+  ""dtDirectorR"": ""导演：(.*)"",
+  ""dtDesc"": ""//span[@class='detail-content']/text()"",
+  ""dtDescR"": """",
+  ""dtFromNode"": ""//div[contains(@class,'stui-pannel__head bottom-line') and not(contains(./h3/text(),'猜你喜欢')) and not(contains(./h3/text(),'W')) and not(contains(./h3/text(),'S'))]"",
+  ""dtFromName"": ""/h3/text()"",
+  ""dtFromNameR"": """",
+  ""dtUrlNode"": ""//ul[contains(@class,'stui-content__playlist')]"",
+  ""dtUrlSubNode"": ""/li/a"",
+  ""dtUrlId"": ""/@href"",
+  ""dtUrlIdR"": ""/zbkplay/(\\S+).html"",
+  ""dtUrlName"": ""/text()"",
+  ""dtUrlNameR"": """",
+  ""playUrl"": ""https://www.zbkk.net/zbkplay/{playUrl}.html"",
+  ""playUa"": ""Mozilla/5.0 (Linux; Android 11; SM-G715FN) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.40 Mobile Safari/537.36"",
+  ""searchUrl"": ""https://www.zbkk.net/index.php/ajax/suggest?mid=1&wd={wd}&limit=15"",
+  ""scVodNode"": ""json:list"",
+  ""scVodName"": ""name"",
+  ""scVodId"": ""id"",
+  ""scVodIdR"": """",
+  ""scVodImg"": ""pic"",
+  ""scVodMark"": """",
+  ""filter"": {
+    ""1"":[
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""1""},
+        {""n"":""动作"",""v"":""6""},
+        {""n"":""喜剧"",""v"":""7""},
+        {""n"":""爱情"",""v"":""8""},
+        {""n"":""科幻"",""v"":""9""},
+        {""n"":""恐怖"",""v"":""10""},
+        {""n"":""剧情"",""v"":""11""},
+        {""n"":""战争"",""v"":""12""},
+        {""n"":""粤语"",""v"":""25""},
+        {""n"":""院线"",""v"":""20""},
+        {""n"":""纪录"",""v"":""34""},
+        {""n"":""青春"",""v"":""24""},
+        {""n"":""邵氏"",""v"":""35""}
+      ]},
+      {""key"":""class"",""name"":""剧情"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""喜剧"",""v"":""喜剧""},
+        {""n"":""爱情"",""v"":""爱情""},
+        {""n"":""恐怖"",""v"":""恐怖""},
+        {""n"":""动作"",""v"":""动作""},
+        {""n"":""科幻"",""v"":""科幻""},
+        {""n"":""剧情"",""v"":""剧情""},
+        {""n"":""战争"",""v"":""战争""},
+        {""n"":""警匪"",""v"":""警匪""},
+        {""n"":""犯罪"",""v"":""犯罪""},
+        {""n"":""动画"",""v"":""动画""},
+        {""n"":""奇幻"",""v"":""奇幻""},
+        {""n"":""武侠"",""v"":""武侠""},
+        {""n"":""冒险"",""v"":""冒险""},
+        {""n"":""枪战"",""v"":""枪战""},
+        {""n"":""恐怖"",""v"":""恐怖""},
+        {""n"":""悬疑"",""v"":""悬疑""},
+        {""n"":""惊悚"",""v"":""惊悚""},
+        {""n"":""经典"",""v"":""经典""},
+        {""n"":""青春"",""v"":""青春""},
+        {""n"":""文艺"",""v"":""文艺""},
+        {""n"":""微电影"",""v"":""微电影""},
+        {""n"":""古装"",""v"":""古装""},
+        {""n"":""历史"",""v"":""历史""},
+        {""n"":""运动"",""v"":""运动""},
+        {""n"":""农村"",""v"":""农村""},
+        {""n"":""儿童"",""v"":""儿童""},
+        {""n"":""网络电影"",""v"":""网络电影""}
+      ]},
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""中国大陆""},
+        {""n"":""香港"",""v"":""中国香港""},
+        {""n"":""台湾"",""v"":""中国台湾""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""法国"",""v"":""法国""},
+        {""n"":""英国"",""v"":""英国""},
+        {""n"":""德国"",""v"":""德国""},
+        {""n"":""泰国"",""v"":""泰国""},
+        {""n"":""印度"",""v"":""印度""},
+        {""n"":""意大利"",""v"":""意大利""},
+        {""n"":""西班牙"",""v"":""西班牙""},
+        {""n"":""加拿大"",""v"":""加拿大""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""2"":[
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""2""},
+        {""n"":""国产"",""v"":""13""},
+        {""n"":""韩国"",""v"":""15""},
+        {""n"":""日本"",""v"":""23""},
+        {""n"":""欧美"",""v"":""16""},
+        {""n"":""香港"",""v"":""14""},
+        {""n"":""台湾"",""v"":""21""},
+        {""n"":""泰国"",""v"":""22""}
+      ]},
+      {""key"":""class"",""name"":""剧情"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""古装"",""v"":""古装""},
+        {""n"":""战争"",""v"":""战争""},
+        {""n"":""青春偶像"",""v"":""青春偶像""},
+        {""n"":""喜剧"",""v"":""喜剧""},
+        {""n"":""家庭"",""v"":""家庭""},
+        {""n"":""犯罪"",""v"":""犯罪""},
+        {""n"":""动作"",""v"":""动作""},
+        {""n"":""奇幻"",""v"":""奇幻""},
+        {""n"":""剧情"",""v"":""剧情""},
+        {""n"":""历史"",""v"":""历史""},
+        {""n"":""经典"",""v"":""经典""},
+        {""n"":""乡村"",""v"":""乡村""},
+        {""n"":""情景"",""v"":""情景""},
+        {""n"":""商战"",""v"":""商战""},
+        {""n"":""网剧"",""v"":""网剧""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""中国大陆""},
+        {""n"":""香港"",""v"":""中国香港""},
+        {""n"":""台湾"",""v"":""中国台湾""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""泰国"",""v"":""泰国""},
+        {""n"":""英国"",""v"":""英国""},
+        {""n"":""新加坡"",""v"":""新加坡""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""3"":[
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""3""},
+        {""n"":""大陆"",""v"":""28""},
+        {""n"":""港台"",""v"":""26""},
+        {""n"":""日韩"",""v"":""27""},
+        {""n"":""欧美"",""v"":""33""}
+      ]},
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""中国大陆""},
+        {""n"":""香港"",""v"":""中国香港""},
+        {""n"":""台湾"",""v"":""中国台湾""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""泰国"",""v"":""泰国""},
+        {""n"":""英国"",""v"":""英国""},
+        {""n"":""新加坡"",""v"":""新加坡""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""4"":[
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""4""},
+        {""n"":""大陆"",""v"":""31""},
+        {""n"":""日本"",""v"":""29""},
+        {""n"":""港台"",""v"":""32""},
+        {""n"":""欧美"",""v"":""30""}
+      ]},
+      {""key"":""class"",""name"":""剧情"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""情感"",""v"":""情感""},
+        {""n"":""科幻"",""v"":""科幻""},
+        {""n"":""热血"",""v"":""热血""},
+        {""n"":""推理"",""v"":""推理""},
+        {""n"":""搞笑"",""v"":""搞笑""},
+        {""n"":""冒险"",""v"":""冒险""},
+        {""n"":""萝莉"",""v"":""萝莉""},
+        {""n"":""校园"",""v"":""校园""},
+        {""n"":""动作"",""v"":""动作""},
+        {""n"":""机战"",""v"":""机战""},
+        {""n"":""运动"",""v"":""运动""},
+        {""n"":""战争"",""v"":""战争""},
+        {""n"":""少年"",""v"":""少年""},
+        {""n"":""少女"",""v"":""少女""},
+        {""n"":""社会"",""v"":""社会""},
+        {""n"":""原创"",""v"":""原创""},
+        {""n"":""亲子"",""v"":""亲子""},
+        {""n"":""益智"",""v"":""益智""},
+        {""n"":""励志"",""v"":""励志""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""13"":[
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""15"":[
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""16"":[
+      {""key"":""year"",""name"":""年份"",""value"":[{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ]
+  }
+}"
+fZuQe80G,kaola,Damonwei,JSON,Sunday 4th of June 2023 02:15:52 AM CDT,"{
+  ""author"": """",
+  ""homeUrl"": ""https://ikaola.tv/"",
+  ""dcVipFlag"": ""false"",
+  ""pCfgJs"": ""https://ikaola.tv/static/js/playerconfig.js"",
+  ""pCfgJsR"": ""MacPlayerConfig.player_list=([\\w\\W]*?),MacPlayerConfig.downer_list="",
+  ""dcShow2Vip"": {},
+  ""dcPlayUrl"": ""true"",
+  ""cateManual"": {""国产"":""13"",""日韩"":""15"",""欧美"":""16"",""剧集"":""2"",""电影"":""1"",""动漫"":""4"",""综艺"":""3""},
+  ""homeVodNode"": ""//div[contains(@class,'hl-list-wrap')]/ul/li[position()<7]/a[contains(@class,'hl-item-thumb')]"",
+  ""homeVodName"": ""/@title"",
+  ""homeVodId"": ""/@href"",
+  ""homeVodIdR"": ""/vod/(\\w+).html"",
+  ""homeVodImg"": ""/@data-original"",
+  ""homeVodImgR"": """",
+  ""homeVodMark"": ""//span[@class='hl-lc-1 remarks']/text()"",
+  ""cateUrl"": ""https://ikaola.tv/vodshow/{cateId}-{area}-{by}-{class}-----{catePg}---{year}.html"",
+  ""cateVodNode"": ""//div[contains(@class,'hl-list-wrap')]/ul/li/a[contains(@class,'hl-item-thumb')]"",
+  ""cateVodName"": ""/@title"",
+  ""cateVodId"": ""/@href"",
+  ""cateVodIdR"": ""/vod/(\\w+).html"",
+  ""cateVodImg"": ""/@data-original"",
+  ""cateVodImgR"": """",
+  ""cateVodMark"": ""//span[@class='hl-lc-1 remarks']/text()"",
+  ""dtUrl"": ""https://ikaola.tv/vod/{vid}.html"",
+  ""dtNode"": ""//body"",
+  ""dtName"": ""//h2[contains(@class,'hl-dc-title')]/text()"",
+  ""dtNameR"": """",
+  ""dtImg"": ""//div[@class='hl-dc-pic']/span[contains(@class,'hl-item-thumb')]/@data-original"",
+  ""dtImgR"": """",
+  ""dtCate"": ""concat(//em[contains(text(),'类型')]/following-sibling::*//text())"",
+  ""dtCateR"": ""(.*)/"",
+  ""dtYear"": ""//em[contains(text(),'年份')]/parent::*/text()"",
+  ""dtYearR"": """",
+  ""dtArea"": ""//em[contains(text(),'地区')]/parent::*/text()"",
+  ""dtAreaR"": """",
+  ""dtActor"": ""concat(//em[contains(text(),'主演')]/following-sibling::*//text())"",
+  ""dtActorR"": ""(.*)/"",
+  ""dtDirector"": ""concat(//em[contains(text(),'导演')]/following-sibling::*//text())"",
+  ""dtDirectorR"": ""(.*)/"",
+  ""dtDesc"": ""//span[@class='hl-content-text']//text()"",
+  ""dtDescR"": """",
+  ""dtFromNode"": ""//div[@id='playlist']//a[contains(@class,'hl-tabs-btn')]"",
+  ""dtFromName"": ""/@alt"",
+  ""dtFromNameR"": """",
+  ""dtUrlNode"": ""//div[@id='playlist']//div[contains(@class,'hl-tabs-box')]//ul"",
+  ""dtUrlSubNode"": ""/li/a"",
+  ""dtUrlId"": ""/@href"",
+  ""dtUrlIdR"": ""/vodplay/(\\S+).html"",
+  ""dtUrlName"": ""/text()"",
+  ""dtUrlNameR"": """",
+  ""playUrl"": ""https://ikaola.tv/vodplay/{playUrl}.html"",
+  ""playUa"": """",
+  ""searchUrl"": ""https://ikaola.tv/index.php/ajax/suggest?mid=1&wd={wd}&limit=15"",
+  ""scVodNode"": ""json:list"",
+  ""scVodName"": ""name"",
+  ""scVodId"": ""id"",
+  ""scVodIdR"": """",
+  ""scVodImg"": ""pic"",
+  ""scVodMark"": """",
+  ""filter"": {
+    ""1"": [
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""1""},
+        {""n"":""动画"",""v"":""24""},
+        {""n"":""动作"",""v"":""6""},
+        {""n"":""喜剧"",""v"":""7""},
+        {""n"":""爱情"",""v"":""8""},
+        {""n"":""科幻"",""v"":""9""},
+        {""n"":""恐怖"",""v"":""10""},
+        {""n"":""剧情"",""v"":""11""},
+        {""n"":""战争"",""v"":""12""},
+        {""n"":""悬疑"",""v"":""23""},
+        {""n"":""惊悚"",""v"":""20""},
+        {""n"":""犯罪"",""v"":""21""},
+        {""n"":""冒险"",""v"":""22""},
+        {""n"":""武侠"",""v"":""25""},
+        {""n"":""奇幻"",""v"":""26""},
+        {""n"":""记录"",""v"":""27""}
+      ]},
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""大陆""},
+        {""n"":""香港"",""v"":""香港""},
+        {""n"":""台湾"",""v"":""台湾""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""英国"",""v"":""英国""},
+        {""n"":""法国"",""v"":""法国""},
+        {""n"":""德国"",""v"":""德国""},
+        {""n"":""印度"",""v"":""印度""},
+        {""n"":""泰国"",""v"":""泰国""},
+        {""n"":""加拿大"",""v"":""加拿大""},
+        {""n"":""俄罗斯"",""v"":""俄罗斯""},
+        {""n"":""意大利"",""v"":""意大利""},
+        {""n"":""西班牙"",""v"":""西班牙""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""2"": [
+      {""key"":""cateId"",""name"":""类型"",""value"":[{""n"":""全部"",""v"":""2""},
+        {""n"":""国产"",""v"":""13""},
+        {""n"":""港台"",""v"":""14""},
+        {""n"":""日韩"",""v"":""15""},
+        {""n"":""欧美"",""v"":""16""},
+        {""n"":""海外"",""v"":""42""}
+      ]},
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""大陆""},
+        {""n"":""香港"",""v"":""香港""},
+        {""n"":""台湾"",""v"":""台湾""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""英国"",""v"":""英国""},
+        {""n"":""印度"",""v"":""印度""},
+        {""n"":""泰国"",""v"":""泰国""},
+        {""n"":""新加坡"",""v"":""新加坡""},
+        {""n"":""其他"",""v"":""其他""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""3"": [
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""大陆""},
+        {""n"":""香港"",""v"":""香港""},
+        {""n"":""台湾"",""v"":""台湾""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""英国"",""v"":""英国""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""4"": [
+      {""key"":""area"",""name"":""地区"",""value"":[{""n"":""全部"",""v"":""""},
+        {""n"":""大陆"",""v"":""大陆""},
+        {""n"":""香港"",""v"":""香港""},
+        {""n"":""台湾"",""v"":""台湾""},
+        {""n"":""美国"",""v"":""美国""},
+        {""n"":""日本"",""v"":""日本""},
+        {""n"":""韩国"",""v"":""韩国""},
+        {""n"":""英国"",""v"":""英国""}
+      ]},
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""13"": [
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""15"": [
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ],
+    ""16"": [
+      {""key"":""year"",""name"":""年份"",""value"": [{""n"":""全部"",""v"":""""},{""n"":""2023"",""v"":""2023""},
+        {""n"":""2022"",""v"":""2022""},{""n"":""2021"",""v"":""2021""},{""n"":""2020"",""v"":""2020""},{""n"":""2019"",""v"":""2019""},
+        {""n"":""2018"",""v"":""2018""},{""n"":""2017"",""v"":""2017""},{""n"":""2016"",""v"":""2016""},{""n"":""2015"",""v"":""2015""},
+        {""n"":""2014"",""v"":""2014""},{""n"":""2013"",""v"":""2013""},{""n"":""2012"",""v"":""2012""},{""n"":""2011"",""v"":""2011""}
+      ]},
+      {""key"":""by"",""name"":""排序"",""value"":[{""n"":""时间"",""v"":""time""},{""n"":""人气"",""v"":""hits""},{""n"":""评分"",""v"":""score""}]}
+    ]
+  }
+}"
+rZXhPuty,Untitled,35657,C++,Sunday 4th of June 2023 01:40:22 AM CDT,"#define _CRT_SECURE_NO_WARNINGS
+
+#include <iostream>
+#include <cstring>
+
+
+using namespace std;
+
+class String {
+
+public:
+
+	String() : size(0), capacity(15), str(new char[15]) {
+		total_number_strings++;
+	}
+
+	explicit String(const int string_capacity) : size(0), capacity(string_capacity), str(new char[string_capacity]) {
+		total_number_strings++;
+	}
+
+	explicit String(const char new_str[]) {
+		capacity = strlen(new_str) + 1;
+		str = new char[capacity];
+		strcpy(str, new_str);
+		size = capacity - 1;
+		total_number_strings++;
+	}
+
+	String(const String& other) : size(other.size), capacity(other.capacity), str(new char[capacity]) {
+		strcpy(str, other.str);
+		total_number_strings++;
+	}
+
+	String& operator=(const String& other) {
+		if (this != &other) {
+			size = other.size;
+			capacity = other.capacity;
+			delete[] str;
+			str = new char[capacity];
+			strcpy(str, other.str);
+		}
+		return *this;
+	}
+
+	String& operator=(const char new_str[]) {
+		capacity = strlen(new_str) + 1;
+		delete[] str;
+		str = new char[capacity];
+		strcpy(str, new_str);
+		size = capacity - 1;
+		return *this;
+	}
+
+	char& operator[] (const int index) {
+		if (index < 0 || index >= size) {
+			cout << ""Invalid index"" << endl;
+			abort;
+		}
+		return str[index];
+	}
+
+	char& operator[] (const int index) const {
+		if (index < 0 || index >= size) {
+			cout << ""Invalid index"" << endl;
+			abort;
+		}
+		return str[index];
+	}
+
+	bool operator==(const String& right) const {
+		if (size != right.size) {
+			return false;
+		}
+		for (int i = 0; i < size; i++) {
+			if (str[i] != right.str[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool operator!=(const String& right) const {
+		if (size != right.size) {
+			return true;
+		}
+		for (int i = 0; i < size; i++) {
+			if (str[i] != right.str[i]) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	int Size() const {
+		return size;
+	}
+
+	int Capacity() const {
+		return capacity;
+	}
+
+	static int GetTotalNumberStrings() {
+		return total_number_strings;
+	}
+
+	~String() {
+		delete[] str;
+		total_number_strings--;
+	}
+
+private:
+	int size;
+	int capacity;
+	char* str;
+	static int total_number_strings;
+};
+
+ostream& operator<<(ostream& output, const String& string) {
+	for (int i = 0; i < string.Size(); i++) {
+		output << string[i];
+	}
+	return output;
+}
+
+istream& operator>>(istream& input, String& string) {
+	int capacity = 15;
+	int i = 0;
+	char* str = new char[capacity];
+	char ch;
+	while (true) {
+		ch = input.get();
+		if (ch == ' ' || ch == '\n') {
+			break;
+		}
+		if (i == capacity - 1) {
+			char* temp = new char[capacity *= 2];
+			for (int j = 0; j < i; j++) {
+				temp[j] = str[j];
+			}
+			delete[] str;
+			str = temp;
+		}
+		str[i] = ch;
+		i++;
+	}
+	if (i > 0) {
+		str[i] = '\0';
+		string = str;
+	}
+	return input;
+}
+
+int String::total_number_strings = 0;
+
+
+int main() {
+	String my_string;
+	cout << ""Size: "" << my_string.Size() << "" Capacity: "" << my_string.Capacity() << endl;
+	my_string = ""Hello"";
+	cout << my_string << endl;
+	cout << ""Size: "" << my_string.Size() << "" Capacity: "" << my_string.Capacity() << endl;
+	my_string = ""Hello my dear friend"";
+	cout << my_string << endl;
+	cout << ""Size: "" << my_string.Size() << "" Capacity: "" << my_string.Capacity() << endl;
+
+	my_string[2] = 'm';
+
+	cout << my_string << endl;
+	cout << my_string[1] << endl;
+	String my_string2(""1234"");
+	cout << my_string2 << endl;
+	cout << ""Size: "" << my_string2.Size() << "" Capacity: "" << my_string2.Capacity() << endl;
+	String my_string3(my_string);
+	cout << my_string3 << endl;
+	cout << String::GetTotalNumberStrings() << endl;
+
+	const String my_string4 = my_string2;
+
+	cout << my_string4[1] << endl;
+
+	cout << my_string4 << endl;
+
+	cout << boolalpha;
+
+	cout << (my_string == my_string4) << endl;
+	cout << (my_string != my_string4) << endl;
+
+	String my_string5;
+
+	cin >> my_string5;
+
+	cout << my_string5;
+}"
+GxjNZHah,Equinox,junijwi,HTML,Sunday 4th of June 2023 12:32:28 AM CDT,"<!--------------------------------------------------------------------------------
+
+EQUINOX profile by JUNI
+
+Please edit the code with WYSIWYG turned off and Code Editor turned on.
+I personally recommend editing the code in a code editor like Visual Studio Code
+OR using the very handy live-preview website:
+https://th.circlejourney.net/
+You may alter/relocate/restyle coding credit, but please do not remove it.
+
+You can CTRL+Replace these
+Dark Grey Color: #343434
+Gold Color: #B18B4D
+Red Color: #820000
+
+-------------------------------------------------------------------------------->
+
+<div class=""container mx-auto p-0"" style=""font-family: Palatino Linotype; color: black; margin-top: 40px; max-width: 600px;"">
+    <!-- Header -->
+    <div class=""card rounded-0 p-md-4 p-2"" style=""background-color: #343434; background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38795138_znzseRagyqvrokZ.png?1629450779'); background-blend-mode: overlay; border-color: rgba(0,0,0,.2); border-top-left-radius: 15px; border-top-right-radius: 15px;"">
+        <!-- Link buttons, you can remove this whole section if you don't want them -->
+        <div class=""d-md-flex d-none"" style=""position: absolute; right: 10px; top: -20px;"">
+<!-- link name -->
+            <span data-toggle=""tooltip"" title=""LINK_NAME_1"">
+<!-- link url -->
+                <a class=""btn btn-default mx-2 border-0 justify-content-center"" href=""LINK_URL_1"" style=""border-radius: 50px; background-color: #B18B4D; color: white; height: 50px; width: 50px; overflow: hidden;"">
+                <i class=""fas fa-plus fa-2x m-auto""></i>
+                </a></span>
+<!-- link name -->
+            <span data-toggle=""tooltip"" title=""LINK_NAME_2"">
+<!-- link url -->
+                <a class=""btn btn-default mx-2 border-0 justify-content-center"" href=""LINK_URL_2"" style=""border-radius: 50px; background-color: #B18B4D; color: white; height: 50px; width: 50px; overflow: hidden;"">
+                    <i class=""fas fa-users fa-2x m-auto""></i>
+                </a></span>
+<!-- link name -->
+            <span data-toggle=""tooltip"" title=""LINK_NAME_3"">
+<!-- link url -->
+                <a class=""btn btn-default mx-2 border-0 justify-content-center"" href=""LINK_URL_3"" style=""border-radius: 50px; background-color: #B18B4D; color: white; height: 50px; width: 50px; overflow: hidden;"">
+                    <i class=""fas fa-paint-brush fa-2x m-auto""></i>
+                </a></span>
+        </div>
+        <!-- end of Link buttons, if you're removing them, remove above this line -->
+        <div class=""text-white text-md-left text-center"" style=""letter-spacing: 1px;"">
+<!-- name -->
+            <p class=""font-weight-bold mb-0"" style=""font-size: 1.8rem;"">name SURNAME</p>
+            <p>
+<!-- misc info -->
+                species | true neutral | zodiac
+            </p>
+        </div>
+    </div>
+    <div class=""card rounded-0 m-0 p-md-4 p-2"" style=""background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38827311_jS3w5QxxLnRxtBO.png?1629522396'); border: 1px solid rgba(0,0,0,.2);"">
+        <div class=""card rounded-0 p-md-4 p-2"" style=""background-color: white; border-color: rgba(0,0,0,.2);"">
+            <div class=""row"">
+                <div class=""col-md col-6 order-0"">
+                    <div class=""row"">
+                        <div class=""col-md-auto col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+                            Pronouns
+                        </div>
+                        <div class=""col-md col-12 text-md-right text-center"">
+<!-- pronouns -->
+                            -/-
+                        </div>
+                    </div>
+                    <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                    <div class=""row"">
+                        <div class=""col-md-auto col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+                            Age
+                        </div>
+                        <div class=""col-md col-12 text-md-right text-center"">
+<!-- age -->
+                            00 yrs
+                        </div>
+                    </div>
+                    <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                    <div class=""row"">
+                        <div class=""col-md-auto col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+                            Height
+                        </div>
+                        <div class=""col-md col-12 text-md-right text-center"">
+<!-- height -->
+                            0'00"" | 000.00 cm
+                        </div>
+                    </div>
+                    <div class=""text-center mt-3 d-md-flex d-none"" style=""color: #8B8B8B;"">
+<!-- quote -->
+                        <p>""A quote from the character goes here.""</p>
+                    </div>
+                </div>
+                <div class=""col-md col-6 order-md-2 order-1 mb-md-0 mb-3"">
+<!-- character image
+around 400x600 px -->
+                    <img src=""https://f2.toyhou.se/file/f2-toyhou-se/images/38810282_RVLkjdxEU8fXsiu.png"" style=""position: absolute; bottom: -25px; right: 0px;"">
+                </div>
+            </div>
+        </div>
+        <div class=""accordion md-accordion"" id=""accordion"" role=""tablist"" aria-multiselectable=""true"">
+            <div>
+                <a class=""btn btn-default rounded-0 mt-2 px-md-4 px-2 py-2 text-md-left text-center font-weight-bold text-uppercase text-white w-100 text-wrap"" role=""tab"" id=""heading1"" data-toggle=""collapse"" data-parent=""#accordion"" href=""#accordion1"" aria-expanded=""false"" aria-controls=""accordion1"" style=""background-color: #820000; background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38795138_znzseRagyqvrokZ.png?1629450779'); background-blend-mode: overlay; border-color: rgba(0,0,0,.2); font-size: 1.8rem; letter-spacing: 1px;"">
+                    Personality
+                </a>
+            </div>
+            <div id=""accordion1"" class=""collapse"" role=""tabpanel"" aria-labelledby=""heading1"" data-parent=""#accordion"">
+                <div class=""card rounded-0 p-md-4 p-2 my-2"" style=""background-color: white; border-color: rgba(0,0,0,.2);"">
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+<!-- personality traits -->
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Trait - Trait - Trait - Trait</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""text-justify p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- personality text -->
+                        <p>
+                            Some things you can write about in this section include their intelligence, strengths, weaknesses, adaptability, habits, temperament, morality, attitude, opinions, optimism, work ethic, values and beliefs, desires, coping mechanisms, or fears. You can also address how they treat strangers vs friends vs family, or what they prioritize in life, as well as their alignments (lawful / neutral / chaotic and good / neutral / evil).
+                        </p>
+<!-- end of personality text -->
+                    </div>
+                </div>
+            </div>
+            <div>
+                <a class=""btn btn-default rounded-0 mt-2 px-md-4 px-2 py-2 text-md-left text-center font-weight-bold text-uppercase text-white w-100 text-wrap"" role=""tab"" id=""heading2"" data-toggle=""collapse"" data-parent=""#accordion"" href=""#accordion2"" aria-expanded=""false"" aria-controls=""accordion2"" style=""background-color: #820000; background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38795138_znzseRagyqvrokZ.png?1629450779'); background-blend-mode: overlay; border-color: rgba(0,0,0,.2); font-size: 1.8rem; letter-spacing: 1px;"">
+                    Background
+                </a>
+            </div>
+            <div id=""accordion2"" class=""collapse"" role=""tabpanel"" aria-labelledby=""heading2"" data-parent=""#accordion"">
+                <div class=""card rounded-0 p-md-4 p-2 my-2"" style=""background-color: white; border-color: rgba(0,0,0,.2);"">
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+<!-- background section title -->
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Childhood</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""text-justify mb-3 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- background section text -->
+                        <p>
+                            What circumstances were they born in? Who were their parents? Was their childhood comfortable or a struggle?
+                        </p>
+<!-- end of background text -->
+                    </div>
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+<!-- background section title -->
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Turning Point</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""text-justify mb-3 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- background section text -->
+                        <p>
+                            At what moment did your character enter their moment of agency in the story? This event should give them drive/motivation.
+                        </p>
+<!-- end of background text -->
+                    </div>
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+<!-- background section title -->
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Presently</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""text-justify p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- background section text -->
+                        <p>
+                            What is your character's current job? What are their goals? What sort of places do they roam?
+                        </p>
+<!-- end of background text -->
+                    </div>
+                </div>
+            </div>
+            <div>
+                <a class=""btn btn-default rounded-0 mt-2 px-md-4 px-2 py-2 text-md-left text-center font-weight-bold text-uppercase text-white w-100 text-wrap"" role=""tab"" id=""heading3"" data-toggle=""collapse"" data-parent=""#accordion"" href=""#accordion3"" aria-expanded=""false"" aria-controls=""accordion3"" style=""background-color: #820000; background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38795138_znzseRagyqvrokZ.png?1629450779'); background-blend-mode: overlay; border-color: rgba(0,0,0,.2); font-size: 1.8rem; letter-spacing: 1px;"">
+                    Abilities
+                </a>
+            </div>
+            <div id=""accordion3"" class=""collapse"" role=""tabpanel"" aria-labelledby=""heading3"" data-parent=""#accordion"">
+                <div class=""card rounded-0 p-md-4 p-2 mt-2"" style=""background-color: white; border-color: rgba(0,0,0,.2);"">
+                    <!-- weapon section, feel free to remove -->
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Weapon</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+<!-- weapon image
+around 400x250 px -->
+                    <img class=""mx-auto my-4"" src=""https://f2.toyhou.se/file/f2-toyhou-se/images/38822932_NljTFPVuM597JBl.png"">
+                    <div class=""text-justify mb-3 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- weapon text -->
+                        <p>
+                            Describe your character's weapon in this paragraph here. You can include what alternatives they use, where they got it, how important (or unimportant) it is, and how they take care of it.
+                        </p>
+<!-- end of weapon text -->
+                    </div>
+                    <!-- end of weapon section -->
+
+                    <!-- magic section -->
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Magic</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""row"">
+                        <div class=""col-6 pr-md-2 pr-1 text-center"">
+                            <div class=""p-2 font-weight-bold text-uppercase"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1); color: #B18B4D;"">
+<!-- LEFT element -->
+                                Element
+                            </div>
+                        </div>
+                        <div class=""col-6 pl-md-2 pl-1 text-center"">
+                            <div class=""p-2 font-weight-bold text-uppercase"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1); color: #B18B4D;"">
+<!-- RIGHT element -->
+                                Element
+                            </div>
+                        </div>
+                    </div>
+<!-- magic image, familiar, whatever! -->
+                    <img class=""mx-auto my-4"" src=""https://f2.toyhou.se/file/f2-toyhou-se/images/44448586_XhIcZM3bbTjtVla.png"">
+                    <div class=""text-justify mb-3 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+<!-- magic text -->
+                        <p>
+                            Describe your character's magic. Where they got it from, how they use it, the limitations, power, and cost.
+                        </p>
+<!-- end of magic text -->
+                    </div>
+                    <!-- end of magic section -->
+                    
+                    <!-- abilities section -->
+                    <div class=""row mb-2"">
+                        <div class=""col-md col-12 pr-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                        <div class=""col-md-auto col-12 px-2 text-uppercase text-center"">Abilities</div>
+                        <div class=""col-md col-12 pl-md-0"">
+                            <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+                        </div>
+                    </div>
+                    <div class=""row"">
+                        <div class=""col-md-6 col-12 pr-md-2"">
+                            <div class=""text-justify mb-md-3 mb-2 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+                                <div class=""row"">
+                                    <div class=""col-md col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+<!-- TOP LEFT move name -->
+                                        Move
+                                    </div>
+                                    <div class=""col-md col-12 text-md-right text-center"">
+                                        <!-- Points -->
+                                        <i class=""fas fa-star""></i><i class=""far fa-star""></i><i class=""far fa-star""></i>
+                                    </div>
+                                </div>
+                                <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+<!-- TOP LEFT move text -->
+                                <p>Describe how the move is used during a fight.</p>
+<!-- end of move text-->
+                            </div>
+                        </div>
+                        <div class=""col-md-6 col-12 pl-md-2"">
+                            <div class=""text-justify mb-md-3 mb-2 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+                                <div class=""row"">
+                                    <div class=""col-md col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+<!-- TOP RIGHT move name -->
+                                        Move
+                                    </div>
+                                    <div class=""col-md col-12 text-md-right text-center"">
+                                        <!-- Points -->
+                                        <i class=""fas fa-star""></i><i class=""far fa-star""></i><i class=""far fa-star""></i>
+                                    </div>
+                                </div>
+                                <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+<!-- TOP RIGHT move text -->
+                                <p>Describe how the move is used during a fight.</p>
+<!-- end of move text-->
+                            </div>
+                        </div>
+                        <div class=""col-md-6 col-12 pr-md-2"">
+                            <div class=""text-justify mb-md-3 mb-2 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+                                <div class=""row"">
+                                    <div class=""col-md col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+<!-- BOTTOM LEFT move name -->
+                                        Move
+                                    </div>
+                                    <div class=""col-md col-12 text-md-right text-center"">
+                                        <!-- Points -->
+                                        <i class=""fas fa-star""></i><i class=""far fa-star""></i><i class=""far fa-star""></i>
+                                    </div>
+                                </div>
+                                <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+<!-- BOTTOM LEFT move text -->
+                                <p>Describe how the move is used during a fight.</p>
+<!-- end of move text -->
+                            </div>
+                        </div>
+                        <div class=""col-md-6 col-12 pl-md-2"">
+                            <div class=""text-justify mb-md-3 mb-2 p-3"" style=""border-radius: 15px; background-color: rgba(0,0,0,.1);"">
+                                <div class=""row"">
+                                    <div class=""col-md col-12 font-weight-bold text-uppercase text-md-left text-center"" style=""color: #B18B4D;"">
+<!-- BOTTOM RIGHT move name -->
+                                        Move
+                                    </div>
+                                    <div class=""col-md col-12 text-md-right text-center"">
+                                        <!-- Points -->
+                                        <i class=""fas fa-star""></i><i class=""far fa-star""></i><i class=""far fa-star""></i>
+                                    </div>
+                                </div>
+                                <hr class=""my-2"" style=""background-color: rgba(0,0,0,.2);"">
+<!-- BOTTOM RIGHT move text -->
+                                <p>Describe how the move is used during a fight.</p>
+<!-- end of move text-->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Footer -->
+    <div style=""min-height: 170px;"">
+        <div class=""card rounded-0"" style=""background-color: #D2B98C; background-image: url('https://f2.toyhou.se/file/f2-toyhou-se/images/38795138_znzseRagyqvrokZ.png?1629450779'); background-blend-mode: overlay; border-color: rgba(0,0,0,.2); border-bottom-left-radius: 15px; border-bottom-right-radius: 15px; height: 50px;"">
+            <div class=""m-auto"" style=""position: relative; top: 10px;"">
+                <img src=""https://f2.toyhou.se/file/f2-toyhou-se/images/38817940_HXoRMIKmuktqy29.png"">
+            </div>
+        </div>
+        <div style=""position: absolute; right: 10px;"">
+            <a class=""text-muted"" href=""https://toyhou.se/junijwi"" data-toggle=""tooltip"" data-placement=""bottom"" title=""Code""><i class=""fa-solid fa-code""></i></a>
+        </div>
+    </div>
+</div>"
+eT7veUiB,Untitled,andrei24,JavaScript,Sunday 4th of June 2023 12:18:34 AM CDT,"<script type=""text/javascript"">
+  const eventSource = new EventSource('/sse');
+  eventSource.onmessage = ({ data }) => {
+    const message = document.createElement('li');
+    message.innerText = 'New message: ' + data;
+    document.body.appendChild(message);
+  }
+</script>"
+W1uLFtvc,Untitled,35657,C++,Saturday 3rd of June 2023 11:41:54 PM CDT,"#include <iostream>
+
+using namespace std;
+
+class Rational {
+public:
+    Rational() : numerator_(0), denominator_(1) {}
+
+    explicit Rational(int value) : numerator_(value), denominator_(1) {}
+
+    Rational(int numerator, int denominator) : numerator_(numerator), denominator_(denominator) {
+        Reduction();
+    }
+
+    Rational& Addition(const Rational& right) {
+        numerator_ = numerator_ * right.denominator_ + right.numerator_ * denominator_;
+        denominator_ = denominator_ * right.denominator_;
+        Reduction();
+        return *this;
+    }
+
+    Rational& operator=(const Rational& right) {
+        numerator_ = right.numerator_;
+        denominator_ = right.denominator_;
+        Reduction();
+        return *this;
+    }
+
+
+    Rational& operator+=(const Rational& right) {
+        numerator_ = numerator_ * right.denominator_ + right.numerator_ * denominator_;
+        denominator_ = denominator_ * right.denominator_;
+        Reduction();
+        return *this;
+    }
+
+    Rational& operator-=(const Rational& right) {
+        numerator_ = numerator_ * right.denominator_ - right.numerator_ * denominator_;
+        denominator_ = denominator_ * right.denominator_;
+        Reduction();
+        return *this;
+    }
+
+    Rational& operator*=(const Rational& right) {
+        numerator_ = numerator_ * right.numerator_;
+        denominator_ = denominator_ * right.denominator_;
+        Reduction();
+        return *this;
+    }
+
+    Rational& operator/=(const Rational& right) {
+        numerator_ = numerator_ * right.denominator_;
+        denominator_ = denominator_ * right.numerator_;
+        Reduction();
+        return *this;
+    }
+
+    Rational operator-() {
+        return Rational{ -numerator_, denominator_ };
+    }
+
+    int Numerator() const {
+        return numerator_;
+    }
+
+    int Denominator() const {
+        return denominator_;
+    }
+
+
+
+private:
+    void Reduction() {
+        if (denominator_ < 0) {
+            numerator_ = -numerator_;
+            denominator_ = -denominator_;
+        }
+        int x = numerator_ < 0 ? -numerator_ : numerator_;
+        int y = denominator_ < 0 ? -denominator_ : denominator_;
+        while (x != y) {
+            if (x > y) {
+                x = x - y;
+            }
+            else {
+                y = y - x;
+            }
+        }
+        numerator_ /= x;
+        denominator_ /= x;
+    }
+    int numerator_;
+    int denominator_;
+};
+
+Rational& operator+(const Rational& left, const Rational& right) {
+    Rational temp = left;
+    return temp += right;
+}
+
+Rational& operator+(const Rational& left, const int value) {
+    Rational temp = left;
+    return temp += Rational(value);
+}
+
+Rational& operator+(const int value, const Rational& right) {
+    Rational temp = right;
+    return temp += Rational(value);
+}
+
+Rational& operator-(const Rational& left, const Rational& right) {
+    Rational temp = left;
+    return temp -= right;
+}
+
+bool operator==(const Rational& left, const Rational& right) {
+    return left.Numerator() == right.Numerator() && left.Denominator() == right.Denominator();
+}
+
+bool operator!=(const Rational& left, const Rational& right) {
+    return !(left == right);
+}
+
+bool operator>(const Rational& left, const Rational& right) {
+    return left.Numerator() * right.Denominator() > right.Numerator() * left.Denominator();
+}
+
+bool operator<(const Rational& left, const Rational& right) {
+    return left.Numerator() * right.Denominator() < right.Numerator() * left.Denominator();
+}
+
+bool operator>=(const Rational& left, const Rational& right) {
+    return left.Numerator() * right.Denominator() >= right.Numerator() * left.Denominator();
+}
+
+bool operator<=(const Rational& left, const Rational& right) {
+    return left.Numerator() * right.Denominator() <= right.Numerator() * left.Denominator();
+}
+
+Rational& operator*(const Rational& left, const Rational& right) {
+    Rational temp = left;
+    return temp *= right;
+}
+
+Rational& operator/(const Rational& left, const Rational& right) {
+    Rational temp = left;
+    return temp /= right;
+}
+
+ostream& operator<<(ostream& output, const Rational& rational) {
+    return output << rational.Numerator() << ""/"" << rational.Denominator();
+}
+
+istream& operator>>(istream& input, Rational& rational) {
+    int numerator, denominator;
+    char slash;
+    input >> numerator >> slash >> denominator;
+    if (slash == '/') {
+        rational = Rational{ numerator, denominator };
+    }
+    return input;
+}
+
+
+int main() {
+
+    Rational r1(1, 2);
+    Rational r2(3, 4);
+
+    r1 += r2;
+    cout << r1 << endl;
+
+    r1 -= r2;
+    cout << r1 << endl;
+
+    r1 *= r2;
+    cout << r1 << endl;
+
+    r1 /= r2;
+    cout << r1 << endl;
+
+    Rational r3 = r1 + r2;
+    cout << r3 << endl;
+    r3 = r1 - r2;
+    cout << r3 << endl;
+    r3 = r1 * r2;
+    cout << r3 << endl;
+    r3 = r1 / r2;
+    cout << r3 << endl;
+
+    cout << boolalpha;
+
+    cout << (r1 == r2) << endl;
+
+    cout << (r1 != r2) << endl;
+
+    cout << (r1 > r2) << endl;
+
+    cout << (r1 < r2) << endl;
+
+    cout << (r1 >= r2) << endl;
+
+    cout << (r1 <= r2) << endl;
+
+    Rational r5 = 3 + r1;
+    cout << r5 << endl;
+   
+}
+
+
+// Особенности выбора варианта перегрузки:
+
+// 1) четыре оператора =, ->, [], () только как метод класса
+
+// 2) если левый операнд не экземпляр класса - перегружаем только как внешнюю функцию
+
+// в остальном - на ваше усмотрение"
+TVbTXggL,HUE2HEX,baennjer,JavaScript,Saturday 3rd of June 2023 11:38:31 PM CDT,"//In den 4 Arrays werden die DPs der HUE und der VIS eingetragen.
+//Bitte auf richtige Reihenfolge und Syntax achten
+//Hier die HUE DPs für R eintragen
+var idR = [
+    '0_userdata.0.0_ScriptDPs.hue2hex.1.r'/*r*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.2.r'/*r2*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.3.r'/*r3*/
+    ];
+//Hier die HUE DPs für G eintragen
+var idG = [
+    '0_userdata.0.0_ScriptDPs.hue2hex.1.g'/*g*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.2.g'/*g2*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.3.g'/*g3*/
+    ];
+//Hier die HUE DPs für B eintragen
+var idB = [
+    '0_userdata.0.0_ScriptDPs.hue2hex.1.b'/*b*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.2.b'/*b2*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.3.b'/*b3*/
+    ];
+//Hier die VIS DPs eintragen
+var idVis = [
+    '0_userdata.0.0_ScriptDPs.hue2hex.vis'/*vis*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.vis2'/*vis2*/,
+    '0_userdata.0.0_ScriptDPs.hue2hex.vis3'/*vis3*/
+    ];
+var r, g, b;
+var ta = [idR,idG,idB];
+
+on({id:ta},function(){
+    for(let i = 0; i < idR.length; i++){
+        r=toHex(getState(idR[i]).val);
+        g=toHex(getState(idG[i]).val);
+        b=toHex(getState(idB[i]).val);
+        // log('#'+r+g+b);
+        setState(idVis[i], ('#'+r+g+b));
+    }
+})
+
+function toHex(number){
+    if(number<0) number = 0xFFFFFFFF + number + 1;
+    var n = number.toString(16).toUpperCase();
+    if(n.length == 1){
+        n = '0' + n;
+    }
+    return n;
+}
+
+
+
+
+
+
+"
+hVEZ9kPv,Trans Flag,_Pandora,CSS,Saturday 3rd of June 2023 10:49:31 PM CDT,"/* TRANS */
+
+#lion_image>div>img:first-child {
+content: url('https://images.squarespace-cdn.com/content/v1/54e5003ce4b09eaf2d726614/1617041869825-MMEC438VDCSCJ475ATJN/trans-flag.png')!important;
+transform: scaleX(1)!important;
+width: 240px!important;
+height: 200px!important;
+ 
+}"
+KHQwJ4Qv,Pan Flag,_Pandora,CSS,Saturday 3rd of June 2023 10:48:57 PM CDT,"/* PAN */
+
+#lion_image>div>img:first-child {
+content: url('https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Pansexuality_Pride_Flag.svg/640px-Pansexuality_Pride_Flag.svg.png')!important;
+transform: scaleX(1)!important;
+width: 240px!important;
+height: 200px!important;
+ 
+}"
+0fH5QfAA,Bi Flag,_Pandora,CSS,Saturday 3rd of June 2023 10:48:27 PM CDT,"/* BI */
+
+#lion_image>div>img:first-child {
+content: url('https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/Bisexual_Pride_Flag.svg/1200px-Bisexual_Pride_Flag.svg.png')!important;
+transform: scaleX(1)!important;
+width: 240px!important;
+height: 200px!important;
+ 
+}"
+jRYW11a9,Lesbian Flag,_Pandora,CSS,Saturday 3rd of June 2023 10:47:18 PM CDT,"/* LESBIAN */
+
+#lion_image>div>img:first-child {
+content: url('https://media.istockphoto.com/id/1370181615/vector/orange-pink-lesbian-flag-derived-from-the-pink-flag-circulated-on-social-media-in-2018.jpg?s=612x612&w=0&k=20&c=liCXqV_IVLpupYBnWvdrKIbz4ofoxVO0Y_hs6Xr7xLU=')!important;
+transform: scaleX(1)!important;
+width: 240px!important;
+height: 200px!important;
+ 
+}"
+kKZU48Ud,to mp4,Sakitoshi,Batch,Saturday 3rd of June 2023 10:33:10 PM CDT,"@echo off
+setlocal EnableDelayedExpansion
+if not exist ""%~dp0ffmpeg.exe"" (
+    echo Error: ffmpeg.exe not found.
+    echo Put ffmpeg.exe alongside this file.
+    pause
+    goto :eof
+)
+if ""%~1""=="""" (
+    echo Drag a video or gif file into this file.
+    pause
+    goto :eof
+)
+if not ""%~2""=="""" (
+    echo Please drag only one file at a time.
+    pause
+    goto :eof
+)
+:set_quality
+echo Video file: ""%~n1%~x1""
+set /p quality=""Select quality GOD (7), Ultra (6), Very High (5), High (4), Mid-high (3.5), Medium (3), Mid-low (2.8), Low-mid (2.5), Low (2), Very Low (1), gif (g), apng (p) or 0 to exit: ""
+if not defined quality (
+    cls
+    echo Please enter a valid value.
+    goto :set_quality
+)
+if ""%quality%""==""0"" (
+    goto :eof
+)
+if /I ""%quality%""==""g"" (
+    goto :set_size
+)
+if /I ""%quality%""==""p"" (
+    goto :set_size
+)
+if ""%quality%""==""1"" (
+    set crf=""22""
+    set abr=""512K""
+    goto :set_size
+)
+if ""%quality%""==""2"" (
+    set crf=""20""
+    set abr=""1M""
+    goto :set_size
+)
+if ""%quality%""==""2.5"" (
+    set crf=""19""
+    set abr=""1.5M""
+    goto :set_size
+)
+if ""%quality%""==""2.8"" (
+    set crf=""18""
+    set abr=""1.75M""
+    goto :set_size
+)
+if ""%quality%""==""3"" (
+    set crf=""18""
+    set abr=""2M""
+    goto :set_size
+)
+if ""%quality%""==""3.5"" (
+    set crf=""17""
+    set abr=""3M""
+    goto :set_size
+)
+if ""%quality%""==""4"" (
+    set crf=""16""
+    set abr=""4M""
+    goto :set_size
+)
+if ""%quality%""==""5"" (
+    set crf=""14""
+    set abr=""6M""
+    goto :set_size
+)
+if ""%quality%""==""6"" (
+    set crf=""12""
+    set abr=""8M""
+    goto :set_size
+)
+if ""%quality%""==""7"" (
+    set crf=""10""
+    set abr=""10M""
+    goto :set_size
+)
+if defined quality (
+    echo Please enter a valid value.
+    goto :set_quality
+)
+:set_size
+set /p size=""Resize video? 1080p (6), 720p (5), 540p (4), 480p (3), 360p (2), 240p (1), custom size (0) or not (N): ""
+if not defined size (
+    goto :set_cut
+)
+if /I ""%size%""==""n"" (
+    goto :set_cut
+)
+if ""%size%""==""0"" (
+    goto :set_custom_size
+)
+if ""%size%""==""1"" (
+    set scale=scale=-2:240:flags=lanczos
+    goto :set_cut
+)
+if ""%size%""==""2"" (
+    set scale=scale=-2:360:flags=lanczos
+    goto :set_cut
+)
+if ""%size%""==""3"" (
+    set scale=scale=-2:480:flags=lanczos
+    goto :set_cut
+)
+if ""%size%""==""4"" (
+    set scale=scale=-2:540:flags=lanczos
+    goto :set_cut
+)
+if ""%size%""==""5"" (
+    set scale=scale=-2:720:flags=lanczos
+    goto :set_cut
+)
+if ""%size%""==""6"" (
+    set scale=scale=-2:1080:flags=lanczos
+    goto :set_cut
+)
+if defined size (
+    echo Please enter a valid value.
+    goto :set_size
+)
+:set_custom_size
+set /p custom_width=""Enter width: ""
+if not defined custom_width (
+    set custom_width=-2
+)
+set /p custom_height=""Enter height: ""
+if not defined custom_height (
+    set custom_height=-2
+)
+set scale=scale=%custom_width%:%custom_height%:flags=lanczos,setsar=1/1
+:set_cut
+if defined scale (
+    if /I not ""%quality%""==""g"" (
+        set scale=-vf %scale%
+    )
+    if /I ""%quality%""==""g"" (
+        set scale=,%scale%
+    )
+)
+if /I ""%~x1""=="".gif"" (
+    set gif=true
+)
+if /I ""%~x1""=="".png"" (
+    set gif=true
+)
+if /I ""%~x1""=="".apng"" (
+    set gif=true
+)
+if ""%gif%""==""true"" (
+    goto :set_crop
+)
+set /p cut=""Cut video? (y/N): ""
+if not defined cut (
+    goto :set_crop
+)
+if /I ""%cut%""==""n"" (
+    goto :set_crop
+)
+if /I ""%cut%""==""y"" (
+    goto :set_start_time
+)
+if defined cut (
+    goto :set_cut
+)
+:set_start_time
+set /p start_time=""Starting time (hh:mm:ss.sss): ""
+if not defined start_time (
+    goto :set_end_time
+)
+if defined start_time (
+    set ss=-ss %start_time%
+)
+:set_end_time
+set /p end_time=""Ending time (hh:mm:ss.sss): ""
+if not defined end_time (
+    goto :set_crop
+)
+if defined end_time (
+    set to=-to %end_time%
+)
+:set_crop
+set /p crop=""Crop video? (y/N): ""
+if not defined crop (
+    goto :set_fps
+)
+if /I ""%crop%""==""n"" (
+    goto :set_fps
+)
+if /I ""%crop%""==""y"" (
+    goto :set_crop_pos
+)
+if defined crop (
+    goto :set_crop
+)
+:set_crop_pos
+set /p start_pos=""Starting position coordenates (x:y): ""
+if not defined start_pos (
+    goto :set_crop_pos
+)
+:set_crop_area
+set /p crop_area=""Crop area size (w:h): ""
+if not defined crop_area (
+    goto :set_crop_area
+)
+set crop=-filter:v crop=%crop_area%:%start_pos%
+:set_fps
+if /I ""%quality%""==""g"" (
+    goto :create_webm
+)
+if ""%gif%""==""true"" (
+    goto :create_webm
+)
+set /p fps=""Framerate (default=original framerate): ""
+if defined fps (
+    set fps=-r %fps% -vsync cfr
+)
+:create_webm
+if not exist %~dp0output (
+    mkdir %~dp0output
+)
+if ""%quality%""==""p"" (
+    ren ""%~dp0output\%~n1.png"" ""%~n1.apng""
+    ""%~dp0ffmpeg.exe"" -i ""%~1"" %scale% %fps% %ss% %to% ""%~dp0output\%~n1.apng""
+    ren ""%~dp0output\%~n1.apng"" ""%~n1.png""
+    goto :eof
+)
+if ""%gif%""==""true"" (
+    ""%~dp0ffmpeg.exe"" -i ""%~1"" -c:v libx264 -crf %crf% -b:v %abr% -y ""%~dp0output\temp.mp4""
+    ""%~dp0ffmpeg.exe"" -i ""%~dp0output\temp.mp4"" -c:v libx264 -crf %crf% -b:v %abr% %scale% %crop% -an -sn ""%~dp0output\%~n1.webm""
+    erase /Q ""%~dp0output\temp.mp4""
+    goto :eof
+)
+if ""%quality%""==""g"" (
+    set /p fps=""Framerate (default=30): ""
+    if not defined fps (
+        set fps=30
+    )
+    ""%~dp0ffmpeg.exe"" -i ""%~1"" -vf palettegen -r !fps! %ss% %to% -y ""%~dp0output\palette.png""
+    ""%~dp0ffmpeg.exe"" -i ""%~1"" -i ""%~dp0output\palette.png"" -lavfi paletteuse=dither=bayer:bayer_scale=2%scale% -r !fps! %ss% %to% ""%~dp0output\%~n1.gif""
+    erase /Q ""%~dp0output\palette.png""
+    goto :eof
+)
+""%~dp0ffmpeg.exe"" -i ""%~1"" -c:v libx264 -crf %crf% -b:v %abr% %scale% %crop% -an -sn %fps% %ss% %to% ""%~dp0output\%~n1.mp4"""
+bDFHCaP2,testUser,nonvpn,JSON,Saturday 3rd of June 2023 10:28:51 PM CDT,"[{""server"":""aa_vip_01"",""ais"":19,""dtac"":284,""true"":196,""total"":499},{""server"":""aa_vip_02"",""ais"":3,""dtac"":258,""true"":215,""total"":476},{""server"":""aa_vip_03"",""ais"":2,""dtac"":217,""true"":208,""total"":427},{""server"":""aa_vip_04"",""ais"":1,""dtac"":202,""true"":189,""total"":392},{""server"":""aa_vip_05"",""ais"":0,""dtac"":136,""true"":137,""total"":273},{""server"":""aa_vip_06"",""ais"":2,""dtac"":104,""true"":113,""total"":219},{""server"":""aa_vip_07"",""ais"":1,""dtac"":122,""true"":95,""total"":218},{""server"":""aa_vip_08"",""ais"":0,""dtac"":73,""true"":70,""total"":143},{""server"":""aa_vip_09"",""ais"":0,""dtac"":68,""true"":83,""total"":151},{""server"":""aa_vip_10"",""ais"":2,""dtac"":101,""true"":78,""total"":300}]"
+Jg7dWDeG,thelcss,s4turns,CSS,Saturday 3rd of June 2023 10:01:50 PM CDT,".previous-source !important{
+line-height: 1.1;
+}
+body { 
+  font-family: monospace; 
+  line-height: inherit;
+  line-height: initial;
+  line-height: unset;
+}
+#form,
+.messages .msg,
+.userlist {
+    font-size: 14px;
+    line-height: 1.1;
+}
+#chat .time,
+#chat .from,
+#chat .content {
+	padding-top: 0px;
+	padding-bottom: 0px;
+}
+#chat .self .content {
+	color: grey;
+}"
+GMXXRduy,Trove makecode,Mr_trove,Python,Saturday 3rd of June 2023 09:59:01 PM CDT,"NAME AND AGE
+
+basic.show_string(""name:nawaf age:16"")"
+Qg11jZv5,Trove makecode,Mr_trove,Python,Saturday 3rd of June 2023 09:54:33 PM CDT,"RAINFALL
+
+def on_forever():
+    rain = game.create_sprite(randint(0, 4), 0)
+    for i in range(4):
+        rain.change(LedSpriteProperty.Y, 1)
+        basic.pause(200)
+    rain.delete()
+basic.forever(on_forever)
+
+PLAYER : 
+player = game.create_sprite(4, 2)
+
+def on_button_pressed_a():
+    player.move(-1)
+input.on_button_pressed(Button.A, on_button_pressed_a)
+
+def on_button_pressed_b():
+    player.move(1)
+input.on_button_pressed(Button.B, on_button_pressed_b)
+
+
+A IS GREATER THAN B OR ELSE:
+a = 100
+b = 20
+if a > b:
+    basic.show_string(""a is greater than b"")
+
+else:
+    basic.show_string(""b is greater or equal to a"")
+
+"
+424PLtd7,Valkyrian Computers Tracking System,RedbanditDEV,Lua,Saturday 3rd of June 2023 09:20:45 PM CDT,"local radar = peripheral.wrap(""left"")
+local localShip = peripheral.wrap(""right"")
+local monitor = peripheral.wrap(""top"")
+local pretty = require ""cc.pretty""
+
+function dump(o)
+    if type(o) == 'table' then
+        local s = '{ '
+        for k,v in pairs(o) do
+            if type(k) ~= 'number' then k = '""'..k..'""' end
+            s = s .. '['..k..'] = ' .. dump(v) .. ','
+        end
+        return s .. '} '
+    else
+        return tostring(o)
+    end
+end
+
+term.redirect(monitor)
+term.setPaletteColor(colors.white, 1,1,1)
+term.setBackgroundColor(colors.white)
+term.clear()
+monitor.setTextScale(0.5)
+
+while true do
+    local scan = radar.scan(256)[1]
+    
+    term.setBackgroundColor(colors.white)
+    term.clear()
+    local x,z = monitor.getSize()
+    local xMiddle = x/2
+    local zMiddle = z/2
+    paintutils.drawPixel(xMiddle,zMiddle,colors.blue)
+    
+    local currentPos = localShip.getWorldspacePosition()
+    local currentRot = localShip.getRotation()
+	
+    for i, ship in ipairs(scan) do
+        local xOffset = currentPos['x'] - ship['position']['x']
+        local zOffset = currentPos['z'] - ship['position']['z']
+        x2 = xOffset*math.cos(currentRot['roll']) + zOffset*math.sin(currentRot['roll']);
+        z2 = zOffset*math.cos(currentRot['roll']) - xOffset*math.sin(currentRot['roll']);
+        
+        local drawX = xMiddle + x2
+        local drawZ = zMiddle + z2
+        paintutils.drawPixel(drawX, drawZ, colors.blue)
+        local textLen = string.len(ship['mass'])
+        local textStart = drawX - textLen/2
+        term.setCursorPos(textStart, drawZ-1)
+        term.write(ship['mass'])
+    end
+    os.sleep(0.05)
+end
+"

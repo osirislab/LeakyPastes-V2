@@ -1,0 +1,5242 @@
+id,title,username,language,date,content
+dwfB6bPK,checkKeys,slanda,Lua,Monday 9th of October 2023 06:52:16 AM CDT,"function checkKeys(key, t)
+    for k, _ in pairs(t) do
+        if key == k then
+            return true
+        end
+    end
+    return false
+end
+
+return {checkKeys = checkKeys}"
+PqmBGUT9,Untitled,JackOUT,Java,Monday 9th of October 2023 06:44:00 AM CDT,"package games.coob.laserturrets.util;
+
+import games.coob.laserturrets.model.TurretData;
+import lombok.Getter;
+import lombok.Setter;
+import org.bukkit.Location;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Entity;
+import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Consumer;
+import org.mineacademy.fo.Common;
+import org.mineacademy.fo.MinecraftVersion;
+import org.mineacademy.fo.Valid;
+import org.mineacademy.fo.collection.SerializedMap;
+import org.mineacademy.fo.model.ConfigSerializable;
+import org.mineacademy.fo.remain.CompProperty;
+import org.mineacademy.fo.remain.Remain;
+
+import java.util.*;
+
+public class Hologram implements ConfigSerializable {
+
+	/**
+	 * The distance between each line of lore for this item
+	 */
+	@Getter
+	@Setter
+	private static double loreLineHeight = 0.26D;
+
+	/**
+	 * A turretData of created animated items
+	 */
+	@Getter
+	private static final Set<Hologram> registeredItems = new HashSet<>();
+
+	/**
+	 * The ticking task responsible for calling {@link #onTick()}
+	 */
+	private static volatile BukkitTask tickingTask = null;
+
+	/**
+	 * The armor stand names, each line spawns another invisible stand
+	 */
+	@Getter
+	private final List<ArmorStand> loreEntities = new ArrayList<>();
+
+	/**
+	 * The spawning location
+	 */
+	private final Location lastTeleportLocation;
+
+	/**
+	 * The lore over the item
+	 */
+	@Getter
+	private final List<String> loreLines = new ArrayList<>();
+
+
+	/**
+	 * The displayed entity
+	 */
+	@Getter
+	private Entity entity;
+
+	/*
+	 * A private flag to help with teleporting of this entity
+	 */
+	private Location pendingTeleport = null;
+
+	/*
+	 * Constructs a new item and registers it
+	 */
+	public Hologram(final Location spawnLocation) {
+		this.lastTeleportLocation = spawnLocation;
+
+		registeredItems.add(this);
+
+		onReload();
+	}
+
+	/**
+	 * Restart ticking task on reload
+	 *
+	 * @deprecated internal use only, do not call
+	 */
+	@Deprecated
+	public static void onReload() {
+		if (tickingTask != null)
+			tickingTask.cancel();
+
+		tickingTask = scheduleTickingTask();
+	}
+
+	/*
+	 * Helper method to start main anim ticking task
+	 */
+	private static BukkitTask scheduleTickingTask() {
+		return Common.runTimer(1, () -> {
+
+			for (final Iterator<Hologram> it = registeredItems.iterator(); it.hasNext(); ) {
+				final Hologram model = it.next();
+
+				if (model.isSpawned())
+					if (!model.getEntity().isValid() || model.getEntity().isDead()) {
+						model.removeLore();
+						model.getEntity().remove();
+
+						it.remove();
+					} else
+						model.tick();
+			}
+		});
+	}
+
+	/**
+	 * Spawns this hologram entity
+	 *
+	 * @return
+	 */
+	public Hologram spawn() {
+		Valid.checkBoolean(!this.isSpawned(), this + "" is already spawned!"");
+
+		this.entity = this.createEntity();
+		Valid.checkNotNull(this.entity, ""Failed to spawn entity from "" + this);
+
+		this.drawLore(this.getLastTeleportLocation());
+
+		return this;
+	}
+
+	/**
+	 * Core implementation method to spawn your entity
+	 *
+	 * @return
+	 */
+	private ArmorStand createEntity() {
+		final Location location = this.getLastTeleportLocation();
+		final ArmorStand armorStand;
+
+		if (MinecraftVersion.atLeast(MinecraftVersion.V.v1_11)) {
+			final Consumer<ArmorStand> consumer = stand -> {
+				stand.setMarker(true);
+				CompProperty.GRAVITY.apply(stand, false);
+				stand.setSmall(true);
+				stand.setVisible(false);
+			};
+
+			armorStand = location.getWorld().spawn(location, ArmorStand.class, consumer);
+		} else {
+			final ArmorStand stand = location.getWorld().spawn(location, ArmorStand.class);
+
+			CompProperty.GRAVITY.apply(stand, false);
+			stand.setVisible(false);
+			stand.setMarker(true);
+			stand.setSmall(true);
+
+			armorStand = stand;
+		}
+
+		return armorStand;
+	}
+
+	private ArmorStand createLoreEntity(final Location location) {
+		final ArmorStand armorStand;
+
+		if (MinecraftVersion.atLeast(MinecraftVersion.V.v1_11)) {
+			final Consumer<ArmorStand> consumer = stand -> {
+				stand.setMarker(true);
+				CompProperty.GRAVITY.apply(stand, false);
+				stand.setSmall(true);
+				stand.setVisible(false);
+			};
+
+			armorStand = location.getWorld().spawn(location, ArmorStand.class, consumer);
+		} else {
+			armorStand = location.getWorld().spawn(location, ArmorStand.class);
+
+			armorStand.setMarker(true);
+			CompProperty.GRAVITY.apply(armorStand, false);
+			armorStand.setSmall(true);
+			armorStand.setVisible(false);
+		}
+
+		this.loreEntities.add(armorStand);
+		return armorStand;
+	}
+
+	/*
+	 * Set a lore for this armor stand
+	 */
+	public void drawLore(Location location) {
+		if (this.loreLines.isEmpty())
+			return;
+
+		if (this.entity instanceof ArmorStand && ((ArmorStand) this.entity).isSmall())
+			location = location.clone().add(0, -0.5, 0);
+
+		for (final String loreLine : this.loreLines) {
+			final ArmorStand armorStand = createLoreEntity(location);
+
+			Remain.setCustomName(armorStand, loreLine);
+			location = location.subtract(0, loreLineHeight, 0);
+		}
+	}
+
+	/*
+	 * Iterate the ticking mechanism of this entity
+	 */
+	private void tick() {
+
+		if (this.pendingTeleport != null) {
+			this.entity.teleport(this.pendingTeleport);
+
+			for (final ArmorStand loreEntity : this.loreEntities)
+				loreEntity.teleport(this.pendingTeleport);
+
+			this.pendingTeleport = null;
+			return;
+		}
+
+		this.onTick();
+	}
+
+	/**
+	 * Called automatically where you can animate this armor stand
+	 */
+	protected void onTick() {
+	}
+
+	/**
+	 * Return true if this armor stand is spawned
+	 *
+	 * @return
+	 */
+	public final boolean isSpawned() {
+		return this.entity != null && this.entity.isValid();
+	}
+
+	/**
+	 * Deletes all text that the armor stand has
+	 */
+	public final void removeLore() {
+		this.loreEntities.forEach(ArmorStand::remove);
+	}
+
+	/**
+	 * @param lore
+	 */
+	public final void setLore(final String... lore) {
+		this.loreLines.clear();
+		this.loreLines.addAll(Arrays.asList(lore));
+	}
+
+	/**
+	 * Return the current armor stand location
+	 *
+	 * @return
+	 */
+	public final Location getLocation() {
+		this.checkSpawned(""getLocation"");
+
+		return this.entity.getLocation();
+	}
+
+	/**
+	 * Return the last known teleport location
+	 *
+	 * @return
+	 */
+	public final Location getLastTeleportLocation() {
+		return this.lastTeleportLocation.clone();
+	}
+
+	/**
+	 * Teleport this hologram with its lores to the given location
+	 *
+	 * @param location
+	 */
+	public final void teleport(final Location location) {
+		Valid.checkBoolean(this.pendingTeleport == null, this + "" is already pending teleport to "" + this.pendingTeleport);
+		this.checkSpawned(""teleport"");
+
+		this.lastTeleportLocation.setX(location.getY());
+		this.lastTeleportLocation.setY(location.getY());
+		this.lastTeleportLocation.setZ(location.getZ());
+
+		this.pendingTeleport = location;
+	}
+
+	/**
+	 * Deletes this armor stand
+	 */
+	public final void remove() {
+		for (final Entity entity : this.loreEntities)
+			entity.remove();
+
+		this.loreEntities.clear();
+
+		if (this.entity != null)
+			this.entity.remove();
+
+		registeredItems.remove(this);
+	}
+
+	public final void updateLore(final String... loreLines) {
+		final List<String> list = new ArrayList<>(Arrays.asList(loreLines));
+
+		for (int i = 0; i < list.size(); i++) {
+			if (this.getLoreEntities().get(i) == null)
+				this.getLoreEntities().add(this.createLoreEntity(this.getLoreEntities().get(i - 1).getLocation()));
+
+			Remain.setCustomName(this.getLoreEntities().get(i), list.get(i));
+		}
+
+		this.setLore(loreLines);
+	}
+
+	/*
+	 * A helper method to check if this entity is spawned
+	 */
+	private void checkSpawned(final String method) {
+		Valid.checkBoolean(this.isSpawned(), this + "" is not spawned, cannot call "" + method + ""!"");
+	}
+
+	/**
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		return ""ArmorStandItem{spawnLocation="" + Common.shortLocation(this.lastTeleportLocation) + "", spawned="" + this.isSpawned() + ""}"";
+	}
+
+	/**
+	 * Deletes all floating items on the server
+	 */
+	public static void deleteAll() {
+		final Set<Hologram> holograms = new HashSet<>();
+
+		for (final TurretData turretData : TurretData.getTurrets())
+			holograms.add(turretData.getHologram());
+
+		for (final Iterator<Hologram> it = holograms.iterator(); it.hasNext(); ) {
+			final Hologram item = it.next();
+
+			item.remove();
+			it.remove();
+		}
+	}
+
+	public static Hologram deserialize(final SerializedMap map) {
+		final Location location = map.getLocation(""Location"");
+		final String[] lines = map.getStringList(""Lore"").toArray(new String[0]);
+
+		final Hologram hologram = new Hologram(location.clone().add(0.5, 0.5, 0.5));
+
+		hologram.setLore(lines);
+
+		return hologram;
+	}
+
+	@Override
+	public SerializedMap serialize() {
+		final SerializedMap map = new SerializedMap();
+
+		map.put(""Location"", this.lastTeleportLocation);
+		map.put(""Lore"", this.loreLines);
+
+		return map;
+	}
+}
+"
+20DFCrd2,Three brothers,Spocoman,JavaScript,Monday 9th of October 2023 06:43:07 AM CDT,"function threeBrothers(input) {
+    let firstTime = Number(input[0]);
+    let secondTime = Number(input[1]);
+    let thirdTime = Number(input[2]);
+    let fatherTime = Number(input[3]);
+
+    let cleaningTime = 1 / (1 / firstTime + 1 / secondTime + 1 / thirdTime) * 1.15;
+
+    console.log(`Cleaning time: ${cleaningTime.toFixed(2)}`);
+    if (fatherTime > cleaningTime) {
+        console.log(`Yes, there is a surprise - time left -> ${Math.floor(fatherTime - cleaningTime)} hours.`);
+    } else {
+        console.log(`No, there isn't a surprise - shortage of time -> ${Math.ceil(cleaningTime - fatherTime)} hours.`);
+    }
+    return;
+}"
+Wt3jW3sF,Review ProfitLevel,fxvnpro,PHP,Monday 9th of October 2023 06:40:51 AM CDT,https://www.fxvnpro.com/review-profitlevel/
+PLv65eK2,ME Watch,slanda,Lua,Monday 9th of October 2023 06:32:53 AM CDT,"split = require(""functions.split"").split
+getChanges = require(""functions.getChanges"").getChanges
+sum = require(""functions.sum"").sum
+avg = require(""functions.avg"").avg
+
+
+me = peripheral.wrap(""left"")
+monitor = peripheral.wrap(""right"")
+
+local lastItems = {}
+local diffs = {}
+
+local meCheck = {}
+while true do
+    meCheck = me.getCraftingCPUs()
+    if meCheck ~= nil then
+        local i = 0
+        for _ in pairs(meCheck) do i = i + 1 end
+        if i >= 3 then
+            break
+        end
+    end
+end
+
+fileName = ""items.txt""
+
+minAmount = 10000
+
+monitor.clear()
+monitor.setTextScale(0.5)
+
+
+function compare(a, b)
+    return a.amount > b.amount
+end
+
+
+function getItems()
+    if not fs.exists(fileName) then
+        return {}
+    end
+    local file = fs.open(fileName, ""r"")
+    local itemsStr = file.readAll()
+    file.close()
+    if itemsStr ~= nil then
+        local itemsTable = split(itemsStr, ""\n"")
+        local items = {}
+        for _, itemStr in ipairs(itemsTable) do
+            items[split(itemStr, ""|"")[1]] = split(itemStr, ""|"")
+        end
+        return items
+    end
+    return {}
+end
+
+
+function shift(t, item)
+    local newT = {}
+    newT[1] = item
+    local i = 1
+    for item, n in pairs(t) do
+        newT[item + 1] = n
+        i = i + 1
+    end
+    table.remove(newT, i)
+    return newT
+end
+
+
+function refreshMonitor()
+    monitor.clear()
+    local i = 1
+    local items = me.listItems()
+    lastItems = shift(lastItems, items)
+    local oldItems = getItems()
+    local file = io.open(fileName, ""w"")
+    table.sort(items, compare)
+
+    -- Get changes
+    local c = getChanges(lastItems)
+    -- Get sum of changes
+    local s, l = sum(c)
+    -- Get avg of changes
+    local a = avg(s, l)
+
+    for _, item in ipairs(items) do
+        if item.amount > minAmount then
+            monitor.setCursorPos(1, i)
+            monitor.write(""|"")
+            -- Name
+            monitor.setCursorPos(2, i)
+            monitor.write(split(item.name, "":"")[2])
+            -- Current amount
+            local div = 1
+            local addon = """"
+            if item.amount < 1000000 then
+                div = 1000
+                addon = ""k""
+            elseif item.amount < 1000000000 then
+                div = 1000000
+                addon = ""m""
+
+            end
+            local itemAmountStr = string.format(""%.0f"", item.amount / div) .. addon
+            monitor.setCursorPos(36, i)
+            monitor.write(itemAmountStr)
+            monitor.setCursorPos(34, i)
+            monitor.write(""|"")
+
+            -- Diff
+            if oldItems[item.name] ~= nil then
+                local diff = item.amount - oldItems[item.name][2]
+                local o = 0
+                if diff < 0 then
+                    c = colors.red
+                    add = """"
+                    o = o - 1
+                elseif diff > 0 then
+                    c = colors.lime
+                    add = ""+""
+                    o = o - 1
+                else
+                    c = colors.gray
+                    add = """"
+                end
+                monitor.setTextColor(c)
+                monitor.setCursorPos(27 + o, i)
+                monitor.write(add..diff)
+                monitor.setTextColor(colors.white)
+            end
+            -- Seperator
+            monitor.setCursorPos(25, i)
+            monitor.write(""|"")
+            monitor.setCursorPos(41, i)
+            monitor.write(""|"")
+            monitor.setCursorPos(53, i)
+            monitor.write(""|"")
+            -- Per minute avg
+            monitor.setCursorPos(43, i)
+            if a[i] ~= nil then
+                monitor.write(a[i].."" /min"")
+            else
+                monitor.write(""*/min"")
+            end
+
+            file:write(item.name..""|""..item.amount..""\n"")
+            i = i + 1
+        end
+    end
+    file:close()
+end
+
+refreshMonitor()
+
+os.startTimer(60)
+
+while true do
+    local event = os.pullEvent()
+    if event == ""timer"" then
+        refreshMonitor()
+        os.startTimer(60)
+    elseif event == ""redstone"" and redstone.getInput(""top"") then
+        refreshMonitor()
+    end
+end"
+vMrkTypK,len,slanda,Lua,Monday 9th of October 2023 06:24:40 AM CDT,"function len(t)
+    local l = 0
+    for _, _ in pairs(t) do
+        l = l + 1
+    end
+    return l
+end
+
+return {len = len}"
+deLCZuDz,avg,slanda,Lua,Monday 9th of October 2023 06:23:27 AM CDT,"function avg(t, l)
+    local newT = {}
+    for i, _ in pairs(t)do
+        newT[i] = t[i] / l
+    end
+    return newT
+end
+
+return {avg = avg}"
+9sya2ARf,sum,slanda,Lua,Monday 9th of October 2023 06:22:06 AM CDT,"getChanges = require(""functions.getChanges"").getChanges
+len = require(""functions.len"").len
+
+function sum(t)
+    local newT = {}
+    for item, _ in pairs(t) do
+        for i, _ in pairs(t[item]) do
+            if not getChanges(item, newT) then
+                newT[item] = t[item][i]
+            else:
+                newT[item] = newT[item] + t[item][i]
+            end
+        end
+    end
+    return {newT, len(t)}
+end
+
+return {sum = sum}"
+HAHLD90Z,getChanges,slanda,Lua,Monday 9th of October 2023 06:20:40 AM CDT,"checkKeys = require(""functions.checkKeys"").checkKeys
+
+function getChanges(t)
+    local newT = {}
+    local lasts = {}
+    for i, _ in pairs(t) do
+        for item, _ in pairs(t[i]) do
+            if not checkKeys(item, lasts) then
+                lasts[item] = t[i][item]
+                newT[item] = {i = 0}
+            else
+                newT[item][i] = t[i][item] - lasts[item]
+            end
+        end
+    end
+    return newT
+end
+
+return {getChanges = getChanges}"
+axZpveA6,Untitled,v0637795486,JavaScript,Monday 9th of October 2023 06:12:10 AM CDT,"       $.ajax({
+          type: 'POST',
+          url: 'https://api......',
+          async: false,
+          data: {
+            type: 778280001,
+            phoneNumber: String,
+            firstName: String,
+            lastName: String,
+            city: String,
+            countryFrom: 'HU', // 'PL', 'LT', 'EE', ....
+            countryTo: 'UA', // 'PL', 'LT', 'EE', ....
+            countryLending: ""HU"", // 'PL', 'LT', 'EE' ....
+            sourceCode: ""HU_promo"", // 'HU_client', 'HU_business', ...
+            shipmentsAmount: 1
+          },
+          dataType: 'json',
+          success: function (json) {
+            modalOpen() {
+                alert('GOOD!!!')
+          }
+        });"
+bmUrtwDG,Sorted List JS Advanced,TZinovieva,JavaScript,Monday 9th of October 2023 06:09:40 AM CDT,"class List {
+    constructor() {
+        this.elements = [];
+        this.size = 0;
+    }
+
+    add(element) {
+        let index = 0;
+        while (index < this.elements.length && this.elements[index] < element) {
+            index++;
+        }
+        this.elements.splice(index, 0, element);
+        this.size++;
+        return this;
+    }
+
+    remove(index) {
+        if (index >= 0 && index < this.elements.length) {
+            this.elements.splice(index, 1);
+            this.size--;
+        }
+        return this;
+    }
+
+    get(index) {
+        if (index >= 0 && index < this.elements.length) {
+            return this.elements[index];
+        }
+        return undefined;
+    }
+}
+"
+ffSMLYD9,Untitled,Arch_of_Triumph,C++,Monday 9th of October 2023 06:05:18 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    int n, k;
+    cin >> n >> k;
+
+    vector<int> a(n + 1);
+    set<int> s;
+    for (int i = 1; i <= n; i++) {
+        cin >> a[i];
+        s.insert(a[i]);
+    }
+
+    if (s.size() < k) {
+        cout << ""NO"";
+        return 0;
+    }
+
+    cout << ""YES\n"";
+    for (auto it: s) {
+        for (int i = 1; i <= n; i++) {
+            if (a[i] == it) {
+                cout << i << ' ';
+                break;
+            } 
+        }
+        k--;
+        if (k == 0)
+            break;
+    }
+}
+
+
+"
+wNXns8j2,data720,TestGuy1,JSON,Monday 9th of October 2023 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '14d9849e6c23958f8d204925bb81fc7b48ca65ea02b5d031f39d2b3ad6b3094b43b733ffdf5d6cc284f296efceedd811a955ee775096b015998eb9d4716d34f1e4834863c3b6288cce791e6a119e01005c661fb7783fb349d7d7e8f288dbe59a5ad96b93a30811e96ec35ef54d613f3ca95f8223386687253d765615003850e2',
+  otherdata: [
+    '39eb8806f22d83f7911fc9e917c4baf6',
+    '200eba1ad246cde8fc5868b127a50c67',
+    '933313755958214815af1ae5a87b349c',
+    '9ae4dd575834a8b1ee05ae2c57620ae8',
+    '2626af9ae1a74081b5253ec809b51a97',
+    '8786c6d4b49f28bf24d972d71615b961',
+    '28c53ffb228f78c1cc9f10136fc4d6f7',
+    '4ba3aa7189012ffcb85cdb4f5d31bc5f'
+  ]
+}"
+ckUjJNbt,Untitled,bakhridinova,Java,Monday 9th of October 2023 05:56:56 AM CDT,"import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Getter;
+import lombok.Setter;
+
+import static com.fasterxml.jackson.annotation.JsonFormat.Feature.ACCEPT_CASE_INSENSITIVE_PROPERTIES;
+
+@Getter
+@Setter
+@JsonFormat(with = ACCEPT_CASE_INSENSITIVE_PROPERTIES)
+public class ApplicationDefinition {
+    private Application application;
+
+    @Getter
+    @Setter
+    @JsonFormat(with = ACCEPT_CASE_INSENSITIVE_PROPERTIES)
+    public static class Application {
+        @JsonProperty(required = true)
+        private String art;
+
+        @JsonProperty(required = true)
+        private String team;
+    }
+}
+
+import com.ebsco.platform.shared.gateway.request.executor.exception.MissingRepositoryOwnerException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import javax.annotation.PostConstruct;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class GithubService {
+	...
+    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
+ 	
+	@PostConstruct
+    public void init() {
+        yamlMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }	
+	...
+		
+	private ... method(...) {
+        try (...) {
+		...
+			ApplicationDefinition applicationDefinition = yamlMapper
+                .readValue(getApplicationDefinitionFromResponse(response), ApplicationDefinition.class);
+		...
+		} catch (JsonProcessingException e) {
+            throw new MissingRepositoryOwnerException(e.getMessage());
+        } 
+	}
+}
+
+"
+2nH2fthR,Three brothers,Spocoman,C++,Monday 9th of October 2023 05:48:28 AM CDT,"#include <iostream>
+#include <cmath>
+
+using namespace std;
+
+int main() {
+    double firstTime, secondTime, thirdTime, fatherTime;
+    cin >> firstTime >> secondTime >> thirdTime >> fatherTime;
+    
+    double cleaningTime = 1 / (1 / firstTime + 1 / secondTime + 1 / thirdTime) * 1.15;
+
+    printf(""Cleaning time: %.2f\n"", cleaningTime);
+    if (fatherTime > cleaningTime) {
+        printf(""Yes, there is a surprise - time left -> %.0f hours.\n"", floor(fatherTime - cleaningTime));
+    }
+    else {
+        printf(""No, there isn't a surprise - shortage of time -> %.0f hours.\n"", ceil(cleaningTime - fatherTime));
+    } 
+    return 0;
+}"
+sMMZneD3,Untitled,rezamalik15,HTML,Monday 9th of October 2023 05:48:18 AM CDT,"<script type=""text/javascript"">
+        function deleteConfirm(object){
+            Swal.fire({
+                        title: 'Are you sure?',
+                        text: ""You are about to delete this Todo!"",
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: 'red',
+                        cancelButtonColor: 'blue',
+                        confirmButtonText: 'Yes, delete it!'
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                Swal.fire(
+                                'Deleted!',
+                                'Your file has been deleted.',
+                                'success'
+                                )
+                            }
+                        })
+        }
+    </script>"
+KtC8ddsf,pay page SQL,Ruslan_Rayanov,T-SQL,Monday 9th of October 2023 05:42:04 AM CDT,"CREATE PROCEDURE [dbo].[pg_crumbs_pay] 
+	@roles nvarchar(128),
+	@itemID nvarchar(128) = '',
+    @urlParameters CRUDFilterParameter READONLY	
+AS
+BEGIN
+	declare @g uniqueidentifier = try_convert(uniqueidentifier, @itemID)
+	
+    declare @redirectUrl nvarchar(max) = iif(@g is null, '/', '')
+	declare @financeID int
+    declare @financeStatus nvarchar(max)
+    declare @sum float = 0    
+    declare @orderID int = 123
+    declare @orderDesc nvarchar(max) = ''
+    declare @fio nvarchar(max) = ''
+    declare @email nvarchar(max) = ''
+    declare @phone nvarchar(max) = ''
+    
+    select @financeID = f.id, @sum = f.[sum],@orderID = o.id,
+    	@orderDesc = o.description, 
+    	@fio = isnull((select top 1 isnull(firstname, '') + ' ' + isnull(surname, '')  from ctr_contacts where contragentID = client.contragentID), ''),
+    	@email = isnull((select top 1 email from ctr_contacts where contragentID = client.contragentID), ''),
+    	@phone = isnull((select top 1 phone1 from ctr_contacts where contragentID = client.contragentID), ''),
+        @financeStatus = (select code from fin_financeStatuses where id = f.statusID)
+    from fin_finances f
+    inner join crm_orders o on f.relatedItemID = o.id 
+    inner join crm_clients client on client.id = o.clientID   
+    where guid = @g and relatedTypeCode='order'
+    
+    declare @title nvarchar(max) = ''
+	declare @result TABLE (title nvarchar(256), link nvarchar(256), tooltip nvarchar(256), 
+		ord int, [right] bit, customLink nvarchar(512))
+	
+	-- SELECT 1 Breadcrumbs
+	select * from @result order by ord
+	
+	-- SELECT 2 page settings
+	select @title Title, '' Description, '' Keywords, @redirectUrl RedirectUrl  
+    
+	declare @header nvarchar(max) = '<h2>Оплата по счету #'+isnull(cast(@financeID as nvarchar), '--' )+' на сумму '+isnull(try_cast(@sum as nvarchar) ,'')+' руб.</h2>
+			<p>Услуга - '+isnull(@orderDesc,'')+'</p>'
+    
+    declare @form nvarchar(max) = ''
+    
+    	declare @yooShopID nvarchar(max) = dbo.as_setting('yookassa.payment_shopId', '')        
+       	set @form = iif(isnull(@yooShopID, '') = '', '<div class=""alert alert-warning"">Не задан ключ Yookassa (publicID)</div>', 
+                       '<div class=""as-form"" data-code=""yookassapay"" data-itemID=""'+convert(nvarchar(128),@g)+'""></div>')
+    
+	-- SELECT 3 
+    select  '<div class=""as-panel mx-auto"" style=""max-width: 600px;"">'+
+    @header+
+    iif(@financeStatus in ('done', 'hold', 'deleted'), '<div class=""alert alert-warning"">
+        	По данному счету нельзя провести оплату (статус <b>'+@financeStatus+'</b>)</div>',  @form)+'
+    
+    </div>' text
+		 
+END
+"
+SB1bBRxs,Untitled,Arch_of_Triumph,C++,Monday 9th of October 2023 05:40:32 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+void aboutSet() {
+	// set
+/*
+	Факты про set:
+	1) Все элементы в сете уникальные
+	2) Все элементы хранятся в отсортированном порядке
+	3) В сете нельзя обращаться к элементам через индекс
+	4) Почти все операции в set (insert, erase, find) работают за
+		O(log(n)), где n - текущий размер сета
+	5) 
+*/
+	set<int> s; // {}
+	s.insert(3); // {3}
+	s.insert(5); // {3, 5}
+	s.insert(1); // {1, 3, 5}
+	s.insert(3); // {1, 3, 5, _}
+	s.erase(3); // {1, 5, _}
+	s.erase(2); // {1, 5, _}
+	s.insert(9);
+	s.insert(11);
+	cout << s.size() << endl;
+
+	// auto it = s.begin();
+	// while (it != s.end()) {
+	// 	cout << *it << ' ';
+	// 	it++;
+	// }
+	// cout << endl;
+
+	// auto it2 = s.find(9);
+	// if (it2 != s.end()) {
+	// 	cout << *it2 << endl;
+	// 	it2--;
+	// 	cout << *it2 << endl;
+	// } 
+
+	// for (auto it: s) {
+	// 	cout << it << endl;
+	// }
+}
+
+char a[1000];
+/*
+	a[0] = 'k'
+	a[1] = 'r'
+	a[2] = 't'
+*/
+
+void aboutMap() {
+	// int a[];
+	map<char, int> m; // {}
+	m['a'] = 9; 
+	m['e'] = 15; 
+	m['5'] = 6;
+	m.erase('e');
+	cout << m.size() << endl;
+	for (auto it: m) {
+		cout << it.first << ' ' << it.second << endl;
+	}
+}
+
+/*
+	Строка а считается лексикографически меньше строки b:
+	1) если a является префиксом b, при этом |a| < |b|; abc < abcd
+	2) пусть k - наименьшая позиция такая, что a[k] != b[k], то если 
+		a[k] < b[k]; // abcd < abefgh
+
+
+*/
+
+void aboutQueueStackDeque() {
+	/*
+		про queue: все операции O(1)
+		1) можно добавлять элемент в конец
+		2) можно удалять первый элемент
+		3) нельзя обращаться через индекс
+		4) можно обращаться к первому элементу
+
+		про stack: все операции O(1)
+		1) можно добавлять элемент в конец
+		2) можно удалять последний элемент
+		3) нельзя обращаться через индекс
+		4) можно обращаться к последнему элементу
+
+		про deque: все операции O(1)
+		1) умеет все что умеют stack и queue
+	*/
+	queue<int> q;
+	q.push(5); // {5}
+	q.push(3); // {5, 3}
+	q.push(8); // {5, 3, 8}
+	cout << q.size() << ' ' << q.front() << endl;
+	q.pop();
+	cout << q.front() << endl << endl;
+
+	stack<int> s;
+	s.push(5); // {5}
+	s.push(3); // {5, 3}
+	s.push(8); // {5, 3, 8}
+	cout << s.top() << endl;
+	s.pop();
+	cout << s.top() << endl << endl;
+
+	deque<int> d;
+	d.push_back(5); // {5}
+	d.push_front(1); // {1, 5}
+	d.push_front(8); // {8, 1, 5}
+	d.push_back(7); // {8, 1, 5, 7}
+	cout << d.front() << ' ' << d.back() << endl;
+	d.pop_front(); // {1, 5, 7}
+	d.pop_back(); // {1, 5}
+	cout << d.front() << ' ' << d.back() << endl;
+}
+
+int main() {
+	//aboutSet();
+	//aboutMap();
+	aboutQueueStackDeque();
+}"
+vBhEPzze,Untitled,FladeX,HTML,Monday 9th of October 2023 05:39:25 AM CDT,"<!-- Yandex.Metrika counter -->
+<script type=""text/javascript"" >
+   (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+   m[i].l=1*new Date();
+   for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+   k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+   (window, document, ""script"", ""https://mc.yandex.ru/metrika/tag.js"", ""ym"");
+
+   ym(40985734, ""init"", {
+        clickmap:true,
+        trackLinks:true,
+        accurateTrackBounce:true,
+        webvisor:true
+   });
+</script>
+<noscript><div><img src=""https://mc.yandex.ru/watch/40985734"" style=""position:absolute; left:-9999px;"" alt="""" /></div></noscript>
+<!-- /Yandex.Metrika counter -->"
+NZFDAwgY,Untitled,Arch_of_Triumph,C++,Monday 9th of October 2023 05:30:50 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+void aboutSet() {
+	// set
+/*
+	Факты про set:
+	1) Все элементы в сете уникальные
+	2) Все элементы хранятся в отсортированном порядке
+	3) В сете нельзя обращаться к элементам через индекс
+	4) Почти все операции в set (insert, erase, find) работают за
+		O(log(n)), где n - текущий размер сета
+	5) 
+*/
+	set<int> s; // {}
+	s.insert(3); // {3}
+	s.insert(5); // {3, 5}
+	s.insert(1); // {1, 3, 5}
+	s.insert(3); // {1, 3, 5, _}
+	s.erase(3); // {1, 5, _}
+	s.erase(2); // {1, 5, _}
+	s.insert(9);
+	s.insert(11);
+	cout << s.size() << endl;
+
+	// auto it = s.begin();
+	// while (it != s.end()) {
+	// 	cout << *it << ' ';
+	// 	it++;
+	// }
+	// cout << endl;
+
+	// auto it2 = s.find(9);
+	// if (it2 != s.end()) {
+	// 	cout << *it2 << endl;
+	// 	it2--;
+	// 	cout << *it2 << endl;
+	// } 
+
+	// for (auto it: s) {
+	// 	cout << it << endl;
+	// }
+}
+
+char a[1000];
+/*
+	a[0] = 'k'
+	a[1] = 'r'
+	a[2] = 't'
+*/
+
+void aboutMap() {
+	// int a[];
+	map<char, int> m; // {}
+	m['a'] = 9; 
+	m['e'] = 15; 
+	m['5'] = 6;
+	m.erase('e');
+	cout << m.size() << endl;
+	for (auto it: m) {
+		cout << it.first << ' ' << it.second << endl;
+	}
+}
+
+/*
+	Строка а считается лексикографически меньше строки b:
+	1) если a является префиксом b, при этом |a| < |b|; abc < abcd
+	2) пусть k - наименьшая позиция такая, что a[k] != b[k], то если 
+		a[k] < b[k]; // abcd < abefgh
+
+
+*/
+
+int main() {
+	//aboutSet();
+	aboutMap();
+	
+}"
+kZY92UEg,Three brothers,Spocoman,C#,Monday 9th of October 2023 05:14:17 AM CDT,"using System;
+
+namespace  ThreeBrothers
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            double firstTime = double.Parse(Console.ReadLine());
+            double secondTime = double.Parse(Console.ReadLine());
+            double thirdTime = double.Parse(Console.ReadLine());
+            double fatherTime = double.Parse(Console.ReadLine());
+
+            double cleaningTime = 1 / (1 / firstTime + 1 / secondTime + 1 / thirdTime) * 1.15;
+            double timeLeft = fatherTime - cleaningTime;
+
+            Console.WriteLine($""Cleaning time: {cleaningTime:f2}"");
+            if (timeLeft > 0)
+            {
+                Console.WriteLine($""Yes, there is a surprise - time left -> {Math.Floor(timeLeft)} hours."");
+            }
+            else
+            {
+                Console.WriteLine($""No, there isn't a surprise - shortage of time -> {Math.Ceiling(Math.Abs(timeLeft))} hours."");
+            }
+        }
+    }
+}"
+xpyv49An,Advanced AND - Donald AND Duck AND Hello,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:25 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND
+hello, donald was a duck
+
+5502491997132108
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH
+"
+hDzPyX6f,Financial What's Inside - Email/IP/Bank,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:24 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+What's Inside Paste 
+
+5378496492418234
+5571598708435236
+5587663820997281
+5502491997132108
+5516931903918995
+5322909948799236
+5443317136071703
+5409137465238695
+5497550044220575
+5559606180091553
+
+aaribaud@att.net
+aaribaud@comcast.net
+aaribaud@att.com
+aaribaud@att.co.uk
+aaribaud@yahoo.com
+
+246.107.72.199
+221.187.199.189
+3.109.3.44
+109.112.85.139
+250.83.213.179
+169.141.201.234
+50.180.50.59
+20.181.54.231
+64.235.191.167
+48.103.36.43"
+ArEvSaqC,Financial with SPECIAL CHARACTERS,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:22 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND
+
+5148-2121-6312-7114   - DASHES
+5148212163127114
+5107-4578-0576-9075   - DASHES
+5107457805769075
+3488-1760-1454-729   - DASHES
+348817601454729
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH"
+vPGwUHec,Domains with SPECIAL CHARS,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:21 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND
+
+www.qatesting.com
+blog.qatesting.com
+www.qatesting.com/index.html
+www.qatesting.com/home
+www.qatestingblog.com
+www.qatestingtutorials.com
+shop.qatesting.co.uk
+admin.qatesting.io 
+qatesting
+qatesting.co.uk
+qatesting.cn
+qatesting.io
+findmetesting.com
+www.qatesting-blog.com
+www.qatesting-blog23.com
+www.qatesting
+www.qatesting.co.uk
+www.qatesting.cn
+www.qatesting.io
+www.findmetesting.com
+www.wobsut.gov
+
+The difference is that QA is process oriented and QC is product oriented.
+
+Testing, therefore is product oriented and thus is in the QC domain. Testing for quality isn't assuring quality, it's controlling it.
+
+
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH
+"
+u14KeraZ,ALL Keywords with Excluded Words,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:19 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND 
+
+The dystopian version of superintelligence is illustrated with frequency by leaders in the technology industry, and is famously depicted by Hollywood in films like Terminator, 
+or more recently Ex Machina, and even the Avengers. The “furious deity A.I.” is a story you know, because it is the story you are constantly told: we build the thinking machine, 
+it surpasses our abilities in every way, and it destroys us for one of any number of reasons.Maybe it perceives us as a threat. Maybe we’re just in its way, 
+and it hardly perceives us at all — mankind, a disposable insect race.
+
+There are of course many arguments in opposition to the now ubiquitous concept of our apocalypse by artificial intelligence. 
+I myself have called into question the logic of such dystopian arguments in Anatomy of Next. But our subject here is less pertaining to the nature of the conscious machine than 
+it is to the way we talk about this subject, and what it means. First, consider that most of the artificial intelligence depicted in culture looks human, a representation with 
+no basis in technological reality. Then, the true scope of the Singularity is almost impossible to predict, which begs a question: where are these opinions about the broadly 
+unknowable coming from?"
+rj0njNTN,All Keywords with ANY Additional Words,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:17 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND KEYWAUTO
+
+The dystopian version of superintelligence is illustrated with frequency by leaders in the technology industry, and is famously depicted by Hollywood in films like Terminator, or more recently Ex Machina, and even the Avengers. The “angry god A.I.” is a story you know, because it is the story you are constantly told: we build the thinking machine, it surpasses our abilities in every way, and it destroys us for one of any number of reasons.
+Maybe it perceives us as a threat. Maybe we’re just in its way, and it hardly perceives us at all — humanity, a disposable insect race.
+
+There are of course many arguments in opposition to the now ubiquitous concept of our apocalypse by artificial intelligence. I myself have called into question the logic of such dystopian arguments in Anatomy of Next. But our subject here is less pertaining to the nature of the conscious machine than it is to the way we talk about this subject, and what it means. First, consider that most of the artificial intelligence depicted in culture looks human, a representation with no basis in technological reality. Then, the true scope of the Singularity is almost impossible to predict, which begs a question: where are these opinions about the broadly unknowable coming from?
+
+6589745854123698
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH
+"
+E3UZdvmY,Untitled,tuomasvaltanen,Python,Monday 9th of October 2023 04:10:16 AM CDT,"# tips & tricks for the exercise project 2, NLP with deep learning / BERT
+
+# we can mostly use the previous training code for our version
+# where we load the weights from previous session
+
+!pip install -q tensorflow_text
+!pip install -q tf-models-official==2.11.0
+!pip install tensorflow_addons
+!pip install tf-models-official
+
+#########
+# importing libraries
+import numpy as np
+import pandas as pd
+
+from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
+
+import tensorflow as tf
+import tensorflow_addons as tfa
+import tensorflow_hub as hub
+import tensorflow_text as text  # Registers the ops.
+from keras.utils import to_categorical
+from official.nlp import optimization  # to create AdamW optimizer
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Plots
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+##################
+
+ONLY USE TEST DATA THIS TIME, we don't need 
+Training data, since the model is already trained
+
+# remember to attach your Google Drive first to your Google Colab-notebook
+# also, make sure the file path matches with your Google Drive
+TEST_FILE_PATH = '/pathtoyourdrivefolder/exercise2/news_test.csv'
+
+# load the datas into separate pandas DataFrames
+df_test = pd.read_csv(TEST_FILE_PATH)
+
+
+################3
+
+
+# these are the news categories
+TEXT_LABELS = {1: ""World"", 2: ""Sports"", 3: ""Business"", 4: ""Sci/Tech""}
+
+# also save the amount of categories into a variable
+# so the code works even if this changes later
+num_categories = len(TEXT_LABELS)
+
+
+###################
+
+combine the test data as previously
+
+df_test = combine_title_and_description(df_test)
+
+
+###### 
+
+# import stopwords and tokenize features to be used later
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import multiprocessing as mp
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+
+def remove_stopwords(text):
+    words = text.split()
+    words = [word for word in words if word.lower() not in stopwords.words('english')]
+    return "" "".join(words)
+
+
+###########
+
+# this takes 30sec approximately
+
+df_test['clean_text'] = df_test['text'].apply(remove_stopwords)
+
+
+##############
+
+# this changes somewhat, only use test data
+
+# encode labels, basically converts numeric classes
+# to be in the range of starting from 0 until maximum
+# in this case instead of 1-4, => 0-3
+le = LabelEncoder()
+
+X_test = df_test['clean_text']
+y_test = df_test['Class Index']
+
+# since we don't have training data, instead of transform()
+# let's use fit_transform
+y_test = le.fit_transform(y_test)
+y_test = to_categorical(y_test, num_classes=num_categories)
+
+#########
+
+we need the previous training parameters in order to re-create the model
+
+# variables used by the TensorFlow model training phase
+# epochs = amount of training cycles for our deep learning model
+# 5 is okay for this purpose, due to BERT being a heavy model to use
+epochs = 5
+
+# batch sizes, the amount of data fed to the neural network training algorithm
+# at once. typically a higher batch size allows faster training
+# but higher batch size also uses CONSIDERABLY more memory, which we don't always have
+batch_size = 32
+eval_batch_size = 32
+
+# calculate needed steps per epoch
+# Train data size hardcoded like this, is not optimal way to code
+train_data_size = 120000
+steps_per_epoch = int(train_data_size / batch_size)
+num_train_steps = steps_per_epoch * epochs
+num_warmup_steps = int(0.1 * num_train_steps)
+
+# learning rate, and create an optimizer
+# in this case ADAMW
+init_lr = 3e-5
+optimizer = optimization.create_optimizer(init_lr=init_lr,
+                                          num_train_steps=num_train_steps,
+                                          num_warmup_steps=num_warmup_steps,
+                                          optimizer_type='adamw')
+
+## #########################3 
+
+build model again
+
+def build_model(num_classes, optimizer, max_len=512):
+    # build the model -> BERT + our own small neural network ""tail""
+    # options for different versions (different sizes and complexity):
+    # https://tfhub.dev/google/collections/bert/1
+    text_input = tf.keras.layers.Input(shape=(), dtype=tf.string, name='text')
+    preprocessor = hub.KerasLayer(""https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3"", name='preprocessing_lite')
+    encoder_inputs = preprocessor(text_input)
+    encoder = hub.KerasLayer(""https://tfhub.dev/tensorflow/small_bert/bert_en_uncased_L-6_H-128_A-2/2"", trainable=True, name='BERT_encoder_lite')
+    outputs = encoder(encoder_inputs)
+
+    # our own neural network tail that only adjusts BERT values
+    net = outputs['pooled_output']
+    net = tf.keras.layers.Dropout(0.1)(net)
+    net = tf.keras.layers.Dense(64, activation='relu')(net)
+    net = tf.keras.layers.Dropout(0.1)(net)
+    out = tf.keras.layers.Dense(num_classes, activation='softmax', name='classifier')(net)
+
+    # combine all together
+    model = tf.keras.models.Model(text_input, out)
+    model.compile(optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+
+    return model
+
+
+
+####################
+
+
+# build the model, 4 possible categories => num_classes
+model = build_model(num_classes = num_categories, optimizer = optimizer)
+model.summary()
+
+
+#########
+
+finally: 
+
+model.load_weights(""/pathtoyourdrivefolder/newsmodel.h5"")
+
+
+############
+
+browsing incorrect predictions, case news articles:
+
+
+# iterate through the real category (input matrix), actual text of the news
+# and the predicted category (prediction matrix)
+for input_value, input_text, prediction in zip(y_test, X_test, y_proba):
+
+  # get the indexes of both the true value and prediction
+  # these are between 0-3, as the indexes in the labels-list
+  true_value = np.argmax(input_value)
+  predicted_value = np.argmax(prediction)
+
+  # get the actual labels
+  true_label = labels[true_value]
+  predicted_label = labels[predicted_value]
+
+  # if labels don't match => incorrect prediction
+  # => print all the details
+  if true_label != predicted_label:
+    print(""-----------------------------------------"")
+    print(f""True label is = {true_label}"")
+    print(f""Predicted label was = {predicted_label}"")
+    print(input_text)
+    print()
+    print(labels)
+    print(prediction)
+ 
+    print()
+
+
+########## 
+ADDING A NEW CATEGORY TO NEWS DATA
+
+EXTRA_FILE_PATH = ""/yourgoogledrivepath/exercise2/NewsCategorizer.csv""
+df_extra = pd.read_csv(EXTRA_FILE_PATH)
+
+#########
+df_extra.head()
+###########
+# see all the different categories we have, let's try WELLNESS
+df_extra['category'].value_counts()
+
+###########
+
+# step 1: filter out only the WELLNESS news
+df_extra_wellness = df_extra[df_extra['category'] == ""WELLNESS""].copy()
+
+################
+
+# step 2: assign WELLNESS its own index as Class Index => 5
+df_extra_wellness['Class Index'] = 5
+
+##############
+
+# step 3: rename headline => Title, short_description => Description
+df_extra_wellness = df_extra_wellness.rename(columns={""headline"": ""Title"", ""short_description"": ""Description""})
+
+
+################
+
+
+# step 4: drop the other columns => category, links, keywords
+# axis = 1 means we're dropping a column instead of a row
+df_extra_wellness = df_extra_wellness.drop(""category"", axis=1)
+df_extra_wellness = df_extra_wellness.drop(""links"", axis=1)
+df_extra_wellness = df_extra_wellness.drop(""keywords"", axis=1)
+
+
+###################
+
+
+# it seems our data is now identical in format compared to the original
+# except the order of columns, which doesn't matter
+df_extra_wellness.head()
+
+
+############
+
+
+# step 5: train/test split, 4400 for training, 600 for testing => 5000 in total
+
+# iloc => select values by range, this one from 0 - 4400 => 4400 rows
+df_extra_wellness_train = df_extra_wellness.iloc[:4400]
+
+# and this one everything after 4400 (until 5000) => 600 rows
+df_extra_wellness_test = df_extra_wellness.iloc[4400:]
+
+
+#################
+
+
+df_extra_wellness_test.describe()
+
+
+######################3
+
+# step 6: combine the wellness training data to original data, 
+# and wellness test data into original test data
+
+df_train = pd.concat([df_train, df_extra_wellness_train], ignore_index=True)
+df_test = pd.concat([df_test, df_extra_wellness_test], ignore_index=True)
+
+
+
+#######
+
+# these are the news categories
+TEXT_LABELS = {1: ""World"", 2: ""Sports"", 3: ""Business"", 4: ""Sci/Tech"", 5: ""Wellness""}
+
+# to get rid of the labels -extralist in confusion matrix
+# generate labels from TEXT_LABELS
+# NOTE: remove the labels = -row in the confusion matrix in
+# order for this to work
+labels = list(TEXT_LABELS.values())
+
+# also save the amount of categories into a variable
+# so the code works even if this changes later
+num_categories = len(TEXT_LABELS)
+
+#############33
+
+rest of the training code as before!"
+HteMAr2Y,IP with SPECIAL CHARACTERS,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:14 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND
+
+123.123.123.149
+123.123.123.7
+123.123.123.186
+123.123.123.47
+123.123.123.187
+123.123.123.47
+123.123.123.130
+123.123.123.62
+123.123.123.87
+123.123.123.1
+123.123.123.61
+123.123.123.1
+123.123.123.65
+123.123.123.65
+123.123.123.189
+123.123.123.193
+123.123.123.78
+123.123.123.142
+123.123.123.107
+123.123.123.126
+123.123.123.13
+123.123.123.171
+123.123.123.45
+123.123.123.61
+123.123.123.93
+123.123.123.2
+123.123.123.71
+123.123.123.41
+123.123.123.184
+123.123.123.74
+123.123.123.106
+123.123.123.171
+123.123.123.188
+123.123.123.177
+123.123.123.185
+123.123.123.9
+123.123.123.184
+123.123.123.100
+123.123.123.31
+123.123.123.164
+123.123.123.184
+123.123.123.12
+123.123.123.153
+123.123.123.72
+123.123.123.44
+123.123.123.119
+123.123.123.119
+123.123.123.163
+123.123.123.38
+123.123.123.67
+123.123.123.59
+123.123.123.10
+123.123.123.50
+123.123.123.121
+123.123.123.145
+123.123.123.159
+123.123.123.64
+123.123.123.6
+123.123.123.39
+123.123.123.198
+123.123.123.17
+123.123.123.65
+123.123.123.149
+123.123.123.84
+123.123.123.8
+123.123.123.145
+123.123.123.65
+123.123.123.94
+123.123.123.79
+123.123.123.177
+123.123.123.67
+123.123.123.78
+123.123.123.80
+123.123.123.79
+123.123.123.50
+123.123.123.87
+123.123.123.15
+123.123.123.80
+123.123.123.145
+123.123.123.75
+123.123.123.4
+123.123.123.59
+123.123.123.59
+123.123.123.190
+123.123.123.64
+123.123.123.63
+123.123.123.102
+123.123.123.114
+123.123.123.146
+123.123.123.53
+123.123.123.124
+123.123.123.30
+123.123.123.57
+123.123.123.64
+123.123.123.69
+123.123.123.33
+123.123.123.12
+123.123.123.73
+123.123.123.36
+123.123.123.153
+100.123.123.50
+100.123.123.39
+100.123.123.156
+100.123.123.56
+100.123.123.175
+100.123.123.121
+100.123.123.114
+100.123.123.118
+100.123.123.13
+100.123.123.174
+100.123.123.84
+100.123.123.161
+100.123.123.63
+100.123.123.51
+100.123.123.66
+100.123.123.190
+100.123.123.101
+100.123.123.72
+100.123.123.24
+100.123.123.151
+100.123.123.143
+100.123.123.146
+100.123.123.117
+100.123.123.21
+100.123.123.10
+100.123.123.98
+100.123.123.114
+100.123.123.6
+100.123.123.101
+100.123.123.14
+100.123.123.147
+100.123.123.159
+100.123.123.157
+100.123.123.6
+100.123.123.175
+100.123.123.35
+100.123.123.136
+100.123.123.2
+100.123.123.139
+100.123.123.11
+100.123.123.179
+100.123.123.16
+100.123.123.40
+100.123.123.20
+100.123.123.20
+100.123.123.150
+100.123.123.77
+100.123.123.48
+100.123.123.22
+100.123.123.24
+100.123.123.9
+100.123.123.187
+100.123.123.131
+100.123.123.148
+100.123.123.152
+100.123.123.96
+100.123.123.199
+100.123.123.15
+100.123.123.4
+100.123.123.112
+100.123.123.62
+100.123.123.186
+100.123.123.36
+100.123.123.136
+100.123.123.83
+100.123.123.38
+100.123.123.120
+100.123.123.147
+100.123.123.15
+100.123.123.134
+100.123.123.19
+100.123.123.196
+100.123.123.115
+100.123.123.126
+100.123.123.39
+100.123.123.193
+100.123.123.117
+100.123.123.115
+100.123.123.115
+100.123.123.33
+100.123.123.121
+100.123.123.72
+100.123.123.189
+100.123.123.76
+100.123.123.78
+100.123.123.61
+100.123.123.112
+100.123.123.176
+100.123.123.82
+100.123.123.183
+100.123.123.168
+100.123.123.24
+100.123.123.134
+100.123.123.145
+100.123.123.195
+100.123.123.189
+100.123.123.157
+100.123.123.114
+100.123.123.34
+100.123.123.166
+
+These are a list of generated IPs for test purPoses. They seRVe no purpose only to act as test data for testing activities.
+You might findMEtesting 123.123.123.123 or findmetesting 100.123.123.76. These are my favourite ip addresses 123.123.123.23 100.123.123.23.
+These are some random words networking, ipaddresses, studpidIPs
+
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH"
+M1uM9s57,Hashed Email With Exclude,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:13 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+wojciech@sktestcomcast.net
+joglo@sktestmac.com
+larry@sktesthotmail.com
+aardo@sktestverizon.net
+debest@sktestlive.com
+carroll@sktestaol.com
+arathi@sktestyahoo.ca
+sthomas@sktestcomcast.net
+leocharre@sktestyahoo.ca
+pedwards@sktestyahoo.com
+
+skexclude"
+YDjhEf0V,Hashed Email - Full,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:11 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+wojciech@sktestcomcast.net
+joglo@sktestmac.com
+larry@sktesthotmail.com
+aardo@sktestverizon.net
+debest@sktestlive.com
+carroll@sktestaol.com
+arathi@sktestyahoo.ca
+sthomas@sktestcomcast.net
+leocharre@sktestyahoo.ca
+pedwards@sktestyahoo.com
+
+skinclude"
+tyVVZTvp,Email with Keyword SPECIAL CHARACTERS,wheresTheAnyKey,C,Monday 9th of October 2023 04:10:10 AM CDT,"Pasted at: 09/10/2023 10:10
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3 for TESTING PURPOSE ONLY
+
+DATA_ID_TESTDATATOFIND NOEXCLUDES
+
+Cooper.Kleine@findmetesting.co.uk 
+Mariquilla.Evenden@findmetesting.co.uk 
+Noll.Ingolotti@findmetesting.co.uk  
+Grove.Feldbaum@findmetesting.co.uk
+Mack.Osment@findmetesting.co.uk 
+Trisha.Zanicchelli@findmetesting.co.uk
+Jack.Gorriessen@findmetesting.co.uk 
+Nefen.Malec@findme-testing.co.uk 
+Birdie-Gemmill@findmetesting.co.uk
+Rosabella.Nias@findmetesting.co.uk
+Ellerey.Fanti@findmetesting.cn
+Antonina.Carsey@findmetesting.cn
+Valry.Shead@findmetesting.cn 
+Conrade.Ferrarone@findmetesting.cn
+Neysa.Fazakerley@findmetesting.cn
+Cristobal.Primak@findmetesting.cn
+Wakefield.Kent@findmetesting.cn
+findme.Cheales@findmetesting.cn
+Nert.Roddamr@findmetesting.cn 
+Richy.Raft@findmetesting.cn
+Berget.Kermannes@findmetesting.ie 
+Shelden.Tregea@findmetesting.ie 
+Allsun.Badrick@findmetesting.ie 
+Hortense.Ivkovic@findmetesting.ie
+Carolin.Potte@findmetesting.ie
+Benjie.Trumble@findmetesting.ie
+Andrew.Hadgkiss@findmetesting.ie
+Trula.Kuna@findmetesting.ie
+Tommie.Maytum@findmetesting.ie
+Langsdon.Pakes@findmetesting.ie
+Porty.Tooth@findmetesting.au
+Rozella.Siggefindmetesting.au
+Nolie.Tumultyfindmetesting.au
+Dud.Caustonfindmetesting.au
+Alvinia.Brameldfindmetesting.au
+Meridel.Lymbournefindmetesting.au
+Elvis.Maleckfindmetesting.au
+Brett.Oughtonfindmetesting.au
+Rickard.Clemfindmetesting.au
+Prue.Firemanfindmetesting.au
+Uriel.Rozenbaum@findmetesting25.com
+Cindie.Greeson@findmetesting25.com
+Laurette.Puckham@findmetesting25.com
+Eldredge.Ricket@findmetesting25.com
+Alanah.Rapper@findmetesting25.com
+Ash.Le.Prevost@findmetesting25.com
+Galvin.Purchon@findmetesting25.com
+Lauryn.Ilson@findmetesting25.com
+findme.Graffin@findmetesting25.com
+Edithe.Trehearne@findmetesting25.com
+Den.Cancutt@findmetesting10.com
+Wernher.Spatoni@findmetesting10.com
+Malchy.Ion@findmetesting10.com
+Leona.Whitby@findmetesting10.com
+Alphonse.Goodlake@findmetesting10.com
+Gran.Standen@findmetesting10.com
+Barnie.Gilffilland@findmetesting10.com
+Kaylyn.Ditchfield@findmetesting10.com
+Dorotea.Kohlerman@findmetesting10.com
+Gillan.Lampel@findmetesting10.com
+Patrica.Mannakee@findustesting.com
+Pippo.Sewart@findustesting.com
+Lanae.Cousin@findustesting.com
+Porter.Glaysher@findustesting.com
+Herschel.Yaakov@findustesting.com
+findme.Parsand@findustesting.com
+Lucho.Cosh@findustesting.com
+Cullie.Powlesland@findustesting.com
+Edy.Burkart@findustesting.com
+Christophorus.Ackeroyd@findustesting.com
+Arvy.Rowson@findUStesting.com
+Arlan.Ivanilov@findustesting.com
+Tawnya.Waslin@findustesting.com
+Inigo.Gyrgorcewicx@findustesting.com
+Sharity.Stoodley@findustesting.com
+Ginger.Dresse@findustesting.com
+Deck.Jouannot@findustesting.com
+Deny.Soanes@findustesting.com
+james@findmetesting.com
+
+Wenona.Moverley@findqatesting.com
+Jerry.Poynter@findqatesting.com
+Drugi.Neeson@findqatesting.com
+Winny.Binfield@findqatesting.com
+Darill.Greenshiels@findqatesting.com
+Ethelin.Pinchen@findqatesting.com
+Tanney.Ballendine@findqatesting.com
+Ariadne.Wincott@findqatesting.com
+Winnie.Domm@findqatesting.com
+Rogerio.Cudbird@findqatesting.com
+Yu@findmetesting.com
+
+RIGHT OF @
+findme@findme.testing.com
+wildcard@findme*testing.com
+dash@findme-testing.com
+slash@findme/testing.com
+questionmark@findme?testing.com
+
+ACCENTS
+Pål@findmetesting.com
+Magdalène@findmetesting.com
+Anaël@findmetesting.com
+Lén@findmetesting.com
+Loïs@findmetesting.com
+Thérèsa@findmetesting.com
+Valérie@findmetesting.com
+Görel@findmetesting.com
+Mélia@findmetesting.com
+Joséphine@findmetesting.com
+Loïc@findmetesting.com
+findme@findmetesting.com
+Méghane@findmetesting.com
+Nuó@findmetesting.com
+Lén@findmetesting.com
+Eliès@findmetesting.com
+André@findmetesting.com
+Mahélie@findmetesting.com
+Méthode@findmetesting.com
+Rachèle@findmetesting.com
+Mélina@findmetesting.com
+Gaëlle@findmetesting.com
+Céline@findmetesting.com
+Bérangère@findmetesting.com
+Françoise@findmetesting.com
+Séverine@findmetesting.com
+Måns@findmetesting.com
+Adèle@findmetesting.com
+Aimée@findmetesting.com
+Mélia@findmetesting.com
+Gösta@findmetesting.com
+Laurène@findmetesting.com
+Gisèle@findmetesting.com
+Mélinda@findmetesting.com
+Bécassine@findmetesting.com
+Ruì@findmetesting.com
+Zoé@findmetesting.com
+Maëline@findmetesting.com
+Aimée@findmetesting.com
+Andréanne@findmetesting.com
+Adélaïde@findmetesting.com
+Laurène@findmetesting.com
+Anaé@findmetesting.com
+Noëlla@findmetesting.com
+Anaël@findmetesting.com
+Maëlyss@findmetesting.com
+Lucrèce@findmetesting.com
+Lén@findmetesting.com
+Marie-thérèse@findmetesting.com
+Maéna@findmetesting.com
+Hélène@findmetesting.com
+Hélèna@findmetesting.com
+Méng@findmetesting.com
+Crééz@findmetesting.com
+Mélanie@findmetesting.com
+Frédérique@findmetesting.com
+Médiamass@findmetesting.com
+André@findmetesting.com
+Cinéma@findmetesting.com
+Mégane@findmetesting.com
+Amélie@findmetesting.com
+Nadège@findmetesting.com
+Rébecca@findmetesting.com
+Médiamass@findmetesting.com
+Céline@findmetesting.com
+Maïly@findmetesting.com
+Maï@findmetesting.com
+Maëlann@findmetesting.com
+Noëlla@findmetesting.com
+Laurélie@findmetesting.com
+Ruì@findmetesting.com
+Chloé@findmetesting.com
+Gaëlle@findmetesting.com
+Vénus@findmetesting.com
+Frédérique@findmetesting.com
+Amélie@findmetesting.com
+Loïs@findmetesting.com
+Marlène@findmetesting.com
+Stévina@findmetesting.com
+Clémentine@findmetesting.com
+Mégane@findmetesting.com
+Méng@findmetesting.com
+André@findmetesting.com
+Crééz@findmetesting.com
+Aí@findmetesting.com
+Uò@findmetesting.com
+Yú@findmetesting.com
+Marie-françoise@findmetesting.com
+Uò@findmetesting.com
+Inès@findmetesting.com
+Océane@findmetesting.com
+Marie-ève@findmetesting.com
+Rébecca@findmetesting.com
+Zoé@findmetesting.com
+Lài@findmetesting.com
+Rachèle@findmetesting.com
+Cécile@findmetesting.com
+Maïlys@findmetesting.com
+Garçon@findmetesting.com
+hereiam@testing.com
+
+It's a game of per%entage percentage.
+Findme#testing Findme testing.
+Over&over&over Over over over.
+[findmeinbrackets], findmeinbrackets
+(findmeinbrackets), findmeinbrackets
+<findmeinbrackets>, findmeinbrackets
+{findmeinbrackets>}, findmeinbrackets
+http://findme-testing.here.com
+http:\\findme-testing.here.com
+
+Vestibulum ante ipsum primis in faucibus orci luctus et ultrices Garçon@findmetesting.com cubilia Curae; Mauris viverra diam vitae quam. Suspendisse potenti. 
+Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Ellerey.Fanti@findmetesting.cn risus. Praesent lectus.
+
+Vivamus metus arcu, adipiscing findmetesting@findmetesting.com, hendrerit at, vulputate vitae, nisl.
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH"
+p3PBheAs,bot to test with,coinwalk,JavaScript,Monday 9th of October 2023 04:07:06 AM CDT,"var smiley = parseFloat(document.getElementById('pct_balance').value);
+var nudie = Number((smiley/144000).toFixed(8));
+var burp = nudie;
+var taget = (smiley*2000);
+var bolux = (nudie*10);
+var poopy = (nudie*6.5);
+var sexual = 0;
+var woman = ((Math.floor(smiley/bolux))*bolux);
+var fart = 1;
+var jockey = ((burp*1).toFixed(8));
+var bolance = parseFloat(document.getElementById('pct_balance').value);
+
+
+ 
+function dobet(){
+console.clear();
+bolance = document.getElementById('pct_balance').value;
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+(poopy+nudie)))&&(bolance!=sexual)&&(bolance>woman)) {
+    burp = burp*2;
+    sexual = parseFloat(bolance);
+}
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+(poopy+nudie)))&&(bolance!=sexual)&&(bolance<woman)) {
+    burp = burp*2;
+    fart = 0;
+    sexual = parseFloat(bolance);
+}
+if ((bolance>=(woman+(bolux*fart)))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+poopy))) {
+    burp = nudie;
+    fart = 1;
+    sexual = 0;
+    woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+}
+    if (bolance >= taget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+jockey = ((burp*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(jockey);
+$('#sim_lo').click();
+var dog = ((bolance-smiley).toFixed(8));
+console.log(""profit"");
+console.log(dog);
+}
+setInterval(() => dobet(), 1);"
+gvef5qru,C_number_paterns.c,dmilicev,C,Monday 9th of October 2023 04:05:39 AM CDT,"/*
+
+	C_number_paterns.c
+
+https://www.facebook.com/groups/3092811364081112/?multi_permalinks=7191234904238717
+
+	You can find all my C programs at Dragan Milicev's pastebin:
+
+	https://pastebin.com/u/dmilicev
+
+*/
+
+#include <stdio.h>
+
+int main(void){
+// r - row, c - column, b - blanco, d - digit, n - number of rows
+	int i, j, r, c, b, d, n=5;
+
+/*
+1
+1 1
+1 1 1
+1 1 1 1
+1 1 1 1 1
+*/
+	printf(""\n   1.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(c=0;c<=r;c++)		// count columns
+			printf(""1 "");		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1
+2 2
+3 3 3
+4 4 4 4
+5 5 5 5 5
+*/
+	printf(""\n   1.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",r+1);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+	/*
+5
+4 4
+3 3 3
+2 2 2 2
+1 1 1 1 1
+*/
+	printf(""\n   1.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",n-r);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1
+1 2
+1 2 3
+1 2 3 4
+1 2 3 4 5
+*/
+	printf(""\n   1.3 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",c+1);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1
+2 1
+3 2 1
+4 3 2 1
+5 4 3 2 1
+*/
+	printf(""\n   1.4 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		d = r+1;				// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "", d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+5
+4 5
+3 4 5
+2 3 4 5
+1 2 3 4 5
+*/
+	printf(""\n   1.5 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		d = n-r;				// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "", d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1
+2 3
+4 5 6
+7 8 9 10
+11 12 13 14 15
+*/
+	printf(""\n   1.6 \n\n"");
+	d = 1;						// first digit
+	for(r=0;r<n;r++){			// for n rows
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "", d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+        1
+      1 1
+    1 1 1
+  1 1 1 1
+1 1 1 1 1
+*/
+	printf(""\n   2.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf(""  "");		// print blanko
+		for(c=0;c<=r;c++)		// count columns
+			printf(""1 "");		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+        1
+      1 2
+    1 2 3
+  1 2 3 4
+1 2 3 4 5
+*/
+	printf(""\n   2.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf(""  "");		// print blanko
+		d = 1;					// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+        5
+      5 4
+    5 4 3
+  5 4 3 2
+5 4 3 2 1
+*/
+	printf(""\n   2.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf(""  "");		// print blanko
+		d = n;					// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 1 1 1 1
+  1 1 1 1
+    1 1 1
+      1 1
+        1
+*/
+	printf(""\n   3.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf(""  "");		// print blanko
+		for(c=0;c<n-r;c++)  	// count columns
+			printf(""1 "");		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 2 3 4 5
+  1 2 3 4
+    1 2 3
+      1 2
+        1
+*/
+	printf(""\n   3.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf(""  "");		// print blanko
+		d = 1;					// first digit in row
+		for(c=0;c<n-r;c++)  	// count columns
+			printf(""%d "",d++);		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+5 4 3 2 1
+  5 4 3 2
+    5 4 3
+      5 4
+        5
+*/
+	printf(""\n   3.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf(""  "");		// print blanko
+		d = n;					// first digit in row
+		for(c=0;c<n-r;c++)  	// count columns
+			printf(""%d "",d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 1 1 1 1
+1 1 1 1
+1 1 1
+1 1
+1
+*/
+	printf(""\n   4.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(c=n-r;c>0;c--)		// count columns
+			printf(""1 ""); 		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 2 3 4 5
+2 3 4 5
+3 4 5
+4 5
+5
+*/
+	printf(""\n   4.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		d = r + 1;				// first digit in row
+		for(c=n-r;c>0;c--)		// count columns
+			printf(""%d "",d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+5 4 3 2 1
+4 3 2 1
+3 2 1
+2 1
+1
+*/
+	printf(""\n   4.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		d = n - r;				// first digit in row
+		for(c=n-r;c>0;c--)		// count columns
+			printf(""%d "",d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+    1
+   1 1
+  1 1 1
+ 1 1 1 1
+1 1 1 1 1
+*/
+	printf(""\n   5.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf("" "");		// print blanko
+		for(c=0;c<=r;c++)		// count columns
+			printf(""1 "");		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+    1
+   1 2
+  1 2 3
+ 1 2 3 4
+1 2 3 4 5
+*/
+	printf(""\n   5.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf("" "");		// print blanko
+		d = 1;					// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+    5
+   5 4
+  5 4 3
+ 5 4 3 2
+5 4 3 2 1
+*/
+	printf(""\n   5.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=n-r-1;b>0;b--)	// count blanko
+			printf("" "");		// print blanko
+		d = n;					// first digit in row
+		for(c=0;c<=r;c++)		// count columns
+			printf(""%d "",d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 1 1 1 1
+ 1 1 1 1
+  1 1 1
+   1 1
+    1
+*/
+	printf(""\n   6.0 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf("" "");		// print blanko
+		for(c=0;c<n-r;c++)		// count columns
+			printf(""1 "");		// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+1 2 3 4 5
+ 1 2 3 4
+  1 2 3
+   1 2
+    1
+*/
+	printf(""\n   6.1 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf("" "");		// print blanko
+		d = 1;					// first digit in row
+		for(c=0;c<n-r;c++)		// count columns
+			printf(""%d "",d++);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+/*
+5 4 3 2 1
+ 5 4 3 2
+  5 4 3
+   5 5
+    5
+*/
+	printf(""\n   6.2 \n\n"");
+	for(r=0;r<n;r++){			// for n rows
+		for(b=0;b<r;b++)		// count blanko
+			printf("" "");		// print blanko
+		d = n;					// first digit in row
+		for(c=0;c<n-r;c++)		// count columns
+			printf(""%d "",d--);	// print pattern
+		printf(""\n"");			// new row
+	}
+
+
+
+	printf(""\n\n"");
+    return 0;
+} // main()
+"
+6sSuUCaC,1D and 2D list wrangling,earlution,Python,Monday 9th of October 2023 03:55:54 AM CDT,""""""" 1. Read values from a 1D list, output to console: """"""
+
+# Sample 1D list
+my_list = [1, 2, 3, 4, 5]
+
+# Output values from the list to the console
+for value in my_list:
+    print(value)
+
+
+"""""" 2. Read values from the console, write to a 1D list: """"""
+
+# Initialize an empty list
+my_list = []
+
+# Prompt the user for input and add values to the list
+while True:
+    user_input = input(""Enter a value (or 'exit' to quit): "")
+    if user_input.lower() == 'exit':
+        break
+    my_list.append(user_input)
+
+# Display the contents of the list
+print(""Contents of the list:"")
+for value in my_list:
+    print(value)
+
+
+"""""" 3. Read values from a 1D list, write to a text file: """"""
+
+# Sample 1D list
+my_list = [1, 2, 3, 4, 5]
+
+# Specify the name of the output text file
+output_file_name = ""output.txt""
+
+# Open the text file for writing
+with open(output_file_name, ""w"") as file:
+    for value in my_list:
+        file.write(str(value) + ""\n"")
+
+
+"""""" 4. Read values from the console, write to a text file: """"""
+
+# Specify the name of the output text file
+output_file_name = ""output.txt""
+
+# Open the text file for writing
+with open(output_file_name, ""w"") as file:
+    while True:
+        user_input = input(""Enter a value (or 'exit' to quit): "")
+        if user_input.lower() == 'exit':
+            break
+        file.write(user_input + ""\n"")
+
+
+"""""" 5. Read values from a text file (each value on a separate line), write to a 1D list: """"""
+
+# Specify the name of the input text file
+input_file_name = ""input.txt""
+
+# Initialize an empty list
+my_list = []
+
+# Open the text file for reading
+with open(input_file_name, ""r"") as file:
+    for line in file:
+        # Remove leading/trailing whitespace and add to the list
+        my_list.append(line.strip())
+
+# Display the contents of the list
+print(""Contents of the list:"")
+for value in my_list:
+    print(value)
+
+
+"""""" 6. Read a paragraph from a text file (terminated by a single EOL character), write to a 1D list:""""""
+
+# Specify the name of the input text file
+input_file_name = ""input.txt""
+
+# Initialize an empty list
+my_list = []
+
+# Open the text file for reading
+with open(input_file_name, ""r"") as file:
+    paragraph = file.read()
+
+# Split the paragraph into lines and add to the list
+my_list = paragraph.splitlines()
+
+# Display the contents of the list
+print(""Contents of the list:"")
+for value in my_list:
+    print(value)
+
+
+"""""" 7. Read values from a 2D list, output to console: """"""
+
+python
+Copy code
+# Sample 2D list
+two_d_list = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9]
+]
+
+# Output values from the 2D list to the console
+for row in two_d_list:
+    for value in row:
+        print(value, end="" "")  # Print values on the same line
+    print()  # Move to the next line after each row
+
+
+"""""" 8. Read CSV data from the console, write to a 2D list: """"""
+
+import csv
+
+# Initialize an empty 2D list
+two_d_list = []
+
+# Prompt the user for CSV input
+print(""Enter CSV data (e.g., 1,2,3):"")
+while True:
+    user_input = input(""Enter data (or 'exit' to quit): "")
+    if user_input.lower() == 'exit':
+        break
+    # Split the input into values and append to the 2D list
+    row = user_input.split(',')
+    two_d_list.append(row)
+
+# Display the contents of the 2D list
+print(""Contents of the 2D list:"")
+for row in two_d_list:
+    print(row)
+"
+nHHWGaug,Untitled,Thecedd17,Lua,Monday 9th of October 2023 03:24:25 AM CDT,"local args = { ... }
+ 
+local button = {}
+local filleds = {}
+local boxes = {}
+local lines = {}
+local texts = {}
+ 
+local refresh = true
+ 
+local infosSize = {}
+local controlsSize = {}
+local numbersSize = {}
+local currentRfTotal = 1
+local currentRfTick = 1
+local currentFuelConsumedLastTick = 0.00001
+ 
+ 
+local rfPerTickMax = 1
+local rfTotalMax = 10000000
+local minPowerRod = 0
+local maxPowerRod = 100
+local currentRodLevel = 1
+ 
+local index = """"
+ 
+local reactors = {}
+local monitors = {}
+ 
+local VERSION = ""NONE""
+ 
+function checkVersionTooOld()
+    local uselessMonitors = {peripheral.find(""monitor"")}
+end
+ 
+function checkMBFunctionAvailability()
+    local uselessMbConnected = reactors[1].mbIsConnected()
+    local uselessMbAssembled = reactors[1].mbIsAssembled()
+end
+ 
+function checkEnergyCapacityFunction()
+    local uselessEnergyCapacity = reactors[1].getEnergyStats().energyCapacity
+end
+ 
+-- VERSIONS - BIG, EXTREME, BIGGERv1, BIGGERv2
+function initReactor()
+    if pcall(checkVersionTooOld) then
+        monitors = {peripheral.find(""monitor"")}
+ 
+        -- allow 5 seconds to detect if the reactor is on the network
+        print(""Detecting reactor. This may take up to 5 seconds."")
+        local looptyloop = 0
+        while looptyloop ~= 5 do
+            if peripheral.find(""BigReactors-Reactor"") ~= nil then
+                reactors = {peripheral.find(""BigReactors-Reactor"")}
+                if pcall(checkEnergyCapacityFunction) then
+                    rfTotalMax = reactors[1].getEnergyStats().energyCapacity
+                end
+                if pcall(checkMBFunctionAvailability) then
+                    VERSION = ""EXTREME""
+                else 
+                    VERSION = ""BIG""
+                end
+                break
+            elseif peripheral.find(""bigger-reactor"") ~= nil then
+                reactors = {peripheral.find(""bigger-reactor"")}
+                VERSION = ""BIGGERv1""
+                break
+            elseif peripheral.find(""BiggerReactors_Reactor"") ~= nil then
+                reactors = {peripheral.find(""BiggerReactors_Reactor"")}
+                VERSION = ""BIGGERv2""
+                rfTotalMax = reactors[1].battery().capacity()
+                break
+            end
+ 
+            sleep(1)
+            looptyloop = looptyloop + 1
+        end
+ 
+        if monitors[1] == nil then
+            error(""The Monitor is not being detected, make sure the connections(modem) are activated"", 0)
+        end
+ 
+        if reactors[1] == nil then
+            error(""The Reactor is not being detected, make sure the connections(modem) are activated. The problem could also be related to chunk protection on some public servers, ask an admin about it."", 0)
+        end
+    else
+        error(""The version of ComputerCraft is too old to use this program, sorry"", 0)
+    end
+    print(""Reactor detected. Program Starting."")
+end
+ 
+if (#args == 0) then
+    error(""No index Given, Make sure to start the 'start' program and not the 'reactor' program"", 0)
+end
+ 
+if (#args == 1) then
+    index = args[1]
+end
+ 
+initReactor() -- Init and Verify that everything is okay to start the program
+ 
+local mon = monitors[1]
+ 
+-- Use the black thingy sponge to clear the chalkboard
+ 
+term.redirect(mon)
+mon.clear()
+mon.setTextColor(colors.white)
+mon.setBackgroundColor(colors.black)
+ 
+function clearTable()
+    button = {}
+end
+ 
+ 
+-- All the things that make my buttons work
+ 
+function setButton(name, title, func, xmin, ymin, xmax, ymax, elem, elem2, color)
+    button[name] = {}
+    button[name][""title""] = title
+    button[name][""func""] = func
+    button[name][""active""] = false
+    button[name][""xmin""] = xmin
+    button[name][""ymin""] = ymin
+    button[name][""xmax""] = xmax
+    button[name][""ymax""] = ymax
+    button[name][""color""] = color
+    button[name][""elem""] = elem
+    button[name][""elem2""] = elem2
+end
+ 
+-- stuff and things for buttons
+ 
+function fill(text, color, bData)
+   mon.setBackgroundColor(color)
+   mon.setTextColor(colors.white)
+   local yspot = math.floor((bData[""ymin""] + bData[""ymax""]) /2)
+   local xspot = math.floor((bData[""xmax""] - bData[""xmin""] - string.len(bData[""title""])) /2) +1
+   for j = bData[""ymin""], bData[""ymax""] do
+      mon.setCursorPos(bData[""xmin""], j)
+      if j == yspot then
+         for k = 0, bData[""xmax""] - bData[""xmin""] - string.len(bData[""title""]) +1 do
+            if k == xspot then
+               mon.write(bData[""title""])
+            else
+               mon.write("" "")
+            end
+         end
+      else
+         for i = bData[""xmin""], bData[""xmax""] do
+            mon.write("" "")
+         end
+      end
+   end
+   mon.setBackgroundColor(colors.black)
+end
+ 
+-- stuff and things for buttons
+ 
+function screen()
+   local currColor
+   for name,data in pairs(button) do
+      local on = data[""active""]
+      currColor = data[""color""]
+      fill(name, currColor, data)
+   end
+end
+ 
+-- stuff and things for buttons
+ 
+function flash(name)
+    screen()
+end
+ 
+-- magical handler for clicky clicks
+ 
+function checkxy(x, y)
+   for name, data in pairs(button) do
+      if y>=data[""ymin""] and  y <= data[""ymax""] then
+         if x>=data[""xmin""] and x<= data[""xmax""] then
+            data[""func""](data[""elem""], data[""elem2""])
+            flash(data['name'])
+            return true
+            --data[""active""] = not data[""active""]
+            --print(name)
+         end
+      end
+   end
+   return false
+end
+ 
+-- Don't question my code, it works on my machine...
+ 
+function label(w, h, text)
+   mon.setCursorPos(w, h)
+   mon.write(text)
+end
+ 
+-- Draw function : put's all the beautiful magic in the screen
+ 
+function draw()
+    for key,value in pairs(filleds) do
+        local counter = 1
+        for i=value[2],value[4],1 do
+            paintutils.drawLine(value[1] , value[2]+counter, value[3], value[2]+counter, value[5])
+            counter = counter + 1
+        end
+    end
+ 
+    for key,value in pairs(boxes) do
+        paintutils.drawLine(value[1] , value[2], value[1], value[4], value[5])
+        paintutils.drawLine(value[1] , value[2], value[3], value[2], value[5])
+        paintutils.drawLine(value[1] , value[4], value[3], value[4], value[5])
+        paintutils.drawLine(value[3] , value[2], value[3], value[4], value[5])
+    end
+ 
+    for key,value in pairs(lines) do
+        paintutils.drawLine(value[1] , value[2], value[3], value[4], value[5])
+    end
+ 
+    for key,value in pairs(texts) do
+        mon.setCursorPos(value[1], value[2])
+        mon.setTextColor(value[4])
+        mon.setBackgroundColor(value[5])
+        mon.write(value[3])
+    end
+    screen()
+    resetDraw()
+end
+ 
+-- Resets the elements to draw to only draw the neccessity
+ 
+function resetDraw()
+    filleds = {}
+    boxes = {}
+    lines = {}
+    texts = {}
+end
+ 
+-- Handles all the clicks for the buttons
+ 
+function clickEvent()
+    local myEvent={os.pullEvent(""monitor_touch"")}
+    checkxy(myEvent[3], myEvent[4])
+end
+ 
+-- Power up the reactor (M&N are a good source of food right?)
+ 
+function powerUp(m,n)
+    local reactor = reactors[1]
+    reactor.setActive(true)
+end
+ 
+-- Power down the reactor (M&N are a good source of food right?)
+ 
+function powerDown(m,n)
+    local reactor = reactors[1]
+    reactor.setActive(false)
+end
+ 
+-- Handles and calculate the Min and Max of the power limitation
+ 
+function modifyRods(limit, number)
+    local tempLevel = 0
+ 
+    if limit == ""min"" then
+        tempLevel = minPowerRod + number
+        if tempLevel <= 0 then
+            minPowerRod = 0
+        end
+ 
+        if tempLevel >= maxPowerRod then
+            minPowerRod = maxPowerRod -10
+        end
+ 
+        if tempLevel < maxPowerRod and tempLevel > 0 then
+            minPowerRod = tempLevel
+        end
+    else
+        tempLevel = maxPowerRod + number
+        if tempLevel <= minPowerRod then
+            maxPowerRod = minPowerRod +10
+        end
+ 
+        if tempLevel >= 100 then
+            maxPowerRod = 100
+        end
+ 
+        if tempLevel > minPowerRod and tempLevel < 100 then
+            maxPowerRod = tempLevel
+        end
+    end
+ 
+    table.insert(lines, {controlsSize['inX'], controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, controlsSize['inX'] + controlsSize['width'], controlsSize['inY']+(controlsSize['sectionHeight']*1)+4, colors.black})
+ 
+    table.insert(texts, {controlsSize['inX']+5, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, minPowerRod .. '%', colors.lightBlue, colors.black})
+    table.insert(texts, {controlsSize['inX']+13, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, '--', colors.white, colors.black})
+    table.insert(texts, {controlsSize['inX']+20, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, maxPowerRod .. '%', colors.purple, colors.black})
+ 
+    setInfoToFile()
+    adjustRodsLevel()
+end
+ 
+-- Calculate and adjusts the level of the rods
+-- TOMODIFY
+function adjustRodsLevel()
+    local reactor = reactors[1]
+ 
+    local allStats = getAllStats()
+    local currentRfTotal = allStats[""rfTotal""]
+    local reactorRodsLevel = allStats[""reactorRodsLevel""]
+ 
+    differenceMinMax = maxPowerRod - minPowerRod
+ 
+    maxPower = (rfTotalMax/100) * maxPowerRod
+    minPower = (rfTotalMax/100) * minPowerRod
+ 
+    if currentRfTotal >= maxPower then
+        currentRfTotal = maxPower
+    end
+ 
+    if currentRfTotal <= minPower then
+        currentRfTotal = minPower
+    end
+ 
+    currentRfTotal = currentRfTotal - (rfTotalMax/100) * minPowerRod
+ 
+    local rfInBetween = (rfTotalMax/100) * differenceMinMax
+    local rodLevel = math.ceil((currentRfTotal/rfInBetween)*100)
+    if VERSION == ""EXTREME"" then
+        for key,value in pairs(reactorRodsLevel) do 
+            reactorRodsLevel[key] = rodLevel
+        end
+        reactor.setControlRodsLevels(reactorRodsLevel)
+    else
+        reactor.setAllControlRodLevels(rodLevel)
+    end
+end
+ 
+-- Creates the frame and the basic of the visual
+-- Also adds the variables informations for placement of stuff and things
+ 
+function addDrawBoxesSingleReactor()
+    local w, h = mon.getSize()
+    local margin = math.floor((w/100)*2)
+ 
+    infosSize['startX'] = margin + 1
+    infosSize['startY'] =  margin + 1
+    infosSize['endX'] = (((w-(margin*2))/3)*2)-margin
+    infosSize['endY'] = h - margin
+    infosSize['height'] = infosSize['endY']-infosSize['startY']-(margin*2)-2
+    infosSize['width'] = infosSize['endX']-infosSize['startX']-(margin*2)-2
+    infosSize['inX'] = infosSize['startX'] + margin +1
+    infosSize['inY'] = infosSize['startY'] + margin +1
+    infosSize['sectionHeight'] = math.floor(infosSize['height']/3)
+ 
+    table.insert(boxes, {infosSize['startX'] , infosSize['startY'], infosSize['endX'], infosSize['endY'], colors.gray})
+    local name = ""INFOS""
+    table.insert(lines, {infosSize['startX'] + margin , infosSize['startY'], infosSize['startX'] + (margin*2) + #name+1, infosSize['startY'], colors.black})
+    table.insert(texts, {infosSize['startX'] + (margin*2), infosSize['startY'], name, colors.white, colors.black})
+ 
+    local names = {}
+    names[1] = 'Energie au dernier tick'
+    names[2] = 'Stockage Energie'
+    names[3] = 'Niveau des rods'
+ 
+    for i=0,2,1 do
+        table.insert(texts, {infosSize['inX'] + margin, infosSize['inY'] + (infosSize['sectionHeight']*i) +i, names[i+1], colors.white, colors.black})
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 2 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + infosSize['width'], infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.lightGray})
+    end
+ 
+ 
+    -- Controls
+ 
+    controlsSize['startX'] = infosSize['endX'] + margin + 1
+    controlsSize['startY'] =  margin + 1
+    controlsSize['endX'] = w-margin
+    controlsSize['endY'] = (((h - (margin*2))/3)*2) +1
+    controlsSize['height'] = controlsSize['endY']-controlsSize['startY']-(margin)-1
+    controlsSize['width'] = controlsSize['endX']-controlsSize['startX']-(margin*2)-2
+    controlsSize['inX'] = controlsSize['startX'] + margin +1
+    controlsSize['inY'] = controlsSize['startY'] + margin
+ 
+    table.insert(boxes, {controlsSize['startX'] , controlsSize['startY'], controlsSize['endX'], controlsSize['endY'], colors.gray})
+    name = ""CONTROLES""
+    table.insert(lines, {controlsSize['startX'] + margin , controlsSize['startY'], controlsSize['startX'] + (margin*2) + #name+1, controlsSize['startY'], colors.black})
+    table.insert(texts, {controlsSize['startX'] + (margin*2), controlsSize['startY'], name, colors.white, colors.black})
+ 
+    controlsSize['sectionHeight'] = math.floor(controlsSize['height']/4)
+ 
+    reactor = reactors[1]
+ 
+    mon.setTextColor(colors.white)
+    setButton(""ON"",""ON"", powerUp, controlsSize['inX'], controlsSize['inY'], controlsSize['inX'] + math.floor(controlsSize['width']/2) -1, controlsSize['inY'] +2, 0, 0, colors.green)
+    setButton(""OFF"",""OFF"", powerDown, controlsSize['inX'] + math.floor(controlsSize['width']/2) +2, controlsSize['inY'], controlsSize['inX'] + controlsSize['width'], controlsSize['inY'] +2,0, 0, colors.red)
+ 
+    table.insert(texts, {controlsSize['inX']+6, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+1, 'Gestion auto rods', colors.white, colors.black})
+ 
+    table.insert(texts, {controlsSize['inX']+5, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+3, 'MIN', colors.lightBlue, colors.black})
+    table.insert(texts, {controlsSize['inX']+5, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, minPowerRod..'%', colors.lightBlue, colors.black})
+ 
+    table.insert(texts, {controlsSize['inX']+13, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, '--', colors.white, colors.black})
+    table.insert(texts, {controlsSize['inX']+20, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+3, 'MAX', colors.purple, colors.black})
+    table.insert(texts, {controlsSize['inX']+20, controlsSize['inY'] +(controlsSize['sectionHeight']*1)+4, maxPowerRod..'%', colors.purple, colors.black})
+    mon.setTextColor(colors.white)
+ 
+    setButton(""low-10"",""-10"", modifyRods, controlsSize['inX'], controlsSize['inY'] +(controlsSize['sectionHeight']*2)+2, controlsSize['inX'] + math.floor(controlsSize['width']/2) -1, controlsSize['inY'] +(controlsSize['sectionHeight']*2)+4, ""min"", -10, colors.lightBlue)
+    setButton(""high-10"",""-10"", modifyRods, controlsSize['inX'] + math.floor(controlsSize['width']/2) +2, controlsSize['inY'] +(controlsSize['sectionHeight']*2)+2, controlsSize['inX'] + controlsSize['width'], controlsSize['inY'] +(controlsSize['sectionHeight']*2)+4, ""max"", -10, colors.purple)
+ 
+    setButton(""low+10"",""+10"", modifyRods, controlsSize['inX'], controlsSize['inY'] +(controlsSize['sectionHeight']*3)+2, controlsSize['inX'] + math.floor(controlsSize['width']/2) -1, controlsSize['inY'] +(controlsSize['sectionHeight']*3)+4, ""min"", 10, colors.lightBlue)
+    setButton(""high+10"",""+10"", modifyRods, controlsSize['inX'] + math.floor(controlsSize['width']/2) +2, controlsSize['inY'] +(controlsSize['sectionHeight']*3)+2, controlsSize['inX'] + controlsSize['width'], controlsSize['inY'] +(controlsSize['sectionHeight']*3)+4, ""max"", 10, colors.purple)
+ 
+    -- Numbers
+ 
+    numbersSize['startX'] = infosSize['endX'] + margin + 1
+    numbersSize['startY'] = controlsSize['endY'] + margin + 1
+    numbersSize['endX'] = w-margin
+    numbersSize['endY'] = h-margin
+    numbersSize['height'] = numbersSize['endY']-numbersSize['startY']-(margin)-1
+    numbersSize['width'] = numbersSize['endX']-numbersSize['startX']-(margin*2)-2
+    numbersSize['inX'] = numbersSize['startX'] + margin +1
+    numbersSize['inY'] = numbersSize['startY'] + margin
+ 
+    table.insert(boxes, {numbersSize['startX'] , numbersSize['startY'], numbersSize['endX'], numbersSize['endY'], colors.gray})
+    name = ""DONNEES""
+    table.insert(lines, {numbersSize['startX'] + margin , numbersSize['startY'], numbersSize['startX'] + (margin*2) + #name+1, numbersSize['startY'], colors.black})
+    table.insert(texts, {numbersSize['startX'] + (margin*2), numbersSize['startY'], name, colors.white, colors.black})
+ 
+    refresh = true
+    while refresh do
+        parallel.waitForAny(refreshSingleReactor,clickEvent)
+    end
+end
+ 
+-- Gets the stats needed for the program to function based on the version of the reactor
+-- TOMODIFY
+function getAllStats()
+    local stats = {}
+    local reactor = reactors[1]
+ 
+    if VERSION == ""EXTREME"" then 
+        local reactorEnergyStats = reactor.getEnergyStats()
+        local reactorFuelStats = reactor.getFuelStats()
+ 
+        stats[""reactorRodsLevel""] = reactor.getControlRodsLevels()
+        stats[""rfTotal""] = math.floor(reactorEnergyStats[""energyStored""])
+        stats[""rfPerTick""] = math.floor(reactorEnergyStats[""energyProducedLastTick""])
+        stats[""rodLevel""] = stats[""reactorRodsLevel""][0]
+        stats[""fuelPerTick""] = round(reactorFuelStats[""fuelConsumedLastTick""], 2)
+    elseif VERSION == ""BIG"" or VERSION == ""BIGGERv1"" then  
+        stats[""rfTotal""] = math.floor(reactor.getEnergyStored())
+        stats[""rfPerTick""] = math.floor(reactor.getEnergyProducedLastTick())
+        stats[""rodLevel""] = math.floor(reactor.getControlRodLevel(0))
+        stats[""fuelPerTick""] = reactor.getFuelConsumedLastTick()
+    elseif VERSION == ""BIGGERv2"" then 
+        stats[""rfTotal""] = reactor.battery().stored()
+        stats[""rfPerTick""] = math.floor(reactor.battery().producedLastTick())
+        stats[""rodLevel""] = math.floor(reactor.getControlRod(0).level())
+        stats[""fuelPerTick""] = reactor.fuelTank().burnedLastTick()
+    end
+    
+    return stats 
+end
+ 
+-- Makes and Handles the draw function for less lag in the visual
+function refreshSingleReactor()
+    local rfPerTick = 0
+    local rfTotal = 0
+    local reactor = reactors[1]
+ 
+    local allStats = getAllStats()
+    rfTotal = allStats[""rfTotal""]
+    rfPerTick = allStats[""rfPerTick""]
+    rodLevel = allStats[""rodLevel""]
+    fuelPerTick = allStats[""fuelPerTick""]
+ 
+    local i = 0
+    local infotoAdd = 'RF/tick : '
+ 
+    if currentRfTick ~= rfPerTick then
+        currentRfTick = rfPerTick
+        if rfPerTick > rfPerTickMax then
+            rfPerTickMax = rfPerTick
+        end
+ 
+        table.insert(lines, {numbersSize['inX'] , numbersSize['inY'],numbersSize['inX'] + numbersSize['width'] , numbersSize['inY'], colors.black})
+        table.insert(texts, {numbersSize['inX'], numbersSize['inY'], infotoAdd .. rfPerTick .. "" RF"", colors.white, colors.black})
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + infosSize['width'], infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.lightGray})
+ 
+        width = math.floor((infosSize['width'] / rfPerTickMax)*rfPerTick)
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + width, infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.green})
+ 
+    end
+ 
+    i = 1
+    infotoAdd = 'STOCKAGE : '
+    if currentRfTotal ~= rfTotal then
+        currentRfTotal = rfTotal
+ 
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + infosSize['width'], infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.lightGray})
+ 
+        width = math.floor((infosSize['width'] / rfTotalMax)*rfTotal)
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + width, infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.green})
+        table.insert(lines, {numbersSize['inX'] , numbersSize['inY'] +2 ,numbersSize['inX'] + numbersSize['width'] , numbersSize['inY'] +2, colors.black})
+        table.insert(texts, {numbersSize['inX'], numbersSize['inY']+ 2 , infotoAdd .. rfTotal .. "" RF"", colors.white, colors.black})
+    end
+ 
+    i = 2
+    infotoAdd = 'NIVEAU RODS : '
+    if currentRodLevel ~= rodLevel then
+        currentRodLevel = rodLevel
+ 
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + infosSize['width'], infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.lightGray})
+ 
+        width = math.floor((infosSize['width'] / 100)*rodLevel)
+        table.insert(filleds, {infosSize['inX'] , infosSize['inY'] + 1 + (infosSize['sectionHeight']*i) +i, infosSize['inX'] + width, infosSize['inY'] + (infosSize['sectionHeight']*(i+1))-2 +i, colors.green})
+        table.insert(lines, {numbersSize['inX'] , numbersSize['inY']+4 ,numbersSize['inX'] + numbersSize['width'] , numbersSize['inY'] +4, colors.black})
+        table.insert(texts, {numbersSize['inX'], numbersSize['inY']+ 4 , infotoAdd .. rodLevel .. ""%"", colors.white, colors.black})
+    end
+ 
+    i = 3
+    infotoAdd = 'CARBURANT : '
+    if currentFuelConsumedLastTick ~= fuelPerTick then
+        currentFuelConsumedLastTick = fuelPerTick
+ 
+        table.insert(lines, {numbersSize['inX'] , numbersSize['inY']+6 ,numbersSize['inX'] + numbersSize['width'] , numbersSize['inY'] +6, colors.black})
+        table.insert(texts, {numbersSize['inX'], numbersSize['inY']+ 6 , infotoAdd .. format_num(tonumber(fuelPerTick),3) .. ""mb/t"", colors.white, colors.black})
+    end
+ 
+    mon.setTextColor(colors.white)
+    adjustRodsLevel()
+ 
+    draw()
+ 
+    sleep(2)
+end
+ 
+--
+-- ** Get the informations from the index file
+-- line 1 = min ROD
+-- line 2 = max ROD
+--
+ 
+function getInfoFromFile()
+ 
+     if (fs.exists(index.."".txt"") == false) then
+        file = io.open(index.."".txt"",""w"")
+        file:write(""0"")
+        file:write(""\n"")
+        file:write(""100"")
+        file:close()
+    else
+        file = fs.open(index.."".txt"",""r"")
+        minPowerRod = tonumber(file.readLine())
+        maxPowerRod = tonumber(file.readLine())
+        file.close()
+    end
+end
+ 
+-- Save informations to the index file
+ 
+function setInfoToFile()
+    file = io.open(index.."".txt"",""w"")
+    file:write(minPowerRod .. ""\n"" .. maxPowerRod)
+    file:flush()
+    file:close()
+end
+ 
+---============================================================
+-- add comma to separate thousands
+-- From Lua-users.org/wiki/FormattingNumbers
+--
+--
+function comma_value(amount)
+  local formatted = amount
+  while true do
+    formatted, k = string.gsub(formatted, ""^(-?%d+)(%d%d%d)"", '%1,%2')
+    if (k==0) then
+      break
+    end
+  end
+  return formatted
+end
+ 
+---============================================================
+-- rounds a number to the nearest decimal places
+-- From Lua-users.org/wiki/FormattingNumbers
+--
+--
+function round(val, decimal)
+  if (decimal) then
+    return math.floor( (val * 10^decimal) + 0.5) / (10^decimal)
+  else
+    return math.floor(val+0.5)
+  end
+end
+ 
+--===================================================================
+-- given a numeric value formats output with comma to separate thousands
+-- and rounded to given decimal places
+-- From Lua-users.org/wiki/FormattingNumbers
+--
+function format_num(amount, decimal, prefix, neg_prefix)
+  local str_amount,  formatted, famount, remain
+ 
+  decimal = decimal or 2  -- default 2 decimal places
+  neg_prefix = neg_prefix or ""-"" -- default negative sign
+ 
+  famount = math.abs(round(amount,decimal))
+  famount = math.floor(famount)
+ 
+  remain = round(math.abs(amount) - famount, decimal)
+ 
+        -- comma to separate the thousands
+  formatted = comma_value(famount)
+ 
+        -- attach the decimal portion
+  if (decimal > 0) then
+    remain = string.sub(tostring(remain),3)
+    formatted = formatted .. ""."" .. remain ..
+                string.rep(""0"", decimal - string.len(remain))
+  end
+ 
+        -- attach prefix string e.g '$'
+  formatted = (prefix or """") .. formatted
+ 
+        -- if value is negative then format accordingly
+  if (amount<0) then
+    if (neg_prefix==""()"") then
+      formatted = ""(""..formatted .."")""
+    else
+      formatted = neg_prefix .. formatted
+    end
+  end
+ 
+  return formatted
+end
+ 
+-- Clear and make the pixel smaller because we are not blind
+ 
+mon.setBackgroundColor(colors.black)
+mon.clear()
+mon.setTextScale(0.5)
+ 
+-- Get the information from the index file
+getInfoFromFile()
+ 
+ 
+-- Add's the visual and starts the Loop
+addDrawBoxesSingleReactor()"
+CSpUzsZy,Untitled,Derga,C++,Monday 9th of October 2023 02:25:58 AM CDT,"#include <algorithm>
+#include <iostream>
+#include <climits>
+#include <vector>
+
+using namespace std;
+
+void GetData(vector<vector<int>>& sequences) {
+    for (vector<int>& sequence : sequences) {
+        for (int& number : sequence) {
+            cin >> number;
+        }
+    }
+}
+
+int GetTwoArraysElementsMinMaxIdx(const vector<int>& incr, const vector<int>& decr) {
+    int cur_max = INT_MAX;
+    int max_idx = -1;
+    for (int i = 0; i < incr.size(); ++i) {
+        if (cur_max > incr[i]  && cur_max > decr[i])
+        {
+            cur_max = max(incr[i], decr[i]);
+            max_idx = i;
+        }
+    }
+    return max_idx;
+}
+
+int main() {
+    int increasing_count, decreasing_count, numbers_count;
+    cin >> increasing_count >> decreasing_count >> numbers_count;
+    vector<vector<int>> increasing(increasing_count, vector<int>(numbers_count));
+    vector<vector<int>> decreasing(decreasing_count, vector<int>(numbers_count));
+
+    GetData(increasing);
+    GetData(decreasing);
+    int requests_count;
+    cin >> requests_count;
+    for (int i = 0; i < requests_count; ++i) {
+        int incr_array_idx, decr_array_idx;
+        cin >> incr_array_idx >> decr_array_idx;
+        --incr_array_idx;
+        --decr_array_idx;
+        cout << GetTwoArraysElementsMinMaxIdx(increasing[incr_array_idx], decreasing[decr_array_idx]) + 1 << '\n';
+    }
+
+    return 0;
+}
+
+/*
+test1
+4 3 5
+1 2 3 4 5
+1 1 1 1 1
+0 99999 99999 99999 99999
+0 0 0 0 99999
+5 4 3 2 1
+99999 99999 99999 0 0
+99999 99999 0 0 0
+12
+1 1
+1 2
+1 3
+2 1
+2 2
+2 3
+3 1
+3 2
+3 3
+4 1
+4 2
+4 3
+
+3
+4
+3
+5
+4
+3
+1
+4
+3
+4
+4
+4
+*/"
+QnYzXgeS,Box Model dan Floating,gurumutant,HTML 5,Monday 9th of October 2023 01:56:48 AM CDT,"<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { margin: auto; background-color: lightblue; }
+.container {
+	width: 454px; 
+}
+div.d1 {
+  background-color: lightgrey;
+  width: 160px;
+  border: 15px solid green;
+  padding: 10px 30px 10px 60px; 
+  margin: 1px;
+  float: left;
+}
+p.d2 {
+  background-color: powderblue;
+  width: 100px;
+  border: 15px solid green;
+  padding: 10px 20px 10px 20px; 
+  margin: 1px;
+  float: left;
+}
+</style>
+</head>
+<body>
+
+<h2>Demonstrating the Box Model</h2>
+
+<p>The CSS box model is essentially a box that wraps around every HTML element. It consists of: borders, padding, margins, and the actual content.</p>
+<div class=""container"">
+<div class=""d1"">This text is the content of the box. We have added a 50px padding, 20px margin and a 15px green border. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</div>
+<p class=""d2"">Div ke 2</p>
+</div> <!-- .container -->
+</body>
+</html>
+
+
+"
+WWqwU7Kc,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:56:38 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Initialize the initialized flag
+local initialized = false
+
+-- Function to initialize the turtle
+function initializeTurtle()
+    print(""Initializing turtle..."")
+
+    -- Check if the turtle is already at the initial Y level
+    while turtle.getY() > currentY do
+        turtle.down()
+    end
+
+    -- Ensure the turtle is facing the initial mining direction
+    if turtle.getFuelLevel() < 10 then
+        print(""Please provide fuel (coal) for the turtle."")
+        while turtle.getFuelLevel() < 10 do
+            os.sleep(1)
+        end
+    end
+
+    -- Move to the initial Y level
+    while turtle.getY() < currentY do
+        turtle.up()
+    end
+
+    print(""Turtle initialized."")
+    initialized = true
+end
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal if fuel is low
+function refuelIfNeeded()
+    if not initialized then
+        return
+    end
+
+    if turtle.getFuelLevel() < 10 then
+        for slot = 1, 16 do
+            local itemData = turtle.getItemDetail(slot)
+            if itemData and itemData.name == ""minecraft:coal"" then
+                turtle.select(slot)
+                turtle.refuel()
+            end
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentY >= finalY do
+    if not initialized then
+        initializeTurtle() -- Initialize the turtle
+    end
+
+    -- Refuel if fuel is low
+    refuelIfNeeded()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                turtle.turnRight()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while turtle.getY() > finalY do
+        turtle.down()
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+
+    -- Decrement Y
+    currentY
+"
+BeaY3L0e,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:55:01 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Function to initialize the turtle
+function initializeTurtle()
+    print(""Initializing turtle..."")
+
+    -- Check if the turtle is already at the initial Y level
+    while turtle.getY() > currentY do
+        turtle.down()
+    end
+
+    -- Ensure the turtle is facing the initial mining direction
+    if turtle.getFuelLevel() < 10 then
+        print(""Please provide fuel (coal) for the turtle."")
+        while turtle.getFuelLevel() < 10 do
+            os.sleep(1)
+        end
+    end
+
+    -- Move to the initial Y level
+    while turtle.getY() < currentY do
+        turtle.up()
+    end
+
+    print(""Turtle initialized."")
+end
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal if fuel is low
+function refuelIfNeeded()
+    if turtle.getFuelLevel() < 10 then
+        for slot = 1, 16 do
+            local itemData = turtle.getItemDetail(slot)
+            if itemData and itemData.name == ""minecraft:coal"" then
+                turtle.select(slot)
+                turtle.refuel()
+            end
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+local initialized = false
+
+while currentY >= finalY do
+    if not initialized then
+        initializeTurtle() -- Initialize the turtle
+        initialized = true
+    end
+
+    -- Refuel if fuel is low
+    refuelIfNeeded()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                turtle.turnRight()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while turtle.getY() > finalY do
+        turtle.down()
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+
+    -- Decrement Y
+    currentY = currentY - 1
+end
+"
+9PAyY5rT,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:53:29 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal if fuel is low
+function refuelIfNeeded()
+    if turtle.getFuelLevel() < 10 then
+        for slot = 1, 16 do
+            local itemData = turtle.getItemDetail(slot)
+            if itemData and itemData.name == ""minecraft:coal"" then
+                turtle.select(slot)
+                turtle.refuel()
+            end
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+local initialized = false
+
+while currentY >= finalY do
+    if not initialized then
+        -- Move to the initial Y level
+        while turtle.getY() < currentY do
+            turtle.up()
+        end
+        initialized = true
+    end
+
+    -- Refuel if fuel is low
+    refuelIfNeeded()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                turtle.turnRight()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while turtle.getY() > finalY do
+        turtle.down()
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+
+    -- Decrement Y
+    currentY = currentY - 1
+end
+"
+mLk1VKt8,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:49:52 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+local initialized = false
+
+while currentY >= finalY do
+    if not initialized then
+        -- Move to the initial Y level
+        while turtle.getY() < currentY do
+            turtle.up()
+        end
+        initialized = true
+    end
+
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                turtle.turnRight()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while turtle.getY() > finalY do
+        turtle.down()
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+
+    -- Decrement Y
+    currentY = currentY - 1
+end
+"
+h4vxRYyw,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:39:13 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel and currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Start by moving forward once
+    breakBlocks()
+
+    -- Mine the quarry area
+    for x = 2, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        local z = z or 0  -- Initialize z if not defined
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel > finalY do
+        turtle.down()
+        currentYLevel = currentYLevel - 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+e88bqbpV,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:36:12 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel and currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Start by moving forward once
+    breakBlocks()
+
+    -- Mine the quarry area
+    for x = 2, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel > finalY do
+        turtle.down()
+        currentYLevel = currentYLevel - 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+A2mNexxH,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:32:59 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel and currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        local z = z or 0  -- Initialize z if not defined
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel > finalY do
+        turtle.down()
+        currentYLevel = currentYLevel - 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+RrKugBv3,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:30:33 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel and currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel > finalY do
+        turtle.down()
+        currentYLevel = currentYLevel - 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+7LFHf5y2,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:28:54 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    if currentYLevel > finalY then
+        while currentYLevel > finalY do
+            turtle.down()
+            currentYLevel = currentYLevel - 1
+        end
+    else
+        break -- Exit the loop when finalY is reached
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+WwRsdwe2,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:26:55 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel and currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel < currentY do
+        turtle.up()
+        currentYLevel = currentYLevel + 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+AaBu2JAw,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:24:38 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                if z < areaLength then
+                    turtle.turnRight()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnRight()
+                end
+            else
+                if z < areaLength then
+                    turtle.turnLeft()
+                    turtle.dig()
+                    turtle.forward()
+                    turtle.turnLeft()
+                end
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel < currentY do
+        turtle.up()
+        currentYLevel = currentYLevel + 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
+EgucQCRi,Untitled,yoshimi,Lua,Monday 9th of October 2023 01:21:57 AM CDT,"-- Quarry Turtle Program with Fuel Refueling and Full Inventory Check
+-- This program will mine from the current Y level to the final Y level in the specified area.
+-- Waste materials (including granite, andesite, diorite, cobblestone, deepslate, and dirt) will be thrown out,
+-- valuables will be deposited into a chest, and the turtle will attempt to refuel using mined coal.
+-- The turtle will only empty its inventory into the chest when it's full.
+
+-- Prompt the user to place a chest for storing valuables
+print(""Please place a chest for storing valuables."")
+while not turtle.detect() do
+    os.sleep(1)
+end
+turtle.dig()
+turtle.select(1) -- Select the first inventory slot
+turtle.place()
+
+-- User input for Y levels and area dimensions
+print(""Enter the current Y level:"")
+local currentY = tonumber(read())
+print(""Enter the final Y level:"")
+local finalY = tonumber(read())
+print(""Enter the quarry area width:"")
+local areaWidth = tonumber(read())
+print(""Enter the quarry area length:"")
+local areaLength = tonumber(read())
+
+-- Initialize the current Y level
+local currentYLevel = currentY
+
+-- Function to check if an item is waste material
+function isWaste(itemName)
+    local wasteItems = {
+        ""minecraft:cobblestone"",
+        ""minecraft:deepslate"",
+        ""minecraft:dirt"",
+        ""minecraft:diorite"",
+        ""minecraft:andesite"",
+        ""minecraft:granite"" -- Add more if needed
+    }
+    for _, wasteItem in ipairs(wasteItems) do
+        if itemName == wasteItem then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to drop waste items from the inventory
+function dropWaste()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and isWaste(itemData.name) then
+            turtle.select(slot)
+            turtle.drop()
+        end
+    end
+end
+
+-- Function to refuel using mined coal
+function refuel()
+    for slot = 1, 16 do
+        local itemData = turtle.getItemDetail(slot)
+        if itemData and itemData.name == ""minecraft:coal"" then
+            turtle.select(slot)
+            turtle.refuel()
+        end
+    end
+end
+
+-- Function to break multiple blocks in front, above, and below
+function breakBlocks()
+    while not turtle.detect() do
+        turtle.digUp()
+        turtle.digDown()
+        turtle.dig()
+        turtle.forward()
+    end
+end
+
+-- Main mining loop
+local inventoryFull = false
+
+while currentYLevel >= finalY do
+    -- Refuel using mined coal if available
+    refuel()
+
+    -- Move to the next mining level
+    while currentYLevel > finalY do
+        turtle.down()
+        currentYLevel = currentYLevel - 1
+    end
+
+    -- Mine the quarry area
+    for x = 1, areaWidth do
+        for z = 1, areaLength do
+            breakBlocks()  -- Break blocks in front, above, and below
+
+            -- Check if the inventory is full
+            if not inventoryFull and turtle.getItemCount(16) > 0 then
+                inventoryFull = true
+            end
+        end
+
+        -- Move to the next row
+        if x < areaWidth then
+            if x % 2 == 1 then
+                turtle.turnRight()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                breakBlocks()  -- Break blocks in front, above, and below
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to the starting point
+    while currentYLevel < currentY do
+        turtle.up()
+        currentYLevel = currentYLevel + 1
+    end
+
+    -- Drop waste materials
+    dropWaste()
+
+    -- If the inventory is full, empty valuables into the chest
+    if inventoryFull then
+        print(""Inventory full. Emptying valuables into the chest."")
+        turtle.turnLeft()  -- Face the chest
+        turtle.select(1)   -- Select the chest slot
+        turtle.dig()
+        turtle.place()
+        turtle.select(2)   -- Select the first valuable item slot
+        while turtle.getItemCount(2) > 0 do
+            turtle.drop()
+        end
+        turtle.turnRight() -- Face forward again
+        inventoryFull = false
+    end
+end
+"
