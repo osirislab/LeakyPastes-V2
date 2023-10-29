@@ -1,0 +1,4864 @@
+id,title,username,language,date,content
+bKfzRDh9,Google App Script,shihabsikder,JavaScript,Sunday 29th of October 2023 12:50:42 PM CDT,"function updateSheetWithCalendarEvents() {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var calendar = CalendarApp.getCalendarById('YOUR_GMAIL');
+    
+    // Preserve initial data rows
+    var initialData = sheet.getRange(2, 1, sheet.getLastRow(), 4).getValues();
+
+    // Clear the entire sheet
+    sheet.clear();
+
+    // Re-write the headers and initial data rows
+    sheet.getRange(1, 1, 1, 4).setValues([['First name', 'Surname', 'Email', 'Company']]);
+    sheet.getRange(2, 1, initialData.length, 4).setValues(initialData);
+    
+    var learnerEmails = initialData.map(row => row[2]);
+    var emailRowMapping = createEmailRowMapping(sheet, learnerEmails); 
+    
+    var startDate = new Date();
+    startDate.setMonth(6);  // 0-based month, so 6 is July
+    startDate.setDate(1);
+    
+    var endDate = new Date(startDate);
+    endDate.setFullYear(startDate.getFullYear() + 1);
+    
+    var events;
+    try {
+        events = calendar.getEvents(startDate, endDate);
+    } catch (e) {
+        Logger.log('Error fetching events: ' + e.toString());
+        return;
+    }
+    
+    var relevantEvents = events.filter(function(event) {
+        return event.getGuestList().some(guest => learnerEmails.includes(guest.getEmail()));
+    });
+
+    var monthYearColumns = {};
+
+    for (var event of relevantEvents) {
+        var date = event.getStartTime();
+        var title = event.getTitle();
+        var monthYear = date.toLocaleDateString('default', { month: 'short', year: 'numeric' });
+        
+        if (!monthYearColumns[monthYear]) {
+            monthYearColumns[monthYear] = findMonthYearColumn(sheet, monthYear);
+        }
+        
+        var eventColumn = monthYearColumns[monthYear];
+        var uniqueTitle = title + "" "" + date.toLocaleDateString();
+        var guests = event.getGuestList().map(guest => guest.getEmail()).filter(email => learnerEmails.includes(email));
+        
+        for (var guestEmail of guests) {
+            var guestRow = emailRowMapping[guestEmail] || -1;
+            if (guestRow !== -1) {
+                sheet.getRange(guestRow, eventColumn).setValue(uniqueTitle);
+                sheet.getRange(guestRow, eventColumn).setBackground(""#ADD8E6"");
+            }
+        }
+    }
+    highlightCallsToBeBooked(sheet);
+    beautifySheet(sheet);
+    freezePanes(sheet);
+}
+
+function createEmailRowMapping(sheet, emails) {
+    var mapping = {};
+    var lastRow = sheet.getLastRow();
+    var sheetEmails = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
+    for (var i = 0; i < sheetEmails.length; i++) {
+        if (emails.includes(sheetEmails[i][0])) {
+            mapping[sheetEmails[i][0]] = i + 2;
+        }
+    }
+    return mapping;
+}
+
+function findMonthYearColumn(sheet, monthYear) {
+    var lastColumn = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    
+    var monthColumnIndex = headers.indexOf(monthYear);
+    if (monthColumnIndex !== -1) {
+        return monthColumnIndex + 1;
+    } else {
+        var newColumnIndex = 5;
+        while (headers[newColumnIndex - 1] && newColumnIndex <= lastColumn) {
+            newColumnIndex++;
+        }
+        sheet.getRange(1, newColumnIndex).setValue(monthYear);
+        return newColumnIndex;
+    }
+}
+
+function highlightCallsToBeBooked(sheet) {
+    var lastRow = sheet.getLastRow();
+    var currentDate = new Date();
+    var nextMonthYear = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1).toLocaleDateString('default', { month: 'short', year: 'numeric' });
+    
+    for (var i = 2; i <= lastRow; i++) {
+        var lastEventDate = null;
+        var lastColumnWithEvent = 4;
+        while (sheet.getRange(i, lastColumnWithEvent).getValue()) {
+            var cellValue = sheet.getRange(i, lastColumnWithEvent).getValue();
+            var eventDate = new Date(cellValue.split(' ').slice(-1)[0]);
+            lastEventDate = eventDate;
+            lastColumnWithEvent++;
+        }
+        
+        if (lastEventDate) {
+            var timeDiff = currentDate - lastEventDate;
+            var diffWeeks = Math.floor(timeDiff / (1000 * 60 * 60 * 24 * 7));
+            if (diffWeeks >= 4) {
+                var nextMonthColumn = findMonthYearColumn(sheet, nextMonthYear);
+                sheet.getRange(i, nextMonthColumn).setBackground(""#FF0000"");
+            }
+        }
+    }
+}
+
+function beautifySheet(sheet) {
+    var lastRow = sheet.getLastRow();
+    var lastColumn = sheet.getLastColumn();
+    
+    sheet.getRange(1, 1, 1, lastColumn).setFontWeight('bold').setBackground('#DCEEFB');
+    
+    for (var i = 2; i <= lastRow; i+=2) {
+        sheet.getRange(i, 1, 1, lastColumn).setBackground('#E9F5FE');
+    }
+    
+    sheet.getRange(1, 1, lastRow, lastColumn).setBorder(true, true, true, true, true, true);
+    sheet.autoResizeColumns(1, lastColumn);
+}
+
+function freezePanes(sheet) {
+    sheet.setFrozenRows(1);
+    sheet.setFrozenColumns(4);
+}
+
+// [The New Function]
+
+function beautifyMetricsSheet() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(""User Metrics"");
+  var lastRow = sheet.getLastRow();
+  var lastColumn = sheet.getLastColumn();
+
+  // Apply styles to the header row
+  var headerRange = sheet.getRange(1, 1, 1, lastColumn);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#DCEEFB');
+
+  // Apply alternating row background color
+  for (var i = 2; i <= lastRow; i += 2) {
+    var dataRange = sheet.getRange(""A:I"")
+    dataRange.setBackground('#E9F5FE');
+  }
+
+  // Apply borders to all cells
+  var borderRange = sheet.getRange(""A:I"")
+  borderRange.setBorder(true, true, true, true, true, true);
+
+  // Set data background color, border, and center-align text for the ""Last Contacted Week"" column
+  var weeksAgoColumn = sheet.getRange(2, 9, lastRow - 1);
+  weeksAgoColumn.setBackground('#d9edf7'); // Data background color
+  weeksAgoColumn.setBorder(true, true, true, true, true, true, '#31708f', SpreadsheetApp.BorderStyle.SOLID); // Data border
+  weeksAgoColumn.setHorizontalAlignment('center'); // Center-align text
+
+  // Set hover text for the ""Last Contacted Week"" column
+  var tooltips = [];
+  for (var i = 0; i < lastRow - 1; i++) {
+    var weeksAgoValue = sheet.getRange(i + 2, 9).getValue();
+    var tooltip = weeksAgoValue + ' ago';
+    tooltips.push([tooltip]);
+  }
+  weeksAgoColumn.setNotes(tooltips);
+}
+
+function getMonthName(month) {
+  var monthNames = [""January"", ""February"", ""March"", ""April"", ""May"", ""June"", ""July"", ""August"", ""September"", ""October"", ""November"", ""December""];
+  return monthNames[month];
+}
+
+function createUserMetrics() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName(""Sheet1"");
+  var data = dataSheet.getRange(2, 1, dataSheet.getLastRow() - 1, dataSheet.getLastColumn()).getValues();
+
+  // Clear the existing ""User Metrics"" sheet, if it exists
+  var metricsSheet = ss.getSheetByName('User Metrics');
+  if (metricsSheet) {
+    ss.deleteSheet(metricsSheet);
+  }
+
+  var eventCounts = [];
+
+  // Initialize counts for each event type
+  for (var i = 0; i < data.length; i++) {
+    var rowData = data[i];
+    var counts = {
+      'LSC Call': 0,
+      'Progress Review': 0,
+      'Kick Off Call': 0
+    };
+    
+    var latestEncounterDate = new Date(0); // Initialize with the earliest possible date
+    var hasDate = false; // Flag to check if the row contains at least one date
+
+    // Iterate through the columns containing events
+    for (var j = 4; j < rowData.length; j++) {
+      var event = rowData[j];
+      if (event) {
+        if (event.indexOf('LSC Call') !== -1) {
+          counts['LSC Call']++;
+        }
+        if (event.indexOf('Progress Review') !== -1) {
+          counts['Progress Review']++;
+        }
+        if (event.indexOf('Kick Off Call') !== -1) {
+          counts['Kick Off Call']++;
+        }
+
+        // Extract the date from the event description
+        var dateMatch = event.match(/\d{1,2}\/\d{1,2}\/\d{4}/);
+        if (dateMatch) {
+          var encounterDate = new Date(dateMatch[0]);
+          if (encounterDate > latestEncounterDate && encounterDate <= new Date()) {
+            latestEncounterDate = encounterDate;
+          }
+          hasDate = true;
+        }
+      }
+    }
+
+    // Include the ""First name,"" ""Surname,"" ""Email,"" ""Company,"" event counts, and the latest encounter date (if it exists)
+    var firstName = rowData[0];
+    var surname = rowData[1];
+    var email = rowData[2];
+    var company = rowData[3];
+
+    // Calculate weeks ago
+    var weeksAgo = calculateWeeksAgo(latestEncounterDate);
+
+    // Check if there are no dates in the row and format it red
+    if (!hasDate) {
+      eventCounts.push([firstName, surname, email, company, counts['LSC Call'], counts['Progress Review'], counts['Kick Off Call'], '', '']);
+    } else {
+      var weeksAgoText = weeksAgo;
+      eventCounts.push([firstName, surname, email, company, counts['LSC Call'], counts['Progress Review'], counts['Kick Off Call'], latestEncounterDate, weeksAgoText]);
+    }
+  }
+
+  // Create a new sheet to display the user metrics
+  var metricsSheet = ss.insertSheet('User Metrics');
+  metricsSheet.getRange(1, 1, 1, 9).setValues([['First name', 'Surname', 'Email', 'Company', 'LSC Call Count', 'Progress Review Count', 'Kick Off Call Count', 'Latest Encounter Date', 'Last Contacted Week']]);
+  metricsSheet.getRange(2, 1, eventCounts.length, 9).setValues(eventCounts);
+
+  // Auto-resize columns for better formatting
+  metricsSheet.autoResizeColumns(1, 9);
+  metricsSheet.setFrozenRows(1);
+  metricsSheet.setFrozenColumns(4);
+  
+  // Set the date format for the ""Latest Encounter Date"" column
+  var dateColumn = metricsSheet.getRange(2, 8, eventCounts.length);
+  dateColumn.setNumberFormat('dd mmmm yyyy');
+  
+  // Apply conditional formatting to the ""Latest Encounter Date"" column
+  var now = new Date();
+  var fourWeeksAgo = new Date(now.getTime() - 4 * 7 * 24 * 60 * 60 * 1000); // 4 weeks ago
+  
+  var rule1 = SpreadsheetApp.newConditionalFormatRule()
+    .whenDateEqualTo(fourWeeksAgo)
+    .whenDateAfter(fourWeeksAgo)
+    .setBackground('#00FF00') // Green
+    .setRanges([dateColumn])
+    .build();
+  
+  var rule2 = SpreadsheetApp.newConditionalFormatRule()
+    .whenDateBefore(fourWeeksAgo)
+    .setBackground('#FF0000') // Red
+    .setRanges([dateColumn])
+    .build();
+  
+  var rules = [rule1, rule2];
+  metricsSheet.setConditionalFormatRules(rules);
+
+   // Apply styles to the ""Last Contacted Week"" column
+  var weeksAgoColumn = metricsSheet.getRange(2, 9, eventCounts.length);
+
+  // Set styles for the data in the ""Last Contacted Week"" column
+  weeksAgoColumn.setBackground('#d9edf7'); // Data background color
+  weeksAgoColumn.setBorder(true, true, true, true, true, true, '#31708f', SpreadsheetApp.BorderStyle.SOLID); // Data border
+  weeksAgoColumn.setHorizontalAlignment('center'); // Center-align text
+
+  // Set hover text for the ""Last Contacted Week"" column
+  var tooltips = [];
+  for (var i = 0; i < eventCounts.length; i++) {
+    var weeksAgoValue = eventCounts[i][8];
+    var tooltip = weeksAgoValue + ' ago';
+    tooltips.push([tooltip]);
+  }
+  weeksAgoColumn.setNotes(tooltips);
+
+  // Auto-resize columns for better formatting
+  metricsSheet.autoResizeColumns(1, 9);
+  metricsSheet.setFrozenRows(1);
+  metricsSheet.setFrozenColumns(4);
+  // createVisualizations();
+  beautifyMetricsSheet();
+}
+
+function calculateWeeksAgo(date) {
+  var now = new Date();
+  var diff = now - date;
+  var days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  var weeks = Math.floor(days / 7);
+  var remainingDays = days % 7;
+  var result = '';
+
+  if (weeks > 0) {
+    result += weeks + (weeks === 1 ? ' week' : ' weeks');
+    if (remainingDays > 0) {
+      result += ' ' + remainingDays + (remainingDays === 1 ? ' day' : ' days');
+    }
+  } else {
+    result = remainingDays + (remainingDays === 1 ? ' day' : ' days');
+  }
+  return result;
+}
+
+function prepareDataForVisualizations() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metricsSheet = ss.getSheetByName('User Metrics');
+  var dataRange = metricsSheet.getDataRange().getValues();
+  
+  var weeksData = {}
+
+  var weekdayData = {
+    'Saturday': 0,
+    'Sunday': 0,
+    'Monday': 0,
+    'Tuesday': 0,
+    'Wednesday': 0,
+    'Thursday': 0,
+    'Friday': 0,
+  };
+
+  var redUsers = 0;
+  var greenUsers = 0;
+  
+  for (var i = 1; i < dataRange.length; i++) { // Start from row 2 to skip the header
+    var weeksAgo = dataRange[i][8]; // Assuming the ""Last Contacted Week"" column is in column 9
+    var latestEncounterDate = new Date(dataRange[i][7]); // Assuming the ""Latest Encounter Date"" column is in column 8
+    var isRed = latestEncounterDate <= new Date() - (4 * 7 * 24 * 60 * 60 * 1000); // Red if last contact is 4+ weeks ago
+
+    // Update weeksData
+    var weekNo = weeksAgo.split("" "")[0]
+    Logger.log(`${weekNo} Weeks`)
+    if(weekNo)
+      weeksData[`${weekNo} Weeks`] = weeksData[`${weekNo} Weeks`]? weeksData[`${weekNo} Weeks`]+1:1;
+    // Update weekdayData
+    if (latestEncounterDate) {
+      var dayOfWeek = latestEncounterDate.getDay();
+      var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      if(dayNames[dayOfWeek])
+        weekdayData[dayNames[dayOfWeek]]++;
+    }
+
+    // Update red and green user counts
+    if (isRed) {
+      redUsers++;
+    } else {
+      greenUsers++;
+    }
+  }
+
+  var data = {
+    weeksData: weeksData,
+    weekdayData: weekdayData,
+    redUsers: redUsers,
+    greenUsers: greenUsers,
+  };
+
+  return data;
+}
+
+function createVisualizations(){
+  const data = prepareDataForVisualizations()
+  createWeeksBarChart(data.weeksData)
+  createWeekdayBarChart(data.weekdayData)
+  generateCombinedChart()
+}
+
+function createWeeksBarChart(weeksData) {
+  Logger.log(weeksData)
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(""User Metrics"");
+  // Define the range where you want to place the chart data
+  var chartRange = sheet.getRange(""J10:K14"");
+  
+  // Prepare the data and set it to the range
+  var data = [
+    [""2 Weeks"", weeksData[""2 Weeks""] || 0],
+    [""3 Weeks"", weeksData[""3 Weeks""] || 0],
+    [""4 Weeks"", weeksData[""4 Weeks""] || 0],
+    [""5 Weeks"", weeksData[""5 Weeks""] || 0],
+    [""6 Weeks"", weeksData[""6 Weeks""] || 0]
+  ];
+  
+  chartRange.setValues(data);
+
+  // Create the chart
+  var chartBuilder = sheet.newChart();
+  var chart = chartBuilder
+    .setChartType(Charts.ChartType.BAR)
+    .addRange(chartRange)
+    .setPosition(1, 10, 0, 0)
+    .setOption('title', 'Number of User vs Contactless Weeks')
+    .setOption('height',250)
+    .setOption('width',400)
+    .setOption('vAxis', { title: 'Weeks' })
+    .setOption('hAxis', { title: 'Frequency' })
+    .build();
+  // Insert the chart into the sheet
+  sheet.insertChart(chart);
+}
+
+function createWeekdayBarChart(weekdayData) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(""User Metrics"");
+  // Define the range where you want to place the chart data
+  var chartRange = sheet.getRange(""L10:M16"");
+  
+  // Prepare the data and set it to the range
+  var data = [
+    [""Monday"", weekdayData[""Monday""] || 0],
+    [""Tuesday"", weekdayData[""Tuesday""] || 0],
+    [""Wednesday"", weekdayData[""Wednesday""] || 0],
+    [""Thursday"", weekdayData[""Thursday""] || 0],
+    [""Friday"", weekdayData[""Friday""] || 0],
+    [""Saturday"", weekdayData[""Saturday""] || 0],
+    [""Sunday"", weekdayData[""Sunday""] || 0]
+  ];
+  
+  chartRange.setValues(data);
+
+  // Create the chart
+  var chartBuilder = sheet.newChart();
+  var chart = chartBuilder
+    .setChartType(Charts.ChartType.COLUMN)
+    .addRange(chartRange)
+    .setPosition(14,10, 0, 0)
+    .setOption('title', 'Weekday vs. Frequency')
+    .setOption('hAxis', { title: 'Weekday' })
+    .setOption('vAxis', { title: 'Frequency' })
+    .setOption('height',250)
+    .setOption('width',400)
+    .build();
+
+  // Insert the chart into the sheet
+  sheet.insertChart(chart);
+}
+
+function countMonthlyCallCounts() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(""Sheet1"");
+  var data = sheet.getDataRange().getValues();
+  var monthlyCounts = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var rowData = data[i];
+
+    for (var j = 4; j < rowData.length; j++) {
+      var event = rowData[j];
+      if (event) {
+        // Extract the date from the event description
+        var dateMatch = event.match(/\d{1,2}\/\d{1,2}\/\d{4}/);
+        if (dateMatch) {
+          var eventDate = new Date(dateMatch[0]);
+          var monthYear = eventDate.toLocaleDateString('default', { month: 'short', year: '2-digit' });
+
+          if (!monthlyCounts[monthYear]) {
+            monthlyCounts[monthYear] = { 'LSC Call': 0, 'Progress Review': 0, 'Kick Off Call': 0 };
+          }
+
+          if (event.indexOf('LSC Call') !== -1) {
+            monthlyCounts[monthYear]['LSC Call']++;
+          } else if (event.indexOf('Progress Review') !== -1) {
+            monthlyCounts[monthYear]['Progress Review']++;
+          } else if (event.indexOf('Kick Off Call') !== -1) {
+            monthlyCounts[monthYear]['Kick Off Call']++;
+          }
+        }
+      }
+    }
+  }
+
+  // Sort the monthlyCounts object by keys (month and year)
+  var sortedMonthlyCounts = {};
+  Object.keys(monthlyCounts)
+    .sort(function (a, b) {
+      // Convert keys (e.g., ""Jul 22"") to sortable date format (e.g., ""2022-07-01"")
+      var aDate = new Date('20' + a.split(' ')[1], monthNames.indexOf(a.split(' ')[0]), 1);
+      var bDate = new Date('20' + b.split(' ')[1], monthNames.indexOf(b.split(' ')[0]), 1);
+
+      return aDate - bDate;
+    })
+    .forEach(function (key) {
+      sortedMonthlyCounts[key] = monthlyCounts[key];
+    });
+
+  Logger.log(sortedMonthlyCounts);
+  return sortedMonthlyCounts;
+}
+
+var monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+
+function generateCombinedChart() {
+  var data = countMonthlyCallCounts();
+  
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(""User Metrics""); // Replace with your sheet name
+
+  var chartData = [[""Month"", ""LSC Call"", ""Progress Review"", ""Kick Off Call""]];
+  
+  for (var month in data) {
+    chartData.push([
+      month,
+      data[month][""LSC Call""] || 0,
+      data[month][""Progress Review""] || 0,
+      data[month][""Kick Off Call""] || 0
+    ]);
+  }
+  
+  createCombinedChart(sheet, chartData);
+}
+
+function createCombinedChart(sheet, chartData) {
+  var chartRange = sheet.getRange(2, 14, chartData.length, 4);
+  chartRange.setValues(chartData);
+
+  var chartBuilder = sheet.newChart();
+  var chart = chartBuilder
+    .setChartType(Charts.ChartType.COLUMN)
+    .addRange(chartRange)
+    .setPosition(2, 14, 0, 0)
+    .setOption('title', 'Monthly Call Types')
+    .setOption('hAxis', { title: 'Month' })
+    .setOption('vAxis', { title: 'Frequency' })
+    .setOption('series', {
+      0: { color: 'blue' },
+      1: { color: 'red' },
+      2: { color: 'green' }
+    })
+    .setOption('height',250)
+    .setOption('width',400)
+    .setOption('dataLabels', 'value')
+    .setOption('dataLabelFormat', {
+      0: '#,##0',
+      1: '#,##0',
+      2: '#,##0'
+    })
+    .setOption('displayExactValues', true)
+    .setOption('legend', { position: 'top', textStyle: { fontSize: 12 } }) // Add legend here
+    .setOption('seriesType', 'bars')
+    .setOption('series', { 3: { type: 'line' } })
+    .setOption('series', {
+      0: { labelInLegend: 'LSC Call' },
+      1: { labelInLegend: 'Progress Review' },
+      2: { labelInLegend: 'Kick Off Call' }
+    })
+    .build();
+
+  sheet.insertChart(chart);
+}
+
+
+
+
+
+
+"
+qkNbfiH5,Untitled,sissou123,Python,Sunday 29th of October 2023 12:38:15 PM CDT,"Python GUI Development with Tkinter: Build Pro Desktop Apps!
+Mastering Python GUI Development with Tkinter: Build Professional Desktop Applications with Confidence and Ease
+for more:https://cuty.io/TtOMV"
+m7VHE3Ta,snowybot handbreaker,coinwalk,JavaScript,Sunday 29th of October 2023 12:35:58 PM CDT,"var smiley = parseFloat(document.getElementById('pct_balance').value);
+var nudie = Number((smiley/320).toFixed(8));
+var burp = nudie;
+var taget = (smiley*200000);
+var bolux = (nudie*10);
+var dog = (nudie*50);
+var poopy = (nudie*6.5);
+var mole = (nudie*7.5);
+var sexual = 0;
+var jockey = ((burp*1).toFixed(8));
+var bolance = smiley;
+var fart = 1;
+var woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+var manboobs = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+ 
+function get(){
+console.clear();
+setTimeout(function(){
+bolance = document.getElementById('pct_balance').value;
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+mole))&&(bolance!=sexual)&&(bolance>=manboobs)) {
+    burp = burp*2;
+    sexual = parseFloat(bolance);
+}
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+mole))&&(bolance!=sexual)&&(bolance<manboobs)) {
+    burp = burp*2;
+    fart = 0;
+    sexual = parseFloat(bolance);
+}
+if ((bolance>=(manboobs+(bolux*fart)))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+poopy))){
+    sexual = 0;
+    fart = 1;
+    burp = nudie;
+    manboobs = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+    woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+}
+if ((bolance>=(woman+(bolux*3)))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+poopy))){
+    sexual = 0;
+    burp = nudie;
+    woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+}
+if ((bolance<=(woman-(bolux*6)))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+poopy))){
+    sexual = 0;
+    burp = nudie;
+    woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+}
+    if (bolance >= taget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+jockey = ((burp*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(jockey);
+$('#a_lo').click();
+}, 100);
+var dog = ((bolance-smiley).toFixed(8));
+console.log(""profit"");
+console.log(dog);
+setTimeout(() => get(), 200);
+}
+get();"
+502KSfpq,BTC Wallet Credentials have been reset,castlclass_20,GetText,Sunday 29th of October 2023 12:14:02 PM CDT,"Dear User
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please disregard this message.
+Your new login credentials will be 
+smesu23:3UYL6h on 212.224.93.130
+You can connect via SSH .
+Regards"
+PJGeW3BV,04. Replace All,Spocoman,C++,Sunday 29th of October 2023 11:54:53 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+int main() {
+    string str, oldStr, newStr;
+    getline(cin, str);
+    getline(cin, oldStr);
+    getline(cin, newStr);
+
+    while (str.find(oldStr) != -1) {
+        str.replace(str.find(oldStr), oldStr.length(), newStr);
+    }
+
+    cout << str << endl;
+    return 0;
+}"
+nTf043xK,Binary Random Number Generator,umbongodrink,Python,Sunday 29th of October 2023 11:52:20 AM CDT,"import random
+import sys
+
+
+def random_numb():
+    while True:
+        yield '{0:b}'.format(random.randint(0, sys.maxsize))
+
+random_numb_gen = random_numb()
+next(random_numb_gen)"
+mnuAwfDW,snowybot trial v2,coinwalk,JavaScript,Sunday 29th of October 2023 11:46:20 AM CDT,"var smiley = parseFloat(document.getElementById('pct_balance').value);
+var nudie = Number((smiley/320).toFixed(8));
+var burp = nudie;
+var taget = (smiley*200000);
+var bolux = (nudie*10);
+var poopy = (nudie*6.5);
+var mole = (nudie*7.5);
+var sexual = 0;
+var jockey = ((burp*1).toFixed(8));
+var bolance = smiley;
+var fart = 1;
+var woman = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+var manboobs = ((Math.floor((parseFloat(bolance))/bolux))*bolux);
+ 
+function get(){
+console.clear();
+setTimeout(function(){
+bolance = document.getElementById('pct_balance').value;
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+mole))&&(bolance!=sexual)&&(bolance>manboobs)) {
+    burp = burp*2;
+    manboobs = parseFloat(bolance);
+    sexual = parseFloat(bolance);
+}
+if ((bolance>(((Math.floor(bolance/bolux))*bolux)+poopy))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+mole))&&(bolance!=sexual)&&(bolance<manboobs)) {
+    fart = 0;
+    manboobs = parseFloat(bolance);
+    sexual = 0;
+}
+if ((bolance>=(woman+(bolux*fart)))&&(bolance<(((Math.floor(bolance/bolux))*bolux)+poopy))){
+    sexual = 0;
+    fart = 1;
+    burp = nudie;
+    manboobs = parseFloat(bolance);
+    woman = ((Math.floor(bolance/bolux))*bolux);
+}
+    if (bolance >= taget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+jockey = ((burp*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(jockey);
+$('#a_lo').click();
+}, 100);
+var dog = ((bolance-smiley).toFixed(8));
+console.log(""profit"");
+console.log(dog);
+setTimeout(() => get(), 200);
+}
+get();"
+kEaAaLQR,funny,MomoFloFlo,Lua,Sunday 29th of October 2023 11:38:00 AM CDT,"fc888888800088888b
+ff888878800088888b
+ff888878800088888b
+ff888878800088888b
+ff888878800088888b
+ff888877800088888b
+ff888877800088888b
+ff888877800008888a
+ff8888878000088883
+ff888887800008888a
+ff888887800008888a
+ff888887800008888a
+ff888887800008888a
+ff888888800008888b
+ff888888800008888f
+ff8888888000088887
+ff888888800008888f
+ff888878800008888f
+ff888888800008888f
+ff888888800008888f"
+nQuWJ2CB,whrandom.sh - POSIX compliant random number generator using Wichmann-Hill method,pintcat,Bash,Sunday 29th of October 2023 11:07:56 AM CDT,"#####################################################################################################################
+# whrandom v1.1 - POSIX compliant random number generator using Wichmann-Hill method.                               #
+# Handshake:                                                                                                        #
+# $WH_MAX contains the maximum value for the random number (default: 999).                                          #
+# $WH_LOOP contains the number of random numbers to be generated. Set it to ""U"" for an unlimited random number      #
+#  generation (default: 1).                                                                                         #
+# Usage:                                                                                                            #
+# Simply call WH_RANDOM() to generate one or more random numbers. These numbers will be written to stdout.          #
+# The Wichmann-Hill algorrithm requires 3 seeds each between 1 and 30000. By default, whrandom automatically        #
+# creates 3 unique seeds using the millisecond counter of the system clock. Alternatively, you can call WH_RANDOM() #
+# with up to 3 integers. They will be checked and exchanged with automatically generated ones if they don't fit the #
+# needs. Beware: If you use 3 fixed seeds whrandom will always create an identical chain of random numbers as long  #
+# as you use the same seeds.                                                                                        #
+#####################################################################################################################
+
+WH_MAX=999
+WH_LOOP=1
+
+# WH_CHECK() - checks if a value is given, if this value is a number and if it's between 1 and 30000.
+#  If so it returns that very number and if not it generates a suitable using thesystem clock's millisecond counter.
+# IN:
+# $1 should contain an integer between 1 and 30000.
+# OUT:
+# Prints the fitting number to stdout.
+
+WH_CHECK(){
+	if [ -n ""$1"" ] && [ -n ""${1##*[!0-9]*}"" ] && [ $1 -gt 0 -a $1 -le 30000 ]; then
+		printf $1
+	else
+		WH_TMP=$((10#$(date +%5N)))    # pick 5 digits and remove leading zeros
+		[ $WH_TMP -gt 30000 ] && WH_TMP=$((WH_TMP/4))
+		printf $WH_TMP
+	fi
+}
+
+# WH_RANDOM() - generates one or more random numbers.
+# IN:
+# $1 $2 and $3 can contain integers between 1 and 30000 to be used as seeds. These values will be checked and - if
+#  not suitable - replaced with auto generated ones.
+# $WH_MAX contains the maximum value which will not be exceeded by the random number.
+# $WH_LOOP tells how many numbers will be generated. ""U"" will generate a never ending chain of random numbers.
+# OUT:
+# Prints the random numbers to stdout.
+
+WH_RANDOM(){
+	WH_SEED1=$(WH_CHECK $1)
+	WH_SEED2=$(WH_CHECK $2)
+	WH_SEED3=$(WH_CHECK $3)
+	while [ $WH_LOOP=U ] || [ $((WH_LOOP=$WH_LOOP-1)) -ge 0 ]; do
+		WH_SEED1=$(((171*$WH_SEED1)%30269))
+		WH_SEED2=$(((172*$WH_SEED2)%30307))
+		WH_SEED3=$(((170*$WH_SEED3)%30323))
+		WH_RND=$(((($WH_SEED1*1000000000)/30269)+(($WH_SEED2*1000000000)/30307)+(($WH_SEED3*1000000000)/30323)%1000000000*$WH_MAX))
+		printf ""%.0f\n"" ""${WH_RND}e-9""    # remove anything beyond the decimal point
+	done
+}
+"
+z4FR3MTC,NewMineing,CaptainDeadpool_,Lua,Sunday 29th of October 2023 11:01:30 AM CDT,"startX = -615
+startY = 71
+startZ = 652
+
+endX = -610
+endY = 73
+endZ = 654
+
+function mine()
+    local x,y ,z = gps.locate(5)
+    if startX == tonumber(x) and startY == tonumber(y) and startZ == tonumber(z) then
+        print(""good to start"")
+        zMovment = (endZ - startZ) + 1
+        xMovment = endX - startX
+        yMovement = (endY - startY) + 1
+        print(zMovment)
+        for ym = 1, yMovement, 1 do
+            for i=1, zMovment, 1 do
+            
+                    
+                for XM=1, xMovment, 1 do
+            
+                    turtle.dig()
+                    blockDetected = true
+                    sleep(0.5)
+                    while blockDetected do
+                        if (turtle.detect()) then
+                            turtle.dig()
+                            sleep(0.5)
+                        else
+                            blockDetected = false
+                        end
+                    end
+                    turtle.forward()
+                    
+                end
+                if (i ~= zMovment) then
+                    if (i % 2 == 0) then
+                        turtle.turnLeft()
+                        turtle.dig()
+                        blockDetected = true
+                    sleep(0.5)
+                    while blockDetected do
+                        if (turtle.detect()) then
+                            turtle.dig()
+                            sleep(0.5)
+                        else
+                            blockDetected = false
+                        end
+                    end
+                        turtle.forward()
+                        turtle.turnLeft()
+                    else
+                        turtle.turnRight()
+                        turtle.dig()
+                        blockDetected = true
+                    sleep(0.5)
+                    while blockDetected do
+                        if (turtle.detect()) then
+                            turtle.dig()
+                            sleep(0.5)
+                        else
+                            blockDetected = false
+                        end
+                    end
+                        turtle.forward()
+                        turtle.turnRight()
+                    end
+                else
+                    turtle.turnRight()
+                    returnTo = endZ - startZ
+                    for b=1, returnTo, 1 do
+                        turtle.back()
+                    end
+                    turtle.turnLeft()
+                    for rX=1, xMovment, 1 do
+                        turtle.back()
+                    end
+                end
+            end
+            turtle.digUp()
+            blockDetected = true
+                    sleep(0.5)
+                    while blockDetected do
+                        if (turtle.detect()) then
+                            turtle.digUp()
+                            sleep(0.5)
+                        else
+                            blockDetected = false
+                        end
+                    end
+            turtle.up()
+            --y
+        end
+    end
+end
+
+mine()
+
+"
+RTjn8LK4,SYERBOY: List of Twitter Post Links #P2,Munfaqqiha,C++,Sunday 29th of October 2023 11:00:33 AM CDT,"(1). The total posts from October 23th to 29th are: 61.
+(2). The total number of views on my 36 posts is: 1,193,941.
+ 
+001. https://twitter.com/syerboy/status/1718581009833189436 : 7,779   views
+002. https://twitter.com/syerboy/status/1718577925757538803 : 8,603   views
+003. https://twitter.com/syerboy/status/1718564868150964264 : 10,638  views
+004. https://twitter.com/syerboy/status/1718563415000764569 : 10,679  views
+005. https://twitter.com/syerboy/status/1717541834594173247 : 11,648  views
+006. https://twitter.com/syerboy/status/1717540640047997267 : 15,766  views
+007. https://twitter.com/syerboy/status/1717532719209431316 : 14,479  views
+008. https://twitter.com/syerboy/status/1717532184112726074 : 17,459  views
+009. https://twitter.com/syerboy/status/1717531743836684502 : 17,309  views
+010. https://twitter.com/syerboy/status/1717531144952918121 : 17,269  views
+011. https://twitter.com/syerboy/status/1717530452599218357 : 11,430  views
+012. https://twitter.com/syerboy/status/1717530114387239104 : 9,850   views
+013. https://twitter.com/syerboy/status/1717529649968722298 : 10,779  views
+014. https://twitter.com/syerboy/status/1717529224087572795 : 6,718   views
+015. https://twitter.com/syerboy/status/1717528779650686989 : 7,575   views
+016. https://twitter.com/syerboy/status/1717528241718657100 : 8,959   views
+017. https://twitter.com/syerboy/status/1717527865435001271 : 7,893   views
+018. https://twitter.com/syerboy/status/1717527486618017806 : 5,772   views
+019. https://twitter.com/syerboy/status/1717527104277918045 : 8,716   views
+020. https://twitter.com/syerboy/status/1717526728577368407 : 11,438  views
+021. https://twitter.com/syerboy/status/1717526327061098618 : 14,524  views
+022. https://twitter.com/syerboy/status/1717525885883166945 : 16,030  views
+023. https://twitter.com/syerboy/status/1717525457086959877 : 8,588   views
+024. https://twitter.com/syerboy/status/1717524916143333749 : 8,352   views
+025. https://twitter.com/syerboy/status/1717524006625230960 : 8,507   views
+026. https://twitter.com/syerboy/status/1717523268645863721 : 17,358  views
+027. https://twitter.com/syerboy/status/1717522872602882249 : 16,520  views
+028. https://twitter.com/syerboy/status/1717522460755837341 : 17,408  views
+029. https://twitter.com/syerboy/status/1717521691545604531 : 19,810  views
+030. https://twitter.com/syerboy/status/1717521100144558258 : 19,687  views
+031. https://twitter.com/syerboy/status/1717520454351720885 : 19,280  views
+032. https://twitter.com/syerboy/status/1717520077963350068 : 17,567  views
+033. https://twitter.com/syerboy/status/1717519414160146573 : 18,192  views
+034. https://twitter.com/syerboy/status/1717518880460148797 : 18,208  views
+035. https://twitter.com/syerboy/status/1717518293391876538 : 17,586  views
+036. https://twitter.com/syerboy/status/1716778828574683436 : 39,970  views
+037. https://twitter.com/syerboy/status/1716777957568757950 : 41,575  views
+038. https://twitter.com/syerboy/status/1716775778061623388 : 42,214  views
+039. https://twitter.com/syerboy/status/1716771139270361329 : 44,011  views
+040. https://twitter.com/syerboy/status/1716755703678034146 : 35,502  views
+041. https://twitter.com/syerboy/status/1716737075268202927 : 36,559  views
+042. https://twitter.com/syerboy/status/1716736439541739553 : 35,978  views
+043. https://twitter.com/syerboy/status/1716548287162122640 : 35,470  views
+044. https://twitter.com/syerboy/status/1716532373532377255 : 35,163  views
+045. https://twitter.com/syerboy/status/1716527245345632326 : 34,973  views
+046. https://twitter.com/syerboy/status/1716521229031735478 : 35,210  views
+047. https://twitter.com/syerboy/status/1716515413461459293 : 17,468  views
+048. https://twitter.com/syerboy/status/1716514251794448897 : 17,306  views
+049. https://twitter.com/syerboy/status/1716512988121956424 : 17,494  views
+050. https://twitter.com/syerboy/status/1716498655111446767 : 28,919  views
+051. https://twitter.com/syerboy/status/1716497785489613074 : 18,520  views
+052. https://twitter.com/syerboy/status/1716497119660638232 : 18,798  views
+053. https://twitter.com/syerboy/status/1716494839901196788 : 18,104  views
+054. https://twitter.com/syerboy/status/1716179178041881018 : 22,102  views
+055. https://twitter.com/syerboy/status/1716170363879776447 : 22,320  views
+056. https://twitter.com/syerboy/status/1716161452736950475 : 21,571  views
+057. https://twitter.com/syerboy/status/1716155948216312096 : 24,110  views
+058. https://twitter.com/syerboy/status/1716151784249717101 : 24,877  views
+059. https://twitter.com/syerboy/status/1716145139155185891 : 24,168  views
+060. https://twitter.com/syerboy/status/1716144295382745225 : 21,509  views
+061. https://twitter.com/syerboy/status/1716127983663251474 : 21,674  views
+"
+bUCHJPVB,smelt,ozraru,Lua,Sunday 29th of October 2023 10:37:28 AM CDT,"Length = 8
+
+print(""Starting furnace..."")
+
+local suc, data = turtle.inspect()
+if not suc or data.name ~= ""minecraft:chest"" then
+    error(""missed"")
+end
+local suc, data = turtle.inspectUp()
+if not suc or data.name ~= ""minecraft:chest"" then
+    error(""missed"")
+end
+local suc, data = turtle.inspectDown()
+if not suc or data.name ~= ""minecraft:chest"" then
+    error(""missed"")
+end
+
+WaitUntil = 0
+
+function exchange(up, number)
+    local result = false
+    for i = 1, 8 do
+        turtle.select(i)
+        local drop = math.min(number, turtle.getItemCount())
+        if up then
+            turtle.dropUp(drop)
+        else
+            turtle.dropDown(drop)
+        end
+        number = number - drop
+        if number == 0 then
+            break
+        end
+    end
+    for i = 9, 16 do
+        turtle.select(i)
+        if up then
+            if turtle.suckUp(turtle.getItemSpace()) then
+                result = true
+            else
+                break
+            end
+        else
+            if turtle.suckDown(turtle.getItemSpace()) then
+                result = true
+            else
+                break
+            end
+        end
+    end
+    -- if up then
+    --     suc, data = turtle.inspectUp()
+    --     if data.state.lit then
+    --         result = true
+    --     end
+    -- else
+    --     suc, data = turtle.inspectDown()
+    --     if data.state.lit then
+    --         result = true
+    --     end
+    -- end
+end
+
+function loop(materialNumber)
+    local materialPerFurnace = math.floor(materialNumber / (Length*4))
+    local extra = materialNumber % (Length*4)
+    turtle.turnRight()
+    turtle.forward()
+    turtle.turnRight()
+    local progress = false
+    if materialNumber > 0 then
+        WaitUntil = os.clock() + materialPerFurnace*10
+    end
+    for i = 1, Length do
+        turtle.forward()
+        local number = materialPerFurnace
+        if extra > 0 then
+            number = number + 1
+            extra = extra - 1
+        end
+        for facing = 1, 2 do
+            if exchange(facing == 1, number) then
+                progress = true
+            end
+        end
+    end
+    turtle.turnRight()
+    turtle.forward()
+    turtle.forward()
+    turtle.turnRight()
+    for i = 1, Length do
+        local number = materialPerFurnace
+        if extra > 0 then
+            number = number + 1
+            extra = extra - 1
+        end
+        for facing = 1, 2 do
+            if exchange(facing == 1, number) then
+                progress = true
+            end
+        end
+        turtle.forward()
+    end
+    turtle.turnRight()
+    turtle.forward()
+    turtle.turnLeft()
+    for i = 1, 8 do
+        turtle.select(i)
+        turtle.dropUp()
+    end
+    for i = 9, 16 do
+        turtle.select(i)
+        turtle.dropDown()
+    end
+    if WaitUntil == 0 then
+        WaitUntil = math.max(WaitUntil, os.clock() + 10)
+    end
+end
+
+function refuel()
+    for i = 1, 16 do
+        turtle.select(i)
+        turtle.suck()
+        if turtle.getFuelLevel() < 5000 then
+            turtle.refuel()
+        end
+    end
+    local fuelNumber = 0
+    for i = 1, 16 do
+        fuelNumber = fuelNumber + turtle.getItemCount()
+    end
+    if fuelNumber == 0 then
+        return
+    end
+    local fuelPerFurnace = math.floor(fuelNumber / (Length*4))
+    local extra = fuelNumber % (Length*4)
+    for up = 1, 2 do
+        if up == 1 then
+            turtle.turnRight()
+            turtle.turnRight()
+            turtle.forward()
+            turtle.down()
+        else
+            turtle.turnRight()
+            turtle.turnRight()
+            turtle.up()
+            turtle.up()
+        end
+        for i = 1, Length do
+            if i > 1 then
+                turtle.forward()
+            end
+            for facing = 1, 2 do
+                for i = 1, facing do
+                    turtle.turnRight()
+                end
+                local number = fuelNumber
+                if extra > 0 then
+                    number = remainNumber + 1
+                    extra = extra - 1
+                end
+                for i = turtle.getSelectedSlot(), 16 do
+                    turtle.select(i)
+                    local drop = math.min(number, turtle.getItemCount())
+                    if up then
+                        turtle.dropUp(drop)
+                    else
+                        turtle.dropDown(drop)
+                    end
+                    number = number - drop
+                    if number == 0 or turtle.getItemCount() > 0 then
+                        break
+                    end
+                end
+            end
+            turtle.turnRight()
+        end
+    end
+    turtle.down()
+    turtle.forward()
+    for i = 1, 16 do
+        turtle.select(i)
+        turtle.drop()
+    end
+end
+
+while true do
+    print(""Running furnace system..."")
+    if WaitUntil <= os.clock() then
+        WaitUntil = 0
+        local materialNumber = 0
+        for i = 1, 8 do
+            turtle.select(i)
+            while turtle.getItemSpace() > 0 and turtle.suckUp() do
+            end
+            materialNumber = materialNumber + turtle.getItemCount()
+        end
+        if WaitUntil > 0 or materialNumber > 0 then
+            loop(materialNumber)
+        end
+    end
+    refuel()
+    if WaitUntil > 0 then
+        sleep(WaitUntil - os.clock())
+    else
+        sleep(1)
+    end
+end"
+rZbuWZM8,starship dotfile,bal_gennady,INI file,Sunday 29th of October 2023 10:16:12 AM CDT,"# format = '$all$directory$character'
+add_newline = false
+# A minimal left prompt
+format = """"""$directory$character""""""
+palette = ""catppuccin_mocha""
+# move the rest of the prompt to the right
+right_format = """"""$all""""""
+
+# [directory]
+# truncation_length = 2
+# truncation_symbol = '…/'
+# disabled = true
+
+[directory.substitutions]
+'~/tests/starship-custom' = 'work-project'
+
+
+[aws]
+format = 'on [$symbol($profile )(\($region\) )]($style)'
+style = 'bold blue'
+symbol = ""  ""
+
+[golang]
+format = '[ $version](bold cyan) '
+
+[kubernetes]
+symbol = '☸'
+disabled = false
+detect_files = ['k8s', 'Dockerfile']
+detect_extensions = ['yaml']
+format = '[$symbol$context( \($namespace\))]($style) '
+[kubernetes.context_aliases]
+'arn:aws:eks:us-west-2:123:cluster/gal-kub-demo-cluster' = 'gal'
+
+[palettes.catppuccin_mocha]
+rosewater = ""#f5e0dc""
+flamingo = ""#f2cdcd""
+pink = ""#f5c2e7""
+mauve = ""#cba6f7""
+red = ""#f38ba8""
+maroon = ""#eba0ac""
+peach = ""#fab387""
+yellow = ""#f9e2af""
+green = ""#a6e3a1""
+teal = ""#94e2d5""
+sky = ""#89dceb""
+sapphire = ""#74c7ec""
+blue = ""#89b4fa""
+lavender = ""#b4befe""
+text = ""#cdd6f4""
+subtext1 = ""#bac2de""
+subtext0 = ""#a6adc8""
+overlay2 = ""#9399b2""
+overlay1 = ""#7f849c""
+overlay0 = ""#6c7086""
+surface2 = ""#585b70""
+surface1 = ""#45475a""
+surface0 = ""#313244""
+base = ""#1e1e2e""
+mantle = ""#181825""
+crust = ""#11111b"""
+eAmAZeLj,Untitled,Josif_tepe,C++,Sunday 29th of October 2023 10:08:49 AM CDT,"#include <iostream>
+#include <queue>
+#include <vector>
+#include <fstream>
+using namespace std;
+const int maxn = 1e5 + 10;
+int n, m;
+vector<int> graph[maxn];
+
+int main() {
+    cin >> n >> m;
+    vector<int> parent(n + 1, -1);
+    for(int i = 2; i <= n; i++) {
+        int x;
+        cin >> x;
+        parent[i] = x;
+    }
+    for(int i = 0; i < m; i++) {
+        int x, k;
+        cin >> x >> k;
+        int ancestor = x;
+        for(int j = 0; j < k; j++) {
+            ancestor = parent[ancestor];
+            if(ancestor == -1) {
+                break;
+            }
+        }
+        cout << ancestor << endl;
+    }
+    return 0;
+}
+
+"
+1kcrr1tL,Untitled,Josif_tepe,C++,Sunday 29th of October 2023 09:52:51 AM CDT,"#include <iostream>
+#include <queue>
+#include <vector>
+#include <fstream>
+using namespace std;
+const int maxn = 1e5 + 10;
+int n;
+vector<int> graph[maxn];
+int dfs(int node, int parent) {
+    int cows = (int) graph[node].size();
+    if(parent == -1) {
+        cows++;
+    }
+    
+    
+    int cnt_cows = 1, days_to_send = 0;
+    while(cnt_cows < cows) {
+        cnt_cows *= 2;
+        days_to_send++;
+    }
+    int result = days_to_send;
+    for(int neighbour : graph[node]) {
+        if(neighbour != parent) {
+            result += dfs(neighbour, node) + 1;
+        }
+    }
+    return result;
+}
+int main() {
+    cin >> n;
+    
+    for(int i = 1; i < n; i++) {
+        int a, b;
+        cin >> a >> b;
+        a--;
+        b--;
+        graph[a].push_back(b);
+        graph[b].push_back(a);
+    }
+    cout << dfs(0, -1) << endl;
+    return 0;
+}
+
+"
+i9b0Ak9v,LeetCode 150 - Evaluate Reverse Polish Notation - 2023.10.29 solution,nathanwailes,Python,Sunday 29th of October 2023 09:49:02 AM CDT,"class Solution:
+    def evalRPN(self, tokens: List[str]) -> int:
+        """""" Approach: Step through the input while adding the numbers to a stack,
+        and if you come to a point where the
+        current entry is an operator, pop the last two entries and perform the
+        operation, and then add the result back onto the stack.
+        """"""
+        stack = []
+
+        for t in tokens:
+            if t not in {'+', '-', '*', '/'}:
+                stack.append(int(t))
+            else:
+                second_operand = stack.pop()
+                first_operand = stack.pop()
+                if t == '+':
+                    stack.append(first_operand + second_operand)
+                elif t == '-':
+                    stack.append(first_operand - second_operand)
+                elif t == '*':
+                    stack.append(first_operand * second_operand)
+                elif t == '/':
+                    stack.append(int(first_operand / second_operand))
+        
+        return stack.pop()
+"
+xieE3R6F,Untitled,Josif_tepe,C++,Sunday 29th of October 2023 09:27:38 AM CDT,"#include <iostream>
+#include <queue>
+#include <vector>
+#include <fstream>
+using namespace std;
+const int maxn = 1e5 + 10;
+
+vector<int> graph[maxn];
+int main() {
+    ifstream cin(""milkvisits.in"");
+    ofstream cout(""milkvisits.out"");
+    int n, m;
+    cin >> n >> m;
+    string s;
+    cin >> s;
+    
+    for(int i = 1; i < n; i++) {
+        int a, b;
+        cin >> a >> b;
+        a--;
+        b--;
+        graph[a].push_back(b);
+        graph[b].push_back(a);
+    }
+    vector<pair<pair<int, int>, char>> queries;
+    for(int i = 0; i < m; i++) {
+        int a, b;
+        cin >> a >> b;
+        a--; b--;
+        char c;
+        cin >> c;
+        queries.push_back(make_pair(make_pair(a, b), c));
+    }
+    
+    vector<int> id(n, -1);
+    
+    for(int i = 0; i < n; i++) {
+        if(id[i] == -1) {
+            queue<int> q;
+            q.push(i);
+            
+            while(!q.empty()) {
+                int node = q.front();
+                q.pop();
+                id[node] = i;
+                for(int neighbour : graph[node]) {
+                    if(id[neighbour] == -1 and s[neighbour] == s[i]) {
+                        q.push(neighbour);
+                    }
+                }
+            }
+        }
+    }
+    string res = """";
+    for(int i = 0; i < m; i++) {
+        int a = queries[i].first.first;
+        int b = queries[i].first.second;
+        char c = queries[i].second;
+        
+        if(id[a] == id[b]) {
+            if(s[a] == c) {
+                res += ""1"";
+            }
+            else {
+                res += ""0"";
+            }
+        }
+        else {
+            res += ""1"";
+        }
+    }
+    
+    cout << res << endl;
+    return 0;
+}
+
+"
+vjVESQLv,Untitled,den4ik2003,C++,Sunday 29th of October 2023 09:27:35 AM CDT,"#include <iostream>
+#include <vector>
+#include <algorithm>
+
+using std::vector;
+
+void DFS(int v, vector<vector<int>>& neighbours, vector<bool>& used, int num_of_component) {
+  used[v] = true;
+  for (int to : neighbours[v]) {
+    if (used[to]) {
+      continue;
+    }
+    DFS(to, neighbours, used, num_of_component);
+  }
+}
+
+int NumOfComponents(vector<vector<int>>& neighbours, int n) {
+  vector<bool> used(n, false);
+  int num_of_component = 1;
+  for (int i = 0; i < n; ++i) {
+    if (!used[i]) {
+      DFS(i, neighbours, used, num_of_component++);
+    }
+  }
+  return num_of_component - 1;
+}
+
+vector<vector<int>> SelectAppropriateGraph(vector<vector<std::pair<int, int>>>& neighboursWithWeight, int x, int n) {
+  vector<vector<int>> appropriateGraph(n);
+  for (int i = 0; i < neighboursWithWeight.size(); ++i) {
+    for (int j = 0; j < neighboursWithWeight[i].size(); ++j) {
+      if (neighboursWithWeight[i][j].second > x) {
+        appropriateGraph[i].push_back(neighboursWithWeight[i][j].first);
+      }
+    }
+  }
+  return std::move(appropriateGraph);
+}
+
+int BinaryFindAnswer(vector<vector<std::pair<int, int>>>& neighboursWithWeight, int max, int initialNum, int n) {
+  int left = 0;
+  int right = max;
+  while (left <= right) {
+    int middle = (left + right) / 2;
+    vector<vector<int>> neighbours = SelectAppropriateGraph(neighboursWithWeight, middle, n);
+    if (NumOfComponents(neighbours, n) == initialNum) { // то есть можно попробовать больше снести
+      left = middle + 1;
+    } else { // то есть надо меньше снести
+      right = middle - 1;
+    }
+  }
+  vector<vector<int>> neighbours = SelectAppropriateGraph(neighboursWithWeight, left, n);
+  if (NumOfComponents(neighbours, n) == initialNum) return left;
+  return left - 1;
+}
+
+int main() {
+  int n, m;
+  std::cin >> n >> m;
+  vector<vector<std::pair<int, int>>> neighboursWithWeight(n);
+  vector<vector<int>> neighbours(n);
+  int maxWeight = 0;
+  for (int j = 0; j < m; ++j) {
+    int l, r, w;
+    std::cin >> l >> r >> w;
+    maxWeight = std::max(maxWeight, w);
+    if (l == r) continue; // ok?
+    neighboursWithWeight[l - 1].emplace_back(r - 1, w);
+    neighboursWithWeight[r - 1].emplace_back(l - 1, w);
+    neighbours[l - 1].push_back(r - 1);
+    neighbours[r - 1].push_back(l - 1);
+  }
+  int initialNumOfComponents = NumOfComponents(neighbours, n);
+  std::cout << BinaryFindAnswer(neighboursWithWeight, maxWeight, initialNumOfComponents, n);
+}"
+FpE8bwiq,勘根,excellent940707,C,Sunday 29th of October 2023 09:26:43 AM CDT,"#include <stdio.h>
+using namespace std;
+double f(double x){
+     return 0.0021*x*x*x*x*x + 0.00067*(x-13)*(x-13)*(x-13)*(x-13)+46.7*x-100;
+}
+double error = 1e-5;
+int main(){
+     double l=-15, r=15, mid;
+     while(r-l>=error){
+          mid = (l+r)/2;
+          if(f(mid)*f(r)<0)l=mid;
+          else r=mid;
+     }
+     printf(""%.5f"",r);
+     return 0;
+}"
+01wHeAva,hand-over-hand,DmitriiPastebin,Java,Sunday 29th of October 2023 09:25:38 AM CDT,"package linkedlists.lockbased;
+
+import contention.abstractions.CompositionalSortedSet;
+
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.SortedSet;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import contention.abstractions.AbstractCompositionalIntSet;
+
+public class HandOverHandListIntSet extends AbstractCompositionalIntSet {
+    // sentinel nodes
+    private Node head;
+    private Node tail;
+
+    public HandOverHandListIntSet() {
+        head = new Node(Integer.MIN_VALUE);
+        tail = new Node(Integer.MAX_VALUE);
+        head.next = tail;
+    }
+
+    private class Node {
+        Node(int item) {
+            key = item;
+            next = null;
+            lock = new ReentrantLock();
+        }
+        public int key;
+        public Node next;
+        public Lock lock;
+    }
+
+    /*
+     * Insert
+     *
+     * @see contention.abstractions.CompositionalIntSet#addInt(int)
+     */
+    @Override
+    public boolean addInt(int item) {
+        head.lock.lock();
+        Node pred = head;
+        Node curr = pred.next;
+
+        try {
+            curr.lock.lock();
+            try {
+                while (curr.key < item) {
+                    pred.lock.unlock();
+                    pred = curr;
+                    curr = pred.next;
+                    curr.lock.lock();
+                }
+
+                if (curr.key == item) {
+                    return false;
+                }
+                Node node = new Node(item);
+                node.next = curr;
+                pred.next = node;
+                return true;
+            }
+            finally {
+                curr.lock.unlock();
+            }
+        }
+        finally {
+            pred.lock.unlock();
+        }
+    }
+
+    /*
+     * Remove
+     *
+     * @see contention.abstractions.CompositionalIntSet#removeInt(int)
+     */
+    @Override
+    public boolean removeInt(int item){
+        head.lock.lock();
+        Node pred = head;
+        Node curr = pred.next;
+
+        try {
+            curr.lock.lock();
+            try {
+                while (curr.key < item) {
+                    pred.lock.unlock();
+                    pred = curr;
+                    curr = pred.next;
+                    curr.lock.lock();
+                }
+
+                if (curr.key == item) {
+                    pred.next = curr.next;
+                    return true;
+                }
+                return false;
+            }
+            finally {
+                curr.lock.unlock();
+            }
+        }
+        finally {
+            pred.lock.unlock();
+        }
+    }
+
+    /*
+     * Contains
+     *
+     * @see contention.abstractions.CompositionalIntSet#containsInt(int)
+     */
+    @Override
+    public boolean containsInt(int item){
+        head.lock.lock();
+        Node pred = head;
+        Node curr = pred.next;
+
+        try {
+            curr.lock.lock();
+            try {
+                while (curr.key < item) {
+                    pred.lock.unlock();
+                    pred = curr;
+                    curr = pred.next;
+                    curr.lock.lock();
+                }
+                return (curr.key == item);
+            }
+            finally {
+                curr.lock.unlock();
+            }
+        }
+        finally {
+            pred.lock.unlock();
+        }
+    }
+
+    @Override
+    public void clear() {
+        head = new Node(Integer.MIN_VALUE);
+        head.next = new Node(Integer.MAX_VALUE);
+    }
+
+    /**
+     * Non atomic and thread-unsafe
+     */
+    @Override
+    public int size() {
+        int count = 0;
+
+        Node curr = head.next;
+        while (curr.key != Integer.MAX_VALUE) {
+            curr = curr.next;
+            count++;
+        }
+        return count;
+    }
+}
+
+"
+aVmrnZFh,Untitled,den4ik2003,C++,Sunday 29th of October 2023 09:23:45 AM CDT,"#include <iostream>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+bool delim (char c) {
+	return c == ' ';
+}
+ 
+bool is_op (char c) {
+	return c=='+' || c=='-' || c=='*' || c=='/' || c=='%';
+}
+ 
+int priority (char op) {
+	return
+		op == '+' || op == '-' ? 1 :
+		op == '*' || op == '/' || op == '%' ? 2 :
+		-1;
+}
+ 
+void process_op (vector<int> & st, char op) {
+	int r = st.back();  st.pop_back();
+	int l = st.back();  st.pop_back();
+	switch (op) {
+		case '+':  st.push_back (l + r);  break;
+		case '-':  st.push_back (l - r);  break;
+		case '*':  st.push_back (l * r);  break;
+		case '/':  st.push_back (l / r);  break;
+		case '%':  st.push_back (l % r);  break;
+	}
+}
+ 
+int calc (string & s) {
+	vector<int> st;
+	vector<char> op;
+	for (size_t i=0; i<s.length(); ++i)
+		if (!delim (s[i]))
+			if (s[i] == '(')
+				op.push_back ('(');
+			else if (s[i] == ')') {
+				while (op.back() != '(')
+					process_op (st, op.back()),  op.pop_back();
+				op.pop_back();
+			}
+			else if (is_op (s[i])) {
+				char curop = s[i];
+				while (!op.empty() && priority(op.back()) >= priority(s[i]))
+					process_op (st, op.back()),  op.pop_back();
+				op.push_back (curop);
+			}
+			else {
+				string operand;
+				while (i < s.length() && isalnum (s[i]))
+					operand += s[i++];
+				--i;
+				if (isdigit (operand[0]))
+					st.push_back (atoi (operand.c_str()));
+				else
+					st.push_back (stoi(operand));
+			}
+	while (!op.empty())
+		process_op (st, op.back()),  op.pop_back();
+	return st.back();
+}
+
+int main() {
+  std::string s(""1+(3*3+2)"");
+  int x = calc(s);
+  std::cout << x;
+}"
+DSgxrCLF,МеждуНебомИЗемлейОдинЛишьЯДостоин,HaoAsakura,C#,Sunday 29th of October 2023 08:39:14 AM CDT,"using System;
+using System.Collections.Generic;
+//важня хуйня чтоб мы могли юзать вложенные классы из AirplaneCrew
+using static PracticingPolygon.Program.AirplaneCrew;
+
+namespace PracticingPolygon
+{
+    internal class Program
+    {
+        public class AirplaneCrew
+        {
+            public class Airplane
+            {
+                public string Name { get; private set; }
+                public string Model { get; private set; }
+                public int TankСapacity { get; private set; }
+                public int LoadCapacity { get; private set; }
+
+                public Airplane(string Name, string Model, int TankСapacity, int LoadCapacity)
+                {
+                    this.Name = Name;
+                    this.Model = Model;
+                    this.TankСapacity = TankСapacity;
+                    this.LoadCapacity = LoadCapacity;
+                }
+
+                public void GetСharacteristics()
+                {
+                    Console.WriteLine($""[!] Информация о самолете {Name} [!] \n\n"" +
+                        $""Модель: {Model} \n"" +
+                        $""Ёмкость бака: {TankСapacity} литров \n"" +
+                        $""Грузо-подъёмность: {LoadCapacity} тон \n"");
+                }
+            }
+
+            public class AirlineCompany
+            {
+                public string Name { get; private set; }
+                public int FoundationYear { get; private set; }
+                public string ShortHistory { get; private set; }
+
+                public AirlineCompany(string Name, int FoundationYear, string ShortHistory)
+                {
+                    this.Name = Name;
+                    this.FoundationYear = FoundationYear;
+                    this.ShortHistory = ShortHistory;
+                }
+
+                public AirlineCompany(string Name, int FoundationYear)
+                {
+                    this.Name = Name;
+                    this.FoundationYear = FoundationYear;
+                }
+
+                public void GetInfo()
+                {
+                    Console.WriteLine($""[!] Информация о авиакомпании самолета [!] \n\n"" +
+                        $""Название авиакомпании: {Name} \n"" +
+                        $""Год основания: {FoundationYear} \n"");
+
+                    if(ShortHistory != null)
+                        Console.WriteLine($""Краткая история авиакомпании: {ShortHistory} \n"");
+                }
+            }
+
+            public abstract class AirplaneCrewMember
+            {
+                public string Name { get; set; }
+                public byte Seniority { get; set; }
+                public byte Age { get; set; }
+                public abstract string JobTitle { get; set; }
+
+                public AirplaneCrewMember(string Name, byte Seniority, byte Age)
+                {
+                    this.Name = Name;
+                    this.Seniority = Seniority;
+                    this.Age = Age;
+                }
+
+                public void GetInfo()
+                {
+                    Console.WriteLine($""[!] Информация о члене экипажа: {JobTitle} [!]\n"" +
+                        $""Имя: {Name} \n"" +
+                        $""Стаж: {Seniority} лет \n"" +
+                        $""Возраст: {Age} лет    \n"");
+                }
+            }
+
+            public class Commander : AirplaneCrewMember
+            {
+                public override string JobTitle { get; set; } = ""Командир"";
+                public Commander(string Name, byte Seniority, byte Age) : base(Name, Seniority, Age) { }
+            }
+            
+            public class CoPilot : AirplaneCrewMember
+            {
+                public override string JobTitle { get; set; } = ""Второй пилот"";
+                public CoPilot(string Name, byte Seniority, byte Age) : base(Name, Seniority, Age) { }
+
+            }
+
+            public class Navigator : AirplaneCrewMember
+            {
+                public override string JobTitle { get; set; } = ""Штурман"";
+                public Navigator(string Name, byte Seniority, byte Age) : base(Name, Seniority, Age) { }
+            }
+
+            public class Steward : AirplaneCrewMember
+            {
+                public override string JobTitle { get; set; } = ""Стюардесса"";
+                public Steward(string Name, byte Seniority, byte Age) : base(Name, Seniority, Age) { }
+            }
+
+            public class Passanger
+            {
+                public string Name { get; private set; }
+                public byte Age { get; private set; }
+                public string Destination { get; private set; }
+
+                public Passanger(string Name, byte Age, string Destination)
+                {
+                    this.Name = Name;
+                    this.Age = Age;
+                    this.Destination = Destination;
+                }
+
+                public static void GetInfoAboutPassengers(List<Passanger> passangers)
+                {
+                    Console.WriteLine(""[!] Информация о пассажирах в самолете [!] \n"");
+
+                    int count = 0;
+                    foreach (Passanger passanger in passangers)
+                    {
+                        Console.WriteLine($""[№{count+1}] Имя: {passanger.Name}, "" +
+                                          $""{passanger.Age} лет,"" +
+                                          $""место назначения: {passanger.Destination} \n"");
+
+                        count++;
+                    }
+                }
+            }
+
+            public AirlineCompany _AirlineCompany { get; private set; }
+            public Airplane _Airplane { get; private set; }
+            public Commander _Commander { get; private set; }
+            public CoPilot _CoPilot { get; private set; }
+            public Navigator _Navigator { get; private set; }
+            public Steward _Steward { get; private set; }
+            public List<Passanger> _Passengers { get; private set; } = new List<Passanger>(10);
+
+            public AirplaneCrew(AirlineCompany AirlineCompany, Airplane Airplane, 
+                Commander Commander, CoPilot CoPilot, Navigator Navigator, 
+                Steward Steward, List<Passanger> Passengers)
+            {
+                _AirlineCompany = AirlineCompany;
+                _Airplane = Airplane;
+                _Commander = Commander;
+                _CoPilot = CoPilot;
+                _Navigator = Navigator;
+                _Steward = Steward;
+                _Passengers = Passengers;
+            }
+
+            public void GetAirlineCompanyData()
+            {
+                _AirlineCompany.GetInfo();
+            }
+
+            public void GetAirplaneData()
+            {
+                _Airplane.GetСharacteristics();
+            }
+
+            public void GetAirplaneCrewMembersData()
+            {
+                Console.WriteLine($""[!] Информация о членах экипажа [!] \n\n"");
+
+                _Commander.GetInfo();
+                _CoPilot.GetInfo();
+
+                _Navigator.GetInfo();
+                _Steward.GetInfo();
+            }
+
+            public void GetPassengersData()
+            {
+                Passanger.GetInfoAboutPassengers(_Passengers);
+            }
+        }
+
+        static void Main(string[] args)
+        {
+            AirplaneCrew airplaneCrew = new AirplaneCrew(
+
+                AirlineCompany: new AirlineCompany(
+                    Name:""Авиакомпания Авиасейлс"", 
+                    FoundationYear: 1989, 
+                    ShortHistory: ""История типо компании""
+                ),
+
+                Airplane: new Airplane(
+                    Name: ""Уничтожитель"", 
+                    Model: ""Боинг 33"",
+                    TankСapacity: 34, 
+                    LoadCapacity: 55
+                ),
+
+                Commander: new Commander(
+                    Name: ""Семенов Даниил Фёдорович"",
+                    Seniority: 22,
+                    Age: 55
+                ),
+
+                CoPilot: new CoPilot(
+                    Name: ""Быков Роберт Иванович"",
+                    Seniority: 10,
+                    Age: 32
+                ),
+
+                Navigator: new Navigator(
+                    Name: ""Николаев Артур Никитич"",
+                    Seniority: 11,
+                    Age: 36
+                ),
+
+                Steward: new Steward(
+                    Name: ""Родионова Анастасия Григорьевна"",
+                    Seniority: 3,
+                    Age: 25
+                ),
+
+                Passengers: new List<Passanger>()
+                {
+
+                    new Passanger(
+                        Name: ""Трофимов Тимофей Вячеславович"",
+                        Age: 22,
+                        Destination: ""Фареры""
+                    ),
+
+                    new Passanger(
+                        Name: ""Воробьев Артём Ильич"",
+                        Age: 34,
+                        Destination: ""Сьерра-Леоне""
+                    ),
+
+                    new Passanger(
+                        Name: ""Яшина Виктория Львовна"",
+                        Age: 25,
+                        Destination: ""Фареры""
+                    ),
+
+                    new Passanger(
+                        Name: ""Герасимов Ярослав Леонидович"",
+                        Age: 19,
+                        Destination: ""Аргентина""
+                    ),
+
+                    new Passanger(
+                        Name: ""Григорьев Даниил Родионович"",
+                        Age: 21,
+                        Destination: ""Аргентина""
+                    ),
+
+                    new Passanger(
+                        Name: ""Попова Василиса Артёмовна"",
+                        Age: 36,
+                        Destination: ""Фареры""
+                    ),
+
+                    new Passanger(
+                        Name: ""Романова Карина Данииловна"",
+                        Age: 57,
+                        Destination: ""Таиланд""
+                    ),
+
+                    new Passanger(
+                        Name: ""Егорова Елизавета Артёмовна"",
+                        Age: 19,
+                        Destination: ""Бурунди""
+                    ),
+
+                    new Passanger(
+                        Name: ""Усова Эмилия Павловна"",
+                        Age: 46,
+                        Destination: ""Аргентина""
+                    ),
+
+                    new Passanger(
+                        Name: ""Коновалов Ярослав Святославович"",
+                        Age: 28,
+                        Destination: ""Фареры""
+                    )
+                }
+
+                );
+            int choise = -1;
+
+            Console.WriteLine($""[Оператор] Управление самолетом {airplaneCrew._Airplane.Name}\n"");
+            while (choise!=0) 
+            {
+                Console.WriteLine(""[?]Что вы хотите сделать [?] \n\n"" +
+                    ""[0] Выход из меню управления самолетом\n"" +
+                    ""[1] Информация о членах экипажа \n"" +
+                    ""[2] Информация о пассажирах \n"" +
+                    ""[3] Информация о авиакомпании \n"" +
+                    ""[4] Информация о технической части самолета \n\n"");
+
+                Console.Write(""[Оператор] Я хочу: "");
+                choise = int.Parse(Console.ReadLine());
+                
+                Console.WriteLine();
+                
+                switch (choise)
+                {
+                    case 0:
+                        break;
+                    case 1:
+                        airplaneCrew.GetAirplaneCrewMembersData();
+                        break;
+                    case 2:
+                        airplaneCrew.GetPassengersData();
+                        break;
+                    case 3:
+                        airplaneCrew.GetAirlineCompanyData();
+                        break;
+                    case 4:
+                        airplaneCrew.GetAirplaneData();
+                        break;
+                }
+                
+                if (choise == 0)
+                    break;
+
+                Console.Write(""\nНажмите на любую клавишу.."");
+                Console.ReadLine();
+                Console.Clear();
+            }
+
+
+        }
+    }
+}"
+wtQRVrpY,Random game stuff Simba 1.4,WarPie90,Delphi,Sunday 29th of October 2023 08:19:45 AM CDT,"program new;
+{$I SRL/osr.simba}
+
+const
+  WIDTH  = 720;
+  HEIGHT = 480;
+
+type
+  TGame = record
+    image: TMufasaBitmap;
+    viewpos:  Vector2;
+    charpos,oldpos:  Vector2;
+    velocity: Vector2;
+
+    obstacles: TBoxArray;
+
+    characterImg: TMufasaBitmap;
+  end;
+
+  TKey  = (SPACE, LEFT, RIGHT, X_KEY);
+  TKeys = set of TKey;
+
+
+var
+  character_l, character_r: TMufasaBitmap;
+
+function TGame.GetCharLocation(): Vector2; constref;
+begin
+  Result.x := charpos.x + 20;
+  Result.y := height - charpos.y - 20;
+end;
+
+procedure TGame.DrawThings();
+var
+  loc: Vector2;
+  b: TBox;
+  vp: TPoint;
+begin
+  loc := Self.GetCharLocation();
+  characterImg.DrawTransparent(Max(0,Ceil(loc.x)-20), Max(0,Ceil(loc.y)-20), Self.Image);
+
+  vp := viewpos.ToPoint();
+  for b in Self.obstacles do
+  begin
+    b := [b.x1,height - b.y1,b.x2,height - b.y2];
+    b := [b.x1-vp.x, b.y1-vp.y, b.x2-vp.x, b.y2-vp.y];
+    Self.Image.DrawBoxFilled(b, False, $33AA55);
+  end;
+end;
+
+procedure TGame.Render();
+var tmp: TMufasaBitmap;
+begin
+  Self.image.DrawClear(0);
+  Self.DrawThings();
+  DrawBitmapDebugImg(self.image);
+end;
+
+function TGame.GetInputKeys(): TKeys;
+begin
+  if isKeyDown(VK_SPACE) then Result := [SPACE];
+  if isKeyDown(VK_LEFT)  then Result += [LEFT];
+  if isKeyDown(VK_RIGHT) then Result += [RIGHT];
+  if isKeyDown(VK_X)     then Result += [X_KEY];
+end;
+
+procedure TGame.Setup();
+var b: TBox;
+begin
+  Self.image.Init();
+  Self.image.SetSize(WIDTH, HEIGHT);
+  ShowBitmap(Self.image);
+  DisplayDebugImgWindow(WIDTH, HEIGHT);
+  Self.charpos := [430, 161];
+  Self.velocity := [0,1];
+
+  character_l.Init();
+  character_l.LoadFromFile('images/mario_small_l.png');
+  character_l.ReplaceColor($FFFFFF,0);
+
+  character_r.Init();
+  character_r.LoadFromFile('images/mario_small_r.png');
+  character_r.ReplaceColor($FFFFFF,0);
+
+  Self.obstacles += Box(150, 200, 400, 180);
+  Self.obstacles += Box(100, 50,  150, 0);
+  Self.obstacles += Box(400, 160, 450, 0);
+
+  for 0 to 400 do
+  begin
+    b := Box(Random(50000), Random(40,500), 0, 0);
+    if Random() > 0.5 then
+    begin
+      b.x2 := b.x1 + Random(100,400);
+      b.y2 := Max(0, b.y1 - Random(80));
+    end else
+    begin
+      b.x2 := b.x1 + Random(10,70);
+      b.y2 := Max(0, b.y1 - Random(250));
+    end;
+
+    Self.obstacles += b;
+  end;
+
+  characterImg := character_r;
+end;
+
+// should be rewritten properly
+procedure TGame.WallTest();
+var
+  W_M := WIDTH-40;
+  H_M := HEIGHT-40;
+  b: TBox;
+  this,vp: TPoint;
+  d1,d2: Double;
+  bounds: TBox;
+  top_l,top_r,btm_l,btm_r: TPoint;
+begin
+  bounds := [2,2,W_M,H_M];
+
+  // fix me for proper collision: To high speed sends us though objects
+  this := charpos.ToPoint() + Point(20,0);
+  vp := Self.viewpos.ToPoint();
+  for b in Self.obstacles do
+  begin
+    b := [b.x1-vp.x, b.y1-vp.y, b.x2-vp.x, b.y2-vp.y];
+
+    // floor                                                                                        //if higher up
+    if InRange(this.x, b.x1-20,b.x2+20) and (InRange(this.y, b.y2,b.y1) or (this.y >= b.y1)) and (b.y1 >= bounds.y1) then
+      bounds.y1 := b.y1+3;
+
+    // roof                                                                                         //if lower down
+    if InRange(this.x, b.x1-20,b.x2+20) and (InRange(this.y, b.y2,b.y1) or (this.y < b.y1)) and (b.y2 <= bounds.y2) then
+      bounds.y2 := b.y2-43;
+
+
+    // ---> || wall to the right
+    if InRange(this.y, b.y2-39,b.y1-5) and (InRange(this.x, b.x1,b.x2) or (this.x <= b.x1)) and (b.x1 <= bounds.x2) then
+      bounds.x2 := b.x1-43;
+
+    // || <--- wall to the left
+    if InRange(this.y, b.y2-39,b.y1-5) and (InRange(this.x, b.x1,b.x2) or (this.x >= b.x1)) and (b.x2 >= bounds.x1) then
+      bounds.x1 := b.x2+3;
+  end;
+
+
+  if charpos.x >  bounds.x2 then begin charpos.x := bounds.x2; velocity.x := Min(velocity.x, 0); end;
+  if charpos.x <= bounds.x1 then begin charpos.x := bounds.x1; velocity.x := Max(velocity.x, 0); end;
+  if charpos.y >  bounds.y2 then begin charpos.y := bounds.y2; end;
+  if charpos.y <= bounds.y1 then begin charpos.y := bounds.y1; end;
+  if charpos.y = bounds.y1 then velocity.y := Max(0,velocity.y); //hit a floor
+  if charpos.y = bounds.y2 then velocity.y := Min(0,velocity.y); //hit a roof
+end;
+
+procedure TGame.Thing();
+var
+  keys: TKeys;
+  jmpTimer, dblJmpTimer: TCountDown;
+  i: Int32;
+begin
+  jmpTimer.Init(0);
+  dblJmpTimer.Init(0);
+
+  while True do
+  begin
+    keys := Self.GetInputKeys();
+
+    //writeln keys;
+    if (SPACE in keys) and (jmpTimer.IsFinished) then
+    begin
+      //WriteLn('velo: ', Self.velocity.y);
+
+      if Self.velocity.y = 0 then
+      begin
+        Self.velocity.y := 1.8;
+      end
+      else if (Self.velocity.y > 0) and (Self.velocity.y < 1) and dblJmpTimer.IsFinished() then
+      begin
+        //WriteLn('Double!!', Self.velocity.y);
+        Self.velocity.y := 1.3;
+        dblJmpTimer.Init(400);
+      end;
+
+      jmpTimer.Init(150);
+    end;
+
+    if (RIGHT in keys) then
+    begin
+      Self.velocity.x := Max(10,Self.velocity.x+0.01);
+      characterImg := character_r;
+    end;
+
+    if (LEFT in keys) then
+    begin
+      Self.velocity.x := Min(-10,Self.velocity.x-0.01);
+      characterImg := character_l;
+    end;
+
+    self.oldpos    := Self.charpos;
+    Self.charpos.y += Self.velocity.y;
+
+    if (charpos.x+Self.velocity.x/10+1 > WIDTH - 200) or (charpos.x+Self.velocity.x/10-1 < 200) then
+      self.viewpos.x += Self.velocity.x/10
+    else
+      Self.charpos.x += Self.velocity.x/10;
+
+    Self.Render();
+
+    Sleep(0);
+
+    // break down towards zero x-speed
+    if Self.velocity.x <> 0 then
+    begin
+      if Self.velocity.x > 0 then Self.velocity.x := Max(0, Self.velocity.x-1);
+      if Self.velocity.x < 0 then Self.velocity.x := Min(0, Self.velocity.x+1);
+    end;
+
+    // reduce jump velocity
+    Self.velocity.y := Self.velocity.y - 0.0100;
+    Self.WallTest();
+  end;
+end;
+
+
+var
+  game: TGame;
+begin
+  RandSeed := 50;
+  game.Setup();
+  game.Thing();
+end."
+Y3ah3WZ6,Untitled,Chefir,C#,Sunday 29th of October 2023 08:02:51 AM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace ProjectMY
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.CursorVisible = false;
+            char[,] map = ReadMap(""map.txt"");
+            ConsoleKeyInfo pressedKey = new ConsoleKeyInfo('w', ConsoleKey.W, false, false, false);
+            int pacmanX = 1;
+            int pacmanY = 1;
+            int score = 0;
+
+            while (true)
+            {
+                Console.Clear();
+                Console.ForegroundColor = ConsoleColor.Green;
+                DrawMap(map);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.SetCursorPosition(pacmanX, pacmanY);
+                Console.Write(""@"");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.SetCursorPosition(47, 0);
+                Console.Write($""Score: {score}"");
+                pressedKey = Console.ReadKey();
+                HandleInput(pressedKey, ref pacmanX, ref pacmanY, map, ref score);
+            }
+        }
+
+        private static char[,] ReadMap(string path)
+        {
+            string[] file = File.ReadAllLines(""map.txt"");
+            char[,] map = new char[file.Length, GetMaxLengthOfLine(file)];
+
+            for (int y = 0; y < map.GetLength(0); y++)
+                for (int x = 0; x < map.GetLength(1); x++)
+                    map[y, x] = file[y][x];
+
+            return map;
+        }
+
+        private static void DrawMap(char[,] map)
+        {
+            for (int y = 0; y < map.GetLength(0); y++)
+            {
+                for (int x = 0; x < map.GetLength(1); x++)
+                {
+                    Console.Write(map[y, x]);
+                }
+                Console.Write(""\n"");
+            }
+        }
+
+        private static void HandleInput(ConsoleKeyInfo pressedKey, ref int pacmanX, ref int pacmanY, char[,] map, ref int score)
+        {
+            int[] direction = GetDirection(pressedKey);
+            int nextPacmanPositionX = pacmanX + direction[0];
+            int nextPacmanPositionY = pacmanY + direction[1];
+            char nextCell = map[nextPacmanPositionY, nextPacmanPositionX];
+
+            if (nextCell == ' ' || nextCell == '*')
+            {
+                pacmanX = nextPacmanPositionX;
+                pacmanY = nextPacmanPositionY;
+
+                if (nextCell == '*')
+                {
+                    score++;
+                    map[nextPacmanPositionY, nextPacmanPositionX] = ' ';
+                }
+            }
+        }
+
+        private static int[] GetDirection(ConsoleKeyInfo pressedKey)
+        {
+            int[] direction = { 0, 0 };
+
+            if (pressedKey.Key == ConsoleKey.UpArrow)
+                direction[1] = -1;
+            else if (pressedKey.Key == ConsoleKey.DownArrow)
+                direction[1] = 1;
+            else if (pressedKey.Key == ConsoleKey.LeftArrow)
+                direction[0] = -1;
+            else if (pressedKey.Key == ConsoleKey.RightArrow)
+                direction[0] = 1;
+
+            return direction;
+        }
+
+        private static int GetMaxLengthOfLine(string[] lines)
+        {
+            int maxLength = lines[0].Length;
+
+            foreach (var line in lines)
+                if (line.Length > maxLength)
+                    maxLength = line.Length;
+
+            return maxLength;
+        }
+    }
+}
+"
+Ry0rCWNV,03. Title Case,Spocoman,C++,Sunday 29th of October 2023 08:02:39 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+int main() {
+    string str;
+    getline(cin, str);
+    str[0] = toupper(str[0]);
+
+    for (int i = 1; i < str.length(); i++) {
+        if (!isalpha(str[i - 1]) && islower(str[i])) {
+            str[i] = toupper(str[i]);
+        }
+    }
+
+    cout << str << endl;
+    return 0;
+}"
+3Z8WFt1Z,Untitled,den4ik2003,C++,Sunday 29th of October 2023 07:58:56 AM CDT,"#include <iostream>
+#include <vector>
+
+int main() {
+  int m, n;
+  std::cin >> m >> n;
+  std::vector<std::vector<int>> a(n, std::vector<int>(m));
+
+  int count = 1;
+  for (int shift_j = 0; shift_j < m; ++shift_j) {
+    int i = 0;
+    int j = shift_j;
+    while (i < n && j >= 0) {
+      a[i][j] = count;
+      ++count;
+      ++i;
+      --j;
+    }
+  }
+  for (int shift_i = 1; shift_i < n; ++shift_i) {
+    int i = shift_i;
+    int j = m - 1;
+    while (i < n && j >= 0) {
+      a[i][j] = count;
+      ++count;
+      ++i;
+      --j;
+    }
+  }
+
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < m; ++j) {
+      std::cout << a[i][j] << "" "";
+    }
+    std::cout << '\n';
+  }
+}
+"
+sx0DULs1,init.lua,Mazi30,Lua,Sunday 29th of October 2023 07:47:10 AM CDT,"shell.execute(""pastebin"", ""get"", ""gL9TssfE"", ""excavate.lua"")
+shell.execute(""pastebin"", ""get"", ""nFpa7UQK"", ""fill.lua"")
+shell.execute(""pastebin"", ""get"", ""7LSYF4NV"", ""border.lua"")"
+6wDLiKSv,Simba 1.5 - Planetary rotation around sun,WarPie90,Delphi,Sunday 29th of October 2023 07:46:06 AM CDT,"program new;
+{$R-}
+
+const
+  SPEEDSCALE := 500;
+  G = 6.674*10**-11;
+  Middle: TPoint = [500,500];
+
+type
+  TPlanet = record
+    Distance, Diameter, Mass: Double;
+
+    Pos: record Distance, Angle: Single; end;
+    Color: TColor;
+    pathrad: Int32;
+  end;
+
+
+var
+  Sun: TPlanet;
+  image: TImage;
+  Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune: TPlanet;
+  year: Int32;
+
+function TPlanet.Velocity(): Double;
+begin
+  Result := Sqrt((G*Sun.Mass) / (Self.Distance*1000));
+end;
+
+function TPlanet.SizeScaled(): Int32;
+begin
+  Result := Max(1,Trunc(Self.Diameter ** 0.35 / 5));
+end;
+
+function TPlanet.Tick(Image: TImage): TPoint;
+var
+  speed: Single;
+  size: Int32;
+begin
+  speed := Self.Velocity();
+  size  := Self.SizeScaled();
+
+  if Self.Diameter = Earth.Diameter then
+  begin
+    if Modulo(Self.Pos.Angle + speed/Self.Distance*speedscale, 2*PI) <> Self.Pos.Angle + speed/Self.Distance*speedscale then
+      year += 1;
+
+    Image.DrawText('Earth years: '+ ToStr(year), [50,50], $FFFFFF);
+  end;
+
+  Self.Pos.Distance := Self.Distance ** 0.27;
+  Self.Pos.Angle := Modulo(Self.Pos.Angle + speed/Self.Distance*speedscale, 2*PI);
+
+  Result.x := Round(Middle.x + Self.Pos.Distance * Cos(Self.Pos.Angle));
+  Result.y := Round(Middle.y + Self.Pos.Distance * Sin(Self.Pos.Angle));
+
+  if Self.pathrad = 0 then Self.pathrad := Ceil(Result.DistanceTo(Middle));
+  image.DrawCircleAA(middle, Self.pathrad, $222222, 1);
+
+  image.DrawCircleAA(Result, size, Self.Color, size);
+end;
+
+procedure Update(Image: TImage);
+begin
+  Mercury.Tick(image); Venus.Tick(image); Earth.Tick(image); Mars.Tick(image);
+  Jupiter.Tick(image); Saturn.Tick(image); Uranus.Tick(image); Neptune.Tick(image);
+end;
+
+var
+  tmp: TImage;
+begin
+  Sun.Diameter     := 696340*2;
+  Sun.Mass         := 2*10**30;
+  Sun.Distance     := 0;
+
+
+  Mercury.Diameter := 2440*2;
+  Mercury.Mass     := 3.3010*10**23;
+  Mercury.Distance := 57.9*10**6;
+  Mercury.Color    := Colors.SLATEGREY;
+
+  Venus.Diameter   := 6052*2;
+  Venus.Mass       := 4.1380*10**24;
+  Venus.Distance   := 108.2*10**6;
+  Venus.Color      := Colors.PALE_VIOLETRED;
+
+  Earth.Diameter   := 6371*2;
+  Earth.Mass       := 5.97*10**24;
+  Earth.Distance   := 149.6*10**6;
+  Earth.Color      := Colors.SKYBLUE;
+
+  Mars.Diameter    := 3390*2;
+  Mars.Mass        := 6.4273*10**23;
+  Mars.Distance    := 228.0*10**6;
+  Mars.Color       := Colors.RED;
+
+  Jupiter.Diameter := 69911*2;
+  Jupiter.Mass     := 1.89852*10**27;
+  Jupiter.Distance := 778.5*10**6;
+  Jupiter.Color    := Colors.MEDIUM_BLUE;
+
+  Saturn.Diameter  := 58232*2;
+  Saturn.Mass      := 5.6846*10**26;
+  Saturn.Distance  := 1432.0*10**6;
+  Saturn.Color    := Colors.BEIGE;
+
+  Uranus.Diameter  := 25362*2;
+  Uranus.Mass      := 8.6819*10**25;
+  Uranus.Distance  := 2867.0*10**6;
+  Uranus.Color     := Colors.SKYBLUE;
+
+  Neptune.Diameter := 24622*2;
+  Neptune.Mass     := 1.02431*10**26;
+  Neptune.Distance := 4515.0*10**6;
+  Neptune.Color    := Colors.DARK_BLUE;
+
+  image := TImage.Create(1000,1000);
+
+  while True do
+  begin
+    image.DrawCircleAA(Middle, Sun.SizeScaled(), $88FFFF, Sun.SizeScaled());
+    Update(image);
+    //tmp := image.ResizeBilinear(image.GetWidth() div 4, image.GetHeight() div 4);
+    image.Show(False);
+    //tmp.Free();
+    image.Clear();
+    //TerminateScript;
+  end;
+  image.Free();
+end."
+Dvcnarth,Simba 1.5 - Earth Mercury Relation,WarPie90,Delphi,Sunday 29th of October 2023 07:43:18 AM CDT,"program new;
+
+type
+  TPlanet = record
+    Distance, Diameter, Mass: Double;
+
+    Pos: record Distance, Angle: Single; end;
+    Color: TColor;
+    pathrad: Int32;
+  end;
+
+const
+  G = 6.674*10**-11;
+  Middle: TPoint = [600,600];
+
+var
+  speedscale := 80.0;
+  _iter: Int32;
+
+var
+  Sun: TPlanet;
+  tmp, backup, image: TImage;
+  Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune: TPlanet;
+
+var
+  lines: TPointArray;
+
+function TPlanet.Velocity(): Double;
+begin
+  Result := Sqrt((G*Sun.Mass) / (Self.Distance*1000));
+end;
+
+function TPlanet.SizeScaled(): Int32;
+begin
+  Result := Max(1,Trunc(Self.Diameter ** 0.4 / 3.5));
+end;
+
+function TPlanet.Tick(): TPoint;
+var
+  speed: Single;
+  size: Int32;
+begin
+  speed := Self.Velocity();
+  size  := Self.SizeScaled();
+
+  Self.Pos.Distance := Self.Distance ** 0.33;
+  Self.Pos.Angle += Modulo(Speed / Self.Distance * speedscale, 2*PI);
+
+  Result.x := Round(Middle.x + Self.Pos.Distance * Cos(Self.Pos.Angle));
+  Result.y := Round(Middle.y + Self.Pos.Distance * Sin(Self.Pos.Angle));
+
+  if Self.pathrad = 0 then
+  begin
+    Self.pathrad := Ceil(Result.DistanceTo(Middle));
+    Image.DrawCircle(middle, Self.pathrad, $BFEFFF);
+  end;
+
+  tmp.DrawCircleAA(Result, size, Self.Color, size);
+end;
+
+procedure Update();
+var E,M: TPoint;
+begin
+  Mercury.Tick();
+  Earth.Tick();
+
+  inc(_iter);
+
+  if _iter mod 2 = 0 then
+  begin
+    E.x := Round(Middle.x + Earth.Pos.Distance * Cos(Earth.Pos.Angle));
+    E.y := Round(Middle.y + Earth.Pos.Distance * Sin(Earth.Pos.Angle));
+
+    M.x := Round(Middle.x + Mercury.Pos.Distance * Cos(Mercury.Pos.Angle));
+    M.y := Round(Middle.y + Mercury.Pos.Distance * Sin(Mercury.Pos.Angle));
+
+    Image.DrawLineAA(M, E, $BFEFFF, 1);
+  end;
+end;
+
+var
+  i: Int32;
+  x: TImage;
+begin
+  Sun.Diameter     := 696340*2;
+  Sun.Mass         := 2*10**30;
+  Sun.Distance     := 0;
+
+
+  Mercury.Diameter := 2440*2;
+  Mercury.Mass     := 3.3010*10**23;
+  Mercury.Distance := 57.9*10**6;
+  Mercury.Color    := Colors.ORANGERED;
+
+  Earth.Diameter   := 6371*2;
+  Earth.Mass       := 5.97*10**24;
+  Earth.Distance   := 149.6*10**6;
+  Earth.Color      := Colors.ROYALBLUE;
+
+  WriteLn Mercury.Velocity();
+  WriteLn Earth.Velocity();
+
+  image := TImage.Create(1200,1200);
+  tmp   := TImage.Create(1200,1200);
+  while True do
+  begin
+    tmp.DrawCircleAA(Middle, Sun.SizeScaled(), $55FFFF, Sun.SizeScaled());
+    Update();
+
+    backup := Image.Copy();
+    Image.Draw(tmp, 0,0);
+
+    //tmp := image.ResizeBilinear(image.GetWidth() div 4, image.GetHeight() div 4);
+    Image.Show(False);
+    //tmp.Free();
+    tmp.Clear();
+
+    Image.Free();
+    Image := Backup;
+  end;
+  image.Free();
+end."
+HaEZcEzQ,02. Mathematical Expression,Spocoman,C++,Sunday 29th of October 2023 07:39:40 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+bool areBracketsCorrect(string s) {
+    int openBrackets = 0;
+
+    for (int i = 0; i < s.length(); i++) {
+        if (s[i] == ')' && openBrackets == 0) {
+            return false;
+        }
+        if (s[i] == '(') {
+            openBrackets++;
+        }
+        else if (s[i] == ')') {
+            openBrackets--;
+        }
+    }
+
+    return openBrackets == 0 ? true : false;
+}
+
+int main() {
+    string str;
+    getline(cin, str);
+   
+    cout << (areBracketsCorrect(str) ? ""correct"" : ""incorrect"") << endl;
+    return 0;
+}"
+8iydmWeh,dvt_getValueOfOuterHTML,Savelyev_Vyacheslav,JavaScript,Sunday 29th of October 2023 07:20:03 AM CDT,"function dvt_getValueOfOuterHTML(input, methodName) {
+    const methods = {
+        ""removeTags"": (input) => input.replace(/<[^>]*>/g, ''),
+        ""getBody"": (input) => {
+            const bodyStart = input.indexOf('<body');
+            const bodyEnd = input.indexOf('</body>');
+            if (bodyStart !== -1 && bodyEnd !== -1) {
+                return input.substring(bodyStart, bodyEnd + 7).replace(/<(\/?)body>/g, '<$1div>');
+            }
+            return input;
+        },
+        ""removeTagsExceptionBr"": (input) => input.replace(/<(?!\/?br\s*\/?>)[^>]*>/g, ''),
+    };
+
+    const selectedMethod = methods[methodName];
+    return selectedMethod ? selectedMethod(input) : '';
+}
+
+/*
+
+dvt_getValueOfOuterHTML
+Описание
+dvt_getValueOfOuterHTML - это функция, которая предназначена для обработки HTML-кода и выполнения определенных операций в зависимости от указанного метода. 
+Она может быть использована для удаления HTML-тегов, извлечения содержимого тега <body> или удаления всех HTML-тегов, кроме тегов <br>.
+
+Параметры
+input (строка): Входной HTML-код, который нужно обработать.
+methodName (строка): Наименование метода, который определяет, какая операция будет выполнена. 
+Методы могут быть: ""removeTags"", ""getBody"" и ""removeTagsExceptionBr"".
+Возвращаемое значение
+Функция возвращает строку, которая представляет собой результат выполнения выбранного метода на входном HTML-коде. 
+Если метод не определен или указан некорректно, функция возвращает пустую строку.
+
+Примеры использования
+javascript
+Copy code
+const htmlInput = ""<p>This is some <b>HTML</b> text.</p>"";
+const methodToUse = ""removeTags"";
+
+const result = dvt_getValueOfOuterHTML(htmlInput, methodToUse);
+console.log(result); // Результат будет строка без HTML-тегов
+Методы
+""removeTags"": Удаляет все HTML-теги из входной строки, оставляя только текстовое содержимое.
+""getBody"": Извлекает тело HTML-документа, сохраняя структуру и стили.
+""removeTagsExceptionBr"": Удаляет все HTML-теги, кроме тегов <br>.
+Замечания
+Пожалуйста, убедитесь, что передаете корректные значения параметров, чтобы избежать ошибок.
+Функция разработана для обработки HTML-кода и не поддерживает другие форматы данных.
+Результат работы функции зависит от выбранного метода, так что выбирайте метод в соответствии с вашими потребностями.
+Пример
+javascript
+Copy code
+const htmlInput = ""<p>This is <i>HTML</i> text.</p>"";
+const methodToUse = ""getBody"";
+
+const result = dvt_getValueOfOuterHTML(htmlInput, methodToUse);
+console.log(result);
+// Результат:
+// <body>
+//     <p>This is <i>HTML</i> text.</p>
+// </body>
+Надеюсь, это описание поможет вам использовать функцию dvt_getValueOfOuterHTML более эффективно и понимать ее функциональность.
+
+*/"
+gZpxJwMt,KEYS,fsyt,Lua,Sunday 29th of October 2023 07:14:44 AM CDT,BB=11382U0A138211382SM36PERF1SMPUSER*S #MY KEY(WILLIAMS BAY)
+SCCtjfSf,data736,TestGuy1,JSON,Sunday 29th of October 2023 07:00:07 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'dd55a87c33884bff743a47e20a7d504ea40aafcc7d183411ca7e07dbe6074f61e1942ee0a93b9658f50fb630228bdc56007693553efdff3352909c9c69487174d9f81d4ff8d59bcdae47cd9e053cb30a597b224bfdacf66a66fd12e180f1e57601f29ea1a1e136111a7e80832e91e9adc6d72f0b8ae26ef47900103c0ec9bb0e',
+  otherdata: [
+    'd30b725507c45ce33fb0bd3f801f7038',
+    'bf930fb90dd7d61efc28ae24ceade624',
+    'a5c693b95385294aa229dd63aefe3968',
+    '5fef725675159e32684fbfd932b3bcca',
+    'f8d86a27f198bda31e3b020fbb9f347d',
+    '01a95d3650356c7d19290c8f7280fcc2',
+    'ccf5d2d99efe388f4f71c29ee8cea701',
+    '0156dd83b8368c59d3e919e87e000401'
+  ]
+}"
+M7JPCiD6,Untitled,Riremito,C++,Sunday 29th of October 2023 06:54:37 AM CDT,"void __userpurge CField::OnPacket(int this@<ecx>, int a2@<edi>, int a3@<esi>, int a4, void *iPacket)
+{
+  int v5; // esi
+  unsigned __int8 v6; // al
+  _DWORD *v7; // ecx
+  int v8; // ecx
+  int v9; // ecx
+  int v10; // ecx
+  int v11; // esi
+  _DWORD *v12; // eax
+  char v13; // al
+  _DWORD *v14; // ecx
+  void *v15; // esi
+  int v16; // eax
+  char v17; // al
+  int *v18; // esi
+  _DWORD *v19; // ecx
+  int v20; // [esp-14h] [ebp-14h] BYREF
+  void *v21; // [esp-10h] [ebp-10h]
+  int v22; // [esp-Ch] [ebp-Ch]
+  int v23; // [esp-8h] [ebp-8h]
+  int v24; // [esp-4h] [ebp-4h]
+
+  if ( a4 > 0x18D )
+  {
+    if ( a4 == 0x1C1 )
+    {
+      sub_A55B50((int)iPacket);
+    }
+    else if ( a4 == 0x1C2 )
+    {
+      CWvsContext::OnSetLogoutGiftConfig((int *)dword_D050C0, (int)iPacket);
+    }
+    else
+    {
+LABEL_42:
+      if ( (unsigned int)(a4 - 0xAE) <= 0x6F )
+      {
+        if ( a4 == 0xAE )
+        {
+          CUserPool::OnUserEnterField((_DWORD *)dword_D09584, (int)iPacket);
+        }
+        else if ( a4 == 0xAF )
+        {
+          CUserPool::OnUserLeaveField((_DWORD *)dword_D09584, (int)iPacket);
+        }
+        else if ( (unsigned int)(a4 - 0xB0) > 0x1E )
+        {
+          if ( (unsigned int)(a4 - 0xCF) <= 0x15 )
+          {
+            v24 = a3;
+            v23 = a2;
+            v17 = CInPacket::Decode4((int)iPacket);
+            v18 = (int *)sub_9CDB10(v17);
+            if ( v18 && !*(_DWORD *)(dword_D050C0 + 14452) )
+            {
+              if ( !v18[282] )
+              {
+                switch ( a4 )
+                {
+                  case 0xD0:
+                  case 0xD1:
+                  case 0xD2:
+                  case 0xD3:
+                    CUserRemote::OnAttack((int)v18, a4, (int)iPacket);
+                    break;
+                  case 0xD4:
+                    CUserRemote::OnSkillPrepare(v18, (int)iPacket);
+                    break;
+                  case 0xD5:
+                    CUserRemote::OnMovingShootAttackPrepare((int)v18, (int)iPacket);
+                    break;
+                  case 0xD6:
+                    CUserRemote::OnSkillCancel(v18, (int *)iPacket);
+                    break;
+                  case 0xD7:
+                    CUserRemote::OnHit(v18, (int)iPacket);
+                    break;
+                  case 0xD8:
+                    CUser::OnEmotion(v18, (int)iPacket);
+                    break;
+                  case 0xD9:
+                    CUserRemote::OnSetActiveEffectItem(iPacket);
+                    break;
+                  case 0xDA:
+                    CUserRemote::OnShowUpgradeTombEffect(iPacket);
+                    break;
+                  case 0xDD:
+                    CUser::OnEffect(v18, (int)iPacket);
+                    break;
+                  case 0xE3:
+                    sub_9D7400(v18, (int)iPacket);
+                    break;
+                  case 0xE4:
+                    CUserRemote::OnThrowGrenade((int)iPacket);
+                    break;
+                  default:
+                    break;
+                }
+              }
+              switch ( a4 )
+              {
+                case 0xCF:
+                  CUserRemote::OnMove(v18, (int)iPacket);
+                  break;
+                case 0xDB:
+                  CUserRemote::OnSetActivePortableChair(v18, (int)iPacket);
+                  break;
+                case 0xDC:
+                  CUserRemote::OnAvatarModified(v18, (int)iPacket);
+                  break;
+                case 0xDE:
+                  CUserRemote::OnSetTemporaryStat(v18, (int)iPacket);
+                  break;
+                case 0xDF:
+                  CUserRemote::OnResetTemporaryStat(v18, (int)iPacket);
+                  break;
+                case 0xE0:
+                  CUserRemote::OnReceiveHP(v18, (int)iPacket);
+                  break;
+                case 0xE1:
+                  CUserRemote::OnGuildNameChanged((int)iPacket);
+                  break;
+                case 0xE2:
+                  CUserRemote::OnGuildMarkChanged((int)v18, (int)iPacket);
+                  break;
+                default:
+                  return;
+              }
+            }
+          }
+          else if ( (unsigned int)(a4 - 229) <= 0x37 )
+          {
+            v19 = *(_DWORD **)(dword_D09584 + 8);
+            if ( v19 )
+            {
+              switch ( a4 )
+              {
+                case 0xE5:
+                  CUserLocal::OnSitResult(v19, (int)iPacket);
+                  break;
+                case 0xE6:
+                  CUser::OnEmotion(v19, (int)iPacket);
+                  break;
+                case 0xE7:
+                  CUser::OnEffect(v19, (int)iPacket);
+                  break;
+                case 0xE8:
+                  CUserLocal::OnTeleport(v19, (int)iPacket);
+                  break;
+                case 0xEA:
+                  CUserLocal::OnMesoGive_Succeeded_((int)iPacket);
+                  break;
+                case 0xEB:
+                  UserLocal::OnMesoGive_Failed(v19, (int)iPacket);
+                  break;
+                case 0xEC:
+                  CUserLocal::OnFieldFadeInOut((char *)v19, (int)iPacket);
+                  break;
+                case 0xED:
+                  CUserLocal::OnFieldFadeOutForce((int)iPacket);
+                  break;
+                case 0xEE:
+                  CUserLocal::OnRandomMesobag_Succeeded((int)iPacket);
+                  break;
+                case 0xEF:
+                  CUserLocal::OnRandomMesobag_Failed(v19, (int)iPacket);
+                  break;
+                case 0xF0:
+                  CUserLocal::OnQuestResult((int)iPacket);
+                  break;
+                case 0xF1:
+                  CUserLocal::OnNotifyHPDecByField((int)iPacket);
+                  break;
+                case 0xF2:
+                  sub_993760(v19, (char *)iPacket);
+                  break;
+                case 0xF3:
+                  CUserLocal::OnBalloonMsg(v19, (int)iPacket);
+                  break;
+                case 0xF4:
+                  CUserLocal::OnPlayEventSound((char *)iPacket);
+                  break;
+                case 0xF5:
+                  CUserLocal::OnPlayMinigameSound((int)iPacket);
+                  break;
+                case 0xF6:
+                  sub_995910(iPacket);
+                  break;
+                case 0xF7:
+                  CUserLocal::OnMakerResult((char **)iPacket);
+                  break;
+                case 0xF8:
+                  sub_982950((int)iPacket);
+                  break;
+                case 0xF9:
+                  CUserLocal::OnOpenClassCompetitionPage((int)iPacket);
+                  break;
+                case 0xFA:
+                  CUserLocal::OnOpenUI((int)iPacket);
+                  break;
+                case 0xFB:
+                  CUserLocal::OnOpenUIWithOption((int)iPacket);
+                  break;
+                case 0xFC:
+                  CUserLocal::OnSetDirectionMode(v19, (int)iPacket);
+                  break;
+                case 0xFD:
+                  CUserLocal::OnSetStandAloneMode((int)iPacket);
+                  break;
+                case 0xFE:
+                  CUserLocal::OnHireTutor(v19, (unsigned int *)iPacket);
+                  break;
+                case 0xFF:
+                  CUserLocal::OnTutorMsg(v19, (int)iPacket);
+                  break;
+                case 0x100:
+                  CUserLocal::OnIncComboResponse(v19, (int)iPacket);
+                  break;
+                case 0x101:
+                  sub_99B300(v19, (int)iPacket);
+                  break;
+                case 0x102:
+                  sub_998CC0((int)iPacket);
+                  break;
+                case 0x103:
+                  sub_98DC00(v19, (int)iPacket);
+                  break;
+                case 0x104:
+                  CUser::OnRandomEmotion(iPacket);
+                  break;
+                case 0x105:
+                  CUserLocal::OnResignQuestReturn((int)iPacket);
+                  break;
+                case 0x106:
+                  CUserLocal::OnPassMateName((int)iPacket);
+                  break;
+                case 0x107:
+                  CUserLocal::OnRadioSchedule((int)iPacket);
+                  break;
+                case 0x108:
+                  CUserLocal::OnOpenSkillGuide(iPacket);
+                  break;
+                case 0x109:
+                  CUserLocal::OnNoticeMsg((int)iPacket);
+                  break;
+                case 0x10A:
+                  CUserLocal::OnChatMsg((int)iPacket);
+                  break;
+                case 0x10B:
+                  CUserLocal::OnBuffzoneEffect((int)iPacket);
+                  break;
+                case 0x10C:
+                  sub_982A60((int)iPacket);
+                  break;
+                case 0x10D:
+                  CUserLocal::OnTimeBombAttack(v19, (int)iPacket);
+                  break;
+                case 0x10E:
+                  CUser::OnPassiveMove(v19, (int)iPacket);
+                  break;
+                case 0x10F:
+                  CUserLocal::OnFollowCharacterFailed(iPacket);
+                  break;
+                case 0x110:
+                  CUserLocal::OnVengeanceSkillApply(iPacket);
+                  break;
+                case 0x111:
+                  v19[4547] = 1;
+                  break;
+                case 0x112:
+                  if ( dword_D0F980 )
+                    sub_7C7450((unsigned int *)dword_D0F980, iPacket);
+                  break;
+                case 0x113:
+                  sub_998B40(v19, (int)iPacket);
+                  break;
+                case 0x114:
+                  sub_982B60((int)iPacket);
+                  break;
+                case 0x115:
+                  sub_99E350((int)iPacket);
+                  break;
+                case 0x116:
+                  sub_5777A0(v19 + 4447, (int)iPacket);
+                  break;
+                case 0x117:
+                  CUserLocal::OnQuestGuideResult((int)iPacket);
+                  break;
+                case 0x118:
+                  sub_98DDC0((int)iPacket);
+                  break;
+                case 0x119:
+                  sub_98DF90(v19, (int)iPacket);
+                  break;
+                case 0x11A:
+                  sub_98F7B0((int)iPacket);
+                  break;
+                case 0x11B:
+                  sub_982C60((int)iPacket);
+                  break;
+                case 0x11C:
+                  CUserLocal::OnSkillCooltimeSet((int)iPacket);
+                  break;
+                default:
+                  return;
+              }
+            }
+          }
+        }
+        else
+        {
+          CUserPool::OnUserCommonPacket((_DWORD *)dword_D09584, a4, (int)iPacket);
+        }
+      }
+      else if ( (unsigned int)(a4 - 286) > 5 )
+      {
+        if ( (unsigned int)(a4 - 292) <= 0x1A )
+        {
+          switch ( a4 )
+          {
+            case 0x124:
+              CMobPool::OnMobEnterField(iPacket);
+              break;
+            case 0x125:
+              CMobPool::OnMobLeaveField(iPacket);
+              break;
+            case 0x126:
+              CMobPool::OnMobChangeController(iPacket);
+              break;
+            case 0x131:
+              CMobPool::OnMobCrcKeyChanged(iPacket);
+              break;
+            default:
+              if ( (unsigned int)(a4 - 0x127) <= 0x16 )
+              {
+                v24 = a3;
+                v23 = a2;
+                v13 = CInPacket::Decode4((int)iPacket);
+                v14 = (_DWORD *)sub_441250(v13);
+                if ( v14 )
+                {
+                  if ( a4 == 0x138 )
+                  {
+                    CMob::OnEscortStopEndPermmision(v14);
+                  }
+                  else
+                  {
+                    switch ( a4 )
+                    {
+                      case 0x127:
+                        CMob::OnMove((int)iPacket);
+                        break;
+                      case 0x128:
+                        CMob::OnCtrlAck(v14, (int)iPacket);
+                        break;
+                      case 0x12A:
+                        CMob::OnStatSet(v14, (int)iPacket);
+                        break;
+                      case 0x12B:
+                        CMob::OnStatReset(v14, (int)iPacket);
+                        break;
+                      case 0x12C:
+                        CMob::OnSuspendReset(iPacket);
+                        break;
+                      case 0x12D:
+                        CMob::OnAffected(iPacket);
+                        break;
+                      case 0x12E:
+                        CMob::OnDamaged(iPacket);
+                        break;
+                      case 0x12F:
+                        CMob::OnSpecialEffectBySkill(v14, (void **)iPacket);
+                        break;
+                      case 0x132:
+                        CMob::OnHPIndicator(v14, (int)iPacket);
+                        break;
+                      case 0x133:
+                        CMob::OnCatchEffect(iPacket);
+                        break;
+                      case 0x134:
+                        CMob::OnEffectByItem(iPacket);
+                        break;
+                      case 0x135:
+                        CMob::OnMobSpeaking(iPacket);
+                        break;
+                      case 0x136:
+                        CMob::OnMobSkillDelay(v14, (int)iPacket);
+                        break;
+                      case 0x137:
+                        CMob::OnEscortFullPath(v14, (int)iPacket);
+                        break;
+                      case 0x139:
+                        CMob::OnEscortStopSay(v14, (int)iPacket);
+                        break;
+                      case 0x13A:
+                        CMob::OnEscortReturnBefore(v14, iPacket);
+                        break;
+                      case 0x13B:
+                        CMob::OnNextAttack(v14, (int)iPacket);
+                        break;
+                      case 0x13C:
+                        CMob::OnMobTeleportRequest(v14, (int)iPacket);
+                        break;
+                      case 0x13D:
+                        CMob::OnMobAttackedByMob(v14, (int)iPacket);
+                        break;
+                      default:
+                        return;
+                    }
+                  }
+                }
+              }
+              break;
+          }
+        }
+        else if ( (unsigned int)(a4 - 319) > 7 )
+        {
+          if ( (unsigned int)(a4 - 327) <= 2 )
+          {
+            switch ( a4 )
+            {
+              case 0x147:
+                CEmployeePool::OnEmployeeEnterField(dword_D0B9F0, a3, (int)iPacket);
+                break;
+              case 0x148:
+                CEmployeePool::OnEmployeeLeaveField(iPacket);
+                break;
+              case 0x149:
+                CEmployeePool::OnEmployeeMiniRoomBalloon((int)iPacket);
+                break;
+            }
+          }
+          else if ( (unsigned int)(a4 - 330) <= 2 )
+          {
+            if ( a4 == 0x14A )
+            {
+              CDropPool::OnDropEnterField((void *)dword_D0B990, (int)iPacket);
+            }
+            else if ( a4 == 0x14C )
+            {
+              CDropPool::OnDropLeaveField((int)iPacket);
+            }
+          }
+          else if ( (unsigned int)(a4 - 333) <= 2 )
+          {
+            switch ( a4 )
+            {
+              case 0x14D:
+                v24 = 0;
+                v23 = 0;
+                v22 = 0;
+                v21 = 0;
+                v20 = dword_D0BA94;
+                v12 = (_DWORD *)sub_794940();
+                sub_429CE0(v12, (int)&v20, 496);
+                sub_9F6190(v20, v21, v22, v23, v24);
+                break;
+              case 0x14E:
+                CMessageBoxPool::OnMessageBoxEnterField((void *)dword_D0BA94, (int)iPacket);
+                break;
+              case 0x14F:
+                CMessageBoxPool::OnMessageBoxLeaveField(iPacket);
+                break;
+            }
+          }
+          else if ( (unsigned int)(a4 - 336) <= 1 )
+          {
+            if ( a4 == 0x150 )
+            {
+              CAffectedAreaPool::OnAffectedAreaCreated((_DWORD *)dword_D0952C, (int)iPacket);
+            }
+            else if ( a4 == 0x151 )
+            {
+              CAffectedAreaPool::OnAffectedAreaRemoved(iPacket);
+            }
+          }
+          else if ( (unsigned int)(a4 - 338) <= 1 )
+          {
+            if ( a4 == 0x152 )
+            {
+              CTownPortalPool::OnTownPortalCreated((void *)dword_D0BA98, (int *)iPacket);
+            }
+            else if ( a4 == 0x153 )
+            {
+              CTownPortalPool::OnTownPortalRemoved(iPacket);
+            }
+          }
+          else if ( (unsigned int)(a4 - 340) <= 1 )
+          {
+            if ( a4 == 0x154 )
+            {
+              COpenGatePool::OnOpenGateCreated((void *)dword_D0BA9C, (int)iPacket);
+            }
+            else if ( a4 == 0x155 )
+            {
+              COpenGatePool::OnOpenGateRemoved(iPacket);
+            }
+          }
+          else if ( (unsigned int)(a4 - 345) <= 3 )
+          {
+            switch ( a4 )
+            {
+              case 0x159:
+                CReactorPool::OnReactorChangeState((int)iPacket);
+                break;
+              case 0x15A:
+                CReactorPool::OnReactorMove((int)iPacket);
+                break;
+              case 0x15B:
+                CReactorPool::OnReactorEnterField((void *)dword_D0BA80, (int *)iPacket);
+                break;
+              case 0x15C:
+                CReactorPool::OnReactorLeaveField((int)iPacket);
+                break;
+              default:
+                return;
+            }
+          }
+          else if ( a4 == 0x176 )
+          {
+            CScriptMan::OnPacket((_DWORD *)dword_D0BA90, (int)iPacket);
+          }
+          else if ( (unsigned int)(a4 - 414) <= 3 )
+          {
+            v24 = a3;
+            v11 = dword_D0B85C;
+            switch ( a4 )
+            {
+              case 0x19E:
+                CFuncKeyMappedMan::OnInit((int *)dword_D0B85C, (int)iPacket);
+                break;
+              case 0x19F:
+                sub_576ED0((_DWORD *)dword_D0B85C, (int)iPacket);
+                break;
+              case 0x1A0:
+                sub_576F00((_DWORD *)dword_D0B85C, (int)iPacket);
+                break;
+              case 0x1A1:
+                *(_DWORD *)(v11 + 1336) = CInPacket::Decode4((int)iPacket);
+                break;
+              default:
+                return;
+            }
+          }
+          else if ( (unsigned int)(a4 - 375) > 1 )
+          {
+            if ( (unsigned int)(a4 - 380) > 1 )
+            {
+              if ( (unsigned int)(a4 - 136) > 2 )
+              {
+                if ( (unsigned int)(a4 - 139) <= 2 )
+                {
+                  switch ( a4 )
+                  {
+                    case 0x8B:
+                      CMapLoadable::OnSetBackEffect((int)iPacket);
+                      break;
+                    case 0x8C:
+                      CMapLoadable::OnSetMapObjectVisible((int)iPacket);
+                      break;
+                    case 0x8D:
+                      CMapLoadable::OnClearBackEffect((char *)(this - 8));
+                      break;
+                  }
+                }
+                else if ( (unsigned int)(a4 - 377) > 1 )
+                {
+                  if ( a4 < 426 || a4 > 428 )
+                  {
+                    if ( (unsigned int)(a4 - 429) <= 4 )
+                    {
+                      v24 = a3;
+                      v5 = dword_D09980;
+                      switch ( a4 )
+                      {
+                        case 0x1AE:
+                          CBattleRecordMan::OnDotDamageInfo((_DWORD *)dword_D09980, (int)iPacket);
+                          break;
+                        case 0x1AF:
+                          v6 = CInPacket::Decode1((int)iPacket);
+                          *(_DWORD *)(v5 + 12) = v6;
+                          if ( !v6 )
+                          {
+                            CWvsContext::UI_Close(dword_D050C0, 0x23u);
+                            *(_DWORD *)(v5 + 8) = 0;
+                          }
+                          break;
+                        case 0x1B0:
+                          sub_4707D0((_DWORD *)dword_D09980, (int)iPacket);
+                          break;
+                      }
+                    }
+                    else if ( (unsigned int)(a4 - 0x1B5) > 3 )
+                    {
+                      if ( (unsigned int)(a4 - 0x1B9) > 3 )
+                      {
+                        if ( (unsigned int)(a4 - 0x1BD) > 3 )
+                        {
+                          if ( (unsigned int)(a4 - 0x156) <= 2 )
+                          {
+                            switch ( a4 )
+                            {
+                              case 0x156:
+                                sub_581600((void *)dword_D0BAA0, (int *)iPacket);
+                                break;
+                              case 0x157:
+                                sub_5812D0((int)iPacket);
+                                break;
+                              case 0x158:
+                                sub_5805D0((int)iPacket);
+                                break;
+                            }
+                          }
+                        }
+                        else
+                        {
+                          v10 = this - 8;
+                          if ( *(_DWORD *)(v10 + 636) )
+                            (*(void (__thiscall **)(_DWORD, int, void *))(**(_DWORD **)(v10 + 636) + 60))(
+                              *(_DWORD *)(v10 + 636),
+                              a4,
+                              iPacket);
+                        }
+                      }
+                      else
+                      {
+                        v9 = this - 8;
+                        if ( *(_DWORD *)(v9 + 632) )
+                          (*(void (__thiscall **)(_DWORD, int, void *))(**(_DWORD **)(v9 + 632) + 60))(
+                            *(_DWORD *)(v9 + 632),
+                            a4,
+                            iPacket);
+                      }
+                    }
+                    else
+                    {
+                      v8 = dword_D0BAA4;
+                      switch ( a4 )
+                      {
+                        case 0x1B5:
+                          CMapleTVMan::OnSetMessage(dword_D0BAA4, (int)iPacket);
+                          break;
+                        case 0x1B6:
+                          *(_DWORD *)(dword_D0BAA4 + 8) = 0;
+                          *(_DWORD *)(v8 + 12) = 1;
+                          *(_DWORD *)(v8 + 744) = 0;
+                          break;
+                        case 0x1B7:
+                          CMapleTVMan::OnSendMessageResult((int)iPacket);
+                          break;
+                        default:
+                          return;
+                      }
+                    }
+                  }
+                }
+                else
+                {
+                  CAdminShopDlg::OnPacket((int *)a4, (int)iPacket);
+                }
+              }
+              else
+              {
+                CStage::OnPacket((char *)this, a4, (int)iPacket);
+              }
+            }
+            else
+            {
+              CStoreBankDlg::OnPacket((int *)a4, (int)iPacket);
+            }
+          }
+          else
+          {
+            CShopDlg::OnPacket(a4, (int)iPacket);
+          }
+        }
+        else
+        {
+          CNpcPool::OnPacket(a2, (_DWORD *)dword_D0BA88, a4, (char *)iPacket);
+        }
+      }
+      else
+      {
+        v24 = a3;
+        v23 = a2;
+        v15 = (void *)dword_D0BA84;
+        v16 = CInPacket::Decode4((int)iPacket);
+        switch ( a4 )
+        {
+          case 0x11E:
+            CSummonedPool::OnCreated(v15, v16, (char *)iPacket);
+            break;
+          case 0x11F:
+            CSummonedPool::OnRemoved(v16, (int)iPacket);
+            break;
+          case 0x120:
+            CSummonedPool::OnMove(v16, (int)iPacket);
+            break;
+          case 0x121:
+            CSummonedPool::OnAttack(v16, iPacket);
+            break;
+          case 0x122:
+            CSummonedPool::OnSkill(v16, iPacket);
+            break;
+          case 0x123:
+            CSummonedPool::OnHit(v16, (int)iPacket);
+            break;
+          default:
+            return;
+        }
+      }
+    }
+  }
+  else if ( a4 == 0x18D )
+  {
+    CParcelDlg::OnPacket((int)iPacket);
+  }
+  else
+  {
+    switch ( a4 )
+    {
+      case 0x8E:
+        CField::OnTransferFieldReqIgnored((int *)iPacket);
+        break;
+      case 0x8F:
+        CField::OnTransferChannelReqIgnored((int)iPacket);
+        break;
+      case 0x90:
+        CField::OnFieldSpecificData((void *)(this - 8), (int)iPacket);
+        break;
+      case 0x91:
+        CField::OnGroupMessage((int)iPacket);
+        break;
+      case 0x92:
+        CField::OnWhisper((LONG *)(this - 8), (int)iPacket);
+        break;
+      case 0x93:
+        CField::OnSummonItemInavailable((int)iPacket);
+        break;
+      case 0x94:
+        CField::OnFieldEffect((void *)(this - 8), (int)iPacket);
+        break;
+      case 0x95:
+        CField::OnFieldObstacleOnOff((int)iPacket);
+        break;
+      case 0x96:
+        CField::OnFieldObstacleOnOffStatus((int)iPacket);
+        break;
+      case 0x97:
+        CField::OnFieldObstacleAllReset((_DWORD *)(this - 8), (int)iPacket);
+        break;
+      case 0x98:
+        sub_5311D0((int)iPacket);
+        break;
+      case 0x99:
+        CField::OnBlowWeather((int)iPacket);
+        break;
+      case 0x9A:
+        CField::OnPlayJukeBox(this - 8, (int)iPacket);
+        break;
+      case 0x9B:
+        CField::OnAdminResult((int)iPacket);
+        break;
+      case 0x9C:
+        CField::OnQuiz((int)iPacket);
+        break;
+      case 0x9D:
+        CField::OnDesc((_DWORD *)(this - 8), (int)iPacket);
+        break;
+      case 0x9E:
+        (*(void (__thiscall **)(int, void *))(*(_DWORD *)(this - 8) + 36))(this - 8, iPacket);
+        break;
+      case 0xA1:
+        CField::OnSetQuestClear((int)iPacket);
+        break;
+      case 0xA2:
+        CField::OnSetQuestTime((int)iPacket);
+        break;
+      case 0xA3:
+        CField::OnSetObjectState((int)iPacket);
+        break;
+      case 0xA4:
+        v7 = *(_DWORD **)(this + 520);
+        if ( v7 )
+          CWnd::Destroy(v7);
+        break;
+      case 0xA6:
+        CField::OnStalkResult((int)iPacket);
+        break;
+      case 0xA9:
+        CQuickslotKeyMappedMan::OnInit((int *)dword_D0B938, (int)iPacket);
+        break;
+      case 0xAA:
+        CField::OnFootHoldInfo((int)iPacket);
+        break;
+      case 0xAB:
+        CField::OnRequestFootHoldInfo((_DWORD *)(this - 8), (int)iPacket);
+        break;
+      case 0xAD:
+        sub_53B4F0((_DWORD *)(this - 8), iPacket);
+        break;
+      case 0xC0:
+        return;
+      case 0x171:
+        CField::OnHontaleTimer((char *)iPacket);
+        break;
+      case 0x173:
+        CField::OnChaosZakumTimer((char)iPacket);
+        break;
+      case 0x174:
+        CField::OnHontailTimer((char *)iPacket);
+        break;
+      case 0x175:
+        CField::OnZakumTimer((char *)iPacket);
+        break;
+      case 0x17B:
+        CTrunkDlg::OnPacket((int)iPacket);
+        break;
+      case 0x17E:
+        CRPSGameDlg::OnPacket((int)iPacket);
+        break;
+      case 0x17F:
+        CUIMessenger::OnPacket((char *)iPacket);
+        break;
+      case 0x180:
+        CMiniRoomBaseDlg::OnPacketBase((int)iPacket);
+        break;
+      default:
+        goto LABEL_42;
+    }
+  }
+}"
+A5diCJYd,MOK layout Thai u/ Pali,dksetiavan,JSON,Sunday 29th of October 2023 06:16:31 AM CDT,"OK_Layout_Begin
+Name:Thai u/ Pali
+๑๒๓๔๕๖๗๘๙๐
+ะาเพหคทชฑ
+ฺิุปรกตจฏ
+มนวลสย
+!?"",.฿ฯ๏๚๛
+ ๅโภงฆธฌฒ
+อีูผญขถฉฐ
+-ณฬ[MC:ฬฺห]ษศ
+£¥€$%^&*()№
+~`{}\_-=|+«»
+[]@#±/÷'""‹›.
+…<>!;:?§,
+1234567890
+qwertyuiop
+asdfghjkl'
+zxcvbnm
+OK_Layout_End
+"
+p2EL3ZXj,MOK layout Thai u/ Sanskrit,dksetiavan,JSON,Sunday 29th of October 2023 06:15:47 AM CDT,"OK_Layout_Begin
+Name:Thai u/ Sanskrit
+๑๒๓๔๕๖๗๘๙๐
+ะาเพหคทชฑ
+ฺิุปรกตจฏ
+มนวลสย
+!?"",.฿ฯ๏๚๛
+ํๅโภงฆธฌฒ
+อีูผญขถฉฐ
+-ณฤฦษศ
+£¥€$%^&*()№
+~`{}\_-=|+«»
+[]@#±/÷'""‹›.
+…<>!;:?§,
+1234567890
+qwertyuiop
+asdfghjkl'
+zxcvbnm
+OK_Layout_End
+"
+VDDcCZAL,MOK layout Thai - Pattajoti,dksetiavan,JSON,Sunday 29th of October 2023 06:14:37 AM CDT,"OK_Layout_Begin
+Name:Pattajoti
+๒๓๔๕ู๗๘๙๐๑๖
+็ตยอร่ดมวแใฌ
+้ทงกัีานเไขฺ
+บปลหิคสะจพ
+ฅฃ""-ุ๎ๅ฿๏๚๛
+๊ฤๆญษึฝซถฒฯฦ
+๋ธำณ์ืผชโฆฑํ
+ฎฏฐภ[MC:ั้]ศฮฟฉฬ
+£¥€$%^&*()№
+~`{}\_-=|+«»
+[]@#±/÷'""‹›.
+…<>!;:?§,
+1234567890
+qwertyuiop
+asdfghjkl'
+zxcvbnm
+OK_Layout_End
+"
+NvUyDSnS,step motor_V3,bipping,C++,Sunday 29th of October 2023 06:13:15 AM CDT,"#include <avr/interrupt.h>
+#include <Arduino.h>
+#include <Wire.h>
+#include <rgb_lcd.h>
+
+//#define SDA A4
+//#define SLC A5
+#define NOTE_CS6 1109 
+#define NOTE_DS6 1245
+
+rgb_lcd lcd;
+
+// Variables globales
+const int8_t (SWITCH_PIN) = 2; //interupteur à bascule
+const int8_t(rouge) = 5;
+const int8_t(vert) = 6;
+const int8_t(orange) = 7;
+const int8_t (DIR) = 8;
+const int8_t (PUL) = 9;
+const int8_t (ENA) = 10;
+const int8_t BUZ = 11; // BUZzer
+const int colorR = 255;  
+const int8_t colorG = 0;  
+const int8_t colorB = 0; 
+const int8_t NUM_TIMERS = 8;
+const int8_t TIMER_SWITCH = 7;
+const int8_t TIMER_LED_ORANGE = 0;
+const int8_t TIMER_LED_VERT = 1;
+const int8_t TIMER_LED_ROUGE = 3;
+const int8_t TIMER_MOTOR = 2;
+const int8_t TIMER_LCD_Origine = 4;
+const int8_t TIMER_LCD_avance = 5;
+const int8_t TIMER_LCD_toggle = 6;
+
+unsigned long previousTimers[8];
+unsigned long Nombres_de_pas = 0;  
+
+const unsigned long NOMBRES_DE_PAS_MAX = 120000;  
+const unsigned long INTERVAL = 500;
+
+bool stat_switch = false;
+bool sense = false;
+bool Signal_PWM = false;
+bool initOrigineExecuted = false;
+bool functionExecuted  = false;
+
+  byte L[8] = {     0b00000,    0b11000,    0b01100,     0b00100,     0b01100,     0b10010,     0b10001,     0b00000    };  
+
+// Énumération pour les différents états
+enum Etat {    ETAT_ORIGINE,    ETAT_AVANCE,    ETAT_RETOUR };
+
+Etat etatActuel;
+
+// ISR TIMER
+ISR(TIMER1_COMPA_vect){  
+        if(Signal_PWM == true){
+            toggle (PUL); 
+            Nombres_de_pas++;
+        }
+    }
+
+//Les fonctions
+
+unsigned long potard() {
+    return map(analogRead(A0), 0, 1023, 11200, 11300);
+}
+
+void toggle(int pin) {
+    digitalWrite(pin, !digitalRead(pin));
+}
+
+void checkTimerAndUpdate(unsigned long &previousTime, unsigned long interval, void (*func)()) {
+    if (micros() - previousTime >= interval) {
+        previousTime = micros();
+        func();
+    }
+}
+
+void updateSwitchState(int SWITCH_PIN) {
+    stat_switch = digitalRead(SWITCH_PIN);
+}
+
+void MOTORAction() {
+    toggle(PUL);
+    Nombres_de_pas--;
+}
+
+void LED_VERTAction(const int8_t vert){
+  toggle(vert);
+}
+
+void LED_ORANGEAction(const int8_t orange) {
+  toggle(orange);
+}
+
+void LED_ROUGEAction() {
+    static int i = 0;
+    static int8_t i_sens = 1;
+    analogWrite(rouge, i);  
+    i = i + i_sens; 
+    if(i >= 255) {
+        i_sens = -1;
+    }
+    if(i <= 0) {
+        i_sens = 1;
+    }
+}
+
+void checkTimerBasedOnStat(bool stat_switch, unsigned long *previousTimers, unsigned long INTERVAL, void (*LED_VERTAction)(), void (*LED_ORANGEAction)()) {
+  if (stat_switch == true) {
+    checkTimerAndUpdate(previousTimers[TIMER_LED_VERT], INTERVAL, LED_VERTAction);
+  }
+  else {
+    checkTimerAndUpdate(previousTimers[TIMER_LED_ORANGE], INTERVAL, LED_ORANGEAction);
+  }
+}
+
+void verifierConditionsArret(int SWITCH_PIN, const int8_t vert, rgb_lcd lcd, bool &sense, bool &Signal_PWM, bool &stat_switch, unsigned long &Nombres_de_pas, const unsigned long NOMBRES_DE_PAS_MAX) {
+  if(digitalRead(SWITCH_PIN) == LOW) {
+    stat_switch = false;
+    arreterTacheAvance(vert, lcd, sense, Signal_PWM);
+  }
+  else if(Nombres_de_pas >= NOMBRES_DE_PAS_MAX) {
+    arreterTacheAvance(vert, lcd, sense, Signal_PWM);
+  }
+}
+
+void arreterTacheAvance(const int8_t vert, rgb_lcd lcd, bool &sense, bool &Signal_PWM) {
+  digitalWrite(vert, LOW);
+  lcd.clear();
+  lcd.home();
+  lcd.print(""toggle"");
+  sense = true;
+  Signal_PWM = false;
+}
+
+void checkNombreDePas(unsigned long &Nombres_de_pas, bool &sense, bool &initOrigineExecuted, const int8_t orange, const int8_t vert) {
+  if(Nombres_de_pas == 0) {
+    sense = false;
+    initOrigineExecuted  = false;
+    digitalWrite(orange, LOW);
+    digitalWrite(vert, LOW);
+  }
+}
+
+void initOrigine(const int8_t orange, const int8_t vert, const int ENA, const int8_t rouge, int BUZ, bool &Signal_PWM) {
+    digitalWrite(orange, LOW);  // éteint LED orange
+    digitalWrite(vert, LOW);    // éteint LED vert
+    digitalWrite(ENA, HIGH);    // moteur libre
+    digitalWrite(rouge, HIGH);  // allumer une LED rouge
+    tone(BUZ, NOTE_CS6, 80);    // note de musique
+    delay(100);                 // attend un peu
+    tone(BUZ, NOTE_DS6, 80);    // note de musique
+    delay(100);                 // attend un peu
+    tone(BUZ, NOTE_DS6, 160);   // note de musique
+    Signal_PWM = false;         // ordre d'arrêt du moteur
+    delay(250);                 // attend un peu
+    digitalWrite(rouge, LOW);   // éteint une LED rouge
+
+    initOrigineExecuted = true;   // Retourne vrai pour indiquer que l'initialisation a réussi
+}
+
+void initAvance(int dir, const int8_t vert, const int8_t orange, const int8_t rouge, int ENA, rgb_lcd lcd, unsigned long &Nombres_de_pas) {
+    digitalWrite(DIR, LOW);                      // Tache sense de rotation
+    digitalWrite(vert, HIGH);                    // allumer LED temoin vert fix
+    digitalWrite(orange, LOW);                   // eteindre une LED orange
+    digitalWrite(rouge, LOW);                    // eteindre une LED rouge
+    lcd.clear();                                 // on efface tout
+    lcd.home();                                  // retour à la ligne
+    lcd.print(""Programme"");                      // affichage LCD ligne 1 ""programme principale""
+    lcd.setCursor(1, 1);                         // 
+    lcd.print(Nombres_de_pas);                   // 
+    digitalWrite(ENA, LOW);                      // moteur sous tention
+    functionExecuted = true;
+}
+
+void initToggle(int dir, const int8_t rouge, int ENA, rgb_lcd lcd, unsigned long &Nombres_de_pas) {
+  if (functionExecuted) {  // si initAvanceState est true, alors initToggle peut s'exécuter
+    digitalWrite(DIR, HIGH);
+    digitalWrite(rouge, LOW);
+    digitalWrite(ENA, LOW);
+    lcd.clear();
+    lcd.home();
+    lcd.print(""toggle"");
+    lcd.setCursor(1, 1);
+    lcd.print(Nombres_de_pas);
+    functionExecuted  = false;
+  }
+}
+
+void LCD_OrigineAction(){
+    // fonction qui gère l'affichage de l'écran LCD lorsque le bouton est relacher
+    //                                                                    //
+    OCR1A = potard();                                                       // met à jour la vitesse d'avance avec la valeur de potard 
+    //                                                                    //
+    lcd.clear();                                                          // efface l'écran LCD 
+    lcd.home();                                                           // 
+    lcd.print(""Origine"");                                                 // affichage LCD ligne 1 ""programme Origine""
+    lcd.setCursor(1, 1);                                                  //
+    lcd.print(Nombres_de_pas);                                            // affiche la valeur de Nombres_de_pas 
+    lcd.setCursor(6, 1);                                                  // 
+    lcd.print(potard());                                                    // affichage la valauer de potard
+    lcd.createChar(1,L);                                                  // affiche un caractère personnalisé sur la seconde ligne.
+    lcd.setCursor(11, 1);                                                 // 
+    lcd.write(byte(1));                                                         
+}
+ 
+void LCD_avanceAction(){
+        // fonction qui gère l'affichage de l'écran LCD lorsque le moteur tourne
+    Signal_PWM = true;                                                    // met à jour la Signal_PWM pour activer le moteur
+    
+    lcd.clear();                                                         // efface l'écran LCD
+    lcd.home();                                                          // 
+    lcd.print(""Programme"");                                              // affiche ""Programme"" et ""Lambda"" sur la première ligne
+    lcd.setCursor(10, 0);                                                //
+    lcd.print(""Lambda"");                                                 //
+    lcd.setCursor(1, 1);                                                 //
+    lcd.print(Nombres_de_pas);                                           // affiche la valeur de Nombres_de_pas sur la seconde ligne
+    lcd.setCursor(10, 1);                                                //
+    lcd.print(potard());                                                   // affiche des informations sur la position et la vitesse sur la seconde ligne.
+    lcd.createChar(1,L);                                                 //
+    lcd.setCursor(15, 1);                                                // 
+    lcd.write(byte(1));                                                  //
+    }
+ 
+void LCD_toggleAction(){ // fonction qui gère l'affichage alternatif de l'écran LCD entre l'affichage de la position actuelle et l'affichage de la position cible
+        
+    lcd.clear();                                                         // efface l'écran LCD
+    lcd.home();                                                          //
+    lcd.print(""toggle"");                                                 // affichage LCD ligne 1 ""toggle""
+    lcd.setCursor(10, 0);                                                //
+    lcd.print(""Lambda"");                                                 //
+    lcd.setCursor(1, 1);                                                 //
+    lcd.print(Nombres_de_pas);                                           // affiche la position actuelle et la position cible sur la première ligne
+    lcd.setCursor(10, 1);                                                //
+    lcd.print(potard());                                                   // affiche des informations sur la position et la vitesse sur la seconde ligne.
+    lcd.createChar(1,L);                                                 //
+    lcd.setCursor(15, 1);                                                // 
+    lcd.write(byte(1));                                                  //
+    digitalWrite(rouge, LOW);
+}
+
+void etatUrgence(bool &Signal_PWM, const int PUL, const int ENA, const int8_t rouge) {
+    Signal_PWM = false;             // ordre d'arrêt du moteur
+    digitalWrite(PUL, LOW);         // arrêt des impulsions
+    digitalWrite(ENA, HIGH);        // moteur hors tension
+    digitalWrite(rouge, HIGH);      // allumer la LED rouge
+}
+
+void updateEtatActuel(bool &stat_switch, unsigned long &Nombres_de_pas, bool &sense, Etat &etatActuel, const unsigned long NOMBRES_DE_PAS_MAX) {
+    if(stat_switch == false && Nombres_de_pas == 0 && sense == false){
+         etatActuel = ETAT_ORIGINE;
+    }
+    if (Nombres_de_pas < NOMBRES_DE_PAS_MAX && stat_switch == true && sense == false){
+         etatActuel = ETAT_AVANCE;
+    }
+    if(sense == true && Nombres_de_pas > 0){
+         etatActuel = ETAT_RETOUR;
+    }
+}
+
+
+void setup() {
+    
+    Serial.begin(115200);                                                       // ça pulse à 115 200 Hertz
+    lcd.begin(16, 2);                                                           // set up the LCD's number of columns and rows:
+    lcd.setRGB(colorR, colorG, colorB);                                         //
+    lcd.print(""initialization"");                                                // Print a message to the LCD.
+ 
+    pinMode(orange, OUTPUT);                                                    // LED orange
+    pinMode(vert, OUTPUT);                                                      // LED vert
+    pinMode(rouge, OUTPUT);                                                     // LED rouge
+    
+    pinMode(A0, INPUT);                                                         // potentiomètre A0
+    pinMode(SWITCH_PIN, INPUT_PULLUP);                                              // configurer la pin 8 comme sortie pour contrôler la direction du moteur
+    pinMode(DIR, OUTPUT);                                                       // direction du moteur
+    pinMode(PUL, OUTPUT);                                                       // vitesse du moteur la frecence est de ~177.77hz
+    pinMode(ENA, OUTPUT);                                                       // frein du moteur >> relaché à l'état haut<< mode automatique à l'état bas>>
+    pinMode(BUZ, OUTPUT);                                                       // BUZzer en sortie 10 s'appel BUZ
+ 
+    digitalWrite(BUZ, LOW);                                                     // broche 10 BUZzer
+    digitalWrite(SWITCH_PIN, HIGH);                                                 // bouton sur OFF
+ 
+    digitalWrite(vert, HIGH);                                                   // eteint LED vert
+    digitalWrite(orange, HIGH);                                                 // allumer LED temoin orange fixe
+    digitalWrite(rouge, HIGH);                                                  // eteint LED rouge    
+    
+    tone(BUZ, NOTE_DS6, 500);
+    
+    delay(500);                                                                 // 1 seconde
+    
+    digitalWrite(vert, LOW);                                                    // eteint LED vert
+    digitalWrite(rouge, LOW);                                                   // eteint LED rouge
+    digitalWrite(orange, LOW);                                                  // allumer LED temoin orange fixe
+ 
+ 
+    previousTimers[TIMER_LCD_toggle] = micros();                                // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_LCD_avance] = micros();                                // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_LCD_Origine] = micros();                               // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_LED_ORANGE] = millis();                                // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_LED_VERT] = millis();                                  // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_LED_ROUGE] = micros();                                 // initialiser les valeurs à l'heure courante
+    previousTimers[TIMER_SWITCH] = micros();                                 // initialiser les valeurs à l'heure courante
+
+    previousTimers[TIMER_MOTOR] = micros();                                     // initialiser les valeurs à l'heure courante
+
+    Etat etatActuel = ETAT_ORIGINE;
+
+   
+    TCCR1A = 0;                                                                 // configurer Timer1 pour utiliser l'OCR en mode CTC
+    TCCR1B = (1 << WGM12) | (1 << CS11);
+   
+    OCR1A = potard();                                                             // configurer le registre de comparaison de sortie pour un certain nombre de pas
+ 
+    TIMSK1 |= (1 << OCIE1A);                                                    // activer l'interruption associée à OCR1A
+ 
+    delay(800);                                                                 // attend un peu
+ 
+    sei();                                                                      // activer les interruptions globales
+}
+
+void loop() {
+
+    checkTimerAndUpdate(previousTimers[TIMER_SWITCH], 250006, updateSwitchState);
+    
+    switch (etatActuel) {
+        case ETAT_ORIGINE:
+            if (!initOrigineExecuted) {initOrigine(orange, vert, ENA, rouge, BUZ, Signal_PWM);}
+            checkTimerAndUpdate(previousTimers[TIMER_LED_ROUGE], 10014, LED_ROUGEAction);
+            checkTimerAndUpdate(previousTimers[TIMER_LCD_Origine], 250006, LCD_OrigineAction);
+
+            break;
+
+        case ETAT_AVANCE:
+            if(!functionExecuted) {initAvance(DIR, vert, orange, rouge, ENA, lcd, Nombres_de_pas);}
+            checkTimerAndUpdate(previousTimers[TIMER_LCD_avance], 177797, LCD_avanceAction);
+            verifierConditionsArret(SWITCH_PIN, vert, lcd, sense, Signal_PWM, stat_switch, Nombres_de_pas, NOMBRES_DE_PAS_MAX);
+            break;
+
+        case ETAT_RETOUR:
+            if (functionExecuted) {initToggle(DIR, rouge, ENA, lcd, Nombres_de_pas);}
+            checkTimerAndUpdate(previousTimers[TIMER_LCD_toggle], 298820, LCD_toggleAction);
+            checkTimerAndUpdate(previousTimers[TIMER_MOTOR], 3347, MOTORAction);
+
+            checkTimerBasedOnStat(stat_switch, previousTimers, INTERVAL, LED_VERTAction, LED_ORANGEAction);       
+            checkNombreDePas(Nombres_de_pas, sense, initOrigineExecuted, orange, vert);
+            break;
+
+        default: //ETAT_URGENCE:
+            etatUrgence(Signal_PWM, PUL, ENA, rouge);
+            break;
+    }
+
+    updateEtatActuel(stat_switch, Nombres_de_pas, sense, etatActuel, NOMBRES_DE_PAS_MAX);
+}
+"
+8mMaMahm,MOK layout Hindko,dksetiavan,YAML,Sunday 29th of October 2023 06:08:36 AM CDT,"{
+""title"":""Hindko"",
+""onScreen"":{
+""main"":[
+""ھ١٢٣٤٥٦٧٨٩٠"",
+""ݩوےرتیَُِٓپ"",
+""اسدڇگهجکلْ"",
+""[SHIFT]ڈٹچڨبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""عغٚظطذصضزث"",
+""ݨؤـڑ[MC:تھ]ئًٌٍ[MC:پھ]"",
+""ءشࢿݬࣂحࣁقخّ"",
+""[SHIFT]ࣀ[MC:ٹھ][MC:چھ]فࢾں[MC:ݩگ][DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+u6JDKvig,MOK layout Arabi Malayalam 2,dksetiavan,YAML,Sunday 29th of October 2023 06:07:21 AM CDT,"{
+""title"":""Arabi Malayalam 2"",
+""onScreen"":{
+""main"":[
+""يءزفقصطغذ"",
+""[MC:َوْ][MC:َيْ]ا[MC:ِی][MC:ُو]بهگدجڊ"",
+""[MC:ٗو][MC:ٝی]َُِپڔکتچڌ"",
+""[SHIFT]ْٗٝمنولسی[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""ٓئًٌٍضظعث"",
+""[MC:اَوْ][MC:اَيْ]آ[MC:اِي][MC:اُو][MC:بھ]ۼ[MC:گھ][MC:دھ][MC:جھ][MC:ڊھ]"",
+""[MC:اٗو][MC:اٝی][MC:اَ][MC:اِ][MC:اُ][MC:پھ]ر[MC:کھ][MC:تھ][MC:چھ][MC:ڌھ]"",
+""[SHIFT][MC:اٗ][MC:اٝ]ّژڹۺۻشڿ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""1234567890"",
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞«»,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+0ZVSQTUB,MOK layout Wadaad,dksetiavan,YAML,Sunday 29th of October 2023 06:05:19 AM CDT,"{
+""title"":""Wadaad"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قو[MC:َِ]رتيَُِٗ"",
+""اسدفگهجكل"",
+""[SHIFT]زخڎْبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""آة[CO:2]ۆ[MC:رٙ][CO:1]ثئًٌٍ[CO:2]ۉ"",
+""ءش[CO:2][MC:دٙ][CO:1]عغحصض[CO:2]ڸ"",
+""[SHIFT]ذظطّٓ[CO:2][MC:ن࣪]ـ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+355UQX21,MOK layout Tamajaq,dksetiavan,YAML,Sunday 29th of October 2023 06:04:44 AM CDT,"{
+""title"":""Tamajaq"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قو[MC:يٰ]رتيَُِپ"",
+""اسدفغهجکل"",
+""[SHIFT]زخشْبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""﷽ﷻﷺﷸطئًٌٍث"",
+""ءصضةگحﷷﷶﷵ"",
+""[SHIFT]ظع[MC:تْش]ّﷴﷳﷲ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+WKufw50W,MOK layout Adamawa Fulfulde,dksetiavan,YAML,Sunday 29th of October 2023 06:04:09 AM CDT,"{
+""title"":""Adamawa Fulfulde"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ٛوٜرتيَُِݠ"",
+""اسدٮغحجكلْ"",
+""[SHIFT][MC:نغ]شثࢩبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""[MC:ٛو]ة[MC:ٜی][MC:رّ]ظࢨ[MC:ُو][MC:ِي][MC:َا]ف"",
+""ءصطࢡعهخقضّ"",
+""[SHIFT]ًٌٍئ[MC:بٔ]ذز[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+ta7CFqwW,MOK layout Ajami Fula,dksetiavan,YAML,Sunday 29th of October 2023 06:02:46 AM CDT,"{
+""title"":""Ajami Fula"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ٛوٜرتيَُِݠ"",
+""اسدٮغحجكلْ"",
+""[SHIFT][MC:نغ]شثࢩبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""[MC:ٛو]ة[MC:ٜٮٰ][MC:رّ]ظࢨ[MC:ُو][MC:ِي][MC:َا]ف"",
+""ءصطࢡعهخقضّ"",
+""[SHIFT]ًٌٍئ[MC:بٔ]ذز[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+8XSduqmH,MOK layout Ajami Hausa,dksetiavan,YAML,Sunday 29th of October 2023 06:02:07 AM CDT,"{
+""title"":""Ajami Hausa"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""عوٜرتیَُِڭ"",
+""اسدفغهجكلْ"",
+""[SHIFT]زشثڟبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ظة[MC:ٰٜی]ـئۑًٌٍڨ"",
+""ءشطڡڠحخقضّ"",
+""[SHIFT]ذ[MC:ُو][MC:ِی][MC:َا]ٻ[MC:َوْ][MC:َیْ][DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+ankQ8ziB,MOK layout Ajami Swahili,dksetiavan,YAML,Sunday 29th of October 2023 06:01:05 AM CDT,"{
+""title"":""Ajami Swahili"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""ڈوٖرتيَُِپ"",
+""اسدفڠهجكلْ"",
+""[SHIFT]ز[MC:نݝ]چڤبنمھ[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ٹۏۃظطئًٌٍث"",
+""ءشذؤغحخقعّ"",
+""[SHIFT]ژ[MC:نْڠ]ݝصضأإـ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+zwTsvNZu,MOK layout Moroccan Arabic,dksetiavan,YAML,Sunday 29th of October 2023 05:59:41 AM CDT,"{
+""title"":""Moroccan Arabic"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""قوعرتيَُِپ"",
+""اسدفڭهجكلْ"",
+""[SHIFT]زخشڥبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ةوضظطئًٌٍث"",
+""ءصذـغحآأإّ"",
+""[SHIFT]PV[MC:تش]ڨڤٓڜ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+Z9m9BabP,Clan XP Calculation,mrnosuch,Python,Sunday 29th of October 2023 05:58:58 AM CDT,"#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sqlite3
+import datetime
+
+local_db_path     = ""/home/pi/Scripts/blastardbot/bot.db"" # Prod
+# local_db_path     = ""/home/pi/Scripts/blastardbot/bot-dev.db"" # Dev
+
+
+class UpdateData():
+
+    def __init__(self, player, slice_date):
+
+        self.player = player
+        self.slice_date = slice_date
+        self.type = None
+        self.incremental = 0
+        self.estimated = 0
+        self.estimate_rate = None
+        self.calculated = 0 
+        self.kills = 0
+        self.elapsed = 0
+
+
+
+# What the columns mean:
+
+# XPClan: Clan XP direct from the API
+# timeElapsed: seconds online in game for sample.
+# clanXPincremental: amount of XP earned in sample, as calculated
+# clanXPcalculated: total amount of clan XP earned as calculated
+# clanXPestimated: calculated estimated XP for capped members
+# clanXPestimateRate: this is either the rate used for clanXPestimated, or a rate equivalent to the calcuated rate.
+
+
+# Queries
+
+# This query selects the samples that needs updating
+SELECT_FUTURE_SLICES = '''
+SELECT player, date, timeElapsed, XPClan, killsNPC
+FROM stats 
+WHERE clanXPtype is NULL and timeElapsed is NOT NULL 
+AND (clanXPdataStatus IS NULL or clanXPdataStatus != 'A')
+ORDER BY player, date;
+'''
+
+# This query selects the previous sample for a sample being processed
+SELECT_PREV_SLICE = '''
+SELECT player, date, XPClan, clanXPtype, clanXPcalculated, timeElapsed, killsNPC
+FROM stats 
+WHERE player = :player
+AND date < :slice_date
+AND clanXPtype != ""X""
+AND (clanXPdataStatus IS NULL or clanXPdataStatus != 'A')
+ORDER BY date desc
+LIMIT 1;
+'''
+
+# Used to update the sample in the database
+UPDATE_SLICE = '''
+UPDATE stats
+SET clanXPtype = :type, 
+  clanXPincremental = :incremental,
+  clanXPestimated = :estimated,
+  clanXPestimateRate = :estimate_rate,
+  clanXPcalculated = :calculated,
+  killsIncremental = :kills,
+  timeElapsed = :elapsed
+WHERE player = :player
+AND date = :slice_date;
+'''
+
+# To determine the estimated XP rate for a member
+SELECT_EST_RATE = '''
+SELECT 
+    sum(clanXPestimateRate)/count(*) as 'estimated_rate'
+FROM 
+    stats 
+WHERE 
+	player = :player
+AND
+    date > 
+	(
+		SELECT
+			date(substr(max(date),1,10),'-90 days')
+		FROM
+			stats
+		WHERE
+			player=:player
+		AND
+			clanXPtype = ""I""
+		AND
+			clanXPestimateRate IS NOT NULL
+		AND
+			date < :sample_date
+		)
+AND 
+    date <= :sample_date
+AND 
+    clanXPestimateRate IS NOT NULL;
+'''
+
+
+### Config
+
+# For calcuation estimated rates, we only include samples covering 0:30 - 4:00 of game play
+DURATION_MIN = 60*30 # 30 minutes
+DURATION_MAX = 60*60*4 # 4 hours
+
+# Discount rates for estimated XP
+NORMAL_DISC_RATE   = 0.70  # Use this for elapsed time within MIN and MAX
+ATYPICAL_DISC_RATE = 0.25  # Use this for elapsed time outside of MIN and MAX
+
+
+# DB Utiity Functions
+
+def get_rec(cursor, query, query_opts=None):
+
+    result = None
+
+    if query_opts is not None:
+        cursor.execute(query, query_opts)
+    else:
+        cursor.execute(query)
+
+    row = cursor.fetchone()
+
+    if row is not None:
+        result = dict(row)
+
+    return result
+
+
+def query_db(cursor, query, query_opts=None):
+
+    if query_opts is not None:
+        cursor.execute(query, query_opts)
+    else:
+        cursor.execute(query)
+
+
+def get_next_rec(cursor):
+
+    result = None
+
+    row = cursor.fetchone()
+
+    if row is not None:
+        result = dict(row)
+
+    return result
+
+
+def update_rec(cursor, query, update_opts=None):
+
+    if update_opts is not None:
+        cursor.execute(query, update_opts)
+    else:
+        cursor.execute(query)
+
+
+#########################
+###
+### START OF MAIN ROUTINE
+###
+
+
+# Open the database
+
+db = sqlite3.connect(f""file:{local_db_path}"", uri=True)
+db.row_factory = sqlite3.Row
+
+# Start processing loop
+
+    # Fetch player and date for a single first, oldest NULL clanXPtype row (TARGET_ROW)
+    # clanXPtype values:
+    #   N New
+    #   C Capped
+    #   R Reset
+    #   I Incremental (Normal)
+    #   X No activity (no time online)
+    #   Z Zero (no clan XP)
+    #   B Bugged (no XP earned)
+
+    # First stats are slice 2020-01-29-23
+
+    # Fetch single oldest clanXPtype row earlier than TARGET_ROW matching TARGET_ROW player
+
+    # if none found, update TARGET_ROW with 0 earned, this is a baseline/first entry
+
+    # if found, update TARGET_ROW with difference, if difference is 0 (non earned, check for CAP)
+
+
+# Load last on data for players
+
+found = True
+table_available = True
+
+cur = db.cursor()
+update_cur = db.cursor()
+prev_row_cur = db.cursor()
+est_cur = db.cursor()
+
+query_db(cur, SELECT_FUTURE_SLICES)
+
+while found and table_available:
+
+    result = get_next_rec(cur)
+
+    if result is None:
+
+        found = False
+
+    else:
+
+        player = result['player']
+        pending_slice_date = result['date']
+        clan_xp = result['XPClan']
+        elapsed = result['timeElapsed']
+        total_kills = result['killsNPC']
+
+        # These are the values we need to populate
+
+        row_description = None
+        row_type = None
+
+        update_data = UpdateData(player, pending_slice_date)
+
+        if elapsed < 0:
+            elapsed = 0 # Correct for negative elapsed glitches
+        
+        update_data.elapsed = elapsed
+
+        test_start = pending_slice_date
+        prev_result = get_rec(prev_row_cur, SELECT_PREV_SLICE, {'player': player, 'slice_date' : pending_slice_date})
+
+        if prev_result is not None:
+            
+            prev_calculated = prev_result['clanXPcalculated']
+            prev_type = prev_result['clanXPtype']
+            if prev_type == ""Z"":
+                prev_xp = prev_result['clanXPcalculated']
+            else:
+                prev_xp = prev_result['XPClan']
+            prev_kills = prev_result['killsNPC']
+
+            session_kills = total_kills - prev_kills
+
+            update_data.kills = session_kills
+
+            # Are we capped? Two ways to find out.
+
+            # If the previous sample was capped and we have the same amount of XP as that, we are capped
+            # OR if we have the same XP as the previous row and we've spent time and had some kills (not perfect, but good enough)
+            
+            # Also there's a bug where some capped players go to zero and stay that way, and we need to flag
+            # them as capped and not just zero (which is otherwise a different bug)
+
+            if (prev_xp == clan_xp or (clan_xp == 0 and prev_type == ""C"")) and elapsed > 0 and session_kills > 0 :
+
+                if (clan_xp < 2000000000 and clan_xp >0) or elapsed < 0:
+
+                    update_data.type = ""B""
+                    row_description = ""Bugged""
+                    update_data.incremental = 0
+                    update_data.calculated = prev_calculated
+
+                else:
+
+                    update_data.type = ""C""
+                    row_description = ""Capped""
+                    # We need to calculate ESTIMATED XP here.
+
+                    disc_rate = NORMAL_DISC_RATE
+                    if elapsed < DURATION_MIN or elapsed > DURATION_MAX:
+                        disc_rate = ATYPICAL_DISC_RATE
+                    
+                    est_result = get_rec(est_cur, SELECT_EST_RATE, {'sample_date' : update_data.slice_date, 'player': player})
+                    est_rate = int(est_result['estimated_rate'] * disc_rate)
+                    est_xp = est_rate * elapsed
+                    update_data.estimate_rate = est_rate
+                    update_data.estimated = est_xp
+                    update_data.incremental = 0
+                    update_data.calculated = prev_calculated + est_xp
+
+            else:
+
+                # Did someone get reset (leave and rejoin)? We can tell because the clan XP will drop below what it was (probably)
+
+                if prev_xp > clan_xp:
+
+                    if clan_xp == 0:  # If it's zero, this is just a ZERO row
+
+                        update_data.type = ""Z""
+                        row_description = ""Zero clan XP""
+                        update_data.incremental = 0
+                        update_data.calculated = prev_calculated + update_data.incremental
+
+                    else: # Otherwise we have a member who was reset (left/joined)
+
+                        update_data.type = ""R"" 
+                        row_description = ""Reset""
+                        update_data.incremental = clan_xp
+                        update_data.calculated = prev_calculated + update_data.incremental
+
+                else:
+
+                    # Was the player not online at all?
+
+                    if (elapsed == 0 or session_kills ==0) and (clan_xp - prev_xp) == 0:
+
+                        update_data.type = ""X""
+                        row_description = ""No activity""
+                        update_data.calculated = prev_calculated
+
+                    else: # There was some kind of activity for this sample
+
+                        update_data.type =""I""
+                        row_description = ""Incremental""
+                        update_data.incremental = clan_xp - prev_xp
+                        update_data.calculated = prev_calculated + update_data.incremental
+
+                        # If this session is a more typical duration, we can calc the XP rate
+                        if elapsed >= DURATION_MIN and elapsed <= DURATION_MAX:
+                            # calculate xp rate
+                            update_data.estimate_rate = int(update_data.incremental / elapsed)
+
+        else: 
+
+            # This member is new (i.e. first sample for the player)
+
+            update_data.type = ""N"" # New
+            row_description = ""New""
+            session_kills = total_kills
+            update_data.incremental = clan_xp
+            update_data.calculated = clan_xp
+            update_data.kills = session_kills
+            prev_xp = 0
+
+            # We do not set an estimate_rate for new players
+
+        display_rate = 0 # Just used for the console display
+
+        if update_data.estimate_rate is not None:
+            display_rate = update_data.estimate_rate
+
+        if update_data.estimated > 0:
+            xp_type=""est""
+            xp_value = update_data.estimated
+        else:
+            xp_type=""inc""
+            xp_value = update_data.incremental
+
+        if update_data.type != ""X"":
+
+            # We show samples with no activity without a linefeed on the console, so it's easier to read changes
+            print(f""  {player:<12}|{update_data.slice_date}|{update_data.type}|cxp: {clan_xp:>12,}|elap: {elapsed:>6,}|kills: {session_kills:>6,}|{xp_type} cxp: {xp_value:>11,}|calc cxp: {update_data.calculated:>12,}|est.rate: {display_rate:>6,}"")
+
+        else:
+
+            print(f""  {player:<12}|{update_data.slice_date}|{update_data.type}|cxp: {clan_xp:>12,}|elap: {elapsed:>6,}|kills: {session_kills:>6,}|{xp_type} cxp: {xp_value:>11,}|calc cxp: {update_data.calculated:>12,}|est.rate: {display_rate:>6,}"", end='\r', flush=True)
+
+        # Save to the database!
+        update_rec(update_cur, UPDATE_SLICE, vars(update_data))
+
+        db.commit() 
+        
+        # We commit after each update so that any contention 
+        # on the database with a lock will fail immediately
+        # We don't want this process locking the database for any duration,
+        # since it can resume after failure without issue on a subsequent run
+
+db.close()
+print("""")
+print(""Complete."")"
+Y0rbXWrd,MOK layout Polish Arabic 2,dksetiavan,YAML,Sunday 29th of October 2023 05:40:00 AM CDT,"{
+""title"":""Polish Arabic 2"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""آڤَرتِ[MC:ُو]يُپ"",
+""اسدفڠه[MC:اُ]كلۤ"",
+""[SHIFT]زإ[MC:تْس]ّبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ءج[MC:تْش]ظطـئعْث"",
+""[MC:ُنۤ]شذصضحخقوغ"",
+""[SHIFT]ڟڑ[MC:تْش]ةًٌٍ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
+vLmiBagf,MOK layout Polish Arabic 1,dksetiavan,YAML,Sunday 29th of October 2023 05:39:23 AM CDT,"{
+""title"":""Polish Arabic 1"",
+""onScreen"":{
+""main"":[
+""١٢٣٤٥٦٧٨٩٠"",
+""وَرتِ[MC:ُو]ي[MC:ُ]پ"",
+""اسدفغحࢮقل"",
+""[SHIFT]زخࢯْبنم[DEL]"",
+""[TOOL][ALTGR:،][SPACE][][][SYM:.][ENTER]""
+],
+
+""shifted"":[
+""﷽ﷻﷺﷸﷷﷶﷵﷴﷳﷲ"",
+""ة[MC:َن]ظطءعئُـ"",
+""[MC:َون]ثذصضه[MC:دڑ]كج"",
+""[SHIFT]شڑچًٌٍّ[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""sym"":[
+""!@#$۞٪&*)(۝"",
+""]}{\/_-=|+۩["",
+""~؎﷼£¥€:؛'ʺ٭"",
+""[SHIFT]؟…؏؞»«,.?[DEL]"",
+""[LOCK][ALTGR:‍][SPACE][][][SYM:‌][ENTER]""
+],
+
+""altGr"":[
+""1234567890"",
+"">‎‏‭‮‬‪‫ <"",
+""°•ىـ−ٱۤ،﴾﴿;"",
+""[SHIFT]ٰٖٜٗ؍٫٬‐۔[DEL]"",
+""[LOCK][ALTGR:,][SPACE][][][SYM:.][ENTER]""
+]}}
+    "
