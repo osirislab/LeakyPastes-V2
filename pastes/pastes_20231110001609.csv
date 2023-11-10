@@ -1,0 +1,3429 @@
+id,title,username,language,date,content
+6PNAcsjV,BTC Wallet Credentials have been reset,castlclass_20,GetText,Thursday 9th of November 2023 06:09:59 PM CDT,"Dear User
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please disregard this message.
+Your new login credentials will be 
+slivnimapk:ZsANVg on 212.224.93.130
+You can connect via SSH.
+Regards"
+ifbjvRHA,Untitled,savva_morozov,C++,Thursday 9th of November 2023 05:59:11 PM CDT,"#ifdef WIN32
+#include <sdkddkver.h>
+#endif
+
+#include ""seabattle.h""
+
+#include <atomic>
+#include <boost/asio.hpp>
+#include <boost/array.hpp>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <thread>
+#include <string_view>
+
+namespace net = boost::asio;
+using net::ip::tcp;
+using namespace std::literals;
+
+void PrintFieldPair(const SeabattleField& left, const SeabattleField& right) {
+    auto left_pad = ""  ""s;
+    auto delimeter = ""    ""s;
+    std::cout << left_pad;
+    SeabattleField::PrintDigitLine(std::cout);
+    std::cout << delimeter;
+    SeabattleField::PrintDigitLine(std::cout);
+    std::cout << std::endl;
+    for (size_t i = 0; i < SeabattleField::field_size; ++i) {
+        std::cout << left_pad;
+        left.PrintLine(std::cout, i);
+        std::cout << delimeter;
+        right.PrintLine(std::cout, i);
+        std::cout << std::endl;
+    }
+    std::cout << left_pad;
+    SeabattleField::PrintDigitLine(std::cout);
+    std::cout << delimeter;
+    SeabattleField::PrintDigitLine(std::cout);
+    std::cout << std::endl;
+}
+
+template <size_t sz>
+static std::optional<std::string> ReadExact(tcp::socket& socket) {
+    boost::array<char, sz> buf;
+    boost::system::error_code ec;
+
+    net::read(socket, net::buffer(buf), net::transfer_exactly(sz), ec);
+
+    if (ec) {
+        return std::nullopt;
+    }
+
+    return {{buf.data(), sz}};
+}
+
+static bool WriteExact(tcp::socket& socket, std::string_view data) {
+    boost::system::error_code ec;
+
+    net::write(socket, net::buffer(data), net::transfer_exactly(data.size()), ec);
+
+    return !ec;
+}
+
+class SeabattleAgent {
+public:
+    SeabattleAgent(const SeabattleField& field)
+        : my_field_(field) {
+    }
+
+    void StartGame(tcp::socket& socket, bool my_initiative) {
+
+        try {
+            boost::system::error_code ec;
+            net::streambuf stream_buf;
+
+            PrintFields();
+
+            while (!IsGameEnded()) {
+                if (my_initiative) {
+                    std::cout << ""Your turn: ""sv;
+                    std::string move_str;
+                    std::getline(std::cin, move_str);
+
+                    std::optional<std::pair<int, int>> my_move = ParseMove(move_str);
+                    size_t x = my_move.value().first;
+                    size_t y = my_move.value().second;
+
+                    SendMove(socket, move_str);
+                    
+                    SeabattleField::ShotResult shot_result = ReadResult(socket).value();
+
+                    switch(shot_result)
+                    {
+                        case SeabattleField::ShotResult::MISS: 
+                            other_field_.MarkMiss(x, y);
+                            my_initiative = !my_initiative;
+                            std::cout << ""Miss""sv << std::endl;
+                            break;
+                        case SeabattleField::ShotResult::HIT: 
+                            other_field_.MarkHit(x, y);
+                            std::cout << ""Hit""sv << std::endl;
+                            break;
+                        case SeabattleField::ShotResult::KILL:
+                            other_field_.MarkKill(x, y);
+                            std::cout << ""Kill""sv << std::endl;
+                            break;
+                    }
+
+                } else if (!my_initiative) {
+                    std::cout << ""Waiting for turn ...""sv << std::endl;
+                    auto opponent_move = ReadMove(socket);
+                    size_t x = opponent_move.value().first;
+                    size_t y = opponent_move.value().second;
+
+                    std::cout << ""Shot to ""sv << MoveToString(opponent_move.value()) << std::endl;
+
+                    SeabattleField::ShotResult shot_result = my_field_.Shoot(x, y);
+
+                    switch(shot_result)
+                    {
+                        case SeabattleField::ShotResult::MISS: 
+                            my_field_.MarkMiss(x, y);
+                            my_initiative = !my_initiative;
+                            break;
+                        case SeabattleField::ShotResult::HIT: 
+                            my_field_.MarkHit(x, y);
+                            break;
+                        case SeabattleField::ShotResult::KILL: 
+                            my_field_.MarkKill(x, y);
+                            break;
+                    }
+                    SendResult(socket, shot_result);                    
+                }
+                PrintFields();
+            }
+        }  catch (std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        }
+    }
+
+private:
+    static std::optional<std::pair<int, int>> ParseMove(const std::string_view& sv) {
+        if (sv.size() != 2) return std::nullopt;
+
+        int p1 = sv[0] - 'A', p2 = sv[1] - '1';
+
+        if (p1 < 0 || p1 > 8) return std::nullopt;
+        if (p2 < 0 || p2 > 8) return std::nullopt;
+
+        return {{p1, p2}};
+    }
+
+    static std::string MoveToString(std::pair<int, int> move) {
+        char buff[] = {static_cast<char>(move.first) + 'A', static_cast<char>(move.second) + '1'};
+        return {buff, 2};
+    }
+
+    void PrintFields() const {
+        PrintFieldPair(my_field_, other_field_);
+    }
+
+    bool IsGameEnded() const {
+        return my_field_.IsLoser() || other_field_.IsLoser();
+    }
+
+    std::optional<std::pair<int, int>> ReadMove(tcp::socket& socket) {
+        boost::system::error_code ec;
+        net::streambuf stream_buf;
+
+        net::read_until(socket, stream_buf, '\n', ec);
+        if (ec) {
+            std::cout << ""Error reading data ReadMove""sv << std::endl;
+        return std::nullopt;
+        }
+
+        std::string turn_data_str{std::istreambuf_iterator<char>(&stream_buf),
+                                  std::istreambuf_iterator<char>()};
+
+        return ParseMove(turn_data_str);
+    }
+
+    std::optional<SeabattleField::ShotResult> ReadResult(tcp::socket& socket) {
+        boost::system::error_code ec;
+        net::streambuf stream_buf;
+
+        net::read_until(socket, stream_buf, '\n', ec);
+        if (ec) {
+            std::cout << ""Error reading data ReadResult""sv << std::endl;
+        return std::nullopt;
+        }
+
+        std::string shot_result_str{std::istreambuf_iterator<char>(&stream_buf),
+                                    std::istreambuf_iterator<char>()};
+
+        return static_cast<SeabattleField::ShotResult>(shot_result_str[0]);
+    }
+
+    void SendResult(tcp::socket& socket, SeabattleField::ShotResult& shot_result) {
+        boost::system::error_code ec;
+        std::string s{static_cast<char>(shot_result)};
+        s += ""\n""s;
+        std::cout << s << std::endl;
+        socket.write_some(net::buffer(s), ec);
+        if (ec) {
+            std::cout << ""Error sending data SendResult""sv << std::endl;
+        return;
+        }
+    }
+
+    void SendMove(tcp::socket& socket, std::string move_str) {
+        boost::system::error_code ec;
+        move_str += ""\n""s;
+        socket.write_some(net::buffer(move_str), ec);
+        if (ec) {
+            std::cout << ""Error sending data SendMove""sv << std::endl;
+        return;
+        }
+    }
+
+private:
+    SeabattleField my_field_;
+    SeabattleField other_field_;
+};
+
+void StartServer(const SeabattleField& field, unsigned short port) {
+    SeabattleAgent agent(field);
+
+    try {
+        boost::system::error_code ec;
+
+        net::io_context io_context;
+
+        // используем конструктор tcp::v4 по умолчанию для адреса 0.0.0.0
+        tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
+        std::cout << ""Waiting for connection...""sv << std::endl;
+
+        tcp::socket socket{io_context};
+        acceptor.accept(socket, ec);
+
+        agent.StartGame(socket, false);
+
+    } catch (std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    }
+};
+
+void StartClient(const SeabattleField& field, const std::string& ip_str, unsigned short port) {
+    SeabattleAgent agent(field);
+
+    try {
+        boost::system::error_code ec;
+
+        net::io_context io_context;
+
+        auto endpoint = tcp::endpoint(net::ip::make_address(ip_str, ec), port);
+
+        tcp::socket socket{io_context};
+        socket.connect(endpoint, ec);
+
+        agent.StartGame(socket, true);
+
+    } catch (std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    }
+};
+
+int main(int argc, const char** argv) {
+    if (argc != 3 && argc != 4) {
+        std::cout << ""Usage: program <seed> [<ip>] <port>"" << std::endl;
+        return 1;
+    }
+
+    std::mt19937 engine(std::stoi(argv[1]));
+    SeabattleField fieldL = SeabattleField::GetRandomField(engine);
+
+    if (argc == 3) {
+        StartServer(fieldL, std::stoi(argv[2]));
+    } else if (argc == 4) {
+        StartClient(fieldL, argv[2], std::stoi(argv[3]));
+    }
+}
+"
+4DVMiJ7F,BTC Wallet Credentials have been reset,VQ-Moe,GetText,Thursday 9th of November 2023 05:52:40 PM CDT,"Dear User
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please contact us immediately.
+
+Your new login credentials will be: 
+josli45:KoE3dG1 on 159.223.212.34
+You can connect via SSH.
+
+Regards
+BT369704"
+8Zgi2fhG,Esercizi programmazione 1 - rec,informaticage,C,Thursday 9th of November 2023 05:44:25 PM CDT,"#include <stdio.h>
+
+int even(int n) {
+  if (n == 0) return 1;
+  if (n == 1) return 0;
+
+  return even(n - 2);
+}
+
+int summation(int i, int n) {
+  if (i == n) return 0;
+  return i + summation(i + 1, n);
+}
+
+int product(int i, int n) {
+  if (i == n) return 1;
+  return (i + 1) * product(i + 1, n);
+}
+
+int pi(int i, int n) {
+  if (i == n + 1) return 0;
+  int sum = summation(0, i) * even(i);
+  int prod = product(0, i) * (1 - even(i));
+
+  return sum + prod + pi(i + 1, n);
+}
+
+int pi_iter(int n) {
+  int tot = 0;
+  for (int i = 1; i <= n; i++) {
+    int sum = summation(0, i) * (i % 2 == 0);
+    int prod = product(0, i) * (1 - (i % 2 == 0));
+
+    tot = tot + (sum + prod);
+  }
+
+  return tot;
+}
+
+int power(int b, int e) {
+  int res = 1;
+  for (int i = 0; i < e; i++) {
+    res = res * b;
+  }
+
+  return res;
+}
+
+int powrec(int b, int e) {
+  if (e == 0) return 1;
+  return b * powrec(b, e - 1);
+}"
+i6Wz4n7f,Nigerian scammers [9-11-3/2023],bombaires,AIMMS,Thursday 9th of November 2023 05:43:06 PM CDT,"<a href=""mailto:fed_paymt_treasury_usa_2013@live.com"">fed_paymt_treasury_usa_2013@live.com</a>
+<a href=""mailto:warrenbuffett631@yahoo.com"">warrenbuffett631@yahoo.com</a>
+<a href=""mailto:warrenbuffett63@yahoo.com"">warrenbuffett63@yahoo.com</a>
+<a href=""mailto:warrenbuffett64@outlook.com"">warrenbuffett64@outlook.com</a>
+<a href=""mailto:carla@worldwidebizleads.com"">carla@worldwidebizleads.com</a>
+<a href=""mailto:mscarmanlapointe21@gmail.com"">mscarmanlapointe21@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+647@gmail.com"">mscarmanlapointe21+647@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+18783@gmail.com"">mscarmanlapointe21+18783@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+29595@gmail.com"">mscarmanlapointe21+29595@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+30429@gmail.com"">mscarmanlapointe21+30429@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+9815@gmail.com"">mscarmanlapointe21+9815@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+26693@gmail.com"">mscarmanlapointe21+26693@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+11934@gmail.com"">mscarmanlapointe21+11934@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+27751@gmail.com"">mscarmanlapointe21+27751@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+23640@gmail.com"">mscarmanlapointe21+23640@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13802@gmail.com"">mscarmanlapointe21+13802@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+18608@gmail.com"">mscarmanlapointe21+18608@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+3718@gmail.com"">mscarmanlapointe21+3718@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+16548@gmail.com"">mscarmanlapointe21+16548@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19640@gmail.com"">mscarmanlapointe21+19640@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+32234@gmail.com"">mscarmanlapointe21+32234@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+16900@gmail.com"">mscarmanlapointe21+16900@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+29343@gmail.com"">mscarmanlapointe21+29343@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+28522@gmail.com"">mscarmanlapointe21+28522@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13803@gmail.com"">mscarmanlapointe21+13803@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+23971@gmail.com"">mscarmanlapointe21+23971@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+8152@gmail.com"">mscarmanlapointe21+8152@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+30265@gmail.com"">mscarmanlapointe21+30265@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+32520@gmail.com"">mscarmanlapointe21+32520@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+32056@gmail.com"">mscarmanlapointe21+32056@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+1682@gmail.com"">mscarmanlapointe21+1682@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+26613@gmail.com"">mscarmanlapointe21+26613@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+12407@gmail.com"">mscarmanlapointe21+12407@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+24444@gmail.com"">mscarmanlapointe21+24444@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+31817@gmail.com"">mscarmanlapointe21+31817@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13745@gmail.com"">mscarmanlapointe21+13745@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+25574@gmail.com"">mscarmanlapointe21+25574@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+5650@gmail.com"">mscarmanlapointe21+5650@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+22368@gmail.com"">mscarmanlapointe21+22368@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+28287@gmail.com"">mscarmanlapointe21+28287@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+24475@gmail.com"">mscarmanlapointe21+24475@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+18745@gmail.com"">mscarmanlapointe21+18745@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+32369@gmail.com"">mscarmanlapointe21+32369@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19093@gmail.com"">mscarmanlapointe21+19093@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+16860@gmail.com"">mscarmanlapointe21+16860@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+10613@gmail.com"">mscarmanlapointe21+10613@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+3521@gmail.com"">mscarmanlapointe21+3521@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19769@gmail.com"">mscarmanlapointe21+19769@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+25648@gmail.com"">mscarmanlapointe21+25648@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+25842@gmail.com"">mscarmanlapointe21+25842@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+14993@gmail.com"">mscarmanlapointe21+14993@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+28811@gmail.com"">mscarmanlapointe21+28811@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+12932@gmail.com"">mscarmanlapointe21+12932@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+10944@gmail.com"">mscarmanlapointe21+10944@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13932@gmail.com"">mscarmanlapointe21+13932@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+20504@gmail.com"">mscarmanlapointe21+20504@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+8370@gmail.com"">mscarmanlapointe21+8370@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+1718@gmail.com"">mscarmanlapointe21+1718@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+22654@gmail.com"">mscarmanlapointe21+22654@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19363@gmail.com"">mscarmanlapointe21+19363@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+391@gmail.com"">mscarmanlapointe21+391@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+1703@gmail.com"">mscarmanlapointe21+1703@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+26789@gmail.com"">mscarmanlapointe21+26789@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+24660@gmail.com"">mscarmanlapointe21+24660@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13550@gmail.com"">mscarmanlapointe21+13550@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+6407@gmail.com"">mscarmanlapointe21+6407@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19143@gmail.com"">mscarmanlapointe21+19143@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+29238@gmail.com"">mscarmanlapointe21+29238@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+4163@gmail.com"">mscarmanlapointe21+4163@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+20721@gmail.com"">mscarmanlapointe21+20721@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+3701@gmail.com"">mscarmanlapointe21+3701@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+3977@gmail.com"">mscarmanlapointe21+3977@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+26920@gmail.com"">mscarmanlapointe21+26920@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13086@gmail.com"">mscarmanlapointe21+13086@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+578@gmail.com"">mscarmanlapointe21+578@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+17911@gmail.com"">mscarmanlapointe21+17911@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19000@gmail.com"">mscarmanlapointe21+19000@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+26393@gmail.com"">mscarmanlapointe21+26393@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+13761@gmail.com"">mscarmanlapointe21+13761@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+10710@gmail.com"">mscarmanlapointe21+10710@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+29572@gmail.com"">mscarmanlapointe21+29572@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+21347@gmail.com"">mscarmanlapointe21+21347@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+5893@gmail.com"">mscarmanlapointe21+5893@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+17231@gmail.com"">mscarmanlapointe21+17231@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+9813@gmail.com"">mscarmanlapointe21+9813@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+22059@gmail.com"">mscarmanlapointe21+22059@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+15601@gmail.com"">mscarmanlapointe21+15601@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+10165@gmail.com"">mscarmanlapointe21+10165@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+16194@gmail.com"">mscarmanlapointe21+16194@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+19426@gmail.com"">mscarmanlapointe21+19426@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+17686@gmail.com"">mscarmanlapointe21+17686@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+30126@gmail.com"">mscarmanlapointe21+30126@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+1437@gmail.com"">mscarmanlapointe21+1437@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+3291@gmail.com"">mscarmanlapointe21+3291@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+8604@gmail.com"">mscarmanlapointe21+8604@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+22348@gmail.com"">mscarmanlapointe21+22348@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+16753@gmail.com"">mscarmanlapointe21+16753@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+8792@gmail.com"">mscarmanlapointe21+8792@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+21502@gmail.com"">mscarmanlapointe21+21502@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+9246@gmail.com"">mscarmanlapointe21+9246@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+5304@gmail.com"">mscarmanlapointe21+5304@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+29753@gmail.com"">mscarmanlapointe21+29753@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+4679@gmail.com"">mscarmanlapointe21+4679@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+7093@gmail.com"">mscarmanlapointe21+7093@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+191@gmail.com"">mscarmanlapointe21+191@gmail.com</a>
+<a href=""mailto:mscarmanlapointe21+4289@gmail.com"">mscarmanlapointe21+4289@gmail.com</a>"
+wUPZN1e8,Simple Space,Ansuperope,HTML,Thursday 9th of November 2023 05:39:53 PM CDT,"<!------------------------------------------------
+Thank you for downloading! :D
+ 
+Feel free to do whatever you want with the
+code such as editing, changing or frakensteining
+it. You're free to move and edit the credits
+just make sure its somewhere on the code please.
+ 
+If you need help, have questions or you notice
+something is broke or is hard to read with my
+code free to message me or @ my main account 
+Ansuperope
+ 
+    LIVE PREVIEW
+      https://toyhou.se/24282521.f2u-simple-space  
+ 
+ 
+    BOOTSTRAP COLORS
+        - MAIN:     primary
+        - SUB:      secondary
+        - BG:       faded
+ 
+        delete bootstrap colors to use custom colors
+        or you can use a combo of both up to you
+ 
+    CUSTOM COLORS
+        - MAIN:     CC_MAIN
+        - SUB:      CC_SUB
+        - TEXT:     CC_TEXT
+ 
+ 
+TIPS & HELPFUL INFO
+ 
+    SHORT CUTS:
+        ""Ctrl"" + ""F"" - find, replace, delete and edit text faster
+        ""Ctrl"" + ""Z"" - undo
+        ""Ctrl"" + ""Y"" - redo
+ 
+    LIVE CODE EDITOR (highly recommend using):
+        https://th.circlejourney.net/
+ 
+    HELP THREAD / ASK FOR HELP HERE:
+        https://toyhou.se/~forums/16.htmlcss-graphics/48845.-help-thread-ask-your-questions-here-
+ 
+    BOOSTRAP COLORS:
+        https://getbootstrap.com/docs/4.0/utilities/colors/
+ 
+    ICONS (you can use ones labled pro):
+        https://fontawesome.com/search
+ 
+    COLOR PICKER WEBSITE:
+        https://imagecolorpicker.com/color-code/2596be
+ 
+------------------------------------------------->
+
+
+<!-- BACKGROUND --------------------------------->
+<div class="""" style=""z-index:-1; position:absolute; top:0; bottom:0; left:0; width:100%;
+    background:url('');
+    background-color:;
+    background-position:center;
+    background-size:cover;""></div> 
+<!-- END BACKGROUND ----------------------------->
+
+
+
+
+<div class=""mx-auto justify-content-center align-items-center"" style=""max-width:800px;""><div class=""col row no-gutters align-items-center justify-content-center"">
+    
+    <!-- LEFT SIDE IMAGE AND SMALL INFO --------->
+    <div class=""col-12 col-lg-4 my-3 mr-lg-4 h-100 flex-column"">
+        
+        <!-- IMAGE AND STARS -------------------->
+        <div class=""col my-3"">
+            
+            <!-- image -->
+            <div class=""col my-2 card p-2 card-outline-primary"" style=""border-color:#CC_MAIN; border-width:3px;""><div class=""card p-1 border-0 bg-secondary"" style=""min-height:150px; background-color:#CC_SUB;
+                background-image:url('https://f2.toyhou.se/file/f2-toyhou-se/images/35501574_UgeKlRSMZWWgyKo.png?1664395374');
+                background-position:top; background-size:cover;""></div></div>
+            
+            <!-- top right star -->
+            <a href="""" title=""Background Credit"" class=""text-primary"" style=""position:absolute; top:-55px; right:-0px; color:#CC_MAIN; font-size:70px;""><i class=""fa-regular fa-star fa-fade""></i></a>
+            
+            <!-- top right star -->
+            <a href="""" title=""Code Credit"" class=""text-primary"" style=""position:absolute; top:-10px; right:-25px; color:#CC_MAIN; font-size:55px;""><i class=""fa-regular fa-star fa-fade""></i></a>
+            
+            <!-- bottom left star / song -->
+            <a href="""" title=""Theme Song"" class=""text-primary"" style=""position:absolute; bottom:-25px; left:-15px; color:#CC_MAIN; font-size:60px;""><i class=""fa-regular fa-star fa-fade""></i></a>
+        </div>
+        <!-- END IMAGE AND STARS ---------------->
+        
+        
+        <!-- QUOTE ------------------------------>
+        <div class=""col card border-0 bg-primary"" style=""color:#CC_TEXT; background-color:#CC_MAIN;""><div class=""p-1 row no-gutters justify-content-center"" style=""font-variant:small-caps;"">
+            <i class=""fa-regular fa-quote-left pt-1""></i>
+            <span class=""pb-1 px-2"">quote</span>
+            <i class=""fa-regular fa-quote-right pt-1""></i>
+        </div></div>
+        <!-- END QUOTE -------------------------->
+        
+        
+        <!-- SHORT INFO ------------------------->
+        <div class=""col mt-2 row no-gutters"">
+            
+            <!-- left lines -->
+            <div class=""col-auto my-1 row no-gutters"">
+                <div class=""col-auto card h-100 border-left-0 card-outline-primary"" style=""border-color:#CC_MAIN; border-width:3px;""></div>
+                <div class=""col-auto card m-2 border-left-0 card-outline-secondary"" style=""border-color:#CC_SUB; border-width:3px;""></div>  
+            </div>
+            
+            <!-- words -->
+            <div class=""col my-2 ml-3"">
+               Lorem ipsum dolor sit amet, consectetur adipiscing elit
+            </div>
+        
+        </div>
+        <!-- END SHORT INFO --------------------->
+        
+    </div>
+    <!-- END LEFT SIDE IMAGE AND SMALL INFO ----->
+    
+    
+    
+    
+    <!-- RIGHT SIDE INFO BOXES ------------------>
+    <div class=""col ml-lg-5 row no-gutters"">
+        
+        <!-- BOXES ------------------------------>
+        <div class=""col mr-2"">
+            
+            <!-- ABOUT BOX ---------------------->
+            <div class=""col my-3 card rounded-circle p-3 card-outline-secondary"" style=""border-style:dashed; border-color:#CC_SUB; border-width:3px;""><div class=""card p-1 card-outline-primary"" style=""border-color:#CC_MAIN; border-width:3px;"">
+                
+                <!-- HEADER --------------------->
+                <div class=""col py-2 text-center text-uppercase bg-primary"" style=""font-size:18px; font-variant:small-caps; font-style:italic; letter-spacing:3px; color:#CC_TEXT; background-color:#CC_MAIN;"">
+                    <i class=""fa-regular fa-planet-ringed""></i>
+                    <span class=""px-3"">about</span>
+                    <i class=""fa-regular fa-planet-ringed""></i>
+                </div>
+                <!-- HEADER --------------------->
+                
+                
+                <!-- INFO ----------------------->
+                <div class=""card border-top-0 card-outline-secondary bg-faded"" style=""color:#CC_TEXT; background-color:#CC_SUB; border-color:#CC_MAIN; border-width:3px;""><div class=""row no-gutters p-1"">
+                    
+                    <!-- name -->
+                    <div class=""col-12 my-1 px-2 row no-gutters"">
+                        <div class=""col-auto text-uppercase"">
+                            <span class=""px-1 bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-moon-stars""></i></span>
+                            <span class=""text-secondary"" style=""color:#CC_MAIN; letter-spacing:2px;"">name</span>
+                        </div>
+                        
+                        <div class=""col pl-2 text-right"" style=""font-variant:small-caps;"">content</div>
+                    </div>
+                    
+                    <!-- species -->
+                    <div class=""col-12 my-1 px-2 row no-gutters"">
+                        <div class=""col-auto text-uppercase"">
+                            <span class=""px-1 bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-moon-stars""></i></span>
+                            <span class=""text-secondary"" style=""color:#CC_MAIN; letter-spacing:2px;"">species</span>
+                        </div>
+                        
+                        <div class=""col pl-2 text-right"" style=""font-variant:small-caps;"">content</div>
+                    </div>
+                    
+                    <!-- height -->
+                    <div class=""col-12 my-1 px-2 row no-gutters"">
+                        <div class=""col-auto text-uppercase"">
+                            <span class=""px-1 bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-moon-stars""></i></span>
+                            <span class=""text-secondary"" style=""color:#CC_MAIN; letter-spacing:2px;"">height</span>
+                        </div>
+                        
+                        <div class=""col pl-2 text-right"" style=""font-variant:small-caps;"">content</div>
+                    </div>
+                    
+                    <!-- age -->
+                    <div class=""col-12 my-1 px-2 row no-gutters"">
+                        <div class=""col-auto text-uppercase"">
+                            <span class=""px-1 bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-moon-stars""></i></span>
+                            <span class=""text-secondary"" style=""color:#CC_MAIN; letter-spacing:2px;"">age</span>
+                        </div>
+                        
+                        <div class=""col pl-2 text-right"" style=""font-variant:small-caps;"">content</div>
+                    </div>
+                    
+                    <!-- birthday -->
+                    <div class=""col-12 my-1 px-2 row no-gutters"">
+                        <div class=""col-auto text-uppercase"">
+                            <span class=""px-1 bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-moon-stars""></i></span>
+                            <span class=""text-secondary"" style=""color:#CC_MAIN; letter-spacing:2px;"">birthday</span>
+                        </div>
+                        
+                        <div class=""col pl-2 text-right"" style=""font-variant:small-caps;"">content</div>
+                    </div>
+                    
+                </div></div>
+                <!-- END INFO ------------------->
+                
+            </div></div>
+            <!-- END ABOUT BOX ------------------>
+            
+            
+            <!-- NOTE BOX ----------------------->
+            <div class=""col my-3 card rounded-circle p-3 card-outline-secondary"" style=""border-style:dashed; border-color:#CC_SUB; border-width:3px;""><div class=""card p-1 card-outline-primary"" style=""border-color:#CC_MAIN; border-width:3px;"">
+                
+                <!-- HEADER --------------------->
+                <div class=""col py-2 text-center text-uppercase bg-primary"" style=""font-size:18px; font-variant:small-caps; font-style:italic; letter-spacing:3px; color:#CC_TEXT; background-color:#CC_MAIN;"">
+                    <i class=""fa-regular fa-rocket""></i>
+                    <span class=""px-3"">note</span>
+                    <i class=""fa-regular fa-rocket""></i>
+                </div>
+                <!-- HEADER --------------------->
+                
+                
+                <!-- INFO ----------------------->
+                <div class=""card py-1 border-top-0 card-outline-secondary bg-faded"" style=""background-color:#CC_SUB; border-color:#CC_MAIN; border-width:3px;"">
+                    
+                    <!-- 1 -->
+                    <div class=""my-1 px-2"" style=""color:#CC_TEXT;"">
+                        <span class=""pl-1 text-uppercase bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-stars""></i>
+                        </span>
+                        
+                        <span class=""pl-2"">content</span>
+                    </div>
+                    
+                    <!-- 2 -->
+                    <div class=""my-1 px-2"" style=""color:#CC_TEXT;"">
+                        <span class=""pl-1 text-uppercase bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-stars""></i>
+                        </span>
+                        
+                        <span class=""pl-2"">content</span>
+                    </div>
+                    
+                    <!-- 3 -->
+                    <div class=""my-1 px-2"" style=""color:#CC_TEXT;"">
+                        <span class=""pl-1 text-uppercase bg-secondary"" style=""background-color:#CC_MAIN;""><i class=""fa-light fa-stars""></i>
+                        </span>
+                        
+                        <span class=""pl-2"">content</span>
+                    </div>
+                    
+                </div>
+                <!-- END INFO ------------------->
+                
+            </div></div>
+            <!-- END NOTE BOX ------------------->
+            
+        </div>
+        <!-- END BOXES -------------------------->
+        
+        
+        
+        <!-- RIGHT LINES ----------------------->
+        <div class=""col-auto my-1 ml-2 row no-gutters"">
+            <div class=""col-auto card m-2 border-left-0 card-outline-secondary"" style=""border-color:#CC_SUB; border-width:3px;""></div>
+            <div class=""col-auto card h-100 border-left-0 card-outline-primary"" style=""border-color:#CC_MAIN; border-width:3px;""></div>  
+        </div>
+        <!-- END RIGHT LINES ------------------->
+        
+    </div>
+    <!-- END RIGHT SIDE INFO BOXES ------------->
+    
+</div></div>"
+DdS0cEdR,03. Heart Delivery,Spocoman,C#,Thursday 9th of November 2023 05:27:16 PM CDT,"using System;
+
+namespace HeartDelivery
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var houses = Console.ReadLine().Split('@').Select(int.Parse).ToList();
+
+            int index = 0;
+            string command;
+
+            while ((command = Console.ReadLine()) != ""Love!"")
+            {
+                index += int.Parse(command.Substring(5));
+                if (index >= houses.Count)
+                {
+                    index = 0;
+                }
+
+                if (houses[index] == 0)
+                {
+                    Console.WriteLine($""Place {index} already had Valentine's day."");
+                }
+                else
+                {
+                    houses[index] -= 2;
+                    if (houses[index] == 0)
+                    {
+                        Console.WriteLine($""Place {index} has Valentine's day."");
+                    }
+                }
+            }
+
+            Console.WriteLine($""Cupid's last position was {index}."");
+            int houseCount = houses.Where(x => x > 0).Count();
+            Console.WriteLine(houseCount == 0 ? ""Mission was successful."" : $""Cupid has failed {houseCount} places."");
+        }
+    }
+}"
+NcsY7QDw,update_libraries.lua,iNxmi,Lua,Thursday 9th of November 2023 05:25:00 PM CDT,"local index = 
+{
+	socket = ""ViawNrKK"",
+	serial = ""tHuuHBNy""
+}
+
+for k, v in pairs(index) do
+    local path = string.format(""/libs/%s.lua"", k)
+    print(string.format(""Updating %s (%s)"", path, v))
+   
+	shell.run(string.format(""delete %s"", path)) 
+    shell.run(string.format(""pastebin get %s %s"", v, path))
+end
+    
+print(""Finished updating libraries"")
+
+"
+XZimdqAw,Untitled,Sininerebane,C#,Thursday 9th of November 2023 05:20:21 PM CDT,"Задача
+Написать конвертер валют (3 валюты).
+У пользователя есть баланс в каждой из представленных валют. Он может попросить сконвертировать часть баланса с одной валюты в другую. Тогда у него с баланса одной валюты снимется X и зачислится на баланс другой Y. Курс конвертации должен быть просто прописан в программе.
+По имени переменной курса конвертации должно быть понятно, из какой валюты в какую валюту конвертируется.
+Должна выполняться однотипная операция или везде умножение ""*"" или деление ""/"". Для чего это нужно подробнее позже узнаете в разделе ""Функции"". Но придётся объявить коэффициенты на все случаи.
+
+Программа должна завершиться тогда, когда это решит пользователь.
+
+Дополнительно: Если решение строится на switch, то принято работать с константами (в остальных случаях объявляются переменные). Для каждого case следует объявить константу.
+Пример:
+const string CommandExit = ""exit"";
+
+case CommandExit:
+break;
+
+Константы объявляются перед блоком переменных и отделяются от них пустой строкой. Константы именуются с большой буквы. Если константа создана для связки консольное меню + switch (case) к имени константы добавляется Command или Menu - это передает суть константы, превращая ее в существительное, а не глагол и улучшает читаемость кода.
+
+
+namespace ConvertorValut
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+
+            const string RubMenu = ""1"";
+            const string EuroMenu = ""2"";
+            const string UsdMenu = ""3"";
+
+            Console.OutputEncoding = Encoding.UTF8;
+            float rubToEur;
+            float eurToRub;
+            float usdToRub;
+            float rub;
+            float euro;
+            float usd;
+            string userInput;
+            float currencyCount;
+
+            rubToEur = 0.01F;
+            eurToRub = 98.29F;
+            usdToRub = 91.68F;
+
+            Console.WriteLine(""Добро пожаловать в обменник валют. У нас вы можете обменять рубли в евро и евро в рубли. "");
+            Console.WriteLine(""Введите баланс рублей: "");
+            rub = Convert.ToSingle(Console.ReadLine());
+            Console.WriteLine(""Введите баланс евро: "");
+            euro = Convert.ToSingle(Console.ReadLine());
+            Console.WriteLine(""Введите баланс долларов: "");
+            usd = Convert.ToSingle(Console.ReadLine());
+
+            Console.WriteLine(""1 - обменять рубли на евро"");
+            Console.WriteLine(""2 - обменять евро на рубли"");
+            Console.WriteLine(""3 - обменять рубли на доллары"");
+            userInput = Console.ReadLine();
+
+
+            switch (userInput)
+            {
+                case RubMenu:
+                    Console.WriteLine(""Обмен рублей на евро"");
+                    Console.Write(""Сколько вы хотите обменять?: "");
+                    currencyCount = Convert.ToSingle(Console.ReadLine());
+                    if (rub >= currencyCount)
+                    {
+                        rub -= currencyCount;
+                        euro += currencyCount / eurToRub;
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Недопустимое количество рублей"");
+                    }
+                    break;
+                case EuroMenu:
+                    Console.WriteLine(""Обмен евро на рубли"");
+                    Console.Write(""Сколько вы хотите обменять?: "");
+                    currencyCount = Convert.ToSingle(Console.ReadLine());
+                    if ( euro >= currencyCount)
+                    {
+                        euro -= currencyCount;
+                        rub += currencyCount / rubToEur;
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Недопустимое количество евро"");
+                    }
+                    break;
+                case UsdMenu:
+                    Console.WriteLine(""Обмен рублей на доллары"");
+                    Console.Write(""Сколько вы хотите обменять?: "");
+                    currencyCount = Convert.ToSingle(Console.ReadLine());
+                    if (usd >= currencyCount)
+                    {
+                        rub -= currencyCount;
+                        usd += currencyCount / usdToRub;
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Недопустимое количество рублей"");
+                    }
+                    break;
+            }
+
+            Console.WriteLine($""Ваш баланс {rub}  рублей и {euro} евро и {usd} долларов "");
+            Console.ReadKey();
+        }
+    }
+}"
+cE0pfpHq,03. Heart Delivery,Spocoman,C++,Thursday 9th of November 2023 04:54:10 PM CDT,"#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <algorithm>
+
+using namespace std;
+
+vector<int> split(string str, char sep) {
+    stringstream s(str);
+    vector<int> v;
+    string n;
+    while (getline(s, n, sep)) {
+        v.push_back(stoi(n));
+    }
+    return v;
+}
+
+int main() {
+    int number, index = 0, houseCount = 0;
+
+    string line, command;
+    getline(cin, line);
+
+    vector<int> houses = split(line, '@');
+
+    cin >> command;
+
+    while (command != ""Love!"") {
+        cin >> number;
+        index += int(number);
+        if (index >= houses.size()) {
+            index = 0;
+        }
+        if (houses[index] == 0) {
+            cout << ""Place "" << index << "" already had Valentine's day.\n"";
+        }
+        else {
+            houses[index] -= 2;
+            if (houses[index] == 0) {
+                cout << ""Place "" << index << "" has Valentine's day.\n"";
+            }
+        }
+        cin >> command;
+    }
+
+    for (int i = 0; i < houses.size(); i++) {
+        if (houses[i] > 0) {
+            houseCount++;
+        }
+    }
+
+    cout << ""Cupid's last position was "" << index << "".\n"";
+    if (houseCount == 0) {
+        cout << ""Mission was successful.\n"";
+    }
+    else {
+        cout << ""Cupid has failed "" << houseCount << "" places.\n"";
+    }
+    return 0;
+}"
+c0JBqtcz,w_tests_2,kostyukevich,Python,Thursday 9th of November 2023 03:35:39 PM CDT,"import unittest
+
+def read_employees(filename):
+    """"""
+    Читает данные о сотрудниках из файла.
+
+    Args:
+        filename (str): Имя файла с данными о сотрудниках.
+
+    Returns:
+        list: Список сотрудников в формате (name, level, technologies).
+    """"""
+    employees = []
+    with open(filename, 'r', encoding='utf-8') as file:
+        for line in file:
+            parts = line.strip().split()
+            i = 0
+            while parts[i] != 'junior' and parts[i] != 'middle' and parts[i] != 'senior': i += 1
+            name = ' '.join(parts[:i])
+            level = parts[i]
+            technologies = ' '.join(parts[i+1:]).split(', ')
+            employees.append((name, level, technologies))
+    return employees
+ 
+def read_tasks(filename):
+    """"""
+    Читает данные о задачах из файла.
+
+    Args:
+        filename (str): Имя файла с данными о задачах.
+
+    Returns:
+        list: Список задач в формате (task, level, technologies, time).
+    """"""
+    tasks = []
+    with open(filename, 'r', encoding='utf-8') as file:
+        for line in file:
+            parts = line.strip().split()
+            i = 0
+            while parts[i] != 'junior' and parts[i] != 'middle' and parts[i] != 'senior': i += 1
+            task = ' '.join(parts[:i])
+            level = parts[i]
+            technologies = ' '.join(parts[i+1:len(parts)-1]).split(', ')
+            time = int(parts[-1])
+            tasks.append((task, level, technologies, time))
+    return tasks
+ 
+def distribute_tasks(employees, tasks):
+    """"""
+    Распределяет задачи между сотрудниками.
+
+    Args:
+        employees (list): Список сотрудников в формате (name, level, technologies).
+        tasks (list): Список задач в формате (task, level, technologies, time).
+
+    Returns:
+        tuple: Кортеж с результатами распределения задач и списком нераспределенных задач.
+            Результаты представляются в формате словаря result и список unsolved_tasks.
+    """"""
+    result = {}
+    unsolved_tasks = []
+    for task in tasks:
+        task_name, task_level, task_technologies, task_time = task
+        assigned = False
+        for employee in employees:
+            employee_name, employee_level, employee_technologies = employee
+            if (employee_level == task_level or employee_level == 'senior' or task_level == 'junior') and set(employee_technologies).issuperset(set(task_technologies)):
+                if employee_name not in result:
+                    result[employee_name] = {'total_time': 0, 'tasks': []}
+                result[employee_name]['total_time'] += task_time
+                result[employee_name]['tasks'].append((task_name, task_time))
+                assigned = True
+                break
+        if not assigned:
+            unsolved_tasks.append(task)
+ 
+    return result, unsolved_tasks
+ 
+def write_plans(filename, result, unsolved_tasks):
+    """"""
+    Записывает результаты распределения задач в файл.
+
+    Args:
+        filename (str): Имя файла, в который будут записаны результаты.
+        result (dict): Словарь с результатами распределения задач.
+        unsolved_tasks (list): Список нераспределенных задач.
+    """"""
+    with open(filename, 'w') as file:
+        for employee, data in sorted(result.items()):
+            file.write(f'{employee} - {data[""total_time""]}\n')
+            for i, (task, time) in enumerate(data['tasks'], 1):
+                file.write(f'{i}. {task} - {time}\n')
+            file.write('\n')
+        file.write('\n')
+        if unsolved_tasks:
+            file.write('Задачи, которые никто не может решить:\n')
+            for i, (task, level, technologies, time) in enumerate(unsolved_tasks, 1):
+                file.write(f'{i}. {task} {level} {"", "".join(technologies)} {time}\n')
+ 
+class TestEmployeeTasks(unittest.TestCase):
+    def setUp(self):
+        self.levels = ['junior', 'middle', 'senior']
+
+        self.employees = [
+            ('Иванов Иван Иванович', 'junior', ['html', 'java', 'тестирование']),
+            ('Смирнов Алексей Александрович', 'senior', ['python', 'анализ данных', 'статистика']),
+            ('Кац Александр', 'senior', ['тестирование'])
+        ]
+
+        self.tasks = [
+            ('Протестировать фичу 4398', 'junior', ['тестирование'], 1),
+            ('Протестировать фичу 4399', 'junior', ['тестирование'], 2),
+            ('Спарсить сайт test.test по форме', 'middle', ['python', 'программирование'], 8),
+            ('Написать план тестирования', 'senior', ['тестирование'], 7)
+        ]
+
+    def test_read_employees(self):
+        employees = read_employees('employees.txt')
+        self.assertEqual(employees, self.employees)
+
+    def test_read_tasks(self):
+        tasks = read_tasks('tasks.txt')
+        self.assertEqual(tasks, self.tasks)
+""""""""""""
+
+
+if __name__ == ""__main__"":
+    employees = read_employees('employees.txt')
+    tasks = read_tasks('tasks.txt')
+    result, unsolved_tasks = distribute_tasks(employees, tasks)
+    write_plans('plans.txt', result, unsolved_tasks)
+    unittest.main()"
+Qn5yhGSB,Сумма цифр числа (E),cyberjab,C++,Thursday 9th of November 2023 03:27:58 PM CDT,"#include <iostream>
+#include <iomanip>
+#include <cstdlib>
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <queue>
+#include <deque>
+#include <cmath>
+#include <numeric>
+#include <algorithm>
+#include <ctime>
+#include <chrono>
+#include <random>
+#include <functional>
+
+using namespace std;
+
+int main() {
+    ios_base::sync_with_stdio(0);
+    cin.tie(0);
+    cout << fixed;
+    int n, k;
+    int ans = 0;
+    cin >> n /*>> k*/;
+    priority_queue <int> st;
+    /*for (int i = 0; i < n; i++) {
+        int x;
+        cin >> x;
+        st.push(x);
+    }*/
+    //for (int i = 0; i < k; i++) {
+    //    int a = st.top();
+    //    st.pop();
+    //    string s = to_string(a);
+    //    int sm = 0;
+    //    for (auto now : s) {
+    //        sm += int(now) - 48;
+    //    }
+    //    /*int sm = (a % 10) + ((a / 10) % 10) + ((a / 100) % 10) + ((a / 1000) % 10) + ((a / 10000) % 10) + ((a / 100000) % 10) + ((a / 1000000) % 10);*/
+    //    st.push(a - sm);
+    //    ans = sm;
+    //    if (sm == 0) {
+    //        break;
+    //    }
+    //}
+    //cout << ans;
+    while (n > 0) {
+        string s = to_string(n);
+        int sm = 0;
+        for (auto now : s) {
+            sm += int(now) - 48;
+        }
+        cout << n << "" - "" << sm << '\n';
+        n -= sm;
+    }
+}
+"
+tRW4J3DJ,Попытка E,cyberjab,C++,Thursday 9th of November 2023 03:04:59 PM CDT,"#include <iostream>
+#include <iomanip>
+#include <cstdlib>
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <queue>
+#include <deque>
+#include <cmath>
+#include <numeric>
+#include <algorithm>
+#include <ctime>
+#include <chrono>
+#include <random>
+#include <functional>
+
+using namespace std;
+
+int main() {
+    ios_base::sync_with_stdio(0);
+    cin.tie(0);
+    cout << fixed;
+    int n, k;
+    int ans = 0;
+    cin >> n >> k;
+    priority_queue <int> st;
+    for (int i = 0; i < n; i++) {
+        int x;
+        cin >> x;
+        st.push(x);
+    }
+    for (int i = 0; i < k; i++) {
+        int a = st.top();
+        st.pop();
+        string s = to_string(a);
+        int sm = 0;
+        for (auto now : s) {
+            sm += int(now) - 48;
+        }
+        /*int sm = (a % 10) + ((a / 10) % 10) + ((a / 100) % 10) + ((a / 1000) % 10) + ((a / 10000) % 10) + ((a / 100000) % 10) + ((a / 1000000) % 10);*/
+        st.push(a - sm);
+        ans = sm;
+        if (sm == 0) {
+            break;
+        }
+    }
+    cout << ans;
+}
+"
+p38nSnsi,03. Heart Delivery,Spocoman,JavaScript,Thursday 9th of November 2023 02:50:23 PM CDT,"function heartDelivery(input) {
+    let houses = input.shift().split('@').map(Number);
+    let index = 0;
+
+    while (input[0] !== 'Love!') {
+        index += Number(input.shift().slice(5));
+        if (index >= houses.length){
+            index = 0;
+        } 
+        
+        if (houses[index] == 0) {
+            console.log(`Place ${index} already had Valentine's day.`);
+        } else {
+            houses[index] -= 2;
+            if (houses[index] == 0) {
+                console.log(`Place ${index} has Valentine's day.`);
+            }
+        }
+    }
+
+    console.log(`Cupid's last position was ${index}.`);
+    let houseCount = houses.filter(x => x !== 0).length;
+    console.log(houseCount === 0 ? 'Mission was successful.' : `Cupid has failed ${houseCount} places.`);
+    return;
+}"
+dfhyddeQ,03. Heart Delivery,Spocoman,Python,Thursday 9th of November 2023 02:18:42 PM CDT,"houses = list(map(int, input().split('@')))
+index = 0
+
+command = input()
+
+while command != ""Love!"":
+    command, i = command.split(' ')
+    index += int(i)
+    if index >= len(houses):
+        index = 0
+    if houses[index] == 0:
+        print(f""Place {index} already had Valentine's day."")
+    else:
+        houses[index] -= 2
+        if houses[index] == 0:
+            print(f""Place {index} has Valentine's day."")
+
+    command = input()
+
+print(f""Cupid's last position was {index}."")
+house_count = len([i for i in houses if i != 0])
+print(""Mission was successful."" if house_count == 0 else f""Cupid has failed {house_count} places."")
+"
+528ifBqi,Untitled,Sininerebane,C#,Thursday 9th of November 2023 02:17:43 PM CDT,"namespace ConvertorValut
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+
+            Console.OutputEncoding = Encoding.UTF8;
+            float rubToEur;
+            float eurToRub;
+            float rub;
+            float euro;
+            string userInput;
+            float currencyCount;
+
+            rubToEur = 0.01F;
+            eurToRub = 98.29F;
+
+            Console.WriteLine(""Добро пожаловать в обменник валют. У нас вы можете обменять рубли в евро и евро в рубли. "");
+            Console.WriteLine(""Введите баланс рублей: "");
+            rub = Convert.ToSingle(Console.ReadLine());
+            Console.WriteLine(""Введите баланс евро: "");
+            euro = Convert.ToSingle(Console.ReadLine());
+
+            Console.WriteLine(""1 - обменять рубли на евро"");
+            Console.WriteLine(""2 - обменять евро на рубли"");
+            userInput = Console.ReadLine();
+
+            switch (userInput)
+            {
+                case ""1"":
+                    Console.WriteLine(""Обмен рублей на евро"");
+                    Console.Write(""Сколько вы хотите обменять?: "");
+                    currencyCount = Convert.ToSingle(Console.ReadLine());
+                    if (rub >= currencyCount)
+                    {
+                        rub -= currencyCount;
+                        euro += currencyCount / eurToRub;
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Недопустимое количество рублей"");
+                    }
+                    break;
+                case ""2"":
+                    Console.WriteLine(""Обмен евро на рубли"");
+                    Console.Write(""Сколько вы хотите обменять?: "");
+                    currencyCount = Convert.ToSingle(Console.ReadLine());
+                    if ( euro >= currencyCount)
+                    {
+                        euro -= currencyCount;
+                        rub += currencyCount / rubToEur;
+                    }
+                    else
+                    {
+                        Console.WriteLine(""Недопустимое количество евро"");
+                    }
+                    break;
+            }
+
+            Console.WriteLine($""Ваш баланс {rub}  рублей и {euro} евро"");
+            Console.ReadKey();
+        }
+    }
+}"
+a5P5hrbJ,Untitled,Chefir,C#,Thursday 9th of November 2023 02:10:08 PM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Test
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            int arrayLenght = 15;
+            int[] arrayNumbers = new int[arrayLenght];
+            FillArray(arrayNumbers);
+            Console.WriteLine(""Исходный массив числел: "");
+            OutputArray(arrayNumbers);
+            Console.WriteLine(""Перемешанный массив числел: "");
+            Shuffle(arrayNumbers);
+            OutputArray(arrayNumbers);
+        }
+
+        static void FillArray(int[] arrayNumbers)
+        {
+            Random rand = new Random();
+            int minNumbers = 0;
+            int maxNumbers = 10;
+
+            for (int i = 0; i < arrayNumbers.Length; i++)
+            {
+                arrayNumbers[i] = rand.Next(minNumbers, maxNumbers);
+            }
+        }
+
+        static void OutputArray(int[] arrayNumerOutput)
+        {
+            for (int i = 0; i < arrayNumerOutput.Length; i++)
+            {
+                Console.WriteLine(arrayNumerOutput[i] + "" "");
+            }
+        }
+
+        static void Shuffle(int[] arrayNumberShuffle)
+        {
+            Random rand = new Random();
+            int shuffledElement;
+            int randomIndex;
+
+            for (int i = 0; i < arrayNumberShuffle.Length; i++)
+            {
+                randomIndex = rand.Next(arrayNumberShuffle.Length);
+                shuffledElement = arrayNumberShuffle[randomIndex];
+                arrayNumberShuffle[randomIndex] = arrayNumberShuffle[i];
+                arrayNumberShuffle[i] = shuffledElement;
+            }
+        }"
+UDL5cabe,gunicorn fields,web_mc,Python,Thursday 9th of November 2023 01:40:34 PM CDT,"from flask import g, has_request_context
+from pythonjsonlogger import jsonlogger
+
+
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record, record, message_dict):
+        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+        if has_request_context():
+            log_record[""user_id""] = g.user_id
+        else:
+            log_record[""user_id""] = 111"
+s2LtRQyF,02. Shopping List,Spocoman,Python,Thursday 9th of November 2023 01:37:50 PM CDT,"list_products = input().split('!')
+
+command = input()
+
+while command != ""Go Shopping!"":
+    tokens = command.split(' ')
+    command = tokens[0]
+    product = tokens[1]
+
+    if command == ""Urgent"" and product not in list_products:
+        list_products.insert(0, product)
+    elif command == ""Unnecessary"" and product in list_products:
+        list_products.remove(product)
+    elif command == ""Correct"" and product in list_products:
+        new_product = tokens[2]
+        list_products[list_products.index(product)] = new_product
+    elif command == ""Rearrange"" and product in list_products:
+        list_products.append(list_products.pop(list_products.index(product)))
+
+    command = input()
+
+print("", "".join(list_products))
+"
+a26duR8R,Untitled,fatalryuu,MySQL,Thursday 9th of November 2023 01:14:49 PM CDT,"-- Создание пользователей
+DROP USER IF EXISTS 'guest'@'localhost';
+CREATE USER 'guest'@'localhost'; -- гость
+DROP USER IF EXISTS 'player'@'localhost';
+CREATE USER 'player'@'localhost' IDENTIFIED BY 'password'; -- игрок
+DROP USER IF EXISTS 'coach'@'localhost';
+CREATE USER 'coach'@'localhost' IDENTIFIED BY 'password'; -- тренер
+DROP USER IF EXISTS 'tournament_organizer'@'localhost';
+CREATE USER 'tournament_organizer'@'localhost' IDENTIFIED BY 'password'; -- организатор турнира
+DROP USER IF EXISTS 'manager'@'localhost';
+CREATE USER 'manager'@'localhost' IDENTIFIED BY 'password'; -- менеджер
+DROP USER IF EXISTS 'admin'@'localhost';
+CREATE USER 'admin'@'localhost' IDENTIFIED BY 'password'; -- администратор
+
+-- Права доступа для ГОСТЯ
+GRANT SELECT ON `volleyball_db`.* TO 'guest'@'localhost';
+
+-- Права доступа для ИГРОКА
+GRANT SELECT, UPDATE ON `volleyball_db`.`players` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`teams` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`m2m_match_team` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`matches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`coaches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`rating` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`tournaments` TO 'player'@'localhost';
+
+-- Права доступа для ТРЕНЕРА
+GRANT SELECT, UPDATE ON `volleyball_db`.`players` TO 'player'@'localhost';
+GRANT SELECT, UPDATE ON `volleyball_db`.`teams` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`m2m_match_team` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`matches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`coaches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`rating` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`tournaments` TO 'player'@'localhost';
+
+-- Права доступа для ОРГАНИЗАТОРА ТУРНИРА
+GRANT SELECT ON `volleyball_db`.`players` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`teams` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`m2m_match_team` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`matches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`coaches` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`rating` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`tournaments` TO 'player'@'localhost';
+
+-- Права доступа для ОРГАНИЗАТОРА МЕНЕДЖЕРА
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`players` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`teams` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`m2m_match_team` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`matches` TO 'player'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON `volleyball_db`.`coaches` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`rating` TO 'player'@'localhost';
+GRANT SELECT ON `volleyball_db`.`tournaments` TO 'player'@'localhost';
+
+-- Права доступа для АДМИНИСТРАТОРА 
+GRANT ALL PRIVILEGES ON `volleyball_db`.* TO 'admin'@'localhost' WITH GRANT OPTION;
+"
+Ps9sF3dw,QuickSort C++,hangglider_,C++,Thursday 9th of November 2023 01:04:00 PM CDT,"#include ""bits/stdc++.h""
+#define pb push_back
+#define ll long long
+
+using namespace std;
+
+template <typename T>
+static function<bool(T, T)> cmp = [](T a, T b) {
+    return a < b;
+};
+
+/*template <typename T>
+static bool cmp(T a, T b) {
+    return a < b;
+};*/
+
+template <typename T>
+T G(vector<T>& a, T l, T r) {
+    auto mid = l + (r - l) / 2;
+    if (a[l] > a[mid])
+        swap(a[l], a[mid]);
+    if (a[l] > a[r])
+        swap(a[l], a[r]);
+    if (a[mid] > a[r])
+        swap(a[mid], a[r]);
+    return mid;
+}
+
+template <typename T>
+auto F(vector<T>& a, T l, T r, function<bool(T, T)> &cmp) {
+    auto m = G(a, l, r);
+    auto mid = a[m];
+    swap(a[m], a[r]);
+    auto i = l - 1;
+    for (auto j = l; j <= r - 1; j++) {
+        if (cmp(a[j], mid)) swap(a[++i], a[j]);
+    }
+    swap(a[i + 1], a[r]);
+    return ++i;
+}
+
+template <typename T>
+void Quicksort(vector<T> &a, T l, T r, function<bool(T, T)> &cmp){
+    if (l < r){
+        auto mid = F(a, l, r, cmp);
+        Quicksort(a, l, mid - 1, cmp);
+        Quicksort(a, mid + 1, r, cmp);
+    }
+}
+
+int solve() {
+    //int n = 2642245;
+    ll n;
+    cin >> n;
+    random_device rd;
+    uniform_int_distribution<long long> dist(1, pow(n, 3) - 1);
+    vector<ll> a;
+    for (int i = 0; i < n; i++){
+        a.pb(dist(rd));
+    }
+    for (auto &x : a){
+        printf(""%d %s"", x, "" "");
+    }
+    cout << endl;
+
+    Quicksort(a, 0ll, n - 1, cmp<typeof(a[0])>);
+    for (auto &x : a){
+        printf(""%d %s"", x, "" "");
+    }
+
+    return 0;
+}
+
+signed main() {
+    int q = 1;
+    //cin >> q;
+    while (q > 0){
+        --q;
+        solve();
+        cout << endl;
+    }
+    system(""PAUSE"");
+    return 0;
+}"
+xG2f7Bxv,News Nov9 23,Newscaster_Ned,Email,Thursday 9th of November 2023 01:02:23 PM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+A‎n‎d‎ ‎I‎f‎ ‎y‎o‎u‎ ‎e‎v‎e‎r‎ ‎p‎u‎t‎ ‎t‎w‎o‎ ‎s‎p‎l‎e‎n‎d‎a‎s‎ ‎i‎n‎ ‎m‎y‎ ‎c‎o‎f‎f‎e‎e‎ ‎a‎g‎a‎i‎n‎,‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎c‎u‎t‎ ‎y‎o‎u‎r‎ ‎f‎a‎c‎e‎ ‎i‎n‎t‎o‎ ‎t‎i‎n‎y‎ ‎p‎i‎e‎c‎e‎s‎ ‎s‎o‎ ‎y‎o‎u‎'‎l‎l‎ ‎h‎a‎v‎e‎ ‎t‎o‎ ‎p‎u‎t‎ ‎i‎t‎ ‎b‎a‎c‎k‎ ‎t‎o‎g‎e‎t‎h‎e‎r‎ ‎l‎i‎k‎e‎ ‎a‎ ‎j‎i‎g‎s‎a‎w‎ ‎p‎u‎z‎z‎l‎e‎!‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎O‎h‎ ‎h‎e‎y‎.‎ ‎H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎.‎S‎h‎o‎c‎k‎ ‎R‎e‎p‎o‎r‎t‎:‎ ‎C‎N‎N‎,‎ ‎N‎Y‎T‎,‎ ‎A‎P‎,‎ ‎R‎e‎u‎t‎e‎r‎s‎ ‎H‎a‎d‎ ‎P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎r‎s‎ ‎E‎m‎b‎e‎d‎d‎e‎d‎ ‎w‎i‎t‎h‎ ‎H‎a‎m‎a‎s‎ ‎D‎u‎r‎i‎n‎g‎ ‎T‎e‎r‎r‎o‎r‎ ‎A‎t‎t‎a‎c‎k‎
+
+N‎e‎t‎a‎n‎y‎a‎h‎u‎ ‎D‎e‎m‎a‎n‎d‎s‎ ‎A‎n‎s‎w‎e‎r‎s‎
+F‎I‎L‎E‎ ‎-‎ ‎P‎a‎l‎e‎s‎t‎i‎n‎i‎a‎n‎s‎ ‎t‎r‎a‎n‎s‎p‎o‎r‎t‎ ‎a‎ ‎c‎a‎p‎t‎u‎r‎e‎d‎ ‎I‎s‎r‎a‎e‎l‎i‎ ‎c‎i‎v‎i‎l‎i‎a‎n‎ ‎f‎r‎o‎m‎ ‎K‎f‎a‎r‎ ‎A‎z‎z‎a‎ ‎k‎i‎b‎b‎u‎t‎z‎ ‎i‎n‎t‎o‎ ‎t‎h‎e‎ ‎G‎a‎z‎a‎ ‎S‎t‎r‎i‎p‎ ‎o‎n‎ ‎S‎a‎t‎u‎r‎d‎a‎y‎,‎ ‎O‎c‎t‎.‎ ‎7‎,‎ ‎2‎0‎2‎3‎.‎ ‎I‎s‎r‎a‎e‎l‎'‎s‎ ‎m‎i‎l‎i‎t‎a‎r‎y‎ ‎b‎r‎o‎u‎g‎h‎t‎ ‎t‎o‎g‎e‎t‎h‎e‎r‎ ‎a‎ ‎g‎r‎o‎u‎p‎ ‎o‎f‎ ‎f‎o‎r‎e‎i‎g‎n‎ ‎c‎o‎r‎r‎e‎s‎p‎o‎n‎d‎e‎n‎t‎s‎ ‎M‎o‎n‎d‎a‎y‎,‎ ‎O‎c‎t‎.‎ ‎1‎6‎,‎ ‎t‎o‎ ‎s‎c‎r‎e‎e‎n‎ ‎a‎ ‎4‎0‎-‎m‎i‎n‎u‎t‎e‎ ‎r‎e‎e‎l‎ ‎o‎f‎ ‎g‎r‎u‎e‎s‎o‎m‎e‎ ‎f‎o‎o‎t‎a‎g‎e‎ ‎c‎o‎m‎p‎i‎l‎e‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎H‎a‎m‎a‎s‎ ‎a‎t‎t‎a‎c‎k‎ ‎l‎a‎s‎t‎ ‎w‎e‎e‎k‎.‎ ‎T‎h‎e‎ ‎s‎c‎r‎e‎e‎n‎i‎n‎g‎ ‎…‎
+I‎s‎r‎a‎e‎l‎i‎ ‎P‎r‎i‎m‎e‎ ‎M‎i‎n‎i‎s‎t‎e‎r‎ ‎B‎e‎n‎j‎a‎m‎i‎n‎ ‎N‎e‎t‎a‎n‎y‎a‎h‎u‎’‎s‎ ‎a‎d‎m‎i‎n‎i‎s‎t‎r‎a‎t‎i‎o‎n‎ ‎i‎s‎ ‎d‎e‎m‎a‎n‎d‎i‎n‎g‎ ‎a‎n‎s‎w‎e‎r‎s‎ ‎f‎r‎o‎m‎ ‎s‎e‎v‎e‎r‎a‎l‎ ‎p‎r‎o‎m‎i‎n‎e‎n‎t‎ ‎n‎e‎w‎s‎ ‎a‎g‎e‎n‎c‎i‎e‎s‎ ‎a‎f‎t‎e‎r‎ ‎c‎r‎i‎t‎i‎c‎i‎s‎m‎ ‎e‎m‎e‎r‎g‎e‎d‎ ‎o‎f‎ ‎t‎h‎e‎i‎r‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎r‎s‎ ‎a‎p‎p‎e‎a‎r‎i‎n‎g‎ ‎t‎o‎ ‎h‎a‎v‎e‎ ‎b‎e‎e‎n‎ ‎e‎m‎b‎e‎d‎d‎e‎d‎ ‎w‎i‎t‎h‎ ‎H‎a‎m‎a‎s‎ ‎t‎e‎r‎r‎o‎r‎i‎s‎t‎s‎ ‎d‎u‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎O‎c‎t‎o‎b‎e‎r‎ ‎7‎ ‎a‎t‎t‎a‎c‎k‎.‎
+
+N‎o‎l‎t‎e‎:‎ ‎A‎n‎t‎i‎-‎J‎e‎w‎i‎s‎h‎ ‎H‎a‎t‎e‎ ‎C‎r‎i‎m‎e‎s‎ ‎S‎u‎r‎g‎e‎ ‎2‎1‎4‎%‎ ‎i‎n‎ ‎D‎e‎m‎o‎c‎r‎a‎t‎-‎R‎u‎n‎ ‎N‎e‎w‎ ‎Y‎o‎r‎k‎ ‎C‎i‎t‎y‎
+2‎7‎0‎
+*‎*‎*‎ ‎G‎O‎P‎ ‎D‎e‎b‎a‎t‎e‎ ‎L‎i‎v‎e‎w‎i‎r‎e‎ ‎*‎*‎*‎ ‎A‎n‎d‎ ‎T‎h‎e‎n‎ ‎T‎h‎e‎r‎e‎ ‎W‎e‎r‎e‎ ‎F‎i‎v‎e‎ ‎L‎e‎f‎t‎ ‎o‎n‎ ‎S‎t‎a‎g‎e‎
+*‎*‎*‎ ‎G‎O‎P‎ ‎D‎e‎b‎a‎t‎e‎ ‎L‎i‎v‎e‎w‎i‎r‎e‎ ‎*‎*‎*‎ ‎A‎n‎d‎ ‎T‎h‎e‎n‎ ‎T‎h‎e‎r‎e‎ ‎W‎e‎r‎e‎ ‎F‎i‎v‎e‎ ‎L‎e‎f‎t‎ ‎o‎n‎ ‎S‎t‎a‎g‎e‎
+6‎,‎1‎5‎7‎
+V‎i‎v‎e‎k‎ ‎S‎l‎a‎m‎s‎ ‎R‎N‎C‎ ‎P‎i‎c‎k‎i‎n‎g‎ ‎N‎B‎C‎ ‎f‎o‎r‎ ‎D‎e‎b‎a‎t‎e‎,‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎M‎c‎D‎a‎n‎i‎e‎l‎'‎s‎ ‎R‎e‎s‎i‎g‎n‎a‎t‎i‎o‎n‎
+V‎i‎v‎e‎k‎ ‎S‎l‎a‎m‎s‎ ‎R‎N‎C‎ ‎P‎i‎c‎k‎i‎n‎g‎ ‎N‎B‎C‎ ‎f‎o‎r‎ ‎D‎e‎b‎a‎t‎e‎,‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎M‎c‎D‎a‎n‎i‎e‎l‎'‎s‎ ‎R‎e‎s‎i‎g‎n‎a‎t‎i‎o‎n‎
+8‎0‎1‎
+'‎V‎a‎c‎a‎t‎e‎'‎ ‎H‎e‎r‎:‎ ‎R‎e‎p‎u‎b‎l‎i‎c‎a‎n‎s‎ ‎C‎a‎l‎l‎ ‎o‎n‎ ‎R‎o‎n‎n‎a‎ ‎M‎c‎D‎a‎n‎i‎e‎l‎ ‎t‎o‎ ‎R‎e‎s‎i‎g‎n‎
+'‎V‎a‎c‎a‎t‎e‎'‎ ‎H‎e‎r‎:‎ ‎R‎e‎p‎u‎b‎l‎i‎c‎a‎n‎s‎ ‎C‎a‎l‎l‎ ‎o‎n‎ ‎R‎o‎n‎n‎a‎ ‎M‎c‎D‎a‎n‎i‎e‎l‎ ‎t‎o‎ ‎R‎e‎s‎i‎g‎n‎
+3‎,‎4‎1‎6‎
+S‎h‎a‎r‎o‎n‎ ‎S‎t‎o‎n‎e‎ ‎A‎l‎l‎e‎g‎e‎s‎ ‎e‎x‎-‎H‎e‎a‎d‎ ‎o‎f‎ ‎S‎o‎n‎y‎ ‎P‎i‎c‎t‎u‎r‎e‎s‎ ‎S‎e‎x‎u‎a‎l‎l‎y‎ ‎H‎a‎r‎a‎s‎s‎e‎d‎ ‎H‎e‎r‎
+S‎h‎a‎r‎o‎n‎ ‎S‎t‎o‎n‎e‎ ‎A‎l‎l‎e‎g‎e‎s‎ ‎e‎x‎-‎H‎e‎a‎d‎ ‎o‎f‎ ‎S‎o‎n‎y‎ ‎P‎i‎c‎t‎u‎r‎e‎s‎ ‎S‎e‎x‎u‎a‎l‎l‎y‎ ‎H‎a‎r‎a‎s‎s‎e‎d‎ ‎H‎e‎r‎
+2‎8‎5‎
+R‎a‎b‎b‎i‎ ‎M‎i‎c‎h‎a‎e‎l‎ ‎B‎a‎r‎c‎l‎a‎y‎:‎ ‎R‎e‎m‎e‎m‎b‎e‎r‎i‎n‎g‎ ‎K‎r‎i‎s‎t‎a‎l‎l‎n‎a‎c‎h‎t‎ ‎S‎o‎ ‎I‎t‎ ‎N‎e‎v‎e‎r‎ ‎H‎a‎p‎p‎e‎n‎s‎ ‎A‎g‎a‎i‎n‎
+R‎a‎b‎b‎i‎ ‎M‎i‎c‎h‎a‎e‎l‎ ‎B‎a‎r‎c‎l‎a‎y‎:‎ ‎R‎e‎m‎e‎m‎b‎e‎r‎i‎n‎g‎ ‎K‎r‎i‎s‎t‎a‎l‎l‎n‎a‎c‎h‎t‎ ‎S‎o‎ ‎I‎t‎ ‎N‎e‎v‎e‎r‎ ‎H‎a‎p‎p‎e‎n‎s‎ ‎A‎g‎a‎i‎n‎
+8‎8‎
+F‎a‎c‎t‎ ‎C‎h‎e‎c‎k‎:‎ ‎N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎ ‎C‎l‎a‎i‎m‎s‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎I‎s‎ ‎a‎ ‎'‎D‎e‎m‎o‎c‎r‎a‎c‎y‎'‎
+F‎a‎c‎t‎ ‎C‎h‎e‎c‎k‎:‎ ‎N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎ ‎C‎l‎a‎i‎m‎s‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎I‎s‎ ‎a‎ ‎'‎D‎e‎m‎o‎c‎r‎a‎c‎y‎'‎
+6‎7‎9‎
+N‎e‎w‎ ‎Y‎o‎r‎k‎ ‎G‎i‎v‎e‎s‎ ‎T‎h‎u‎m‎b‎s‎-‎D‎o‎w‎n‎ ‎t‎o‎ ‎E‎l‎e‎c‎t‎r‎i‎c‎ ‎S‎n‎o‎w‎ ‎P‎l‎o‎w‎s‎
+N‎e‎w‎ ‎Y‎o‎r‎k‎ ‎G‎i‎v‎e‎s‎ ‎T‎h‎u‎m‎b‎s‎-‎D‎o‎w‎n‎ ‎t‎o‎ ‎E‎l‎e‎c‎t‎r‎i‎c‎ ‎S‎n‎o‎w‎ ‎P‎l‎o‎w‎s‎
+6‎9‎8‎
+*‎*‎*‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎ ‎N‎i‎g‎h‎t‎ ‎L‎i‎v‎e‎w‎i‎r‎e‎ ‎*‎*‎*‎ ‎2‎0‎2‎3‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎s‎ ‎O‎f‎f‎e‎r‎ ‎P‎o‎s‎s‎i‎b‎l‎e‎ ‎2‎0‎2‎4‎ ‎C‎l‎u‎e‎s‎
+*‎*‎*‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎ ‎N‎i‎g‎h‎t‎ ‎L‎i‎v‎e‎w‎i‎r‎e‎ ‎*‎*‎*‎ ‎2‎0‎2‎3‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎s‎ ‎O‎f‎f‎e‎r‎ ‎P‎o‎s‎s‎i‎b‎l‎e‎ ‎2‎0‎2‎4‎ ‎C‎l‎u‎e‎s‎
+
+2‎ ‎M‎o‎n‎k‎e‎y‎s‎ ‎a‎n‎d‎ ‎a‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎1‎7‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎G‎i‎r‎l‎ ‎i‎s‎ ‎F‎r‎e‎e‎d‎ ‎f‎r‎o‎m‎ ‎H‎u‎m‎a‎n‎ ‎T‎r‎a‎f‎f‎i‎c‎k‎i‎n‎g‎.‎
+
+W‎e‎ ‎s‎h‎o‎u‎l‎d‎ ‎t‎r‎a‎f‎f‎i‎c‎ ‎t‎h‎o‎s‎e‎ ‎n‎e‎g‎r‎o‎e‎s‎,‎ ‎a‎n‎d‎ ‎t‎h‎a‎t‎ ‎m‎u‎d‎s‎h‎a‎r‎k‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎P‎a‎s‎t‎o‎r‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎i‎n‎ ‎C‎o‎l‎o‎r‎a‎d‎o‎ ‎S‎p‎r‎i‎n‎g‎s‎ ‎f‎o‎r‎ ‎C‎h‎i‎l‎d‎ ‎S‎e‎x‎u‎a‎l‎ ‎A‎s‎s‎a‎u‎l‎t‎.‎
+
+
+P‎h‎i‎l‎l‎y‎ ‎P‎u‎b‎e‎h‎e‎a‎d‎ ‎F‎o‎u‎n‎d‎ ‎G‎u‎i‎l‎t‎y‎ ‎o‎f‎ ‎S‎h‎o‎o‎t‎i‎n‎g‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎ ‎i‎n‎ ‎F‎r‎o‎n‎t‎ ‎o‎f‎ ‎H‎i‎s‎ ‎D‎a‎u‎g‎h‎t‎e‎r‎ ‎D‎u‎r‎i‎n‎g‎ ‎C‎a‎r‎j‎a‎c‎k‎i‎n‎g‎.‎
+
+
+P‎e‎n‎n‎s‎y‎l‎v‎a‎n‎i‎a‎ ‎T‎r‎o‎o‎p‎e‎r‎ ‎i‎n‎ ‎C‎r‎i‎t‎i‎c‎a‎l‎ ‎C‎o‎n‎d‎i‎t‎i‎o‎n‎ ‎A‎f‎t‎e‎r‎ ‎C‎o‎o‎n‎ ‎S‎h‎o‎o‎t‎s‎ ‎H‎i‎m‎ ‎D‎u‎r‎i‎n‎g‎ ‎T‎r‎a‎f‎f‎i‎c‎ ‎S‎t‎o‎p‎.‎
+
+
+L‎i‎v‎i‎n‎g‎ ‎P‎i‎e‎c‎e‎ ‎o‎f‎ ‎S‎h‎i‎t‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎P‎o‎s‎t‎i‎n‎g‎ ‎P‎i‎c‎t‎u‎r‎e‎s‎ ‎o‎f‎ ‎L‎i‎t‎t‎l‎e‎ ‎G‎i‎r‎l‎s‎ ‎w‎i‎t‎h‎ ‎S‎e‎x‎u‎a‎l‎ ‎C‎o‎m‎m‎e‎n‎t‎s‎ ‎o‎n‎ ‎I‎n‎s‎t‎a‎g‎r‎a‎m‎.‎
+
+
+F‎i‎f‎t‎h‎ ‎M‎o‎n‎k‎e‎y‎ ‎W‎h‎o‎ ‎S‎h‎o‎t‎ ‎C‎u‎o‎m‎o‎ ‎A‎i‎d‎e‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎T‎e‎a‎c‎h‎e‎r‎ ‎S‎l‎a‎p‎s‎ ‎M‎i‎d‎d‎l‎e‎ ‎S‎c‎h‎o‎o‎l‎ ‎G‎i‎r‎l‎ ‎i‎n‎ ‎t‎h‎e‎ ‎F‎a‎c‎e‎ ‎a‎t‎ ‎B‎r‎o‎n‎x‎ ‎S‎c‎h‎o‎o‎l‎.‎
+
+
+N‎e‎g‎r‎e‎s‎s‎ ‎W‎h‎o‎ ‎C‎u‎t‎ ‎o‎u‎t‎ ‎H‎e‎r‎ ‎U‎n‎b‎o‎r‎n‎ ‎N‎i‎g‎l‎e‎t‎ ‎G‎e‎t‎s‎ ‎4‎0‎ ‎t‎o‎ ‎L‎i‎f‎e‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎h‎a‎t‎?‎ ‎O‎h‎ ‎r‎i‎g‎h‎t‎ ‎t‎h‎e‎ ‎w‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎h‎u‎ ‎0‎9‎ ‎|‎ ‎D‎a‎y‎
+7‎8‎°‎
+7‎3‎%‎
+N‎
+1‎3‎
+ ‎
+m‎p‎h‎
+C‎l‎o‎u‎d‎y‎ ‎w‎i‎t‎h‎ ‎o‎c‎c‎a‎s‎i‎o‎n‎a‎l‎ ‎l‎i‎g‎h‎t‎ ‎r‎a‎i‎n‎ ‎d‎u‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎a‎f‎t‎e‎r‎n‎o‎o‎n‎.‎ ‎T‎h‎u‎n‎d‎e‎r‎ ‎p‎o‎s‎s‎i‎b‎l‎e‎.‎ ‎H‎i‎g‎h‎ ‎7‎8‎F‎.‎ ‎W‎S‎W‎ ‎w‎i‎n‎d‎s‎ ‎s‎h‎i‎f‎t‎i‎n‎g‎ ‎t‎o‎ ‎N‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎ ‎C‎h‎a‎n‎c‎e‎ ‎o‎f‎ ‎r‎a‎i‎n‎ ‎7‎0‎%‎.‎
+ ‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+9‎1‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+2‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+6‎:‎5‎0‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+5‎:‎3‎7‎ ‎p‎m‎
+T‎h‎u‎ ‎0‎9‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+5‎4‎°‎
+7‎7‎%‎
+N‎
+1‎5‎
+ ‎
+m‎p‎h‎
+A‎ ‎s‎t‎e‎a‎d‎y‎ ‎r‎a‎i‎n‎ ‎t‎h‎i‎s‎ ‎e‎v‎e‎n‎i‎n‎g‎.‎ ‎S‎h‎o‎w‎e‎r‎s‎ ‎c‎o‎n‎t‎i‎n‎u‎i‎n‎g‎ ‎o‎v‎e‎r‎n‎i‎g‎h‎t‎.‎ ‎L‎o‎w‎ ‎5‎4‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎2‎0‎ ‎m‎p‎h‎.‎ ‎C‎h‎a‎n‎c‎e‎ ‎o‎f‎ ‎r‎a‎i‎n‎ ‎8‎0‎%‎.‎ ‎R‎a‎i‎n‎f‎a‎l‎l‎ ‎n‎e‎a‎r‎ ‎a‎ ‎q‎u‎a‎r‎t‎e‎r‎ ‎o‎f‎ ‎a‎n‎ ‎i‎n‎c‎h‎.‎
+ ‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+9‎4‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+3‎:‎1‎9‎ ‎a‎m‎
+W‎a‎n‎i‎n‎g‎ ‎C‎r‎e‎s‎c‎e‎n‎t‎
+M‎o‎o‎n‎s‎e‎t‎
+3‎:‎3‎9‎ ‎p‎m‎
+F‎r‎i‎ ‎1‎0‎
+C‎l‎o‎u‎d‎y‎
+6‎0‎°‎
+/‎5‎5‎°‎
+2‎4‎%‎
+N‎ ‎1‎6‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎1‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+5‎9‎°‎
+/‎5‎3‎°‎
+3‎8‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎2‎
+S‎h‎o‎w‎e‎r‎s‎
+6‎3‎°‎
+/‎5‎3‎°‎
+4‎4‎%‎
+N‎N‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎3‎
+S‎h‎o‎w‎e‎r‎s‎
+6‎2‎°‎
+/‎5‎3‎°‎
+5‎7‎%‎
+N‎N‎E‎ ‎1‎3‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎4‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+6‎6‎°‎
+/‎5‎2‎°‎
+3‎6‎%‎
+N‎ ‎1‎1‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎5‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎9‎°‎
+/‎5‎4‎°‎
+1‎0‎%‎
+N‎ ‎8‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎6‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎3‎°‎
+/‎5‎8‎°‎
+7‎%‎
+S‎S‎E‎ ‎6‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎7‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎7‎°‎
+/‎6‎2‎°‎
+9‎%‎
+S‎S‎W‎ ‎1‎0‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎8‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎8‎°‎
+/‎5‎7‎°‎
+2‎4‎%‎
+S‎S‎W‎ ‎1‎0‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎9‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎4‎°‎
+/‎5‎6‎°‎
+2‎4‎%‎
+W‎S‎W‎ ‎1‎0‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎2‎0‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+7‎4‎°‎
+/‎5‎4‎°‎
+4‎7‎%‎
+S‎W‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎2‎1‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+7‎1‎°‎
+/‎5‎4‎°‎
+3‎5‎%‎
+W‎S‎W‎ ‎1‎1‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎2‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎2‎°‎
+/‎5‎6‎°‎
+1‎8‎%‎
+S‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎2‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎1‎°‎
+/‎5‎7‎°‎
+2‎4‎%‎
+S‎ ‎1‎1‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎S‎p‎i‎c‎s‎.‎ ‎👲🏾
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎
+D‎e‎s‎p‎i‎t‎e‎ ‎b‎e‎i‎n‎g‎ ‎n‎a‎m‎e‎d‎ ‎A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎,‎ ‎A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎ ‎i‎s‎ ‎t‎h‎e‎ ‎h‎o‎m‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎P‎a‎s‎h‎t‎u‎n‎s‎,‎ ‎a‎l‎s‎o‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎b‎a‎r‎b‎a‎r‎i‎a‎n‎ ‎n‎a‎z‎i‎s‎ ‎卐‎.‎ ‎A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎ ‎w‎a‎s‎ ‎c‎r‎e‎a‎t‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎e‎j‎a‎c‎u‎l‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎B‎i‎l‎l‎ ‎N‎y‎e‎ ‎(‎a‎s‎ ‎h‎e‎ ‎w‎h‎a‎c‎k‎e‎d‎ ‎o‎f‎f‎ ‎t‎o‎ ‎t‎h‎e‎ ‎r‎e‎m‎e‎m‎b‎r‎a‎n‎c‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎t‎i‎m‎e‎ ‎h‎e‎ ‎n‎a‎i‎l‎e‎d‎ ‎S‎o‎l‎e‎d‎a‎d‎ ‎O‎'‎B‎r‎i‎e‎n‎)‎ ‎t‎h‎a‎t‎ ‎l‎a‎n‎d‎e‎d‎ ‎o‎n‎ ‎a‎n‎ ‎u‎n‎k‎n‎o‎w‎n‎ ‎d‎r‎y‎ ‎m‎i‎l‎d‎e‎w‎ ‎g‎r‎o‎w‎i‎n‎g‎ ‎o‎n‎ ‎d‎o‎n‎k‎e‎y‎ ‎s‎h‎i‎t‎.‎ ‎T‎h‎r‎o‎u‎g‎h‎o‎u‎t‎ ‎m‎o‎s‎t‎ ‎o‎f‎ ‎A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎'‎s‎ ‎h‎i‎s‎t‎o‎r‎y‎,‎ ‎i‎t‎'‎s‎ ‎b‎e‎e‎n‎ ‎c‎a‎l‎l‎e‎d‎ ‎""‎t‎h‎a‎t‎ ‎o‎t‎h‎e‎r‎ ‎p‎i‎e‎c‎e‎ ‎o‎f‎ ‎s‎h‎i‎t‎ ‎b‎e‎t‎w‎e‎e‎n‎ ‎P‎e‎r‎s‎i‎a‎ ‎a‎n‎d‎ ‎I‎n‎d‎i‎a‎.‎""‎ ‎W‎h‎e‎n‎ ‎R‎u‎s‎s‎i‎a‎n‎ ‎a‎n‎d‎ ‎B‎r‎i‎t‎i‎s‎h‎ ‎I‎m‎p‎e‎r‎i‎a‎l‎i‎s‎m‎ ‎h‎i‎t‎ ‎C‎e‎n‎t‎r‎a‎l‎ ‎A‎s‎i‎a‎ ‎(‎t‎h‎e‎ ‎G‎r‎e‎a‎t‎ ‎G‎a‎m‎e‎)‎,‎ ‎n‎o‎n‎e‎ ‎o‎f‎ ‎t‎h‎a‎t‎ ‎m‎a‎t‎t‎e‎r‎e‎d‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎e‎ ‎w‎h‎o‎l‎e‎ ‎p‎l‎a‎c‎e‎ ‎b‎e‎c‎a‎m‎e‎ ‎U‎n‎i‎t‎e‎d‎ ‎K‎i‎n‎g‎d‎o‎m‎'‎s‎ ‎b‎i‎t‎c‎h‎.‎ ‎H‎o‎w‎e‎v‎e‎r‎,‎ ‎A‎f‎g‎h‎a‎n‎i‎s‎t‎a‎n‎ ‎i‎s‎ ‎t‎h‎e‎ ‎o‎n‎l‎y‎ ‎c‎o‎u‎n‎t‎r‎y‎ ‎t‎h‎a‎t‎ ‎h‎a‎s‎ ‎p‎w‎n‎e‎d‎ ‎e‎v‎e‎r‎y‎ ‎i‎n‎v‎a‎d‎e‎r‎ ‎e‎x‎c‎e‎p‎t‎ ‎t‎h‎e‎ ‎U‎.‎S‎.‎/‎C‎a‎n‎a‎d‎a‎ ‎b‎u‎t‎ ‎t‎h‎e‎ ‎o‎n‎l‎y‎ ‎r‎e‎a‎s‎o‎n‎ ‎w‎h‎y‎ ‎t‎h‎e‎y‎ ‎d‎i‎d‎n‎'‎t‎ ‎i‎s‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎e‎y‎ ‎u‎s‎e‎d‎ ‎t‎h‎e‎m‎ ‎t‎o‎ ‎k‎i‎c‎k‎ ‎o‎u‎t‎ ‎O‎s‎a‎m‎a‎ ‎b‎i‎n‎ ‎L‎a‎d‎e‎n‎ ‎a‎n‎d‎ ‎f‎r‎i‎e‎n‎d‎s‎ ‎N‎o‎.‎ ‎A‎f‎t‎e‎r‎ ‎t‎h‎a‎t‎,‎ ‎t‎h‎e‎y‎ ‎p‎l‎a‎n‎ ‎o‎n‎ ‎t‎u‎r‎n‎i‎n‎g‎ ‎b‎a‎c‎k‎ ‎i‎n‎t‎o‎ ‎w‎h‎a‎t‎ ‎t‎h‎e‎y‎ ‎w‎e‎r‎e‎ ‎b‎e‎f‎o‎r‎e‎;‎ ‎a‎ ‎n‎a‎r‎c‎o‎-‎t‎e‎r‎r‎o‎r‎i‎s‎t‎ ‎s‎h‎i‎t‎h‎o‎l‎e‎ ‎w‎h‎o‎'‎s‎ ‎o‎n‎l‎y‎ ‎c‎o‎n‎t‎r‎i‎b‎u‎t‎i‎o‎n‎ ‎t‎o‎ ‎t‎h‎e‎ ‎w‎o‎r‎l‎d‎ ‎i‎s‎ ‎d‎e‎c‎e‎n‎t‎ ‎h‎e‎r‎o‎i‎n‎,‎ ‎i‎n‎n‎o‎v‎a‎t‎i‎o‎n‎s‎ ‎i‎n‎ ‎b‎u‎t‎t‎r‎a‎p‎e‎,‎ ‎a‎n‎d‎ ‎l‎o‎u‎s‎y‎ ‎t‎a‎x‎i‎ ‎d‎r‎i‎v‎e‎r‎s‎.‎ ‎A‎ ‎c‎o‎u‎n‎t‎r‎y‎ ‎t‎h‎a‎t‎,‎ ‎i‎f‎ ‎i‎t‎ ‎w‎e‎r‎e‎n‎'‎t‎ ‎f‎o‎r‎ ‎e‎v‎e‎r‎y‎o‎n‎e‎ ‎c‎a‎r‎r‎y‎i‎n‎g‎ ‎a‎n‎ ‎A‎K‎-‎4‎7‎,‎ ‎w‎o‎u‎l‎d‎ ‎l‎o‎o‎k‎ ‎v‎e‎r‎y‎ ‎m‎u‎c‎h‎ ‎l‎i‎k‎e‎ ‎i‎t‎ ‎d‎i‎d‎ ‎i‎n‎ ‎t‎h‎e‎ ‎1‎2‎t‎h‎ ‎c‎e‎n‎t‎u‎r‎y‎.‎
+
+(‎(‎ ‎T‎a‎l‎i‎b‎a‎n‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎l‎l‎ ‎t‎h‎e‎y‎'‎r‎e‎ ‎b‎a‎r‎e‎l‎y‎ ‎h‎u‎m‎a‎n‎,‎ ‎b‎u‎t‎ ‎h‎e‎r‎e‎ ‎w‎e‎ ‎g‎o‎.‎ ‎I‎R‎C‎ ‎q‎u‎o‎t‎e‎s‎.‎ ‎#‎L‎R‎H‎:‎
+
+[‎0‎8‎:‎0‎4‎]‎ ‎<‎i‎n‎t‎0‎x‎4‎7‎>‎ ‎y‎o‎u‎ ‎h‎a‎v‎e‎ ‎m‎e‎e‎t‎i‎n‎g‎s‎?‎
+[‎0‎8‎:‎0‎5‎]‎ ‎<‎n‎e‎p‎t‎u‎n‎e‎_‎>‎ ‎w‎i‎n‎1‎0‎ ‎i‎s‎ ‎s‎h‎i‎t‎ ‎c‎a‎n‎'‎t‎ ‎e‎v‎e‎n‎ ‎s‎t‎a‎y‎ ‎o‎n‎ ‎t‎h‎e‎ ‎i‎n‎t‎e‎r‎n‎e‎t‎
+[‎0‎8‎:‎0‎5‎]‎ ‎<‎i‎n‎t‎0‎x‎4‎7‎>‎ ‎h‎o‎w‎ ‎d‎o‎ ‎y‎o‎u‎ ‎k‎n‎o‎w‎ ‎i‎t‎ ‎w‎i‎n‎1‎0‎ ‎a‎n‎d‎ ‎n‎o‎t‎ ‎s‎h‎i‎t‎t‎y‎ ‎N‎I‎C‎?‎
+‎0‎3‎[‎0‎8‎:‎0‎5‎]‎ ‎*‎ ‎j‎n‎c‎o‎g‎ ‎(‎~‎s‎t‎i‎l‎l‎f‎r‎e‎e‎@‎c‎p‎c‎1‎6‎0‎0‎1‎9‎-‎b‎r‎a‎d‎2‎5‎-‎2‎-‎0‎-‎c‎u‎s‎t‎1‎3‎.‎1‎7‎-‎1‎.‎c‎a‎b‎l‎e‎.‎v‎i‎r‎g‎i‎n‎m‎.‎n‎e‎t‎)‎ ‎h‎a‎s‎ ‎j‎o‎i‎n‎e‎d‎ ‎#‎l‎r‎h‎
+[‎0‎8‎:‎0‎6‎]‎ ‎<‎n‎e‎p‎t‎u‎n‎e‎_‎>‎ ‎b‎l‎o‎a‎t‎w‎a‎r‎e‎ ‎
+[‎0‎8‎:‎0‎6‎]‎ ‎<‎n‎e‎p‎t‎u‎n‎e‎_‎>‎ ‎a‎n‎y‎w‎a‎y‎ ‎t‎i‎m‎e‎ ‎t‎o‎ ‎c‎o‎f‎f‎e‎e‎N‎t‎0‎k‎3‎
+‎0‎3‎[‎0‎8‎:‎0‎7‎]‎ ‎*‎ ‎i‎s‎s‎y‎ ‎(‎~‎i‎s‎s‎y‎@‎1‎9‎6‎.‎1‎9‎6‎.‎2‎1‎6‎.‎1‎6‎4‎)‎ ‎h‎a‎s‎ ‎j‎o‎i‎n‎e‎d‎ ‎#‎l‎r‎h‎
+‎0‎2‎[‎0‎8‎:‎0‎7‎]‎ ‎*‎ ‎n‎e‎p‎t‎u‎n‎_‎e‎ ‎(‎~‎n‎e‎p‎t‎u‎n‎e‎r‎@‎1‎7‎2‎.‎5‎8‎.‎1‎4‎5‎.‎4‎4‎)‎ ‎Q‎u‎i‎t‎ ‎(‎P‎i‎n‎g‎ ‎t‎i‎m‎e‎o‎u‎t‎:‎ ‎2‎4‎0‎ ‎s‎e‎c‎o‎n‎d‎s‎‎)‎
+‎0‎3‎[‎0‎8‎:‎0‎7‎]‎ ‎*‎ ‎s‎t‎e‎g‎0‎s‎a‎u‎r‎ ‎i‎s‎ ‎n‎o‎w‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎s‎t‎e‎g‎O‎s‎a‎u‎r‎
+[‎0‎8‎:‎0‎7‎]‎ ‎<‎n‎e‎p‎t‎u‎n‎e‎_‎>‎ ‎t‎h‎i‎s‎ ‎n‎o‎t‎ ‎w‎o‎r‎k‎i‎n‎g‎ ‎t‎h‎i‎n‎g‎,‎ ‎n‎o‎t‎ ‎h‎a‎v‎i‎n‎g‎ ‎a‎ ‎j‎o‎b‎ ‎t‎h‎i‎n‎g‎ ‎i‎ ‎s‎ ‎k‎i‎n‎d‎a‎ ‎n‎i‎c‎e‎
+[‎0‎8‎:‎0‎8‎]‎ ‎<‎i‎n‎t‎0‎x‎4‎7‎>‎ ‎n‎i‎c‎e‎ ‎a‎ ‎c‎o‎f‎f‎e‎e‎ ‎a‎n‎d‎ ‎k‎u‎s‎h‎ ‎t‎y‎p‎e‎ ‎o‎f‎ ‎m‎e‎e‎t‎i‎n‎g‎
+[‎0‎8‎:‎0‎9‎]‎ ‎<‎+‎d‎a‎v‎e‎>‎ ‎T‎h‎i‎s‎ ‎p‎r‎o‎m‎p‎t‎ ‎c‎o‎n‎t‎a‎i‎n‎s‎ ‎p‎r‎o‎h‎i‎b‎i‎t‎e‎d‎ ‎w‎o‎r‎d‎s‎:‎ ‎""‎f‎i‎s‎t‎i‎n‎g‎ ‎a‎n‎a‎l‎ ‎s‎e‎x‎""‎
+[‎0‎8‎:‎1‎0‎]‎ ‎<‎i‎n‎t‎0‎x‎4‎7‎>‎ ‎""‎i‎s‎ ‎i‎t‎ ‎p‎o‎s‎s‎i‎b‎l‎e‎ ‎t‎o‎ ‎u‎s‎e‎ ‎a‎ ‎h‎a‎n‎d‎ ‎t‎i‎g‎h‎t‎l‎y‎ ‎g‎r‎a‎s‎p‎e‎d‎ ‎f‎o‎r‎ ‎a‎ ‎c‎o‎l‎o‎n‎o‎s‎c‎o‎p‎y‎ ‎p‎r‎e‎p‎e‎r‎a‎t‎i‎o‎n‎""‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+W‎e‎s‎t‎ ‎V‎i‎r‎g‎i‎n‎i‎a‎ ‎i‎s‎ ‎a‎ ‎s‎t‎a‎t‎e‎ ‎i‎n‎ ‎t‎h‎e‎ ‎S‎o‎u‎t‎h‎e‎r‎n‎ ‎o‎r‎ ‎M‎i‎d‎-‎A‎t‎l‎a‎n‎t‎i‎c‎ ‎r‎e‎g‎i‎o‎n‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎U‎n‎i‎t‎e‎d‎ ‎S‎t‎a‎t‎e‎s‎.‎ ‎I‎t‎ ‎i‎s‎ ‎t‎h‎e‎ ‎1‎0‎t‎h‎-‎s‎m‎a‎l‎l‎e‎s‎t‎ ‎s‎t‎a‎t‎e‎ ‎b‎y‎ ‎a‎r‎e‎a‎ ‎a‎n‎d‎ ‎r‎a‎n‎k‎s‎ ‎a‎s‎ ‎t‎h‎e‎ ‎1‎2‎t‎h‎-‎l‎e‎a‎s‎t‎ ‎p‎o‎p‎u‎l‎o‎u‎s‎ ‎s‎t‎a‎t‎e‎,‎ ‎w‎i‎t‎h‎ ‎a‎ ‎p‎o‎p‎u‎l‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎1‎,‎7‎9‎3‎,‎7‎1‎6‎ ‎r‎e‎s‎i‎d‎e‎n‎t‎s‎.‎ ‎T‎h‎e‎ ‎s‎t‎a‎t‎e‎ ‎w‎a‎s‎ ‎f‎o‎r‎m‎e‎d‎ ‎i‎n‎ ‎1‎8‎6‎1‎,‎ ‎c‎o‎m‎p‎r‎i‎s‎i‎n‎g‎ ‎a‎ ‎n‎u‎m‎b‎e‎r‎ ‎o‎f‎ ‎c‎o‎u‎n‎t‎i‎e‎s‎ ‎w‎h‎i‎c‎h‎ ‎s‎e‎p‎a‎r‎a‎t‎e‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎s‎t‎a‎t‎e‎ ‎o‎f‎ ‎V‎i‎r‎g‎i‎n‎i‎a‎ ‎a‎f‎t‎e‎r‎ ‎t‎h‎e‎ ‎l‎a‎t‎t‎e‎r‎ ‎h‎a‎d‎ ‎s‎e‎c‎e‎d‎e‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎U‎n‎i‎t‎e‎d‎ ‎S‎t‎a‎t‎e‎s‎.‎ ‎W‎e‎s‎t‎ ‎V‎i‎r‎g‎i‎n‎i‎a‎ ‎w‎a‎s‎ ‎a‎d‎m‎i‎t‎t‎e‎d‎ ‎t‎o‎ ‎t‎h‎e‎ ‎U‎n‎i‎o‎n‎ ‎i‎n‎ ‎1‎8‎6‎3‎,‎ ‎a‎n‎d‎ ‎w‎a‎s‎ ‎a‎ ‎k‎e‎y‎ ‎b‎o‎r‎d‎e‎r‎ ‎s‎t‎a‎t‎e‎ ‎d‎u‎r‎i‎n‎g‎ ‎t‎h‎e‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎ ‎C‎i‎v‎i‎l‎ ‎W‎a‎r‎.‎ ‎T‎h‎e‎ ‎s‎t‎a‎t‎e‎ ‎i‎s‎ ‎n‎o‎t‎e‎d‎ ‎f‎o‎r‎ ‎i‎t‎s‎ ‎m‎o‎u‎n‎t‎a‎i‎n‎s‎ ‎a‎n‎d‎ ‎r‎o‎l‎l‎i‎n‎g‎ ‎h‎i‎l‎l‎s‎,‎ ‎i‎t‎s‎ ‎h‎i‎s‎t‎o‎r‎i‎c‎a‎l‎l‎y‎ ‎s‎i‎g‎n‎i‎f‎i‎c‎a‎n‎t‎ ‎c‎o‎a‎l‎ ‎m‎i‎n‎i‎n‎g‎ ‎a‎n‎d‎ ‎l‎o‎g‎g‎i‎n‎g‎ ‎i‎n‎d‎u‎s‎t‎r‎i‎e‎s‎,‎ ‎a‎n‎d‎ ‎i‎t‎s‎ ‎p‎o‎l‎i‎t‎i‎c‎a‎l‎ ‎a‎n‎d‎ ‎l‎a‎b‎o‎r‎ ‎h‎i‎s‎t‎o‎r‎y‎.‎ ‎I‎t‎ ‎i‎s‎ ‎a‎l‎s‎o‎ ‎a‎ ‎p‎o‎p‎u‎l‎a‎r‎ ‎t‎o‎u‎r‎i‎s‎t‎ ‎d‎e‎s‎t‎i‎n‎a‎t‎i‎o‎n‎.‎ ‎C‎h‎a‎r‎l‎e‎s‎t‎o‎n‎ ‎i‎s‎ ‎t‎h‎e‎ ‎c‎a‎p‎i‎t‎a‎l‎ ‎a‎n‎d‎ ‎m‎o‎s‎t‎ ‎p‎o‎p‎u‎l‎o‎u‎s‎ ‎c‎i‎t‎y‎ ‎o‎f‎ ‎t‎h‎e‎ ‎s‎t‎a‎t‎e‎.‎ ‎T‎h‎i‎s‎ ‎1‎8‎7‎6‎ ‎i‎l‎l‎u‎s‎t‎r‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎t‎h‎e‎ ‎S‎e‎a‎l‎ ‎o‎f‎ ‎W‎e‎s‎t‎ ‎V‎i‎r‎g‎i‎n‎i‎a‎ ‎w‎a‎s‎ ‎p‎r‎o‎d‎u‎c‎e‎d‎ ‎b‎y‎ ‎H‎e‎n‎r‎y‎ ‎M‎i‎t‎c‎h‎e‎l‎l‎ ‎a‎s‎ ‎p‎a‎r‎t‎ ‎o‎f‎ ‎a‎ ‎s‎e‎r‎i‎e‎s‎ ‎t‎i‎t‎l‎e‎d‎ ‎T‎h‎e‎ ‎S‎t‎a‎t‎e‎ ‎A‎r‎m‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎U‎n‎i‎o‎n‎.‎
+
+I‎l‎l‎u‎s‎t‎r‎a‎t‎i‎o‎n‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎H‎e‎n‎r‎y‎ ‎M‎i‎t‎c‎h‎e‎l‎l‎;‎ ‎r‎e‎s‎t‎o‎r‎e‎d‎ ‎b‎y‎ ‎G‎o‎d‎o‎t‎1‎3‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+A‎l‎r‎i‎g‎h‎t‎ ‎I‎ ‎h‎a‎v‎e‎ ‎t‎o‎ ‎g‎o‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎m‎i‎c‎r‎o‎w‎a‎v‎e‎ ‎a‎n‎ ‎i‎c‎e‎ ‎c‎r‎e‎a‎m‎ ‎s‎a‎n‎d‎w‎i‎c‎h‎ ‎a‎n‎d‎ ‎t‎h‎e‎n‎ ‎g‎o‎ ‎r‎u‎n‎ ‎o‎v‎e‎r‎ ‎s‎o‎m‎e‎ ‎p‎o‎r‎c‎u‎p‎i‎n‎e‎s‎ ‎w‎i‎t‎h‎ ‎m‎y‎ ‎t‎r‎a‎c‎t‎o‎r‎.‎"
+uFW4hhZ2,Automatic Copy and Paste Script,Ajwct,Java,Thursday 9th of November 2023 01:00:25 PM CDT,"// Get the text you want to copy
+var textToCopy = ""Hello, World!"";
+
+// Create a textarea element dynamically
+var textarea = document.createElement('textarea');
+
+// Set the value of the textarea to the text you want to copy
+<textarea.value = textToCopy;
+
+// Append the textarea to the document
+document.body.appendChild(textarea);
+
+// Select the text inside the textarea
+<textarea.select();
+
+// Copy the selected text to the clipboard
+document.execCommand('copy');
+
+// Remove the textarea from the document
+document.body.removeChild(textarea);"
+1zcVYMn1,Untitled,xPucTu4,Python,Thursday 9th of November 2023 12:56:13 PM CDT,"N = int(input())
+special_numbers = []
+
+for num in range(1111, 10000):
+    is_special = True
+    for digit in str(num):
+        if int(digit) == 0 or N % int(digit) != 0:
+            is_special = False
+            break
+    if is_special:
+        special_numbers.append(str(num))
+
+print("" "".join(special_numbers))
+"
+w2Pu4eV2,Untitled,xPucTu4,Python,Thursday 9th of November 2023 12:52:38 PM CDT,"# Special numbers
+dividend_criteria = int(input())
+
+for i in range(1111, 10000):
+    i = str(i) # convert to string
+
+    # for each digit in the number
+    for j in range(0, len(i)):
+        current_digit = int(i[j])
+        if current_digit == 0:
+            continue # if we manage to divide by 0, we can break the universe or worse
+
+        if dividend_criteria % current_digit == 0:
+            if j == len(i) - 1: # this is the last digit in the number - we have a special number
+                print(i, end="" "")
+        else: # at least one digit does not meet the criteria - not a special number
+            break
+"
+afdPfGdf,main.cpp,HICONT,C++,Thursday 9th of November 2023 12:30:59 PM CDT,"//Copyright 2023 Soloninko Andrey
+#include <iostream>
+#include <gtest/gtest.h>
+#include <mpi.h>
+
+#include ""./Algo.h""
+
+TEST(Non_Matching_Symbols, Test_1_Def)
+{
+    int rankProc = 0;
+    int numProc = 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rankProc);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProc);
+
+    std::string s1 = ""hello"";
+    std::string s2 = ""halwo"";
+   
+    int result = GetStringDifPar(s1, s2);
+
+    if (rankProc == 0)
+    {
+        int result_non_par_t1 = GetStringDifDef(s1, s2);
+        ASSERT_EQ(result, result_non_par_t1);
+    }
+}
+
+TEST(Non_Matching_Symbols, Test_2_World)
+{
+    int rankProc = 0;
+    int numProc = 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rankProc);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProc);
+
+    std::string s1 = ""World"";
+    std::string s2 = ""dlroW"";
+   
+    int result = GetStringDifPar(s1, s2);
+
+    if (rankProc == 0)
+    {
+        int result_non_par_t2 = GetStringDifDef(s1, s2);
+        ASSERT_EQ(result, result_non_par_t2);
+    }
+}
+
+TEST(Non_Matching_Symbols, Test_3_Same)
+{
+    int rankProc = 0;
+    int numProc = 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rankProc);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProc);
+
+    std::string s1 = ""World"";
+    std::string s2 = ""World"";
+   
+    int result = GetStringDifPar(s1, s2);
+
+    if (rankProc == 0)
+    {
+        int result_non_par_t3 = GetStringDifDef(s1, s2);
+        ASSERT_EQ(result, result_non_par_t3);
+    }
+}
+
+TEST(Non_Matching_Symbols, Test_4)
+{
+    int rankProc = 0;
+    int numProc = 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rankProc);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProc);
+
+    std::string s1 = ""ripoejgpojb gjdoirepoigjpe"";
+    std::string s2 = ""qwertyuiopasdfghjklzxcvbnm"";
+   
+    int result = GetStringDifPar(s1, s2);
+
+    if (rankProc == 0)
+    {
+        int result_non_par_t4 = GetStringDifDef(s1, s2);
+        ASSERT_EQ(result, result_non_par_t4);
+    }
+}
+
+TEST(Non_Matching_Symbols, Test_5_Random_String)
+{
+    int rankProc = 0;
+    int numProc = 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rankProc);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProc);
+
+    std::string s1 = random_string(10);
+    std::string s2 = random_string(10);
+   
+    int result = GetStringDifPar(s1, s2);
+
+    if (rankProc == 0)
+    {
+        int result_non_par_t5 = GetStringDifDef(s1, s2);
+        ASSERT_EQ(result, result_non_par_t5);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    int res_c = 0;
+
+    ::testing::InitGoogleTest(&argc, argv);
+    ::testing::TestEventListeners &listeners =
+        ::testing::UnitTest::GetInstance()->listeners();
+
+    if (MPI_Init(&argc, &argv) != MPI_SUCCESS)
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    res_c = RUN_ALL_TESTS();
+    MPI_Finalize();
+
+    return res_c;
+}"
+MnBnckwt,Algo.h,HICONT,C++,Thursday 9th of November 2023 12:30:35 PM CDT,"//Copyright 2023 Soloninko Andrey
+#ifndef TASKS_TASK_1_SOLONINKO_A_NON_MATCHING_SYMBOLS_ALGO_H_
+#define TASKS_TASK_1_SOLONINKO_A_NON_MATCHING_SYMBOLS_ALGO_H_
+
+#include<string>
+#include<mpi.h>
+#include<random>
+
+int GetStringDifDef(std::string s1, std::string s2);
+int GetStringDifPar(std::string s1, std::string s2);
+std::string random_string(int length);
+
+#endif // TASKS_TASK_1_SOLONINKO_A_NON_MATCHING_SYMBOLS_ALGO_H_"
+VY0qTjth,Algo.cpp,HICONT,C++,Thursday 9th of November 2023 12:30:12 PM CDT,"//Copyright 2023 Soloninko Andrey
+
+#include ""task_1/soloninko_a_non_matching_symbols/Algo.h""
+
+std::string random_string(int length)
+{
+    const std::string CHARACTERS = ""abcdefghijklmnopqrstuvwxyz"";
+
+    std::random_device random_device;
+    std::mt19937 generator(random_device());
+    std::uniform_int_distribution<> distribution(0, CHARACTERS.size() - 1);
+
+    std::string random_string;
+
+    for (int i = 0; i < length; ++i)
+    {
+        random_string += CHARACTERS[distribution(generator)];
+    }
+
+    return random_string;
+}
+
+int GetStringDifDef(std::string s1, std::string s2)
+{
+    int dif_coint = 0;
+    for(int i = 0; i < s1.size(); i++)
+    {
+        if(s1[i] != s2[i])
+        {
+            dif_coint++;
+        }
+    }
+    return dif_coint;
+}
+
+int GetStringDifPar(std::string s1, std::string s2)
+{
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int str_len = s1.length();
+    std::vector<int> sendcounts(size);
+    std::vector<int> displs(size);
+
+    int segment_size = str_len / size;
+    int remainder = str_len % size;
+
+    for (int i = 0; i < size; i++) {
+        sendcounts[i] = segment_size;
+        if (i < remainder) {
+            sendcounts[i]++;
+        }
+
+        if (i == 0) {
+            displs[i] = 0;
+        } else {
+            displs[i] = displs[i - 1] + sendcounts[i - 1];
+        }
+    }
+
+    std::string local_str1(sendcounts[rank], ' ');
+    std::string local_str2(sendcounts[rank], ' ');
+
+    MPI_Scatterv(s1.c_str(), sendcounts.data(), displs.data(), MPI_CHAR, &local_str1[0], sendcounts[rank], MPI_CHAR, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(s2.c_str(), sendcounts.data(), displs.data(), MPI_CHAR, &local_str2[0], sendcounts[rank], MPI_CHAR, 0, MPI_COMM_WORLD);
+
+    int local_dif_count = 0;
+
+    for (int i = 0; i < local_str1.length(); i++) {
+        if (local_str1[i] != local_str2[i]) {
+            local_dif_count++;
+        }
+    }
+
+    int dif_count = 0;
+    MPI_Reduce(&local_dif_count, &dif_count, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    return dif_count;
+}"
+YJDbNeWk,02. Shopping List,Spocoman,JavaScript,Thursday 9th of November 2023 12:28:24 PM CDT,"function shoppingList(input) {
+    let list = input.shift().split('!');
+
+    while (input[0] !== ""Go Shopping!"") {
+        [command, product, newProduct] = input.shift().split(' ');
+        if (command === ""Urgent"" && !list.includes(product)) {
+            list.unshift(product);
+        } else if (command === ""Unnecessary"" && list.includes(product)) {
+            list.splice(list.indexOf(product), 1);
+        } else if (command === ""Correct"" && list.includes(product)) {
+            list.splice(list.indexOf(product), 1, newProduct);
+        } else if (command === ""Rearrange"" && list.includes(product)) {
+            list.push(list.splice(list.indexOf(product), 1));
+        }
+    }  
+    console.log(list.join("", ""));
+	return;
+}"
+BNJuJEmY,02. Shopping List,Spocoman,C++,Thursday 9th of November 2023 12:22:43 PM CDT,"#include <iostream>
+#include <vector>
+#include <string>
+
+using namespace std;
+
+vector<string> vectorFiller(string str, char sep) {
+    vector<string> v;
+    string p = """";
+
+    for (int i = 0; i < str.length(); i++) {
+        if (str[i] == sep) {
+            v.push_back(p);
+            p = """";
+        }
+        else {
+            p += str[i];
+        }
+    }
+    v.push_back(p);
+    return v;
+}
+
+int index(vector<string> v, string s) {
+    for (int i = 0; i < v.size(); i++) {
+        if (v[i] == s) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int main() {
+    string line, product, newProduct, command;
+    getline(cin, line);
+
+    vector<string> list = vectorFiller(line, '!');
+
+    while (true) {
+        getline(cin, line);
+        if (line == ""Go Shopping!"") {
+            break;
+        }
+
+        vector<string> currentLine = vectorFiller(line, ' ');
+        command = currentLine[0];
+        product = currentLine[1];
+
+        if (command == ""Urgent"" && index(list, product) == -1) {
+            list.insert(list.begin(), product);
+        }
+        else if (command == ""Unnecessary"" && index(list, product) != -1) {
+            list.erase(list.begin() + index(list, product));
+        }
+        else if (command == ""Correct"" && index(list, product) != -1) {
+            newProduct = currentLine[2];
+            list[index(list, product)] = newProduct;
+        }
+        else if (command == ""Rearrange"" && index(list, product) != -1) {
+            list.erase(list.begin() + index(list, product));
+            list.push_back(product);
+        }
+    }
+
+    for (int i = 0; i < list.size() - 1; i++) {
+        cout << list[i] << "", "";
+    }
+    cout << list[list.size() - 1] << endl;
+    return 0;
+}"
+b3Vfpekt,Bone Carver's Chisel Macro,CantFindGeorge,JavaScript,Thursday 9th of November 2023 12:22:42 PM CDT,"// Bone Carver's Chisel Macro
+
+// Creates dialogue box and prompts user for entry
+await Dialog.prompt({
+    title: `Bone Carver's Chisel - Consume A Bone?`,
+    content: `
+        <div class=""form-group"">
+            <label for=""exampleSelect"">Which size bone would you like to use?</label>
+            <select name=""exampleSelect"">
+              <option value=""Bones - Small"">Small (1d4)</option>
+              <option value=""Bones - Medium"">Medium (1d6)</option>
+              <option value=""Bones - Large"">Large (1d8)</option>
+              <option value=""Bones - Huge"">Huge (1d10)</option>
+              <option value=""Bones - Gargantuan"">Gargantuan (1d12)</option>
+            </select>
+        </div>
+        <br><br>
+    `,
+
+    callback: async(html) => {
+
+        // Gather user input from prompt
+        const bonePrompt = html[0].querySelector(""[name='exampleSelect']"").value;
+        
+        // Find bone from prompt in actor's inventory
+        let boneSize = actor.items.getName(bonePrompt);
+
+        // -----------------------
+        // CHECKS ACTORS INVENTORY
+        // -----------------------
+
+        // No bones in inventory
+        if (boneSize == null || boneSize == undefined){
+            ui.notifications.error(""You don't have any bones of that size."")
+            return;
+        }
+
+
+        // Bone is in inventory
+        if (boneSize >= 1){
+
+
+            // Assigns a die size based on user input
+            let boneDice
+            if(boneSize = ""Bones - Small""){
+                boneDice = `<br><h2>Bone Carver's Chisel</h2><br><u>${bonePrompt}</u><br><br>/r 1d4`
+            }
+            if(boneSize = ""Bones - Medium""){
+                boneDice = `<br><h2>Bone Carver's Chisel</h2><br><u>${bonePrompt}</u><br><br>/r 1d6`
+            }
+            if(boneSize = ""Bones - Large""){
+                boneDice = `<br><h2>Bone Carver's Chisel</h2><br><u>${bonePrompt}</u><br><br>/r 1d8`
+            }
+            if(boneSize = ""Bones - Huge""){
+                boneDice = `<br><h2>Bone Carver's Chisel</h2><br><u>${bonePrompt}</u><br><br>/r 1d10`
+            }
+            if(boneSize = ""Bones - Gargantuan""){
+                boneDice = `<br><h2>Bone Carver's Chisel</h2><br><u>${bonePrompt}</u><br><br>/r 1d12`
+            }
+
+            // Removes bone from inventory
+            await boneSize.update({""data.quantity"": boneSize.data.data.quantity - 1})
+            // If less than 1 bone delete item from inventory
+            if(boneSize.data.data.quantity < 1){
+                boneSize.delete()
+            }
+
+            await ChatMessage.create({
+                content: `${boneDice}`,
+    
+            })
+        }
+
+
+
+        
+    }
+});"
+6K2CtuDf,36. grind me {pos de rol},elirosecodes,HTML,Thursday 9th of November 2023 12:22:20 PM CDT,"<link href=""https://dl.dropboxusercontent.com/scl/fi/w3nf9kvhg0g7cj9lxtgza/grind.css?rlkey=cyytyr7bwvx110e6fmiokfact&dl=0"" rel=""stylesheet""><link rel=""stylesheet"" href=""//icons.cappuccicons.com/cpf.css""><div class=""grindme"" style=""background-image:url(https://i.imgur.com/mR39dGU.png);""><div class=""grmd-s1""><div class=""grmd-s1t""><div class=""grmd-s1tl"">Press me up against your lips</div><div class=""grmd-s1ts"">fill your lungs</div><div class=""grmd-s1st"">Then breathe me out</div></div></div><div class=""grmd-s2""><div class=""grmd-s2b"">
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Cras faucibus velit eleifend est pellentesque, sit amet tempus nibh elementum. Integer non ornare erat. Phasellus fringilla, elit a luctus convallis, urna magna tincidunt ante, non lacinia metus diam sit amet nulla. Morbi felis ipsum, ultrices a maximus vel, volutpat vel mi. Donec venenatis massa neque, nec vulputate est aliquam sit amet. Cras sed tellus porta arcu pellentesque volutpat. Ut in elit justo. Sed ut mauris felis. Proin sagittis tortor tempus nisi condimentum, vel semper purus tempus. Sed congue pulvinar pharetra. Mauris sit amet feugiat lorem. Quisque tincidunt, elit vel vulputate auctor, ipsum lectus hendrerit lectus, vel euismod tortor tellus posuere ante.
+<div class=""grmd-s2sc""><a href=""/""><i class=""cp cp-cigarette""></i><br><span>outfit</span></a></div></div></div></div><a href=""https://elirosecodes.tumblr.com/""><div class=""gnomo"">elirose</div></a>"
+kMhWyeup,35. Our year {relaciones},elirosecodes,HTML,Thursday 9th of November 2023 12:21:47 PM CDT,"<link href=""https://dl.dropboxusercontent.com/scl/fi/w6fqlijp81bnluag9uacl/ouryear.css?rlkey=i4rbvr6hpajqc1fvtfpbxi0bo&dl=0"" rel=""stylesheet""><link rel=""stylesheet"" href=""//icons.cappuccicons.com/cpf.css""><div class=""our-year""><div class=""oy-s1""><div class=""oy-s1a"">our year</div><div class=""oy-s1b"">this is our summer night, our winter time</div></div><div class=""oy-s2""><div class=""oy-s2a""><div class=""oy-s2a1""><i class=""cp cp-flower""></i><span>love</span></div><div class=""oy-s2a1""><i class=""cp cp-sun""></i><span>friends</span></div><div class=""oy-s2a1""><i class=""cp cp-leaf""></i><span>neutral</span></div><div class=""oy-s2a1""><i class=""cp cp-snowflake""></i><span>hate</span></div></div><div class=""oy-s2b"">
+
+/*Primavera*/
+<div class=""oy-bx oy-lv""><div class=""oy-bx1""><div class=""oy-bx1a"" style=""background-image:url(https://via.placeholder.com/60x65);""></div><div class=""oy-bx1b"">Nombre del personaje</div></div><div class=""oy-bx2"">my dear beloved one</div><i class=""cp cp-flower""></i><div class=""oy-bx3"">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis interdum congue ipsum id pharetra. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In lobortis eros id tellus interdum, eu suscipit mi gravida. Integer tempor felis purus, at facilisis diam imperdiet vel. Nulla auctor nulla elementum erat lacinia, eu maximus dui fringilla. Suspendisse eget venenatis orci. Aenean consectetur lectus at lacinia convallis. Nunc eget faucibus ex. Vivamus quis interdum nunc, sit amet dapibus nunc. Fusce orci ligula, mollis in porttitor vel, convallis vel lorem. Etiam nec nisi est. Donec vel auctor justo, in consequat turpis.
+</div></div>
+
+/*Verano*/
+<div class=""oy-bx oy-fr""><div class=""oy-bx1""><div class=""oy-bx1a"" style=""background-image:url(https://via.placeholder.com/60x65);""></div><div class=""oy-bx1b"">Nombre del personaje</div></div><div class=""oy-bx2"">my dear beloved one</div><i class=""cp cp-sun""></i><div class=""oy-bx3"">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis interdum congue ipsum id pharetra. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In lobortis eros id tellus interdum, eu suscipit mi gravida. Integer tempor felis purus, at facilisis diam imperdiet vel. Nulla auctor nulla elementum erat lacinia, eu maximus dui fringilla. Suspendisse eget venenatis orci. Aenean consectetur lectus at lacinia convallis. Nunc eget faucibus ex. Vivamus quis interdum nunc, sit amet dapibus nunc. Fusce orci ligula, mollis in porttitor vel, convallis vel lorem. Etiam nec nisi est. Donec vel auctor justo, in consequat turpis.
+</div></div>
+
+/*Otoño*/
+<div class=""oy-bx oy-ne""><div class=""oy-bx1""><div class=""oy-bx1a"" style=""background-image:url(https://via.placeholder.com/60x65);""></div><div class=""oy-bx1b"">Nombre del personaje</div></div><div class=""oy-bx2"">my dear beloved one</div><i class=""cp cp-leaf""></i><div class=""oy-bx3"">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis interdum congue ipsum id pharetra. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In lobortis eros id tellus interdum, eu suscipit mi gravida. Integer tempor felis purus, at facilisis diam imperdiet vel. Nulla auctor nulla elementum erat lacinia, eu maximus dui fringilla. Suspendisse eget venenatis orci. Aenean consectetur lectus at lacinia convallis. Nunc eget faucibus ex. Vivamus quis interdum nunc, sit amet dapibus nunc. Fusce orci ligula, mollis in porttitor vel, convallis vel lorem. Etiam nec nisi est. Donec vel auctor justo, in consequat turpis.
+</div></div>
+
+/*Invierno*/
+<div class=""oy-bx oy-ht""><div class=""oy-bx1""><div class=""oy-bx1a"" style=""background-image:url(https://via.placeholder.com/60x65);""></div><div class=""oy-bx1b"">Nombre del personaje</div></div><div class=""oy-bx2"">my dear beloved one</div><i class=""cp cp-snowflake""></i><div class=""oy-bx3"">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis interdum congue ipsum id pharetra. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In lobortis eros id tellus interdum, eu suscipit mi gravida. Integer tempor felis purus, at facilisis diam imperdiet vel. Nulla auctor nulla elementum erat lacinia, eu maximus dui fringilla. Suspendisse eget venenatis orci. Aenean consectetur lectus at lacinia convallis. Nunc eget faucibus ex. Vivamus quis interdum nunc, sit amet dapibus nunc. Fusce orci ligula, mollis in porttitor vel, convallis vel lorem. Etiam nec nisi est. Donec vel auctor justo, in consequat turpis.
+</div></div>
+ 
+</div></div><div class=""oy-s3""><div class=""oy-s3a""><div class=""oy-s3a1""></div><div class=""oy-s3a2"">this is our fall morning, our spring moment</div></div><div class=""oy-s3b"">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis interdum congue ipsum id pharetra. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In lobortis eros id tellus interdum, eu suscipit mi gravida. Integer tempor felis purus, at facilisis diam imperdiet vel.</div></div></div><a href=""https://elirosecodes.tumblr.com/""><div class=""gnomo"">elirose</div></a><style>:root{--oy-wt: #fff; --oy-bg: #454545; --oy-tx: #000; --oy-cl: #E6D1F0; --oy-lv: #FFD6E9; --oy-fr: #CBDDA6; --oy-ne: #FCD6BD; --oy-ht: #A9DEF9;}</style>"
+v35HNd6g,Nigerian scammers [9-11-2/2023],bombaires,AIMMS,Thursday 9th of November 2023 12:11:45 PM CDT,"<a href=""mailto:paymastergeneralng06@gmail.com"">paymastergeneralng06@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+9242@gmail.com"">paymastergeneralng06+9242@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+22271@gmail.com"">paymastergeneralng06+22271@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+23259@gmail.com"">paymastergeneralng06+23259@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20114@gmail.com"">paymastergeneralng06+20114@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+6197@gmail.com"">paymastergeneralng06+6197@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+11903@gmail.com"">paymastergeneralng06+11903@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+17779@gmail.com"">paymastergeneralng06+17779@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16496@gmail.com"">paymastergeneralng06+16496@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+30017@gmail.com"">paymastergeneralng06+30017@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7807@gmail.com"">paymastergeneralng06+7807@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+3394@gmail.com"">paymastergeneralng06+3394@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+4588@gmail.com"">paymastergeneralng06+4588@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+31887@gmail.com"">paymastergeneralng06+31887@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+17518@gmail.com"">paymastergeneralng06+17518@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+6650@gmail.com"">paymastergeneralng06+6650@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+23820@gmail.com"">paymastergeneralng06+23820@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+24771@gmail.com"">paymastergeneralng06+24771@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+18366@gmail.com"">paymastergeneralng06+18366@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+1550@gmail.com"">paymastergeneralng06+1550@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+3167@gmail.com"">paymastergeneralng06+3167@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16394@gmail.com"">paymastergeneralng06+16394@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+26027@gmail.com"">paymastergeneralng06+26027@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+114@gmail.com"">paymastergeneralng06+114@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16689@gmail.com"">paymastergeneralng06+16689@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20245@gmail.com"">paymastergeneralng06+20245@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+4437@gmail.com"">paymastergeneralng06+4437@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+30204@gmail.com"">paymastergeneralng06+30204@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+19463@gmail.com"">paymastergeneralng06+19463@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+2936@gmail.com"">paymastergeneralng06+2936@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+14296@gmail.com"">paymastergeneralng06+14296@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+9574@gmail.com"">paymastergeneralng06+9574@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+18968@gmail.com"">paymastergeneralng06+18968@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+22254@gmail.com"">paymastergeneralng06+22254@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+9226@gmail.com"">paymastergeneralng06+9226@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+17261@gmail.com"">paymastergeneralng06+17261@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+21571@gmail.com"">paymastergeneralng06+21571@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+32540@gmail.com"">paymastergeneralng06+32540@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20193@gmail.com"">paymastergeneralng06+20193@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+31597@gmail.com"">paymastergeneralng06+31597@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+13776@gmail.com"">paymastergeneralng06+13776@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+12082@gmail.com"">paymastergeneralng06+12082@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+11276@gmail.com"">paymastergeneralng06+11276@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+11373@gmail.com"">paymastergeneralng06+11373@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+28286@gmail.com"">paymastergeneralng06+28286@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+14627@gmail.com"">paymastergeneralng06+14627@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+4412@gmail.com"">paymastergeneralng06+4412@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+25065@gmail.com"">paymastergeneralng06+25065@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+13857@gmail.com"">paymastergeneralng06+13857@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+818@gmail.com"">paymastergeneralng06+818@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16396@gmail.com"">paymastergeneralng06+16396@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+27803@gmail.com"">paymastergeneralng06+27803@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7406@gmail.com"">paymastergeneralng06+7406@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20876@gmail.com"">paymastergeneralng06+20876@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+28985@gmail.com"">paymastergeneralng06+28985@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+19921@gmail.com"">paymastergeneralng06+19921@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+25320@gmail.com"">paymastergeneralng06+25320@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+12249@gmail.com"">paymastergeneralng06+12249@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7730@gmail.com"">paymastergeneralng06+7730@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+17348@gmail.com"">paymastergeneralng06+17348@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16635@gmail.com"">paymastergeneralng06+16635@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+21083@gmail.com"">paymastergeneralng06+21083@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+730@gmail.com"">paymastergeneralng06+730@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+14731@gmail.com"">paymastergeneralng06+14731@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+1488@gmail.com"">paymastergeneralng06+1488@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+8956@gmail.com"">paymastergeneralng06+8956@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7558@gmail.com"">paymastergeneralng06+7558@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+28108@gmail.com"">paymastergeneralng06+28108@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+2389@gmail.com"">paymastergeneralng06+2389@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+25923@gmail.com"">paymastergeneralng06+25923@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+9285@gmail.com"">paymastergeneralng06+9285@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+8649@gmail.com"">paymastergeneralng06+8649@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+3435@gmail.com"">paymastergeneralng06+3435@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+18038@gmail.com"">paymastergeneralng06+18038@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+4470@gmail.com"">paymastergeneralng06+4470@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+4051@gmail.com"">paymastergeneralng06+4051@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+27352@gmail.com"">paymastergeneralng06+27352@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20985@gmail.com"">paymastergeneralng06+20985@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+14738@gmail.com"">paymastergeneralng06+14738@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7205@gmail.com"">paymastergeneralng06+7205@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+11437@gmail.com"">paymastergeneralng06+11437@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+24161@gmail.com"">paymastergeneralng06+24161@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+18195@gmail.com"">paymastergeneralng06+18195@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7644@gmail.com"">paymastergeneralng06+7644@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+12304@gmail.com"">paymastergeneralng06+12304@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+8202@gmail.com"">paymastergeneralng06+8202@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+27606@gmail.com"">paymastergeneralng06+27606@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+30292@gmail.com"">paymastergeneralng06+30292@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+26892@gmail.com"">paymastergeneralng06+26892@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+15955@gmail.com"">paymastergeneralng06+15955@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+19728@gmail.com"">paymastergeneralng06+19728@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20454@gmail.com"">paymastergeneralng06+20454@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+18229@gmail.com"">paymastergeneralng06+18229@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+16799@gmail.com"">paymastergeneralng06+16799@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+25798@gmail.com"">paymastergeneralng06+25798@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+7547@gmail.com"">paymastergeneralng06+7547@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+20397@gmail.com"">paymastergeneralng06+20397@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+12441@gmail.com"">paymastergeneralng06+12441@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+28297@gmail.com"">paymastergeneralng06+28297@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+24806@gmail.com"">paymastergeneralng06+24806@gmail.com</a>
+<a href=""mailto:paymastergeneralng06+32071@gmail.com"">paymastergeneralng06+32071@gmail.com</a>
+<a href=""mailto:MacKinnonPhillipsLawFirm@hotmail.com"">MacKinnonPhillipsLawFirm@hotmail.com</a>
+<a href=""mailto:brownken323@gmail.com"">brownken323@gmail.com</a>
+<a href=""mailto:brownken323+16538@gmail.com"">brownken323+16538@gmail.com</a>
+<a href=""mailto:brownken323+23059@gmail.com"">brownken323+23059@gmail.com</a>
+<a href=""mailto:brownken323+1875@gmail.com"">brownken323+1875@gmail.com</a>
+<a href=""mailto:brownken323+3710@gmail.com"">brownken323+3710@gmail.com</a>
+<a href=""mailto:brownken323+5658@gmail.com"">brownken323+5658@gmail.com</a>
+<a href=""mailto:brownken323+18945@gmail.com"">brownken323+18945@gmail.com</a>
+<a href=""mailto:brownken323+31353@gmail.com"">brownken323+31353@gmail.com</a>
+<a href=""mailto:brownken323+21743@gmail.com"">brownken323+21743@gmail.com</a>
+<a href=""mailto:brownken323+32393@gmail.com"">brownken323+32393@gmail.com</a>
+<a href=""mailto:brownken323+9223@gmail.com"">brownken323+9223@gmail.com</a>
+<a href=""mailto:brownken323+25245@gmail.com"">brownken323+25245@gmail.com</a>
+<a href=""mailto:brownken323+3937@gmail.com"">brownken323+3937@gmail.com</a>
+<a href=""mailto:brownken323+29093@gmail.com"">brownken323+29093@gmail.com</a>
+<a href=""mailto:brownken323+19993@gmail.com"">brownken323+19993@gmail.com</a>
+<a href=""mailto:brownken323+12236@gmail.com"">brownken323+12236@gmail.com</a>
+<a href=""mailto:brownken323+9631@gmail.com"">brownken323+9631@gmail.com</a>
+<a href=""mailto:brownken323+28155@gmail.com"">brownken323+28155@gmail.com</a>
+<a href=""mailto:brownken323+10835@gmail.com"">brownken323+10835@gmail.com</a>
+<a href=""mailto:brownken323+5428@gmail.com"">brownken323+5428@gmail.com</a>
+<a href=""mailto:brownken323+25781@gmail.com"">brownken323+25781@gmail.com</a>
+<a href=""mailto:brownken323+12546@gmail.com"">brownken323+12546@gmail.com</a>
+<a href=""mailto:brownken323+32391@gmail.com"">brownken323+32391@gmail.com</a>
+<a href=""mailto:brownken323+11484@gmail.com"">brownken323+11484@gmail.com</a>
+<a href=""mailto:brownken323+32108@gmail.com"">brownken323+32108@gmail.com</a>
+<a href=""mailto:brownken323+6081@gmail.com"">brownken323+6081@gmail.com</a>
+<a href=""mailto:brownken323+31120@gmail.com"">brownken323+31120@gmail.com</a>
+<a href=""mailto:brownken323+22589@gmail.com"">brownken323+22589@gmail.com</a>
+<a href=""mailto:brownken323+26647@gmail.com"">brownken323+26647@gmail.com</a>
+<a href=""mailto:brownken323+678@gmail.com"">brownken323+678@gmail.com</a>
+<a href=""mailto:brownken323+31659@gmail.com"">brownken323+31659@gmail.com</a>
+<a href=""mailto:brownken323+5945@gmail.com"">brownken323+5945@gmail.com</a>
+<a href=""mailto:brownken323+13603@gmail.com"">brownken323+13603@gmail.com</a>
+<a href=""mailto:brownken323+4121@gmail.com"">brownken323+4121@gmail.com</a>
+<a href=""mailto:brownken323+12810@gmail.com"">brownken323+12810@gmail.com</a>
+<a href=""mailto:brownken323+28669@gmail.com"">brownken323+28669@gmail.com</a>
+<a href=""mailto:brownken323+22472@gmail.com"">brownken323+22472@gmail.com</a>
+<a href=""mailto:brownken323+4393@gmail.com"">brownken323+4393@gmail.com</a>
+<a href=""mailto:brownken323+1998@gmail.com"">brownken323+1998@gmail.com</a>
+<a href=""mailto:brownken323+18104@gmail.com"">brownken323+18104@gmail.com</a>
+<a href=""mailto:brownken323+12175@gmail.com"">brownken323+12175@gmail.com</a>
+<a href=""mailto:brownken323+1902@gmail.com"">brownken323+1902@gmail.com</a>
+<a href=""mailto:brownken323+13152@gmail.com"">brownken323+13152@gmail.com</a>
+<a href=""mailto:brownken323+26269@gmail.com"">brownken323+26269@gmail.com</a>
+<a href=""mailto:brownken323+2536@gmail.com"">brownken323+2536@gmail.com</a>
+<a href=""mailto:brownken323+28455@gmail.com"">brownken323+28455@gmail.com</a>
+<a href=""mailto:brownken323+23539@gmail.com"">brownken323+23539@gmail.com</a>
+<a href=""mailto:brownken323+27687@gmail.com"">brownken323+27687@gmail.com</a>
+<a href=""mailto:brownken323+2715@gmail.com"">brownken323+2715@gmail.com</a>
+<a href=""mailto:brownken323+24753@gmail.com"">brownken323+24753@gmail.com</a>
+<a href=""mailto:brownken323+30155@gmail.com"">brownken323+30155@gmail.com</a>
+<a href=""mailto:brownken323+12681@gmail.com"">brownken323+12681@gmail.com</a>
+<a href=""mailto:brownken323+7675@gmail.com"">brownken323+7675@gmail.com</a>
+<a href=""mailto:brownken323+6141@gmail.com"">brownken323+6141@gmail.com</a>
+<a href=""mailto:brownken323+2851@gmail.com"">brownken323+2851@gmail.com</a>
+<a href=""mailto:brownken323+28199@gmail.com"">brownken323+28199@gmail.com</a>
+<a href=""mailto:brownken323+8564@gmail.com"">brownken323+8564@gmail.com</a>
+<a href=""mailto:brownken323+4645@gmail.com"">brownken323+4645@gmail.com</a>
+<a href=""mailto:brownken323+7561@gmail.com"">brownken323+7561@gmail.com</a>
+<a href=""mailto:brownken323+17264@gmail.com"">brownken323+17264@gmail.com</a>
+<a href=""mailto:brownken323+17723@gmail.com"">brownken323+17723@gmail.com</a>
+<a href=""mailto:brownken323+2303@gmail.com"">brownken323+2303@gmail.com</a>
+<a href=""mailto:brownken323+20083@gmail.com"">brownken323+20083@gmail.com</a>
+<a href=""mailto:brownken323+18997@gmail.com"">brownken323+18997@gmail.com</a>
+<a href=""mailto:brownken323+24165@gmail.com"">brownken323+24165@gmail.com</a>
+<a href=""mailto:brownken323+17705@gmail.com"">brownken323+17705@gmail.com</a>
+<a href=""mailto:brownken323+18517@gmail.com"">brownken323+18517@gmail.com</a>
+<a href=""mailto:brownken323+26861@gmail.com"">brownken323+26861@gmail.com</a>
+<a href=""mailto:brownken323+3017@gmail.com"">brownken323+3017@gmail.com</a>
+<a href=""mailto:brownken323+21928@gmail.com"">brownken323+21928@gmail.com</a>
+<a href=""mailto:brownken323+29185@gmail.com"">brownken323+29185@gmail.com</a>
+<a href=""mailto:brownken323+14389@gmail.com"">brownken323+14389@gmail.com</a>
+<a href=""mailto:brownken323+30594@gmail.com"">brownken323+30594@gmail.com</a>
+<a href=""mailto:brownken323+665@gmail.com"">brownken323+665@gmail.com</a>
+<a href=""mailto:brownken323+2745@gmail.com"">brownken323+2745@gmail.com</a>
+<a href=""mailto:brownken323+470@gmail.com"">brownken323+470@gmail.com</a>
+<a href=""mailto:brownken323+18968@gmail.com"">brownken323+18968@gmail.com</a>
+<a href=""mailto:brownken323+11208@gmail.com"">brownken323+11208@gmail.com</a>
+<a href=""mailto:brownken323+25451@gmail.com"">brownken323+25451@gmail.com</a>
+<a href=""mailto:brownken323+32511@gmail.com"">brownken323+32511@gmail.com</a>
+<a href=""mailto:brownken323+18004@gmail.com"">brownken323+18004@gmail.com</a>
+<a href=""mailto:brownken323+22823@gmail.com"">brownken323+22823@gmail.com</a>
+<a href=""mailto:brownken323+9859@gmail.com"">brownken323+9859@gmail.com</a>
+<a href=""mailto:brownken323+24348@gmail.com"">brownken323+24348@gmail.com</a>
+<a href=""mailto:brownken323+3035@gmail.com"">brownken323+3035@gmail.com</a>
+<a href=""mailto:brownken323+23492@gmail.com"">brownken323+23492@gmail.com</a>
+<a href=""mailto:brownken323+20400@gmail.com"">brownken323+20400@gmail.com</a>
+<a href=""mailto:brownken323+10691@gmail.com"">brownken323+10691@gmail.com</a>
+<a href=""mailto:brownken323+28192@gmail.com"">brownken323+28192@gmail.com</a>
+<a href=""mailto:brownken323+13077@gmail.com"">brownken323+13077@gmail.com</a>
+<a href=""mailto:brownken323+30261@gmail.com"">brownken323+30261@gmail.com</a>
+<a href=""mailto:brownken323+11733@gmail.com"">brownken323+11733@gmail.com</a>
+<a href=""mailto:brownken323+17409@gmail.com"">brownken323+17409@gmail.com</a>
+<a href=""mailto:brownken323+14143@gmail.com"">brownken323+14143@gmail.com</a>
+<a href=""mailto:brownken323+4740@gmail.com"">brownken323+4740@gmail.com</a>
+<a href=""mailto:brownken323+3862@gmail.com"">brownken323+3862@gmail.com</a>
+<a href=""mailto:brownken323+23236@gmail.com"">brownken323+23236@gmail.com</a>
+<a href=""mailto:brownken323+2388@gmail.com"">brownken323+2388@gmail.com</a>
+<a href=""mailto:brownken323+20344@gmail.com"">brownken323+20344@gmail.com</a>
+<a href=""mailto:brownken323+3220@gmail.com"">brownken323+3220@gmail.com</a>
+<a href=""mailto:brownken323+5015@gmail.com"">brownken323+5015@gmail.com</a>
+<a href=""mailto:tylorfair112@gmail.com"">tylorfair112@gmail.com</a>
+<a href=""mailto:tylorfair112+29925@gmail.com"">tylorfair112+29925@gmail.com</a>
+<a href=""mailto:tylorfair112+23009@gmail.com"">tylorfair112+23009@gmail.com</a>
+<a href=""mailto:tylorfair112+15464@gmail.com"">tylorfair112+15464@gmail.com</a>
+<a href=""mailto:tylorfair112+26263@gmail.com"">tylorfair112+26263@gmail.com</a>
+<a href=""mailto:tylorfair112+5116@gmail.com"">tylorfair112+5116@gmail.com</a>
+<a href=""mailto:tylorfair112+7214@gmail.com"">tylorfair112+7214@gmail.com</a>
+<a href=""mailto:tylorfair112+2711@gmail.com"">tylorfair112+2711@gmail.com</a>
+<a href=""mailto:tylorfair112+31056@gmail.com"">tylorfair112+31056@gmail.com</a>
+<a href=""mailto:tylorfair112+4088@gmail.com"">tylorfair112+4088@gmail.com</a>
+<a href=""mailto:tylorfair112+28491@gmail.com"">tylorfair112+28491@gmail.com</a>
+<a href=""mailto:tylorfair112+18540@gmail.com"">tylorfair112+18540@gmail.com</a>
+<a href=""mailto:tylorfair112+2581@gmail.com"">tylorfair112+2581@gmail.com</a>
+<a href=""mailto:tylorfair112+27954@gmail.com"">tylorfair112+27954@gmail.com</a>
+<a href=""mailto:tylorfair112+27428@gmail.com"">tylorfair112+27428@gmail.com</a>
+<a href=""mailto:tylorfair112+4910@gmail.com"">tylorfair112+4910@gmail.com</a>
+<a href=""mailto:tylorfair112+20224@gmail.com"">tylorfair112+20224@gmail.com</a>
+<a href=""mailto:tylorfair112+25571@gmail.com"">tylorfair112+25571@gmail.com</a>
+<a href=""mailto:tylorfair112+12154@gmail.com"">tylorfair112+12154@gmail.com</a>
+<a href=""mailto:tylorfair112+16834@gmail.com"">tylorfair112+16834@gmail.com</a>
+<a href=""mailto:tylorfair112+16222@gmail.com"">tylorfair112+16222@gmail.com</a>
+<a href=""mailto:tylorfair112+16446@gmail.com"">tylorfair112+16446@gmail.com</a>
+<a href=""mailto:tylorfair112+1821@gmail.com"">tylorfair112+1821@gmail.com</a>
+<a href=""mailto:tylorfair112+18325@gmail.com"">tylorfair112+18325@gmail.com</a>
+<a href=""mailto:tylorfair112+2846@gmail.com"">tylorfair112+2846@gmail.com</a>
+<a href=""mailto:tylorfair112+14042@gmail.com"">tylorfair112+14042@gmail.com</a>
+<a href=""mailto:tylorfair112+28402@gmail.com"">tylorfair112+28402@gmail.com</a>
+<a href=""mailto:tylorfair112+4470@gmail.com"">tylorfair112+4470@gmail.com</a>
+<a href=""mailto:tylorfair112+7196@gmail.com"">tylorfair112+7196@gmail.com</a>
+<a href=""mailto:tylorfair112+32084@gmail.com"">tylorfair112+32084@gmail.com</a>
+<a href=""mailto:tylorfair112+3821@gmail.com"">tylorfair112+3821@gmail.com</a>
+<a href=""mailto:tylorfair112+7419@gmail.com"">tylorfair112+7419@gmail.com</a>
+<a href=""mailto:tylorfair112+5735@gmail.com"">tylorfair112+5735@gmail.com</a>
+<a href=""mailto:tylorfair112+26924@gmail.com"">tylorfair112+26924@gmail.com</a>
+<a href=""mailto:tylorfair112+24018@gmail.com"">tylorfair112+24018@gmail.com</a>
+<a href=""mailto:tylorfair112+10811@gmail.com"">tylorfair112+10811@gmail.com</a>
+<a href=""mailto:tylorfair112+17703@gmail.com"">tylorfair112+17703@gmail.com</a>
+<a href=""mailto:tylorfair112+1807@gmail.com"">tylorfair112+1807@gmail.com</a>
+<a href=""mailto:tylorfair112+25998@gmail.com"">tylorfair112+25998@gmail.com</a>
+<a href=""mailto:tylorfair112+18152@gmail.com"">tylorfair112+18152@gmail.com</a>
+<a href=""mailto:tylorfair112+26430@gmail.com"">tylorfair112+26430@gmail.com</a>
+<a href=""mailto:tylorfair112+4173@gmail.com"">tylorfair112+4173@gmail.com</a>
+<a href=""mailto:tylorfair112+17876@gmail.com"">tylorfair112+17876@gmail.com</a>
+<a href=""mailto:tylorfair112+2482@gmail.com"">tylorfair112+2482@gmail.com</a>
+<a href=""mailto:tylorfair112+22270@gmail.com"">tylorfair112+22270@gmail.com</a>
+<a href=""mailto:tylorfair112+721@gmail.com"">tylorfair112+721@gmail.com</a>
+<a href=""mailto:tylorfair112+7513@gmail.com"">tylorfair112+7513@gmail.com</a>
+<a href=""mailto:tylorfair112+23884@gmail.com"">tylorfair112+23884@gmail.com</a>
+<a href=""mailto:tylorfair112+11864@gmail.com"">tylorfair112+11864@gmail.com</a>
+<a href=""mailto:tylorfair112+31164@gmail.com"">tylorfair112+31164@gmail.com</a>
+<a href=""mailto:tylorfair112+30565@gmail.com"">tylorfair112+30565@gmail.com</a>
+<a href=""mailto:tylorfair112+25504@gmail.com"">tylorfair112+25504@gmail.com</a>
+<a href=""mailto:tylorfair112+20073@gmail.com"">tylorfair112+20073@gmail.com</a>
+<a href=""mailto:tylorfair112+27546@gmail.com"">tylorfair112+27546@gmail.com</a>
+<a href=""mailto:tylorfair112+23197@gmail.com"">tylorfair112+23197@gmail.com</a>
+<a href=""mailto:tylorfair112+20132@gmail.com"">tylorfair112+20132@gmail.com</a>
+<a href=""mailto:tylorfair112+24180@gmail.com"">tylorfair112+24180@gmail.com</a>
+<a href=""mailto:tylorfair112+1708@gmail.com"">tylorfair112+1708@gmail.com</a>
+<a href=""mailto:tylorfair112+26977@gmail.com"">tylorfair112+26977@gmail.com</a>
+<a href=""mailto:tylorfair112+28813@gmail.com"">tylorfair112+28813@gmail.com</a>
+<a href=""mailto:tylorfair112+9066@gmail.com"">tylorfair112+9066@gmail.com</a>
+<a href=""mailto:tylorfair112+26214@gmail.com"">tylorfair112+26214@gmail.com</a>
+<a href=""mailto:tylorfair112+19581@gmail.com"">tylorfair112+19581@gmail.com</a>
+<a href=""mailto:tylorfair112+18326@gmail.com"">tylorfair112+18326@gmail.com</a>
+<a href=""mailto:tylorfair112+14455@gmail.com"">tylorfair112+14455@gmail.com</a>
+<a href=""mailto:tylorfair112+31791@gmail.com"">tylorfair112+31791@gmail.com</a>
+<a href=""mailto:tylorfair112+32062@gmail.com"">tylorfair112+32062@gmail.com</a>
+<a href=""mailto:tylorfair112+26305@gmail.com"">tylorfair112+26305@gmail.com</a>
+<a href=""mailto:tylorfair112+6887@gmail.com"">tylorfair112+6887@gmail.com</a>
+<a href=""mailto:tylorfair112+15615@gmail.com"">tylorfair112+15615@gmail.com</a>
+<a href=""mailto:tylorfair112+28080@gmail.com"">tylorfair112+28080@gmail.com</a>
+<a href=""mailto:tylorfair112+19334@gmail.com"">tylorfair112+19334@gmail.com</a>
+<a href=""mailto:tylorfair112+8584@gmail.com"">tylorfair112+8584@gmail.com</a>
+<a href=""mailto:tylorfair112+23530@gmail.com"">tylorfair112+23530@gmail.com</a>
+<a href=""mailto:tylorfair112+3093@gmail.com"">tylorfair112+3093@gmail.com</a>
+<a href=""mailto:tylorfair112+13321@gmail.com"">tylorfair112+13321@gmail.com</a>
+<a href=""mailto:tylorfair112+21047@gmail.com"">tylorfair112+21047@gmail.com</a>
+<a href=""mailto:tylorfair112+22308@gmail.com"">tylorfair112+22308@gmail.com</a>
+<a href=""mailto:tylorfair112+16233@gmail.com"">tylorfair112+16233@gmail.com</a>
+<a href=""mailto:tylorfair112+7746@gmail.com"">tylorfair112+7746@gmail.com</a>
+<a href=""mailto:tylorfair112+108@gmail.com"">tylorfair112+108@gmail.com</a>
+<a href=""mailto:tylorfair112+12100@gmail.com"">tylorfair112+12100@gmail.com</a>
+<a href=""mailto:tylorfair112+7697@gmail.com"">tylorfair112+7697@gmail.com</a>
+<a href=""mailto:tylorfair112+10919@gmail.com"">tylorfair112+10919@gmail.com</a>
+<a href=""mailto:tylorfair112+4909@gmail.com"">tylorfair112+4909@gmail.com</a>
+<a href=""mailto:tylorfair112+21355@gmail.com"">tylorfair112+21355@gmail.com</a>
+<a href=""mailto:tylorfair112+26521@gmail.com"">tylorfair112+26521@gmail.com</a>
+<a href=""mailto:tylorfair112+31810@gmail.com"">tylorfair112+31810@gmail.com</a>
+<a href=""mailto:tylorfair112+58@gmail.com"">tylorfair112+58@gmail.com</a>
+<a href=""mailto:tylorfair112+27369@gmail.com"">tylorfair112+27369@gmail.com</a>
+<a href=""mailto:tylorfair112+8245@gmail.com"">tylorfair112+8245@gmail.com</a>
+<a href=""mailto:tylorfair112+19561@gmail.com"">tylorfair112+19561@gmail.com</a>
+<a href=""mailto:tylorfair112+20783@gmail.com"">tylorfair112+20783@gmail.com</a>
+<a href=""mailto:tylorfair112+29652@gmail.com"">tylorfair112+29652@gmail.com</a>
+<a href=""mailto:tylorfair112+16988@gmail.com"">tylorfair112+16988@gmail.com</a>
+<a href=""mailto:tylorfair112+15285@gmail.com"">tylorfair112+15285@gmail.com</a>
+<a href=""mailto:tylorfair112+24354@gmail.com"">tylorfair112+24354@gmail.com</a>
+<a href=""mailto:tylorfair112+9634@gmail.com"">tylorfair112+9634@gmail.com</a>
+<a href=""mailto:tylorfair112+13255@gmail.com"">tylorfair112+13255@gmail.com</a>
+<a href=""mailto:tylorfair112+12672@gmail.com"">tylorfair112+12672@gmail.com</a>
+<a href=""mailto:tylorfair112+22721@gmail.com"">tylorfair112+22721@gmail.com</a>
+<a href=""mailto:s.agency74@aol.com"">s.agency74@aol.com</a>"
+PbTcNyEU,Untitled,sissou123,Python,Thursday 9th of November 2023 11:54:50 AM CDT,"Mastering Python - From Novice to Ninja
+Learn Python with Machine Learning, Object Oriented Programming, Data Structures, Web Services, Multi-Threading and more
+for more:https://cuty.io/OmFPt"
+5TmNt8CY,Untitled,sissou123,Python,Thursday 9th of November 2023 11:41:53 AM CDT,"Professional Python Developer Bootcamp 2023
+Master Python by building real-world projects. Develop all the skills you need to find your first programming job.
+for more:https://cuty.io/2gMtI8zKU"
+S4PLPsTp,Knight_Rider 2.0,mike2545,Python,Thursday 9th of November 2023 11:38:19 AM CDT,"from machine import Pin, PWM
+from time import sleep
+
+led_pins = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+leds = [PWM(Pin(pin)) for pin in led_pins]
+
+fade_values = [65535, 20000, 15000, 8000, 0]
+delay = 0.08
+trailing_leds = 3
+
+while True:
+    # Fading in the forward direction
+    for i in range(len(leds)):
+        for j in range(trailing_leds + 1):
+            if i - j >= 0:
+                leds[i - j].duty_u16(fade_values[j])
+        sleep(delay)
+        for j in range(trailing_leds + 1):
+            if i - j >= 0:
+                leds[i - j].duty_u16(0)
+    
+    # Fading in the reverse direction
+    for i in range(len(leds) - 2, -1, -1):
+        for j in range(trailing_leds + 1):
+            if i + j < len(leds):
+                leds[i + j].duty_u16(fade_values[j])
+        sleep(delay)
+        for j in range(trailing_leds + 1):
+            if i + j < len(leds):
+                leds[i + j].duty_u16(0)
+
+"
+NWhi45iR,Untitled,sissou123,SQL,Thursday 9th of November 2023 11:36:54 AM CDT,"Database Bootcamp: SQL, Python, Integration, and MORE!
+Master SQL, Python, Integration, and Advanced Data Management Techniques for Comprehensive Data Analysis
+for more:https://cuty.io/IE0xEB"
+suwaWrdb,Amerlan TIX-441 test script,DooD13Z,Python,Thursday 9th of November 2023 11:34:05 AM CDT,"import json
+import logging
+from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
+from ticketsmgmt.core.utils import split_list_to_chunks_by_500
+from ticketsmgmt.event_scraper.scrapers.ticketmaster.models import (
+    TicketMasterScrapeSettings,
+)
+from ticketsmgmt.event.models import Event
+from ticketsmgmt.event.tasks import schedule_spider
+
+logger = logging.getLogger(""ticketsmgmt.event.tasks"")
+every = ""24""
+period = ""hours""
+logger.info(f""Starting periodic events scraping for period {every} {period}."")
+now = timezone.now()
+events = Event.objects.filter(
+    periodic_interval__every=every,
+    periodic_interval__period=period,
+    is_archived=False,
+)
+events = events.filter(
+    Q(event_date_time__isnull=True) | Q(event_date_time__gte=now)
+)
+events = events.filter(Q(paused_until__isnull=True) | Q(paused_until__lte=now))
+events = events.filter(event_scraper__name=""TicketMaster"").select_related('last_scrape_history').order_by('id')
+print(f""EVENTS COUNT BEFORE START: {events.count()}"")
+
+def save_initial_data(events, filename='initial_data.json'):
+    initial_data = {
+        f'{event.id}': event.last_scrape_history.date_time if event.last_scrape_history else None for event in events
+    }
+    with open(filename, 'w') as file:
+        json.dump(initial_data, file, default=str)
+
+
+def compare_data_after_run():
+    from datetime import datetime
+    import json
+    from ticketsmgmt.event.models import Event
+
+    start = datetime.now()
+    from copy import copy
+    with open('initial_data.json', 'r') as file:
+        initial_data = json.load(file)
+    new_initial_data = copy(initial_data)
+    print(f""Before check: {len(initial_data)}"")
+    cnt = 0
+    for event_id, history in initial_data.items():
+        try:
+            event = Event.objects.select_related(""last_scrape_history"").get(id=event_id)
+            if event.last_scrape_history and event.last_scrape_history.date_time > event.last_scrape_scheduled:
+                new_initial_data.pop(event_id)
+                cnt += 1
+                if cnt % 2000 == 0:
+                    print(f""dropped {cnt}"")
+                    with open('initial_data.json', 'w') as file:
+                        json.dump(new_initial_data, file, default=str)
+                        print(f""updated json"")
+        except:
+            print(f""Error: {event_id}"")
+
+    print(f""After check: {len(new_initial_data)}"")
+    with open('initial_data.json', 'w') as file:
+        json.dump(new_initial_data, file, default=str)
+    print(datetime.now() - start)
+    ids = [int(i) for i in list(new_initial_data.keys())]
+    print(""DONE"")
+    return Event.objects.filter(id__in=ids)
+
+
+
+def run_scrapy(events, force_event_details_update=False, is_tasks4=False):
+    scheduling_data = []
+    scheduling_data_tm = []
+    scheduled_events_ids = []
+    allowed = []
+    n_all = 0
+    for event in events:
+        if not event.is_scrape_allowed():
+            n_all += 1
+            continue
+
+        if event.event_scraper.name == ""TicketMaster"":
+            allowed.append(event.id)
+            scheduling_data_tm.append(
+                {
+                    ""url"": event.event_url,
+                    ""tixt_event_id"": event.id,
+                    ""discovery_id"": event.tm_discovery_id,
+                    ""force_event_details_update"": force_event_details_update,
+                }
+            )
+        else:
+            scheduling_data.append(
+                {
+                    ""spider_name"": event.event_scraper.name,
+                    ""url"": event.event_url,
+                    ""tixt_event_id"": event.id,
+                }
+            )
+        scheduled_events_ids.append(event.id)
+    print(f""NOT ALLOWED: {n_all}"")
+    schedule_chunks = split_list_to_chunks_by_500(scheduling_data_tm, chunk_size=500)
+    tm_scrape_settings = TicketMasterScrapeSettings.objects.first()
+    events_allowed = Event.objects.filter(id__in=allowed)
+    save_initial_data(events_allowed)
+    Event.objects.filter(id__in=events_allowed).update(
+        last_scrape_scheduled=timezone.now()
+    )
+    print(""UPDATED"")
+    for chunk in schedule_chunks:
+        if chunk:
+            scrapyd_server = ""http://192.168.50.38:6800""
+            try:
+
+                schedule_spider(
+                    scrapyd_server,
+                    settings.SCRAPYD_PROJECT,
+                    ""TicketMaster"",
+                    events=json.dumps(chunk),
+                    filter_out_offers_by_name=tm_scrape_settings.filter_out_offers_by_name,
+                )
+                logger.debug(
+                    ""Scheduled bulk of %s TM events, server - %s."",
+                    len(chunk),
+                    scrapyd_server,
+                )
+            except Exception as e:
+                logger.error(
+                    f""Could not schedule TM spider chunk on the server {scrapyd_server}"",
+                    exc_info=True,
+                )
+    return events_allowed
+
+events_to_check_scrapes = run_scrapy(events)
+"
+FzY0cBnM,Untitled,dllbridge,C,Thursday 9th of November 2023 11:05:22 AM CDT,"
+#include <stdio.h>
+
+
+char sz[19];
+
+int nCell[3];
+
+/////////////////////////////////////////////
+int main()                                 // 
+{
+	
+	
+    scanf(""%s"", sz); 
+
+    printf(""1st cell is : "");	 
+
+
+    int i = 0;
+
+    while(sz[i] != 0)
+    {
+		
+		
+		
+	   if(sz[i]   % 2)
+	   if(sz[i+1] % 2)      { printf(""black\n""); i+=2; break; }
+	   if(sz[i]   % 2 == 0)
+	   if(sz[i+1] % 2 == 0) { printf(""black\n""); i+=2; break; }
+		
+
+	   printf(""whaite\n"");
+	   
+	   nCell[1] = 1;
+	   
+	   i+=2;	
+	   
+	   break;	
+		
+	}
+
+    printf(""2nd cell is : "");
+	
+    while(sz[i] != 0)
+    {
+		
+	   if(sz[i]   % 2)
+	   if(sz[i+1] % 2)      { printf(""black\n""); i+=2; break; }
+	   if(sz[i]   % 2 == 0)
+	   if(sz[i+1] % 2 == 0) { printf(""black\n""); i+=2; break; }
+		
+
+	   printf(""whaite\n"");
+	   
+	   nCell[2] = 1;
+	   	
+	   break;	   	
+		
+	}
+
+
+    if(nCell[1] == nCell[2]) printf(""Yes, same colors.""         );
+	else                     printf(""Different colors of cells."");
+	
+return 0;
+}
+
+
+"
+1098LSm0,generatorv1,G0nz0uk,YAML,Thursday 9th of November 2023 10:59:20 AM CDT,"  modules:
+    module_name:  # The module name. You can have as many modules as you want.
+      walk:       # List of OIDs to walk. Can also be SNMP object names or specific instances.
+        - sysUpTime                  # Same as ""1.3.6.1.2.1.1.3""
+        - 1.3.6.1.4.1.33762.7.7.2.0  # back temp
+        - 1.3.6.1.4.1.33762.7.6.2.0  # Front of display temp
+
+      version: 2  # SNMP version to use. Defaults to 2.
+                  # 1 will use GETNEXT, 2 and 3 use GETBULK.
+      max_repetitions: 25  # How many objects to request with GET/GETBULK, defaults to 25.
+                          # May need to be reduced for buggy devices.
+      retries: 3   # How many times to retry a failed request, defaults to 3.
+      timeout: 5s  # Timeout for each individual SNMP request, defaults to 5s.
+
+      auth:
+        # Community string is used with SNMP v1 and v2. Defaults to ""public"".
+        community: public
+
+        # v3 has different and more complex settings.
+        # Which are required depends on the security_level.
+        # The equivalent options on NetSNMP commands like snmpbulkwalk
+        # and snmpget are also listed. See snmpcmd(1).
+        username: v1v2c_ro  # Required, no default. -u option to NetSNMP.
+        security_level: noAuthNoPriv  # Defaults to noAuthNoPriv. -l option to NetSNMP.
+                                      # Can be noAuthNoPriv, authNoPriv or authPriv.
+        password: public  # Has no default. Also known as authKey, -A option to NetSNMP.
+                        # Required if security_level is authNoPriv or authPriv.
+        auth_protocol: MD5  # MD5, SHA, SHA224, SHA256, SHA384, or SHA512. Defaults to MD5. -a option to NetSNMP.
+                            # Used if security_level is authNoPriv or authPriv.
+        priv_protocol: DES  # DES, AES, AES192, or AES256. Defaults to DES. -x option to NetSNMP.
+                            # Used if security_level is authPriv.
+        priv_password: otherPass # Has no default. Also known as privKey, -X option to NetSNMP.
+                                # Required if security_level is authPriv.
+        context_name: context # Has no default. -n option to NetSNMP.
+                              # Required if context is configured on the device.
+
+      lookups:  # Optional list of lookups to perform.
+                # The default for `keep_source_indexes` is false. Indexes must be unique for this option to be used.
+
+        # If the index of a table is bsnDot11EssIndex, usually that'd be the label
+        # on the resulting metrics from that table. Instead, use the index to
+        # lookup the bsnDot11EssSsid table entry and create a bsnDot11EssSsid label
+        # with that value.
+        - source_indexes: [bsnDot11EssIndex]
+          lookup: bsnDot11EssSsid
+          drop_source_indexes: false  # If true, delete source index labels for this lookup.
+                                      # This avoids label clutter when the new index is unique.
+
+        # It is also possible to chain lookups or use multiple labels to gather label values.
+        # This might be helpful to resolve multiple index labels to a proper human readable label.
+        # Please be aware that ordering matters here.
+
+        # In this example, we first do a lookup to get the `cbQosConfigIndex` as another label.
+        - source_indexes: [cbQosPolicyIndex, cbQosObjectsIndex]
+          lookup: cbQosConfigIndex
+        # Using the newly added label, we have another lookup to fetch the `cbQosCMName` based on `cbQosConfigIndex`.
+        - source_indexes: [cbQosConfigIndex]
+          lookup: cbQosCMName
+
+      overrides: # Allows for per-module overrides of bits of MIBs
+        metricName:
+          ignore: true # Drops the metric from the output.
+          regex_extracts:
+            Temp: # A new metric will be created appending this to the metricName to become metricNameTemp.
+              - regex: '(.*)' # Regex to extract a value from the returned SNMP walks's value.
+                value: '$1' # The result will be parsed as a float64, defaults to $1.
+            Status:
+              - regex: '.*Example'
+                value: '1' # The first entry whose regex matches and whose value parses wins.
+              - regex: '.*'
+                value: '0'
+          type: DisplayString # Override the metric type, possible types are:
+"
+HRLhTCXZ,Scripts Powershell - 2023,faelcolt,PowerShell,Thursday 9th of November 2023 10:52:16 AM CDT,"Abra o Powershell como administrador e digite: 
+
+""set-executionpolicy unrestricted""
+
+Pressione ""s"" e dê ENTER"
+uuErqBQ0,Exemplo Java,hercioneto,Java,Thursday 9th of November 2023 10:47:15 AM CDT,"public static void main(String[] args) {
+        String nome = ""Hercio Neto"";
+        Integer numero1;
+        Integer numero2;
+        Integer soma, sub, div, multi;
+        Integer numero3;
+        Scanner leitura = new Scanner(System.in);
+        numero1 = 10;
+        numero2 = 4;
+        soma = numero1 + numero2;
+        System.out.println(""Resultado da soma: ""+ soma);
+        System.out.println(""Nome: ""+ nome);
+        for (int i = 0; i <= soma; i++) {
+            System.out.println(""I vale: ""+ i);
+        }
+        System.out.println(""Digite um número:"");
+        numero3 = leitura.nextInt();
+        System.out.println(""Número lido: ""+ numero3);
+        //ler as variaveis numero1 e numero2, efetuar 
+        //a soma, a subtracao, multiplicacao e divisao
+        //mostrar os resultados
+        System.out.println(""Digite um número:"");
+        numero1 = leitura.nextInt();
+        System.out.println(""Digite outro número:"");
+        numero2 = leitura.nextInt();
+        soma = numero1 + numero2;
+        sub = numero1 - numero2;
+        multi = numero1 * numero2;
+        div = numero1 / numero2;
+        System.out.println(""Soma: ""+ soma);
+        System.out.println(""Subtração: ""+ sub);
+        System.out.println(""Multiplicação: ""+ multi);
+        System.out.println(""Divisão: ""+ div);
+        
+        
+    }"
+ybvJf1Hv,Nigerian scammers [9-11-1/2023],bombaires,AIMMS,Thursday 9th of November 2023 10:43:01 AM CDT,"<a href=""mailto:mssimabahous@aol.com"">mssimabahous@aol.com</a>
+<a href=""mailto:mracemrsmorgan555@gmail.com"">mracemrsmorgan555@gmail.com</a>
+<a href=""mailto:mr.a.cemr.smor.g.a.n5.55@gmail.com"">mr.a.cemr.smor.g.a.n5.55@gmail.com</a>
+<a href=""mailto:mra.ce.m.r.s.m.o.r.g.an.5.5.5@gmail.com"">mra.ce.m.r.s.m.o.r.g.an.5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ace.m.r.s.mo.rgan.55.5@gmail.com"">m.r.ace.m.r.s.mo.rgan.55.5@gmail.com</a>
+<a href=""mailto:mra.cem.rsm.o.r.g.an5.55@gmail.com"">mra.cem.rsm.o.r.g.an5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.e.mr.s.morg.an55.5@gmail.com"">m.ra.c.e.mr.s.morg.an55.5@gmail.com</a>
+<a href=""mailto:mrac.emr.s.m.o.r.g.a.n.555@gmail.com"">mrac.emr.s.m.o.r.g.a.n.555@gmail.com</a>
+<a href=""mailto:mracemr.smorg.a.n.5.5.5@gmail.com"">mracemr.smorg.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:m.ra.c.emrsmorgan.555@gmail.com"">m.ra.c.emrsmorgan.555@gmail.com</a>
+<a href=""mailto:m.ra.c.e.m.r.smor.g.an5.55@gmail.com"">m.ra.c.e.m.r.smor.g.an5.55@gmail.com</a>
+<a href=""mailto:m.r.a.c.emr.smo.rga.n.55.5@gmail.com"">m.r.a.c.emr.smo.rga.n.55.5@gmail.com</a>
+<a href=""mailto:mrac.em.rs.m.or.ga.n555@gmail.com"">mrac.em.rs.m.or.ga.n555@gmail.com</a>
+<a href=""mailto:m.r.a.c.e.m.rsm.or.gan5.55@gmail.com"">m.r.a.c.e.m.rsm.or.gan5.55@gmail.com</a>
+<a href=""mailto:m.r.ace.mrs.morg.an.5.5.5@gmail.com"">m.r.ace.mrs.morg.an.5.5.5@gmail.com</a>
+<a href=""mailto:m.ra.c.e.m.r.s.mo.r.ga.n555@gmail.com"">m.ra.c.e.m.r.s.mo.r.ga.n555@gmail.com</a>
+<a href=""mailto:mr.a.cem.r.s.m.o.r.g.a.n5.5.5@gmail.com"">mr.a.cem.r.s.m.o.r.g.a.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ac.e.m.rs.m.o.rga.n.55.5@gmail.com"">m.r.ac.e.m.rs.m.o.rga.n.55.5@gmail.com</a>
+<a href=""mailto:mr.ac.em.r.smorg.a.n555@gmail.com"">mr.ac.em.r.smorg.a.n555@gmail.com</a>
+<a href=""mailto:m.ra.ce.m.r.sm.org.a.n5.5.5@gmail.com"">m.ra.ce.m.r.sm.org.a.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ace.m.rsm.or.g.an5.55@gmail.com"">m.r.ace.m.rsm.or.g.an5.55@gmail.com</a>
+<a href=""mailto:mr.a.c.e.m.rsm.o.r.g.a.n5.55@gmail.com"">mr.a.c.e.m.rsm.o.r.g.a.n5.55@gmail.com</a>
+<a href=""mailto:m.r.a.cem.rsmo.rgan.55.5@gmail.com"">m.r.a.cem.rsmo.rgan.55.5@gmail.com</a>
+<a href=""mailto:mracemr.s.morg.an5.55@gmail.com"">mracemr.s.morg.an5.55@gmail.com</a>
+<a href=""mailto:mra.ce.m.r.sm.o.r.g.a.n.5.5.5@gmail.com"">mra.ce.m.r.sm.o.r.g.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:m.race.mrs.m.o.rga.n555@gmail.com"">m.race.mrs.m.o.rga.n555@gmail.com</a>
+<a href=""mailto:mr.ac.emr.s.mo.r.g.an5.55@gmail.com"">mr.ac.emr.s.mo.r.g.an5.55@gmail.com</a>
+<a href=""mailto:m.r.a.cem.rsmo.rgan5.55@gmail.com"">m.r.a.cem.rsmo.rgan5.55@gmail.com</a>
+<a href=""mailto:m.r.a.c.em.rsmo.rga.n5.5.5@gmail.com"">m.r.a.c.em.rsmo.rga.n5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.cemr.sm.o.rgan5.5.5@gmail.com"">mr.a.cemr.sm.o.rgan5.5.5@gmail.com</a>
+<a href=""mailto:mr.acemrs.m.o.rgan5.5.5@gmail.com"">mr.acemrs.m.o.rgan5.5.5@gmail.com</a>
+<a href=""mailto:m.racem.rsm.or.gan55.5@gmail.com"">m.racem.rsm.or.gan55.5@gmail.com</a>
+<a href=""mailto:m.ra.cem.rs.m.o.rgan.555@gmail.com"">m.ra.cem.rs.m.o.rgan.555@gmail.com</a>
+<a href=""mailto:mr.a.c.emrsmorga.n555@gmail.com"">mr.a.c.emrsmorga.n555@gmail.com</a>
+<a href=""mailto:mra.ce.mr.s.mor.g.an5.5.5@gmail.com"">mra.ce.mr.s.mor.g.an5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ace.m.r.s.m.o.rg.a.n.5.55@gmail.com"">m.r.ace.m.r.s.m.o.rg.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.r.ac.emrs.mo.r.gan.55.5@gmail.com"">m.r.ac.emrs.mo.r.gan.55.5@gmail.com</a>
+<a href=""mailto:mr.ac.e.m.rs.mor.ga.n55.5@gmail.com"">mr.ac.e.m.rs.mor.ga.n55.5@gmail.com</a>
+<a href=""mailto:m.r.ac.e.m.r.sm.org.an5.5.5@gmail.com"">m.r.ac.e.m.r.sm.org.an5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.e.m.rs.m.o.rg.a.n.5.55@gmail.com"">mra.c.e.m.rs.m.o.rg.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.rac.emrs.mor.gan.5.55@gmail.com"">m.rac.emrs.mor.gan.5.55@gmail.com</a>
+<a href=""mailto:mra.c.e.m.rs.m.o.r.g.an.555@gmail.com"">mra.c.e.m.rs.m.o.r.g.an.555@gmail.com</a>
+<a href=""mailto:mrac.emr.s.mo.r.ga.n555@gmail.com"">mrac.emr.s.mo.r.ga.n555@gmail.com</a>
+<a href=""mailto:mra.c.e.mrsm.o.rg.an5.55@gmail.com"">mra.c.e.mrsm.o.rg.an5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.em.r.sm.org.a.n.5.55@gmail.com"">m.ra.c.em.r.sm.org.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.r.a.c.em.r.s.mo.rg.an555@gmail.com"">m.r.a.c.em.r.s.mo.rg.an555@gmail.com</a>
+<a href=""mailto:mr.ac.e.mrsm.o.r.ga.n555@gmail.com"">mr.ac.e.mrsm.o.r.ga.n555@gmail.com</a>
+<a href=""mailto:m.racemr.s.mor.ga.n.555@gmail.com"">m.racemr.s.mor.ga.n.555@gmail.com</a>
+<a href=""mailto:mr.acem.r.s.m.o.rg.an5.5.5@gmail.com"">mr.acem.r.s.m.o.rg.an5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ace.m.rs.mo.r.g.a.n55.5@gmail.com"">m.r.ace.m.rs.mo.r.g.a.n55.5@gmail.com</a>
+<a href=""mailto:mrace.mrs.mor.gan.55.5@gmail.com"">mrace.mrs.mor.gan.55.5@gmail.com</a>
+<a href=""mailto:m.r.acem.rsmo.rgan5.5.5@gmail.com"">m.r.acem.rsmo.rgan5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.c.em.r.s.morg.a.n.55.5@gmail.com"">mr.a.c.em.r.s.morg.a.n.55.5@gmail.com</a>
+<a href=""mailto:mrac.em.r.smorg.an.555@gmail.com"">mrac.em.r.smorg.an.555@gmail.com</a>
+<a href=""mailto:mrac.emr.smo.rga.n5.55@gmail.com"">mrac.emr.smo.rga.n5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.e.mrsmo.rg.a.n5.5.5@gmail.com"">m.ra.c.e.mrsmo.rg.a.n5.5.5@gmail.com</a>
+<a href=""mailto:mrac.em.rs.mor.gan555@gmail.com"">mrac.em.rs.mor.gan555@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mrsm.org.a.n55.5@gmail.com"">mr.a.c.e.mrsm.org.a.n55.5@gmail.com</a>
+<a href=""mailto:mracem.r.s.m.org.a.n.5.55@gmail.com"">mracem.r.s.m.org.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.rac.e.m.rsm.o.rg.an55.5@gmail.com"">m.rac.e.m.rsm.o.rg.an55.5@gmail.com</a>
+<a href=""mailto:mr.a.ce.mrsm.org.a.n5.5.5@gmail.com"">mr.a.ce.mrsm.org.a.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ac.e.m.rs.morgan555@gmail.com"">m.r.ac.e.m.rs.morgan555@gmail.com</a>
+<a href=""mailto:mrac.emrsm.or.g.a.n5.55@gmail.com"">mrac.emrsm.or.g.a.n5.55@gmail.com</a>
+<a href=""mailto:mracem.rsm.o.rg.a.n.55.5@gmail.com"">mracem.rsm.o.rg.a.n.55.5@gmail.com</a>
+<a href=""mailto:m.ra.cemrsmor.g.a.n.5.5.5@gmail.com"">m.ra.cemrsmor.g.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mracemrs.m.orga.n.555@gmail.com"">mracemrs.m.orga.n.555@gmail.com</a>
+<a href=""mailto:mra.ce.m.rs.m.or.g.a.n.555@gmail.com"">mra.ce.m.rs.m.or.g.a.n.555@gmail.com</a>
+<a href=""mailto:m.r.a.ce.mr.sm.o.rg.an.5.55@gmail.com"">m.r.a.ce.mr.sm.o.rg.an.5.55@gmail.com</a>
+<a href=""mailto:mr.a.c.emrs.mo.r.g.an55.5@gmail.com"">mr.a.c.emrs.mo.r.g.an55.5@gmail.com</a>
+<a href=""mailto:m.ra.ce.m.rsmorg.an5.55@gmail.com"">m.ra.ce.m.rsmorg.an5.55@gmail.com</a>
+<a href=""mailto:m.ra.ce.mr.s.mo.rg.a.n.555@gmail.com"">m.ra.ce.mr.s.mo.rg.a.n.555@gmail.com</a>
+<a href=""mailto:mr.ac.e.m.rsmo.rg.a.n55.5@gmail.com"">mr.ac.e.m.rsmo.rg.a.n55.5@gmail.com</a>
+<a href=""mailto:m.ra.c.e.m.r.s.mo.rg.a.n.5.5.5@gmail.com"">m.ra.c.e.m.r.s.mo.rg.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.e.mrsmo.r.gan5.5.5@gmail.com"">mra.c.e.mrsmo.r.gan5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.c.e.m.r.s.mo.rgan555@gmail.com"">m.r.a.c.e.m.r.s.mo.rgan555@gmail.com</a>
+<a href=""mailto:m.r.a.c.e.m.rs.mo.r.gan555@gmail.com"">m.r.a.c.e.m.rs.mo.r.gan555@gmail.com</a>
+<a href=""mailto:m.r.a.cem.rsm.o.rga.n55.5@gmail.com"">m.r.a.cem.rsm.o.rga.n55.5@gmail.com</a>
+<a href=""mailto:m.r.ace.mr.sm.o.r.ga.n.55.5@gmail.com"">m.r.ace.mr.sm.o.r.ga.n.55.5@gmail.com</a>
+<a href=""mailto:mr.a.ce.m.r.sm.org.a.n.55.5@gmail.com"">mr.a.ce.m.r.sm.org.a.n.55.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.smor.ga.n5.5.5@gmail.com"">mr.a.c.e.mr.smor.ga.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.ac.e.mr.smo.r.gan.555@gmail.com"">m.r.ac.e.mr.smo.r.gan.555@gmail.com</a>
+<a href=""mailto:m.ra.cemrsm.o.rg.an5.5.5@gmail.com"">m.ra.cemrsm.o.rg.an5.5.5@gmail.com</a>
+<a href=""mailto:mr.acem.rsmo.r.ga.n.5.55@gmail.com"">mr.acem.rsmo.r.ga.n.5.55@gmail.com</a>
+<a href=""mailto:mra.cem.rsm.o.rga.n55.5@gmail.com"">mra.cem.rsm.o.rga.n55.5@gmail.com</a>
+<a href=""mailto:mr.ac.emr.smo.r.g.an.555@gmail.com"">mr.ac.emr.smo.r.g.an.555@gmail.com</a>
+<a href=""mailto:mra.ce.mr.smor.ga.n.5.55@gmail.com"">mra.ce.mr.smor.ga.n.5.55@gmail.com</a>
+<a href=""mailto:mra.c.emr.s.m.or.g.a.n.5.5.5@gmail.com"">mra.c.emr.s.m.or.g.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mrac.emrsmor.gan555@gmail.com"">mrac.emrsmor.gan555@gmail.com</a>
+<a href=""mailto:m.race.mr.smorg.a.n.555@gmail.com"">m.race.mr.smorg.a.n.555@gmail.com</a>
+<a href=""mailto:m.r.a.c.em.rs.m.or.ga.n555@gmail.com"">m.r.a.c.em.rs.m.or.ga.n555@gmail.com</a>
+<a href=""mailto:mrac.em.rsm.o.r.ga.n.555@gmail.com"">mrac.em.rsm.o.r.ga.n.555@gmail.com</a>
+<a href=""mailto:m.ra.ce.m.rsm.o.rg.a.n55.5@gmail.com"">m.ra.ce.m.rsm.o.rg.a.n55.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.m.rsm.organ.5.55@gmail.com"">mr.a.c.e.m.rsm.organ.5.55@gmail.com</a>
+<a href=""mailto:m.racemr.smor.gan.5.5.5@gmail.com"">m.racemr.smor.gan.5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.e.m.r.s.m.o.rgan5.5.5@gmail.com"">mra.c.e.m.r.s.m.o.rgan5.5.5@gmail.com</a>
+<a href=""mailto:mra.ce.m.r.s.m.org.a.n.5.5.5@gmail.com"">mra.ce.m.r.s.m.org.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.ace.mrsm.o.rg.a.n55.5@gmail.com"">mr.ace.mrsm.o.rg.a.n55.5@gmail.com</a>
+<a href=""mailto:mr.acem.rsmor.ga.n.5.55@gmail.com"">mr.acem.rsmor.ga.n.5.55@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.s.mor.g.an.5.55@gmail.com"">mr.a.c.e.mr.s.mor.g.an.5.55@gmail.com</a>
+<a href=""mailto:mra.c.emr.smo.rg.a.n.5.55@gmail.com"">mra.c.emr.smo.rg.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.rac.emrs.m.o.rg.an.555@gmail.com"">m.rac.emrs.m.o.rg.an.555@gmail.com</a>
+<a href=""mailto:mra.c.e.mrsm.or.g.an.5.5.5@gmail.com"">mra.c.e.mrsm.or.g.an.5.5.5@gmail.com</a>
+<a href=""mailto:m.ra.cem.rsmo.r.ga.n.555@gmail.com"">m.ra.cem.rsmo.r.ga.n.555@gmail.com</a>
+<a href=""mailto:mrac.em.rs.mo.r.g.an5.55@gmail.com"">mrac.em.rs.mo.r.g.an5.55@gmail.com</a>
+<a href=""mailto:mr.ac.em.r.s.m.o.r.gan5.55@gmail.com"">mr.ac.em.r.s.m.o.r.gan5.55@gmail.com</a>
+<a href=""mailto:m.r.ac.emrsmo.r.gan.55.5@gmail.com"">m.r.ac.emrsmo.r.gan.55.5@gmail.com</a>
+<a href=""mailto:m.ra.cemr.s.m.o.r.gan5.55@gmail.com"">m.ra.cemr.s.m.o.r.gan5.55@gmail.com</a>
+<a href=""mailto:mr.acemr.smo.rg.an.5.55@gmail.com"">mr.acemr.smo.rg.an.5.55@gmail.com</a>
+<a href=""mailto:mra.c.emrs.m.org.a.n.5.55@gmail.com"">mra.c.emrs.m.org.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.e.mrs.mo.r.g.a.n.5.5.5@gmail.com"">m.ra.c.e.mrs.mo.r.g.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.c.em.r.sm.o.rg.an.5.55@gmail.com"">mr.a.c.em.r.sm.o.rg.an.5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.em.rs.m.o.rga.n555@gmail.com"">m.ra.c.em.rs.m.o.rga.n555@gmail.com</a>
+<a href=""mailto:m.ra.c.emrsm.o.rg.an555@gmail.com"">m.ra.c.emrsm.o.rg.an555@gmail.com</a>
+<a href=""mailto:mr.acem.rsm.o.r.ga.n55.5@gmail.com"">mr.acem.rsm.o.r.ga.n55.5@gmail.com</a>
+<a href=""mailto:m.ra.cem.rs.mor.g.a.n.55.5@gmail.com"">m.ra.cem.rs.mor.g.a.n.55.5@gmail.com</a>
+<a href=""mailto:m.r.a.c.em.rsm.org.a.n55.5@gmail.com"">m.r.a.c.em.rsm.org.a.n55.5@gmail.com</a>
+<a href=""mailto:m.r.ac.emrs.m.org.a.n.5.5.5@gmail.com"">m.r.ac.emrs.m.org.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.em.r.sm.or.g.a.n.55.5@gmail.com"">mra.c.em.r.sm.or.g.a.n.55.5@gmail.com</a>
+<a href=""mailto:m.r.acemrsmo.rg.a.n55.5@gmail.com"">m.r.acemrsmo.rg.a.n55.5@gmail.com</a>
+<a href=""mailto:mr.a.c.emr.smor.ga.n5.55@gmail.com"">mr.a.c.emr.smor.ga.n5.55@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mrsm.orga.n555@gmail.com"">mr.a.c.e.mrsm.orga.n555@gmail.com</a>
+<a href=""mailto:mra.c.emr.smorg.a.n5.5.5@gmail.com"">mra.c.emr.smorg.a.n5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.e.m.r.s.mo.r.ga.n5.55@gmail.com"">mra.c.e.m.r.s.mo.r.ga.n5.55@gmail.com</a>
+<a href=""mailto:mr.a.cemr.s.morga.n.55.5@gmail.com"">mr.a.cemr.s.morga.n.55.5@gmail.com</a>
+<a href=""mailto:m.r.a.ce.m.r.s.m.org.an55.5@gmail.com"">m.r.a.ce.m.r.s.m.org.an55.5@gmail.com</a>
+<a href=""mailto:m.race.mrsmo.r.gan5.55@gmail.com"">m.race.mrsmo.r.gan5.55@gmail.com</a>
+<a href=""mailto:mr.a.cem.r.smorg.an5.55@gmail.com"">mr.a.cem.r.smorg.an5.55@gmail.com</a>
+<a href=""mailto:m.rac.em.rs.mo.r.g.an55.5@gmail.com"">m.rac.em.rs.mo.r.g.an55.5@gmail.com</a>
+<a href=""mailto:mra.cemr.smo.rga.n.5.55@gmail.com"">mra.cemr.smo.rga.n.5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.e.mrs.m.o.r.gan.5.55@gmail.com"">m.ra.c.e.mrs.m.o.r.gan.5.55@gmail.com</a>
+<a href=""mailto:mra.c.em.r.s.mor.g.a.n555@gmail.com"">mra.c.em.r.s.mor.g.a.n555@gmail.com</a>
+<a href=""mailto:mrac.e.m.rs.m.or.g.an5.55@gmail.com"">mrac.e.m.rs.m.or.g.an5.55@gmail.com</a>
+<a href=""mailto:m.r.a.cemr.s.morg.an.5.5.5@gmail.com"">m.r.a.cemr.s.morg.an.5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.ce.mr.sm.or.ga.n.555@gmail.com"">m.r.a.ce.mr.sm.or.ga.n.555@gmail.com</a>
+<a href=""mailto:m.rac.e.m.rs.morgan555@gmail.com"">m.rac.e.m.rs.morgan555@gmail.com</a>
+<a href=""mailto:m.ra.ce.mr.s.mo.r.g.a.n5.55@gmail.com"">m.ra.ce.mr.s.mo.r.g.a.n5.55@gmail.com</a>
+<a href=""mailto:mracem.rsm.o.r.g.an5.5.5@gmail.com"">mracem.rsm.o.r.g.an5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.e.mrsmo.r.ga.n.5.5.5@gmail.com"">mra.c.e.mrsmo.r.ga.n.5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.cemr.sm.o.r.gan5.5.5@gmail.com"">m.r.a.cemr.sm.o.r.gan5.5.5@gmail.com</a>
+<a href=""mailto:m.rac.emr.s.mo.r.gan.55.5@gmail.com"">m.rac.emr.s.mo.r.gan.55.5@gmail.com</a>
+<a href=""mailto:mrace.m.r.s.m.o.r.g.an55.5@gmail.com"">mrace.m.r.s.m.o.r.g.an55.5@gmail.com</a>
+<a href=""mailto:m.r.ace.m.r.s.m.o.rg.a.n555@gmail.com"">m.r.ace.m.r.s.m.o.rg.a.n555@gmail.com</a>
+<a href=""mailto:mrac.e.m.r.s.mo.rgan555@gmail.com"">mrac.e.m.r.s.mo.rgan555@gmail.com</a>
+<a href=""mailto:mra.cem.r.sm.o.r.ga.n5.5.5@gmail.com"">mra.cem.r.sm.o.r.ga.n5.5.5@gmail.com</a>
+<a href=""mailto:mra.ce.m.rsm.or.g.a.n55.5@gmail.com"">mra.ce.m.rsm.or.g.a.n55.5@gmail.com</a>
+<a href=""mailto:m.rac.em.r.sm.or.g.an555@gmail.com"">m.rac.em.r.sm.or.g.an555@gmail.com</a>
+<a href=""mailto:mr.acem.r.s.mo.rga.n5.5.5@gmail.com"">mr.acem.r.s.mo.rga.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.cem.r.sm.or.gan5.55@gmail.com"">m.r.a.cem.r.sm.or.gan5.55@gmail.com</a>
+<a href=""mailto:mra.ce.m.r.s.m.o.r.g.a.n.5.55@gmail.com"">mra.ce.m.r.s.m.o.r.g.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.r.a.c.emrsm.o.r.gan.55.5@gmail.com"">m.r.a.c.emrsm.o.r.gan.55.5@gmail.com</a>
+<a href=""mailto:m.r.acemr.smo.r.g.an5.5.5@gmail.com"">m.r.acemr.smo.r.g.an5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.c.e.mrs.m.o.r.ga.n555@gmail.com"">m.r.a.c.e.mrs.m.o.r.ga.n555@gmail.com</a>
+<a href=""mailto:mra.cemr.smo.r.g.a.n5.5.5@gmail.com"">mra.cemr.smo.r.g.a.n5.5.5@gmail.com</a>
+<a href=""mailto:m.r.a.c.em.r.smo.rg.an5.55@gmail.com"">m.r.a.c.em.r.smo.rg.an5.55@gmail.com</a>
+<a href=""mailto:m.ra.c.emr.s.morgan555@gmail.com"">m.ra.c.emr.s.morgan555@gmail.com</a>
+<a href=""mailto:m.ra.c.e.mr.s.morga.n.5.5.5@gmail.com"">m.ra.c.e.mr.s.morga.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.ace.mr.smor.gan.555@gmail.com"">mr.ace.mr.smor.gan.555@gmail.com</a>
+<a href=""mailto:mra.c.e.m.rsmo.rga.n55.5@gmail.com"">mra.c.e.m.rsmo.rga.n55.5@gmail.com</a>
+<a href=""mailto:mr.acem.rsm.o.rgan555@gmail.com"">mr.acem.rsm.o.rgan555@gmail.com</a>
+<a href=""mailto:mra.ce.mrs.m.org.an5.55@gmail.com"">mra.ce.mrs.m.org.an5.55@gmail.com</a>
+<a href=""mailto:m.race.mr.s.mor.gan555@gmail.com"">m.race.mr.s.mor.gan555@gmail.com</a>
+<a href=""mailto:mr.a.cemrsmo.rga.n.5.5.5@gmail.com"">mr.a.cemrsmo.rga.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.ac.e.m.rsm.o.r.ga.n.555@gmail.com"">mr.ac.e.m.rsm.o.r.ga.n.555@gmail.com</a>
+<a href=""mailto:m.ra.cemrsm.o.rg.an.5.55@gmail.com"">m.ra.cemrsm.o.rg.an.5.55@gmail.com</a>
+<a href=""mailto:m.racemr.s.mo.rgan5.5.5@gmail.com"">m.racemr.s.mo.rgan5.5.5@gmail.com</a>
+<a href=""mailto:m.rac.em.rsmo.r.gan.5.55@gmail.com"">m.rac.em.rsmo.r.gan.5.55@gmail.com</a>
+<a href=""mailto:mrace.m.r.sm.or.ga.n5.55@gmail.com"">mrace.m.r.sm.or.ga.n5.55@gmail.com</a>
+<a href=""mailto:mr.a.cem.r.s.m.o.r.g.an.5.55@gmail.com"">mr.a.cem.r.s.m.o.r.g.an.5.55@gmail.com</a>
+<a href=""mailto:m.r.ac.emrs.mor.ga.n.5.5.5@gmail.com"">m.r.ac.emrs.mor.ga.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.s.m.o.r.gan5.5.5@gmail.com"">mr.a.c.e.mr.s.m.o.r.gan5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.ce.m.r.sm.o.rgan.5.55@gmail.com"">mr.a.ce.m.r.sm.o.rgan.5.55@gmail.com</a>
+<a href=""mailto:m.rac.e.mr.sm.org.a.n555@gmail.com"">m.rac.e.mr.sm.org.a.n555@gmail.com</a>
+<a href=""mailto:m.ra.c.e.m.r.s.morg.an.555@gmail.com"">m.ra.c.e.m.r.s.morg.an.555@gmail.com</a>
+<a href=""mailto:mracemr.s.m.org.a.n.5.5.5@gmail.com"">mracemr.s.m.org.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mr.acem.rsmo.r.ga.n.55.5@gmail.com"">mr.acem.rsmo.r.ga.n.55.5@gmail.com</a>
+<a href=""mailto:m.ra.ce.m.r.sm.org.a.n.555@gmail.com"">m.ra.ce.m.r.sm.org.a.n.555@gmail.com</a>
+<a href=""mailto:m.r.ac.e.m.rs.m.o.rga.n55.5@gmail.com"">m.r.ac.e.m.rs.m.o.rga.n55.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.sm.o.r.ga.n5.55@gmail.com"">mr.a.c.e.mr.sm.o.r.ga.n5.55@gmail.com</a>
+<a href=""mailto:m.r.a.ce.m.r.s.m.organ.5.55@gmail.com"">m.r.a.ce.m.r.s.m.organ.5.55@gmail.com</a>
+<a href=""mailto:m.rac.em.rsm.o.rga.n5.5.5@gmail.com"">m.rac.em.rsm.o.rga.n5.5.5@gmail.com</a>
+<a href=""mailto:m.racemrsm.o.r.ga.n.555@gmail.com"">m.racemrsm.o.r.ga.n.555@gmail.com</a>
+<a href=""mailto:mra.ce.mr.s.mor.g.a.n55.5@gmail.com"">mra.ce.mr.s.mor.g.a.n55.5@gmail.com</a>
+<a href=""mailto:m.ra.ce.m.rs.m.or.g.an.55.5@gmail.com"">m.ra.ce.m.rs.m.or.g.an.55.5@gmail.com</a>
+<a href=""mailto:mr.a.ce.m.rs.mor.gan.55.5@gmail.com"">mr.a.ce.m.rs.mor.gan.55.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.sm.o.r.g.a.n.55.5@gmail.com"">mr.a.c.e.mr.sm.o.r.g.a.n.55.5@gmail.com</a>
+<a href=""mailto:mr.ac.em.r.smor.ga.n555@gmail.com"">mr.ac.em.r.smor.ga.n555@gmail.com</a>
+<a href=""mailto:mra.c.em.rsm.o.rg.a.n.5.55@gmail.com"">mra.c.em.rsm.o.rg.a.n.5.55@gmail.com</a>
+<a href=""mailto:m.racemr.smo.rgan5.5.5@gmail.com"">m.racemr.smo.rgan5.5.5@gmail.com</a>
+<a href=""mailto:m.r.acemr.s.m.o.rgan.5.55@gmail.com"">m.r.acemr.s.m.o.rgan.5.55@gmail.com</a>
+<a href=""mailto:m.rac.emrs.morga.n.5.55@gmail.com"">m.rac.emrs.morga.n.5.55@gmail.com</a>
+<a href=""mailto:m.r.ac.e.m.r.sm.or.ga.n5.55@gmail.com"">m.r.ac.e.m.r.sm.or.ga.n5.55@gmail.com</a>
+<a href=""mailto:mra.c.e.m.rs.mo.r.g.an.5.55@gmail.com"">mra.c.e.m.rs.mo.r.g.an.5.55@gmail.com</a>
+<a href=""mailto:m.race.m.r.s.mo.rg.a.n5.5.5@gmail.com"">m.race.m.r.s.mo.rg.a.n5.5.5@gmail.com</a>
+<a href=""mailto:mra.c.emrsmo.r.ga.n555@gmail.com"">mra.c.emrsmo.r.ga.n555@gmail.com</a>
+<a href=""mailto:mra.c.em.r.sm.o.rg.a.n.55.5@gmail.com"">mra.c.em.r.sm.o.rg.a.n.55.5@gmail.com</a>
+<a href=""mailto:mr.acemr.smor.gan55.5@gmail.com"">mr.acemr.smor.gan55.5@gmail.com</a>
+<a href=""mailto:mr.ace.m.r.smo.rg.an555@gmail.com"">mr.ace.m.r.smo.rg.an555@gmail.com</a>
+<a href=""mailto:m.race.mrs.m.o.r.g.a.n.5.5.5@gmail.com"">m.race.mrs.m.o.r.g.a.n.5.5.5@gmail.com</a>
+<a href=""mailto:mrac.e.m.r.smorg.an5.5.5@gmail.com"">mrac.e.m.r.smorg.an5.5.5@gmail.com</a>
+<a href=""mailto:mr.a.c.e.mr.sm.o.r.g.an555@gmail.com"">mr.a.c.e.mr.sm.o.r.g.an555@gmail.com</a>
+<a href=""mailto:m.r.a.ce.m.r.sm.or.g.a.n.5.55@gmail.com"">m.r.a.ce.m.r.sm.or.g.a.n.5.55@gmail.com</a>
+<a href=""mailto:mr.acem.rs.m.or.gan5.5.5@gmail.com"">mr.acem.rs.m.or.gan5.5.5@gmail.com</a>"
+TWD1Xk34,eval_is_evil.js,okpalan,JavaScript,Thursday 9th of November 2023 10:25:03 AM CDT,"const fs = require('fs');
+
+function runJSFile(filePath) {
+  fs.readFile(filePath, 'utf8', (err, data) => {
+    if (err) {
+      console.error('Error reading the file:', err);
+    } else {
+      try {
+        // Create the function object without using eval
+        const jsFunction = new Function(data);
+        // Call the function to execute the JavaScript code
+        jsFunction();
+      } catch (e) {
+        console.error('Error executing JavaScript code:', e);
+      }
+    }
+  });
+}
+
+// Replace 'path/to/your/javascript_file.js' with the actual path to your JavaScript file
+runJSFile('path/to/your/javascript_file.js');"
+DaRjZPhG,raytracer-worker.js,okpalan,JavaScript,Thursday 9th of November 2023 10:17:35 AM CDT,"self.addEventListener('message', function (e) {
+
+    var canvas = e.data[0];
+    var ctx = canvas.getContext('2d');
+    var imgData = ctx.createImageData(canvas.width, canvas.height);
+    var maxdepth = e.data[2];
+    var lights = e.data[3];
+function intersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+    var a1, a2, b1, b2, c1, c2;
+    var r1, r2, r3, r4;
+    var denom, offset, num;
+
+    a1 = y2 - y1;
+    b1 = x1 - x2;
+    c1 = (x2 * y1) - (x1 * y2);
+    r3 = ((a1 * x3) + (b1 * y3) + c1);
+    r4 = ((a1 * x4) + (b1 * y4) + c1);
+
+
+    a2 = y4 - y3;
+    b2 = x3 - x4;
+    c2 = (x4 * y3) - (x3 * y4);
+    r1 = (a2 * x1) + (b2 * y1) + c2;
+    r2 = (a2 * x2) + (b2 * y2) + c2;
+
+    denom = (r1 * r2) - (r3 * r4);
+    if (denom == 0) {
+        return false;
+    }
+
+    offset = Math.abs(denom / 2);
+
+    num = (r1 * r4) - (r2 * r3);
+    var x = (num < 0) ? ((num - offset) / denom) : ((num + offset) / denom);
+
+    num = (a1 * r4) - (a2 * r3);
+    var y = (num < 0) ? ((num - offset) / denom) : ((num + offset) / denom);
+
+    var point = new Point(x, y);
+
+    if (r1 == 0 || r2 == 0 || r3 == 0 || r4 == 0) {
+        return true;
+    } else {
+        return (r1 > 0 && r2 > 0 && r3 > 0 && r4 > 0) ||
+            (r1 < 0 && r2 < 0 && r3 < 0 && r4 < 0);
+    }
+}
+function typedArrayToURL(typedArray, mimeType) {
+    return URL.createObjectURL(new Blob([typedArray.buffer], {type: mimeType}))
+  }
+  
+  
+function trace(scene, ray, lights, depth) {
+    // check if the ray hits an object
+    // if so, calculate the color
+    // if not, return the background color
+    // check if the ray hits an object
+
+    var closest = findIntersection(scene.objects, ray);
+    if (closest) {
+        var point = ray.origin.add(ray.direction.multiply(closest.distance));
+        var normal = closest.object.normalAt(point);
+        var lambertAmount = 0;
+
+        for (var i = 0; i < lights.length; i++) {
+            var lightDirection = lights[i].position.subtract(point).normalize();
+            var shadowOrigin = lightDirection.dot(normal) < 0 ? point.subtract(normal.multiply(1e-3)) : point.add(normal.multiply(1e-3));
+            var shadowRay = new Ray(shadowOrigin, lightDirection);
+            var inShadow = findIntersection(scene.objects, shadowRay);
+            if (inShadow && inShadow.distance < lights[i].position.subtract(shadowOrigin).magnitude()) {
+                lambertAmount = 0;
+            }
+            else {
+                lambertAmount += lights[i].intensity * Math.max(0, lightDirection.dot(normal));
+            }
+        }
+        var color = closest.object.color;
+        var finalColor = color.multiply(scene.ambientLight).add(color.multiply(lambertAmount));
+        var specularAmount = 0;
+        var reflectDirection = ray.direction.subtract(normal.multiply(2 * ray.direction.dot(normal))).normalize();
+        var reflectRay = new Ray(point.add(reflectDirection.multiply(1e-3)), reflectDirection);
+        var reflectColor = trace(scene, reflectRay, lights, depth + 1);
+        if (reflectColor && depth <= maxDepth) {
+            specularAmount = Math.pow(Math.max(0, -reflectDirection.dot(ray.direction)), closest.object.specularExponent);
+        }
+        finalColor = finalColor.add(reflectColor.multiply(closest.object.reflectivity).multiply(specularAmount));
+        return finalColor;
+    }
+    else {
+        return null;
+    }
+}
+
+function findIntersection(objects, ray) {
+    var closest = Infinity;
+    var closestInter = null;
+    for (var i = 0; i < objects.length; i++) {
+        var inter = objects[i].intersect(ray);
+        if (inter != null && inter.distance < closest) {
+            closestInter = inter;
+            closest = inter.distance;
+        }
+    }
+    return closestInter;
+}
+    for (var i = 0; i < e.data[4].length; i++) {
+        var ray = e.data[4][i];
+        var color = trace(e.data[1], ray, lights, maxdepth);
+        if (color) {
+            imgData.data[i * 4] = color[0];
+            imgData.data[i * 4 + 1] = color[1];
+            imgData.data[i * 4 + 2] = color[2];
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    postMessage(""Finished"");
+}, false);"
+AZbZehKe,pagerank.py,okpalan,C,Thursday 9th of November 2023 10:14:45 AM CDT,"def compute_pagerank(graph, damping_factor=0.85, max_iterations=100):
+    """"""
+    Compute the PageRank of each node in the graph.
+    
+    Parameters
+    ----------
+    graph : dict
+        A dictionary representing the structure of the graph. The keys are
+        the nodes in the graph, and the values are a list of the nodes that
+        are connected to that node.
+    damping_factor : float
+        The damping factor for the PageRank algorithm.
+    max_iterations : int
+        The maximum number of iterations to perform before stopping.
+    
+    Returns
+    -------
+    dict
+        A dictionary mapping each node in the graph to its PageRank score.
+    """"""
+    
+    # Check for invalid damping factor
+    if damping_factor <= 0 or damping_factor >= 1:
+        raise ValueError(""Invalid damping factor"")
+    
+    # Initialize the PageRank of each node to 1
+    pagerank = {node: 1 for node in graph.keys()}
+    
+    # Perform the PageRank algorithm for the given number of iterations
+    for _ in range(max_iterations):
+        for node in graph.keys():
+            
+            # Compute the sum of the PageRank scores of the nodes that are
+            # connected to this node
+            pagerank_sum = 0
+            for neighbor in graph[node]:
+                pagerank_sum += pagerank[neighbor]
+            
+            # Update the PageRank of this node
+            pagerank[node] = (1 - damping_factor) + \
+                (damping_factor * pagerank_sum)
+    
+    return pagerank
+
+driver code.
+
+
+# Create a graph
+graph = {
+    ""A"": [""B"", ""C""],
+    ""B"": [""A"", ""C"", ""D""],
+    ""C"": [""A"", ""B"", ""D"", ""E""],
+    ""D"": [""B"", ""C"", ""E"", ""F""],
+    ""E"": [""C"", ""D""],
+    ""F"": [""D""]
+}
+
+# Compute the PageRank scores
+pagerank = compute_pagerank(graph)
+
+# Print the PageRank scores
+for node, score in pagerank.items():
+    print(node, "":"", score)"
+GfccEs6w,local-echo.c,okpalan,C,Thursday 9th of November 2023 10:12:49 AM CDT,"#include <stdio.h>
+#include <stdlib.h>
+
+
+int main(void)
+{
+    int c;
+    while ((c = getchar()) != EOF)
+        putchar(c);
+    return 0;
+}"
+Yf8LxPCZ,Flask + SocketIO + Watchdog: HTML template,TheAgedProfessor,HTML,Thursday 9th of November 2023 10:10:50 AM CDT,"<!doctype html>
+<html lang=""en"">
+<head>
+    <meta charset=""utf-8"">
+    <title>Socket Testing</title>
+</head>
+
+<body>
+    <h1>Socket Test</h1>
+    <p>Turn on JS console to view socket messages</p>
+</body>
+
+<script src=""https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js""
+   integrity=""sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==""
+   crossorigin=""anonymous"" referrerpolicy=""no-referrer""></script>
+
+<script src=""https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"" integrity=""sha512-zoJXRvW2gC8Z0Xo3lBbao5+AS3g6YWr5ztKqaicua11xHo+AvE1b0lT9ODgrHTmNUxeCw0Ry4BGRYZfXu70weg=="" crossorigin=""anonymous"" referrerpolicy=""no-referrer""></script>
+
+<script>
+
+var namespace = '/sockettest';
+
+console.log(""SOCKET CREATE:"");
+connection_path = location.protocol + '//' + document.domain + ':' + location.port + namespace
+console.log(connection_path);
+var socket = io.connect(connection_path);
+console.log(socket);
+
+socket.on('file_event', function(msg) {
+    console.log(""file_event"")
+    console.log(msg);
+});
+
+socket.on('done_loading', function(msg) {
+    console.log(""done_loading"");
+    console.log(msg);
+});
+
+socket.on('socket_response', function(msg) {
+    console.log(""socket_response"");
+    console.log(msg);
+});
+
+</script>
+</html>"
+BSjzJTGH,Flask + SocketIO + Watchdog: app.py,TheAgedProfessor,Python,Thursday 9th of November 2023 10:09:08 AM CDT,"from flask import Flask, render_template
+from flask_socketio import SocketIO, emit, disconnect
+
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+import time
+import threading
+
+ACTIVE_DEBUG = True
+
+async_mode = None
+
+watcher_thread = None
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app, async_mode=async_mode)
+
+# new class for background thread
+class FileHandler(FileSystemEventHandler):
+    def __init__(self, pattern=None):
+        print(""FileHandler:__init__"")
+        self.pattern = pattern or ("".txt"")
+        self.dummyThread = None
+
+    def on_any_event(self, event):
+        print(""FileHandler:on_any_event"")
+        print(event)
+        if not event.is_directory and event.src_path.endswith(self.pattern):
+            socketio.emit('socket_response',
+                {'data': 'file event',
+                'file': event.src_path},namespace=""/sockettest"")
+
+    def start(self):
+        print(""FileHandler:start"")
+        self.dummyThread = threading.Thread(target=self._process)
+        self.dummyThread.daemon = True
+        self.dummyThread.start()
+
+    def _process(self):
+        while True:
+            time.sleep(1)
+
+
+fileHandler = FileHandler()
+fileHandler.start()
+
+eventlist_flag = 0
+eventlist = []
+
+def fileObserver():
+    observer = Observer()
+    observer.schedule(fileHandler, '/home/pi/test_file.txt')
+    observer.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+
+@socketio.on('connect', namespace='/sockettest')
+def sockettest_connect():
+    print(""CALL sockettest_connect"")
+    emit('socket_response',
+         {'data': 'Connected'})
+    emit('done_loading',
+         {'data': 'Done Loading'})
+
+@socketio.on('disconnect', namespace='/sockettest')
+def sockettest_disconnect():
+    print(""CALL sockettest_disconnect"")
+    print('Client disconnected')
+
+@socketio.on('disconnect_request', namespace='/sockettest')
+def sockettest_disconnect_request(message):
+    print(""CALL sockettest_disconnect_request"")
+    emit('socket_response',
+         {'data': 'Disconnected!'})
+    disconnect()
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+if __name__ == '__main__':
+    watcher_thread = threading.Thread(target=fileObserver)
+    watcher_thread.start()
+    socketio.run(app, debug=ACTIVE_DEBUG,host='0.0.0.0')
+    watcher_thread.join()"
