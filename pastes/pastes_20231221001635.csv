@@ -1,0 +1,3588 @@
+id,title,username,language,date,content
+JVTephnB,Inverse Kinematics,Mangus875,JavaScript,Wednesday 20th of December 2023 06:15:22 PM CDT,"/*
+<html><head>
+<style>
+	::root, body {
+		background-color: #333;
+		
+		--segment-length: 50px;
+		--segment-width:  10px;
+	}
+
+	div {
+		position: absolute;
+		width: 50px;
+		height: 50px;
+		
+		background-color: #1fc0cf;
+	}
+
+	.arm {
+		width: var(--segment-length);
+		height: var(--segment-width);
+		
+		left: 100%;
+		top: 50%;
+		transform-origin: left center;
+		transform: translateY(-50%);
+	}
+
+	:not(.arm) > .arm {
+		left: 50%;
+	}
+</style>
+</head>
+	
+<body>
+</body></html>
+*/
+
+/****  HACK: shorthand for loop
+  *	
+  * Syntax:
+  *	from(min).to(max).run(callbackFn)
+  *	
+  * Parameters:
+  *		min
+  *			index to start the loop at
+  *	
+  *		max
+  *			index to end the loop at
+  *	
+  *		callbackFn
+  *			function to execute in the loop
+  *	
+  *	Equivalent to:
+  *		for (let i = min; i < max; i++) {
+	*			callbackFn(i);
+	*		}
+  *	
+***/
+
+function from(min) {
+	let fromObj = [];
+	fromObj.to = (max) => {
+		let toObj = {};
+		toObj.run = (callbackFn) => {
+			if (min > max) throw new RangeError(`loop start must be below loop max`);
+			let results = [];
+			for (let i = min; i < max; i++) {
+				results.push(callbackFn(i));
+			}
+		}
+		return toObj;
+	}
+	return fromObj;
+}
+
+function getType(obj) {
+    if (obj === null) return 'null';
+    if (obj === undefined) return 'undefined';
+    return obj.__proto__.constructor.name;
+}
+
+function from(min) {
+	let fromObj = [];
+	fromObj.to = (max) => {
+		let toObj = {};
+		toObj.run = (statement) => {
+			if (min > max) throw new RangeError(`loop start must be below loop max`)
+			for (let i = min; i <= max; i++) {
+				statement(i);
+			}
+		}
+		return toObj;
+	}
+	return fromObj;
+}
+
+function desmosLerp(a,b) {
+	if (getType(a) != getType(b)) throw new TypeError(`cannot lerp between a point and a number`);
+	if (getType(a) == ""Vector2"") {
+		a = a.toString(10000);
+		// a.replace(""("", ""\\left("");
+		// a.replace("")"", ""\\right)"");
+		// a.replace("" "", """");
+		b = b.toString(10000);
+		// b.replace(""("", ""\\left("");
+		// b.replace("")"", ""\\right)"");
+		// b.replace("" "", """");
+	}
+	return `l_{erp}(t,${a},${b})`
+}
+
+function desmosify(points, lerp, name) {
+	let result = name[0]+""_{""+name.substring(1)+""}=\\left["";
+	
+	for (let i = 0; i < points.length; i++) {
+		let pt = points[i];
+		if (i == points.length-1 && lerp) continue;
+		if (lerp) {
+			result += desmosLerp(points[i], points[i+1]);
+			result += (i != points.length-2 ? ',' : '');
+			continue;
+		}
+		result += pt.toString(10000);
+		result += (i != points.length-1 ? ',' : '');
+	}
+	/*
+	points.forEach((pt,i) => {
+		if (lerp) {
+			result += desmosLerp(pt
+		}
+		result += pt.toString(10000);
+		result += (i != points.length-1 ? ',' : '');
+	});
+	*/
+	result += ""\\right]"";
+	// result.replaceAll(""("", ""\\left("");
+	// result.replaceAll("")"", ""\\right)"");
+	result.replaceAll("" "", """");
+	return result;
+}
+
+function roundTo(n,p=1) {
+	return Math.round(n*p)/p;
+}
+
+class Vector2 {
+	constructor(x=0, y=0) {
+		this.x = x;
+		this.y = y;
+	}
+	
+	static copy(v) {
+		return new Vector2(v.x, v.y);
+	}
+	
+	static add(v1, v2) {
+		return new Vector2(v1.x+v2.x, v1.y+v2.y);
+	}
+	
+	static sub(v1, v2) {
+		return new Vector2(v1.x-v2.x, v1.y-v2.y);
+	}
+	
+	add(v) {
+		this.x += v.x;
+		this.y += v.y;
+		return this;
+	}
+	
+	sub(v) {
+		this.x -= v.x;
+		this.y -= v.y;
+		return this;
+	}
+	
+	mult(s) {
+		this.x *= s;
+		this.y *= s;
+		return this;
+	}
+	
+	normalize() {
+		this.mult(1/this.magnitude);
+		return this;
+	}
+	
+	get magnitude() {
+		return Math.sqrt(this.x**2 + this.y**2);
+	}
+	
+	set magnitude(mag) {
+		this.normalize();
+		this.mult(mag);
+	}
+	
+	moveTo(v) {
+		this.x = v.x;
+		this.y = v.y;
+	}
+	
+	toString(d=100) {
+		return `(${roundTo(this.x, d)}, ${roundTo(this.y, d)})`;
+	}
+}
+
+const rad = deg => deg*Math.PI / 180;
+const deg = rad => 180*rad / Math.PI;
+
+function polar(...pt) {
+	let x,y;
+	if (pt.length == 1) {
+		x = pt[0].x;
+		y = pt[0].y;
+	} else {
+		x = pt[0];
+		y = pt[1];
+	}
+	let coord = [];
+	coord.r = Math.sqrt(x*x + y*y);
+	coord.theta = Math.atan(y,x);
+	return coord;
+}
+
+function car(r,theta) {
+	let x,y;
+	x = r*Math.cos(theta);
+	y = r*Math.sin(theta);
+	return [x,y];
+}
+
+function getAngles(points, degrees=false) {
+	let angs = [];
+	for (let i = 0; i < points.length; i++) {
+		let pt1 = points[i];
+		let pt2 = points[i-1] || new Vector2();
+		
+		let angle = polar(Vector2.sub(pt1, pt2)).theta;
+		if (degrees) angle = deg(angle.radians);
+		
+		angs.push(angle);
+	}
+	return angs;
+}
+
+function getLengths(points) {
+	let lengths = [];
+	for (let i = 0; i < points.length; i++) {
+		let pt1 = points[i];
+		let pt2 = points[i-1] || new Vector2();
+		
+		let dist = polar(Vector2.sub(pt1, pt2)).r;
+		lengths.push(dist);
+	}
+	return lengths;
+}
+
+class arm {
+	constructor(...points) {
+		this.points = points;
+		this.lengths = getLengths(this.points);
+		this.angles = getAngles(this.points);
+	}
+	
+	reach(target, iterations=1) {
+		let origin = Vector2.copy(this.points[0]);
+		for (let n = 0; n < iterations; n++) {
+			this.points[this.points.length-1].moveTo(target);
+			for (let i = this.points.length-2; i >= 0; i--) {
+				this.points[i].moveTo(Vector2.sub(this.points[i],this.points[i+1]).normalize().mult(this.lengths[i+1]).add(this.points[i+1]));
+			}
+			this.points[0].moveTo(origin);
+			for (let i = 1; i < this.points.length; i++) {
+				this.points[i].moveTo(Vector2.sub(this.points[i],this.points[i-1]).normalize().mult(this.lengths[i]).add(this.points[i-1]));
+			}
+		}
+		
+		this.updateAngles();
+	}
+	
+	updateAngles() {
+		this.angles = getAngles(this.points);
+	}
+}
+
+function createArm(segs) {
+	
+}
+window.onload = () => {
+	
+}
+let segs = []
+for (let i = 0; i < 5; i++) {
+	segs.push(new Vector2(i, 0));
+}
+let ikArm = new arm(...segs);
+
+ikArm.reach(new Vector2(0, 100), 100);
+console.log(ikArm.angles);
+
+ikArm.angles.forEach((a,i) => {
+	let targSel = ""> .arm"";
+	let baseTransform = ""translateY(-50%)"";
+	let sel = ':not(.arm) ';
+	from(0).to(i).run(_=>sel += targSel+' ');
+	sel = sel.trim();
+	
+	document.querySelector(sel).style.transform = `${baseTransform} rotate(${a}rad)`;
+});
+
+// <div class='arm'></div>"
+vEkHDjqV,2023-12-20_stats.json,rdp_snitch,JSON,Wednesday 20th of December 2023 06:15:09 PM CDT,"{
+  ""ip"": {
+    ""147.78.47.31"": 3,
+    ""161.49.95.180"": 2,
+    ""194.165.16.37"": 2,
+    ""62.122.184.188"": 3,
+    ""62.204.41.208"": 6,
+    ""80.66.76.92"": 2,
+    ""198.235.24.165"": 3,
+    ""64.227.155.120"": 1,
+    ""87.251.75.145"": 3,
+    ""167.94.145.56"": 1,
+    ""185.170.144.113"": 3,
+    ""46.219.77.107"": 1,
+    ""58.218.204.183"": 5,
+    ""209.222.98.33"": 4,
+    ""87.251.75.120"": 2,
+    ""80.66.76.80"": 4,
+    ""198.235.24.43"": 3,
+    ""3.16.147.134"": 1,
+    ""113.160.91.206"": 1,
+    ""165.154.11.139"": 1,
+    ""110.86.3.66"": 1,
+    ""165.154.120.30"": 1,
+    ""45.227.254.54"": 2,
+    ""198.235.24.181"": 3,
+    ""185.170.144.3"": 1,
+    ""37.34.179.6"": 1,
+    ""193.37.69.79"": 3,
+    ""103.77.214.248"": 126,
+    ""51.75.160.42"": 2,
+    ""198.235.24.82"": 3
+  },
+  ""asn"": {
+    ""AS209588"": 3,
+    ""AS17639"": 2,
+    ""AS48721"": 2,
+    ""AS57523"": 3,
+    ""AS59425"": 6,
+    ""AS208091"": 14,
+    ""AS396982"": 12,
+    ""AS14061"": 1,
+    ""AS398705"": 1,
+    ""AS197414"": 4,
+    ""AS31148"": 1,
+    ""AS4134"": 6,
+    ""AS23470"": 4,
+    ""AS16509"": 1,
+    ""AS45899"": 1,
+    ""AS135377"": 2,
+    ""AS267784"": 2,
+    ""AS42961"": 1,
+    ""AS140810"": 126,
+    ""AS16276"": 2
+  },
+  ""isp"": {
+    ""Flyservers S.A."": 7,
+    ""Converge ICT Solution Inc"": 2,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Horizon LLC"": 6,
+    ""Xhost Internet Solutions LP"": 15,
+    ""Google LLC"": 12,
+    ""DigitalOcean, LLC"": 1,
+    ""Censys, Inc."": 1,
+    ""o3 core"": 1,
+    ""Chinanet"": 6,
+    ""ReliableSite.Net LLC"": 4,
+    ""Amazon.com, Inc."": 1,
+    ""VietNam Post and Telecom Corporation"": 1,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Mobile Telecommunications Company"": 1,
+    ""Xhost Internet Solutions"": 3,
+    ""Megacore Technology Company Limited"": 126,
+    ""OVH SAS"": 2
+  },
+  ""org"": {
+    ""Flyservers S.A"": 5,
+    ""Converge ICT Solution Inc"": 2,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Horizon LLC"": 6,
+    ""Xhost Internet Solutions"": 11,
+    ""Palo Alto Networks, Inc"": 12,
+    ""DigitalOcean, LLC"": 1,
+    ""Censys, Inc."": 1,
+    ""Xhostis"": 4,
+    ""Unknown"": 1,
+    ""Chinanet JS"": 5,
+    ""ReliableSite.Net LLC"": 4,
+    ""AWS EC2 (us-east-2)"": 1,
+    ""Vietnam Posts and Telecommunications Group"": 1,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Chinanet FJ"": 1,
+    ""UAB Host Baltic"": 2,
+    ""Zain"": 1,
+    ""XHOSTIS"": 3,
+    ""Vinasite Viet NAM Company Limited"": 126,
+    ""OVH Ltd"": 2
+  },
+  ""regionName"": {
+    ""North Holland"": 15,
+    ""Metro Manila"": 2,
+    ""Kaunas"": 2,
+    ""Moscow"": 9,
+    ""England"": 8,
+    ""California"": 12,
+    ""Karnataka"": 1,
+    ""Hesse"": 1,
+    ""Zhytomyr"": 1,
+    ""Jiangsu"": 5,
+    ""New Jersey"": 4,
+    ""Ohio"": 1,
+    ""Hanoi"": 127,
+    ""Lagos"": 1,
+    ""Fujian"": 1,
+    ""Bangkok"": 1,
+    ""Vilnius"": 2,
+    ""Hawalli"": 1
+  },
+  ""country"": {
+    ""The Netherlands"": 15,
+    ""Philippines"": 2,
+    ""Lithuania"": 4,
+    ""Russia"": 9,
+    ""United Kingdom"": 8,
+    ""United States"": 17,
+    ""India"": 1,
+    ""Germany"": 1,
+    ""Ukraine"": 1,
+    ""China"": 6,
+    ""Vietnam"": 127,
+    ""Nigeria"": 1,
+    ""Thailand"": 1,
+    ""Kuwait"": 1
+  },
+  ""account"": {
+    ""Administr"": 18,
+    ""hello"": 140,
+    ""Test"": 10,
+    ""QKMsgPoEl"": 1,
+    ""bZjtiq"": 1,
+    ""rJomAB"": 1,
+    ""(empty)"": 2,
+    ""Domain"": 10,
+    ""xPAigoGNF"": 1,
+    ""bKMctZ"": 1,
+    ""Vbcepu"": 1,
+    ""nmap"": 1,
+    ""Administrator"": 1,
+    ""JyvCwrwXO"": 1,
+    ""aCjmwT"": 1,
+    ""uDmjCZ"": 1,
+    ""BQOQsfdiB"": 1,
+    ""FHrzrK"": 1,
+    ""pFnjcb"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 194
+  },
+  ""client_build"": {
+    ""Unknown"": 194
+  },
+  ""client_name"": {
+    ""Unknown"": 194
+  },
+  ""ip_type"": {
+    ""Unknown"": 161,
+    ""hosting & proxy"": 3,
+    ""hosting"": 19,
+    ""proxy"": 9,
+    ""mobile"": 2
+  }
+}"
+Sx0xLtXd,G2A Refund Exploit Dec 2023,G2ARefundExploit,GetText,Wednesday 20th of December 2023 05:40:49 PM CDT,"G2A refund exploit updated guide - any item for free on G2A.com
+
+https://drive.google.com/file/d/1AKxSk9vs38aBF7GEDJxf8mNi-_NVRLQ9/view#g2a_refund_exploit.pdf
+
+Working as of 
+13 December 2023
+
+840072"
+4JErvMKa,snowybot,coinwalk,JavaScript,Wednesday 20th of December 2023 05:26:56 PM CDT,"var kozster = parseFloat(document.getElementById('pct_balance').value);
+var beast = ((kozster/24).toFixed(8));
+var burgzie = kozster;
+var zeggar = beast;
+var trget = kozster;
+var tens = (beast*10);
+var sevens = (beast*6.9);
+var james = ((Math.floor(kozster/tens))*tens);
+var fran = ((Math.ceil(kozster/tens))*tens);
+var uprd =  6.9;
+var dnwrd = 2.9;
+var fart = 0;
+var toot = ((zeggar*1).toFixed(8));
+
+function get(){
+burgzie = document.getElementById('pct_balance').value;
+if (burgzie>(james+(zeggar*uprd))){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart-1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (fart<0){
+fart = 0;
+}
+if (burgzie<(james-(zeggar*dnwrd)))&&(fart<=1)){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart+1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+    }
+if ((zeggar>=kozster)&&(burgzie>fran)){
+    zeggar = beast;
+    uprd =  6.9;
+    dnwrd = 2.9;
+    fart = 0;
+    james = ((Math.floor(burgzie/tens))*tens);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (burgzie>=(trget*24)){
+    console.log(""winner winner chicken dinner"");
+    return;
+}
+toot = ((zeggar*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(toot);
+$('#a_lo').click();
+setTimeout(() => get(), 1);
+}
+get();
+"
+bzU0Kb3K,fbtc,coinwalk,JavaScript,Wednesday 20th of December 2023 05:21:15 PM CDT,"var kozster = parseFloat(document.getElementById('balance').innerHTML);
+var junky = kozster;
+var bear = true;
+var beast = ((kozster/240).toFixed(8));
+var burgzie = kozster;
+var zeggar = beast;
+var taget = 0.0005;
+var trget = kozster;
+var tens = (beast*10);
+var sevens = (beast*6.9);
+var james = ((Math.floor(kozster/tens))*tens);
+var fran = ((Math.ceil(kozster/tens))*tens);
+var uprd =  6.9;
+var dnwrd = 2.9;
+var fart = 0;
+var toot = ((zeggar*1).toFixed(8));
+ 
+ 
+function get(){
+burgzie = document.getElementById('pct_balance').value;
+if (burgzie>(james+(zeggar*uprd))){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart-1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (fart<0){
+fart = 0;
+}
+if (burgzie<(james-(zeggar*dnwrd)))&&(fart<=1)){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart+1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+    }
+if (zeggar>=(kozster/10)){
+    zeggar = beast;
+    uprd =  6.9;
+    dnwrd = 2.9;
+    fart = 0;
+    james = ((Math.floor(burgzie/tens))*tens);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (burgzie>=(trget*24)){
+    console.log(""winner winner chicken dinner"");
+    return;
+}
+    if (bolance >= taget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+toot = ((zeggar*1).toFixed(8));
+if ((burgzie==junky)&&(bear)){
+document.getElementById('double_your_btc_win_chance').value = 47.50;
+document.getElementById('double_your_btc_payout_multiplier').value = 2.00;
+parseFloat(document.getElementById('double_your_btc_stake').value = toot);
+parseFloat(document.getElementById('win_amount').innerHTML = toot);
+document.getElementById('double_your_btc_bet_lo_button').click();
+bear = false;
+}
+if ((burgzie!=junky)&&(!bear)){
+junky = parseFloat(burgzie);
+bear = true;
+}
+setTimeout(() => get(), 1);
+}
+get();"
+5S4Pqke1,fbtc,coinwalk,JavaScript,Wednesday 20th of December 2023 05:18:45 PM CDT,"var kozster = parseFloat(document.getElementById('balance').innerHTML);
+var junky = kozster;
+var bear = true;
+var beast = ((kozster/240).toFixed(8));
+var burgzie = kozster;
+var zeggar = beast;
+var trget = kozster;
+var tens = (beast*10);
+var sevens = (beast*6.9);
+var james = ((Math.floor(kozster/tens))*tens);
+var fran = ((Math.ceil(kozster/tens))*tens);
+var uprd =  6.9;
+var dnwrd = 2.9;
+var fart = 0;
+var toot = ((zeggar*1).toFixed(8));
+ 
+ 
+function get(){
+burgzie = document.getElementById('pct_balance').value;
+if (burgzie>(james+(zeggar*uprd))){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart-1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (fart<0){
+fart = 0;
+}
+if (burgzie<(james-(zeggar*dnwrd)))&&(fart<=1)){
+    zeggar = zeggar*2;
+    uprd =  4.9;
+    dnwrd = 4.9;
+    fart = fart+1;
+    james = parseFloat(burgzie);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+    }
+if (zeggar>=(kozster/10)){
+    zeggar = beast;
+    uprd =  6.9;
+    dnwrd = 2.9;
+    fart = 0;
+    james = ((Math.floor(burgzie/tens))*tens);
+    fran = ((Math.ceil(burgzie/tens))*tens);
+}
+if (burgzie>=(trget*24)){
+    console.log(""winner winner chicken dinner"");
+    return;
+}
+    if (bolance >= taget) {
+        console.log(""winner winner chicken dinner"");
+        return;
+    }
+toot = ((zeggar*1).toFixed(8));
+if ((burgzie==junky)&&(bear)){
+document.getElementById('double_your_btc_win_chance').value = 47.50;
+document.getElementById('double_your_btc_payout_multiplier').value = 2.00;
+parseFloat(document.getElementById('double_your_btc_stake').value = toot);
+parseFloat(document.getElementById('win_amount').innerHTML = toot);
+document.getElementById('double_your_btc_bet_lo_button').click();
+bear = false;
+}
+if ((burgzie!=junky)&&(!bear)){
+junky = parseFloat(burgzie);
+bear = true;
+}
+setTimeout(() => get(), 1);
+}
+get();"
+ZBHkWB2A,BTC Wallet Credentials have been reset,VQ-Moe,GetText,Wednesday 20th of December 2023 04:28:30 PM CDT,"Dear Moe,
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please contact us immediately.
+
+Your new login credentials will be 
+chefman440:Jmh3x9ZB on 149.28.231.183
+You can connect via SSH.
+
+Regards,
+GM-834627"
+CQR1VmHW,WooCommerce: Save minimum amount within the order data when a free shipping method is selected,YordanSoares,PHP,Wednesday 20th of December 2023 04:09:32 PM CDT,"<?php
+/**
+ * WooCommerce:
+ * Save the free shipping methodminimum amount (if set) within the order data when a free shipping method is selected  
+ */
+add_action( 'woocommerce_checkout_create_order', 'wpo_safe_free_shipping_amount_within_order_data' );
+function wpo_safe_free_shipping_amount_within_order_data( $order ) {
+    $chosen_shipping_methods = WC()->session->get( 'chosen_shipping_methods' );
+	
+    // If a free shipping method is selected...
+    if ( strpos( $chosen_shipping_methods[0], 'free_shipping' ) !== false ) {
+		list( $shipping_name, $shipping_id ) = explode( ':', $chosen_shipping_methods[0] );
+		
+        // ...get the minimum amount from its settings
+        $free_shipping_settings = get_option( ""woocommerce_{$shipping_name}_{$shipping_id}_settings"" );
+		$min_amount = $free_shipping_settings['min_amount'];
+
+        // If there is a minimum amount set, save it within the order data
+        if ( ! empty( $min_amount ) ) {
+            $order->update_meta_data( '_free_shipping_min_amount', $min_amount );
+            $order->save();
+        }
+    }
+}"
+SXbgsz13,Tree,Xocnx,Lua,Wednesday 20th of December 2023 04:04:12 PM CDT,"-- Get references to relevant objects
+local scriptParent = script.Parent
+local Health = scriptParent.Health
+local Trunk = scriptParent.Trunk
+local Leaves = scriptParent.Leaves
+local Gui = scriptParent.Gui.BillboardGui
+local TextLabel = Gui.TextLabel
+
+-- Function to set transparency and collision state of an entity
+local function setEntityState(entity, transparency, canCollide)
+	entity.Transparency = transparency
+	entity.CanCollide = canCollide
+end
+
+-- Function called when health changes
+local function onHealthChanged()
+	-- Play hit sound for the trunk
+	Trunk.Hit:Play()
+
+	-- Update health display text
+	TextLabel.Text = string.format(""%d/10"", Health.Value)
+
+	-- Check if health is zero or below
+	if Health.Value <= 0 then
+		-- Disable the GUI
+		Gui.Enabled = false
+
+		-- Set trunk and leaves to be invisible and non-collidable
+		setEntityState(Trunk, 1, false)
+		setEntityState(Leaves, 1, false)
+
+		-- Wait for 5 seconds
+		wait(5)
+
+		-- Reset health to 10
+		Health.Value = 10
+
+		-- Set trunk and leaves to be visible and collidable again
+		setEntityState(Trunk, 0, true)
+		setEntityState(Leaves, 0, true)
+	end
+end
+
+-- Function to toggle GUI visibility
+local function toggleGuiVisibility()
+	-- Enable GUI
+	Gui.Enabled = true
+
+	-- Wait for 4 seconds
+	wait(4)
+
+	-- Disable GUI
+	Gui.Enabled = false
+end
+
+-- Connect functions to events
+Health.Changed:Connect(onHealthChanged)
+Health.Changed:Connect(toggleGuiVisibility)
+"
+2b48LQ6a,Untitled,Xocnx,Lua,Wednesday 20th of December 2023 03:59:10 PM CDT,"-- Get references to relevant objects
+local scriptParent = script.Parent
+local Health = scriptParent.Health
+local Trunk = scriptParent.Trunk
+local Leaves = scriptParent.Leaves
+local Gui = scriptParent.Gui.BillboardGui
+local TextLabel = Gui.TextLabel
+
+-- Function to set transparency and collision state of an entity
+local function setEntityState(entity, transparency, canCollide)
+	entity.Transparency = transparency
+	entity.CanCollide = canCollide
+end
+
+-- Function called when health changes
+local function onHealthChanged()
+	-- Play hit sound for the trunk
+	Trunk.Hit:Play()
+
+	-- Update health display text
+	TextLabel.Text = string.format(""%d/10"", Health.Value)
+
+	-- Check if health is zero or below
+	if Health.Value <= 0 then
+		-- Disable the GUI
+		Gui.Enabled = false
+
+		-- Set trunk and leaves to be invisible and non-collidable
+		setEntityState(Trunk, 1, false)
+		setEntityState(Leaves, 1, false)
+
+		-- Wait for 5 seconds
+		wait(5)
+
+		-- Reset health to 10
+		Health.Value = 10
+
+		-- Set trunk and leaves to be visible and collidable again
+		setEntityState(Trunk, 0, true)
+		setEntityState(Leaves, 0, true)
+	end
+end
+
+-- Function to toggle GUI visibility
+local function toggleGuiVisibility()
+	-- Enable GUI
+	Gui.Enabled = true
+
+	-- Wait for 4 seconds
+	wait(4)
+
+	-- Disable GUI
+	Gui.Enabled = false
+end
+
+-- Connect functions to events
+Health.Changed:Connect(onHealthChanged)
+Health.Changed:Connect(toggleGuiVisibility)"
+pfTdRUzj,Сортиране по различни методи,Maina55,C#,Wednesday 20th of December 2023 03:58:12 PM CDT,"internal class Program
+{
+    private static void Main(string[] args)
+    {
+        Random rnd = new Random();
+        int[] nums = new int[20];
+        for (int i = 0; i < nums.Length; i++)
+          {
+            int num = rnd.Next(1,101);
+             nums[i] = num;
+        }
+        Console.WriteLine(String.Join("" "", nums));
+        string input = Console.ReadLine();
+        switch (input)
+        {
+            case ""Bubble"":
+                BubbleSort(nums); 
+                break;
+
+            case ""Insertion"":
+                InsertionSort(nums); 
+                break;
+            case ""Selection"":
+                SelectionSort(nums);
+                break;
+            default:
+                break;
+        }
+        //BubbleSort(nums);
+        //InsertionSort(nums);
+        //SelectionSort(nums);
+        //QuickSort(nums);
+    }
+
+
+    public static void BubbleSort(int[] nums)
+    {
+        int n = nums.Length;
+
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < n-1; j++)
+            {
+                if (nums[j] > nums[j+1])
+                {
+                    int tempnum = nums[j];
+                    nums[j] = nums[j+1];
+                    nums[j+1] = tempnum;
+                }
+            }
+        }
+
+        Console.WriteLine(String.Join("" "", nums));
+    }
+
+    public static void InsertionSort(int[] nums)
+    {
+        int n = nums.Length;
+        for (int i = 1; i < n-1; i++)
+        {
+            int currnum = nums[i];
+            
+            for (int j = i-1; j >= 0;)
+            {
+                if (currnum < nums[j])
+                {
+                    nums[j + 1] = nums[j];
+                    j--;
+                    nums[j+1] = currnum;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+        Console.WriteLine(String.Join("" "", nums));
+    }
+
+    public static void SelectionSort(int[] nums)
+    {
+        int n = nums.Length;
+        for (int i = 0; i < n-1; i++)
+        {
+            int smallestnum = i;
+            for (int j = i+1; j < n; j++)
+            {
+                if (nums[j] < nums[smallestnum])
+                {
+                    smallestnum = j;
+                }
+            }
+
+            int curnum = nums[smallestnum];
+            nums[smallestnum] = nums[i];
+            nums[i] = curnum;
+        }
+
+        Console.WriteLine(String.Join("" "", nums));
+
+    }
+
+    public static void QuickSort(int[] nums)
+    {
+        int leftindx = 0;
+        int rightindx = nums.Length-1;
+        int pivot = nums[leftindx];
+
+        while (leftindx < rightindx)
+        {
+            while (nums[leftindx] < pivot)
+            {
+                leftindx++;
+            }
+
+            while (nums[rightindx] > pivot)
+            {
+                rightindx--;
+            }
+
+            if (leftindx <= rightindx)
+            {
+                int tempnum = nums[leftindx];
+                nums[leftindx] = nums[rightindx];
+                nums[rightindx] = tempnum;
+                leftindx++;
+                rightindx--;
+            }
+        }
+
+        if (0< rightindx)
+        {
+            QuickSort(nums);
+        }
+        if (leftindx< nums.Length-1)
+        {
+            QuickSort(nums);
+        }
+
+        Console.WriteLine(String.Join("" "", nums));
+
+    }
+
+
+    public static void MergeSort(int[] nums)
+    {
+
+    }
+
+}"
+f76LbkvJ,Enqueue petite-vue script in WordPress,rikhen,PHP,Wednesday 20th of December 2023 03:37:34 PM CDT,"<?php 
+
+/*
+ * Enqueue petite-vue script in the footer of the front end + Gutenberg editor
+ *
+ * @link https://github.com/vuejs/petite-vue Documentation of petite-vue
+ */
+add_action( 'init', 'enqueue_petite_vue' );
+function enqueue_petite_vue() {
+    // Register the script
+    wp_register_script(
+        'petite-vue', // Handle
+        'https://unpkg.com/petite-vue@0.4.1/dist/petite-vue.iife.js', // Source
+        array(), // Dependencies
+        '0.4.1', // Version
+        array(
+            'in_footer' => true, // Place in footer
+            'strategy' => 'defer' // Defer loading
+        )
+    );
+
+    // Enqueue the script on the front end
+    wp_enqueue_script( 'petite-vue' );
+
+    // Enqueue the script on the Gutenberg editor
+    if ( is_admin() ) {
+        wp_enqueue_script( 'petite-vue' );
+    }
+}
+
+/*
+ * Optional: Add the init attribute to automatically query and initialize all elements that have v-scope on the page.
+ *
+ * @link https://developer.wordpress.org/reference/hooks/script_loader_tag/ Documentation of WP core hook
+ */
+add_action( 'init', 'enqueue_petite_vue_es' );
+function enqueue_petite_vue_es() {
+    // Register the script
+    wp_register_script(
+        'petite-vue-es', // Handle
+        'https://unpkg.com/petite-vue@0.4.1/dist/petite-vue.es.js', // Source
+        array(), // Dependencies
+        '0.4.1', // Version
+        array(
+            'in_footer' => true, // Place in footer
+            'strategy' => 'defer' // Defer loading
+        )
+    );
+
+    // Enqueue the script on the front end
+    wp_enqueue_script( 'petite-vue-es' );
+
+    // Enqueue the script on the Gutenberg editor
+    if ( is_admin() ) {
+        wp_enqueue_script( 'petite-vue-es' );
+    }
+}
+
+/*
+ * Optional: use the ES module build
+ *
+ */
+add_filter('script_loader_tag', 'add_petite_vue_type_attribute' , 10, 3);
+function add_petite_vue_type_attribute($tag, $handle, $src) {
+    // if not your script, do nothing and return original $tag
+    if ( 'petite-vue' !== $handle ) {
+        return $tag;
+    }
+    // change the script tag by adding init attribute and return it.
+    $tag = '<script id=""'.$handle.'"" src=""' . esc_url( $src ) . '"" data-wp-strategy=""defer"" init></script>';
+    return $tag;
+}
+
+/*
+ * Optional: when using ESM, add the required type=""module""
+ */
+add_filter('script_loader_tag', 'add_petite_vue_es_type_attribute' , 10, 3);
+function add_petite_vue_es_type_attribute($tag, $handle, $src) {
+    // if not your script, do nothing and return original $tag
+    if ( 'petite-vue-es' !== $handle ) {
+        return $tag;
+    }
+    // change the script tag by adding type=""module"" + init attribute and return it.
+    $tag = '<script id=""'.$handle.'"" type=""module"" src=""' . esc_url( $src ) . '"" data-wp-strategy=""defer"" init></script>';
+    return $tag;
+}"
+gDNjh7dM,zentao,huezohuezo1990,Bash,Wednesday 20th of December 2023 03:29:47 PM CDT,docker run -d -p  80: 80 -v /www/zentaopms:/www/zentaopms -v /var/lib/mysql:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=zentao -e MYSQL_INTERNAL=true  easysoft/zentao:16.4
+rSnSVYuk,LuaGame - System - Quests,CaiusNelson,Lua,Wednesday 20th of December 2023 03:28:14 PM CDT,"SaveData.quests={}
+
+function Quests.Quest_Begin(quest)
+    if Quests.CanActivateQuest()==false then
+        SaveData.quests[quest]={active=true}
+
+        Quests[quest].Set_QuestState(quest,1)
+    end
+end
+
+function Quests.Quest_Cancel(quest)
+    SaveData[quest].cancel=true
+    Quests.Set_QuestEnd(quest)
+end
+
+function Quests.Quest_Complete(quest)
+    SaveData[quest].complete=true
+    Quests.Set_QuestEnd(quest)
+end
+
+function Quests.Quest_Fail(quest)
+    Quests.Set_QuestEnd(quest)
+end
+
+--Util
+function Quests.Set_QuestEnd(quest)
+    SaveData[quest].active=false
+    SaveData[quest].ended=true
+end
+
+function Quests.CanActivateQuest(quest)
+    return not SaveData[quest].active and not SaveData[quest].ended
+end
+
+function Quests.Set_QuestState(quest,state)
+    SaveData.quests[quest].state=state
+    SaveData.quests[quest].nodes[state].OnStateBegin()
+end
+
+function ALUA.Quests.Next_QuestState(quest)
+    local new_state = SaveData.quests[quest].state+1
+    if Quests[quest].nodes[new_state] then
+        Quests.Set_QuestState(quest,new_state)
+    else
+        Quests.Quest_Complete(quest)
+    end
+    
+end
+
+-- gets
+function Quests.Get_ActiveQuests()
+    return {}
+end
+
+function Quests.Get_CompleteQuests()
+    return {}
+end
+
+function Quests.Get_FailedQuests()
+    return {}
+end
+
+------------------------------
+Quests[""example""]={
+
+    nodes={}
+}"
+vatkJFxa,charapp,Lancere,Lua,Wednesday 20th of December 2023 03:05:22 PM CDT,http://www.roblox.com/asset?id=14083380;http://www.roblox.com/asset?id=6856488235;http://www.roblox.com/asset?id=6479829829;http://www.roblox.com/asset?id=13334984&version=1;
+znfnUhhQ,Untitled,sissou123,Python,Wednesday 20th of December 2023 02:56:00 PM CDT,"Learn Python Programming Masterclass
+Learn Python like a Professional - Start from the basics and go all the way to creating your own applications & games!
+for more:https://dz-linkk.com/h7KmBp"
+H7Zh3CWQ,Plot Indicatore Test Equity Control Drawdown,Maurizio-Ciullo,JavaScript,Wednesday 20th of December 2023 02:45:45 PM CDT,"// **************************************************************************************************************************
+//                                                                Plot Indicatore Test Equity Control Drawdown
+	                                         // Su questo study bisogna caricare i dati Equity Compresi di Capitale Iniziale Su Data 2 //
+// **************************************************************************************************************************	
+
+// **************************************************************************************************************************
+// 															2 Metodi EQC:
+// 1) Start sopra equityControlPercent ""relative rawdown percent"", stop sotto equityControlPercent ""relative rawdown percent""
+// 2) Start sopra equityControlPercent ""relative rawdown percent"" ma con una nuova rottura dell'equity , stop sotto equityControlPercent ""relative rawdown percent""
+// **************************************************************************************************************************
+
+// **************************************************************************************************************************
+//     Il plotshape Indica se la soglia di drawdown di input è stata superata o meno con x verde e rossa.
+//     Per il metodo di ingresso 1) il plotshape coincide con gli ingressi.
+//     Per il metodo di ingresso 2) L' EquityBroken deve risultare a 0 e il plotshape non ha niente a che vedere con gli ingressi.
+// **************************************************************************************************************************	
+
+ 
+ Input:
+ equityControlPercent(7);
+ 
+ Vars: 
+ 	FirstBar(0), // Variabile per salvare l'indice della prima barra // da cancelare
+ 	balance(0),
+ 	highestRelativeEquity(0),
+ 	relativeDrawdownMonetary(0),
+ 	lowestRelativeEquity(0),
+ 	relativeDrawdownPercent(0),
+ 	tradingAllowed(false),
+ 	tradingNotAllowed(false);
+ 	 
+// **************************************************************************************************************************
+// Inizio a utilizzare una percentuale del massimo drawdown relativo per stoppare l'operatività e ritorna ad operare quando è al di sopra della stessa percentuale BUONO FUNZIONA !!!
+// **************************************************************************************************************************			  
+// Balance
+balance = (close Of Data2);
+
+// Highest Relative Equity
+highestRelativeEquity = MaxList(balance, highestRelativeEquity);
+
+// LowestRelativeEquity E RelativeDrawdownMonetary E RelativeDrawdownPercent
+if balance <= highestRelativeEquity then
+	lowestRelativeEquity = minlist(highestRelativeEquity, balance);
+	relativeDrawdownMonetary = (highestRelativeEquity - balance);
+	relativeDrawdownPercent = (relativeDrawdownMonetary / highestRelativeEquity) * 100;
+   
+// **************************************************************************************************************************
+// Clear the print log when the strategy first applyed or refreshed and print values on the log window
+// **************************************************************************************************************************
+Once Clearprintlog;
+print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ), "", "", "" HighestRelativeEQ= "" ,highestRelativeEquity, "", "", "" LowestRelativeEQ= "" ,lowestRelativeEquity, "", "", "" RelativeDrawdownMonetary= "", relativeDrawdownMonetary, "", "", "" RelativeDrawdownPercent= "", relativeDrawdownPercent , "" %"", "", "", "" BarNum= "", BarNumber);
+
+// **************************************************************************************************************************
+// Inizio Provo Start Stop Equity Trading Con una percentuale del massimo drawdown relativo Solo Per Prova
+// **************************************************************************************************************************
+// Condizioni Segnale Start/Stop
+If relativeDrawdownPercent >= 0 and relativeDrawdownPercent <= equityControlPercent Then
+	tradingAllowed = true
+Else Begin
+	tradingAllowed = false;
+End;
+	
+if tradingAllowed = true Then
+	plot1(tradingAllowed, ""Trading Allowed Relative DD %"", Green)
+Else
+	plot1(tradingAllowed, ""Trading Allowed Relative DD %"", Red);
+
+	
+// ************************************************************************************************************************** 
+// Plot su strategy 1mo plot Start
+// **************************************************************************************************************************
+If relativeDrawdownPercent >= 0 and relativeDrawdownPercent <= equityControlPercent then//and mp[0] <> mp[1] and mp[0] <> 0 Then
+Begin
+	Value1 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value1, Green);
+	Text_setstyle(Value1, 2, 0);
+End;
+
+// ************************************************************************************************************************** 
+// Plot su strategy 2ndo plot End
+// **************************************************************************************************************************
+If relativeDrawdownPercent > equityControlPercent then //and mp[0] <> mp[1] and mp[0] <> 0 Then // and relativeDrawdownPercent <= 7
+Begin
+	Value2 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value2, Red);
+	Text_setstyle(Value2, 2, 0);
+End;
+
+plot2(BarNumber, ""BarNumber"");	
+//plot4(Currentbar, ""CurrentBar"");
+
+plot3(relativeDrawdownPercent, ""Relative Drawdown Percent"", Yellow);
+
+{var: MP(0);
+MP = I_Marketposition;
+plot4(MP);}
+
+// **************************************************************************************************************************
+// Equity Control. Stoppa l'operatività ad una percentuale input derivanta dal massimo drawdown relativo della strategia originale caricata in data2 ""Balance Con Initial Capital di tutte le candele"" EQC_Method = 2
+// La strategia Riparte quando rompiamo un nuovo massimo dell'equity e non abbiamo raggiunto l'input del massimo drawdown ammesso ES: Stop >= 7% Max DD; Restart New Highest Equity High and < 7% Max DD;
+// **************************************************************************************************************************	
+vars:
+EquityBroken(0);  // When we have a new Equity High and Relative Drawdown is Less then equityControlPercent the value is set to 0 else 1. ""Start Straidng Broke Equity Allowed""
+
+If relativeDrawdownPercent > equityControlPercent then 
+	EquityBroken = EquityBroken +1
+else if
+	relativeDrawdownPercent = 0 then
+	EquityBroken = 0;
+	
+plot5(EquityBroken, ""Equity Broken"")
+"
+3V6ENWxF,Indicatore Test Equity Control Drawdown,Maurizio-Ciullo,JavaScript,Wednesday 20th of December 2023 02:45:11 PM CDT,"
+																		// Indicatore Test Equity Control Drawdown //
+														// Su questo indicatore bisogna caricare i dati Equity Compresi di Capitale Iniziale Su Data 1 //
+
+// Mettere input % di Drawdown !!!!
+
+ Vars: 
+ 	FirstBar(0), // Variabile per salvare l'indice della prima barra // da cancelare
+ 	balance(0),
+ 	highestRelativeEquity(0),
+ 	relativeDrawdownMonetary(0),
+ 	lowestRelativeEquity(0),
+ 	relativeDrawdownPercent(0);
+
+                                                                                                                                                                                                                                        
+ 			  //////////////////////////////////// Inizio a utilizzare una percentuale del massimo drawdown relativo per stoppare l'operatività  BUONO FUNZIONA !!! ////////////////////////////////////
+ 			  
+ // Balance
+balance = (close);
+
+// Highest Relative Equity
+highestRelativeEquity = MaxList(balance, highestRelativeEquity);
+
+
+// LowestRelativeEquity E RelativeDrawdownMonetary E RelativeDrawdownPercent
+if balance <= highestRelativeEquity then
+	lowestRelativeEquity = minlist(highestRelativeEquity, balance);
+	relativeDrawdownMonetary = (highestRelativeEquity - balance);
+	relativeDrawdownPercent = (relativeDrawdownMonetary / highestRelativeEquity) * 100;
+
+
+// Clear the print log when the strategy first applyed or refreshed
+Once Clearprintlog;
+print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ), "", "", "" HighestRelativeEQ= "" ,highestRelativeEquity, "", "", "" LowestRelativeEQ= "" ,lowestRelativeEquity, "", "", "" RelativeDrawdownMonetary= "", relativeDrawdownMonetary, "", "", "" RelativeDrawdownPercent= "", relativeDrawdownPercent , "" %"", "", "", "" BarNum= "", BarNumber);
+ 
+			///////////////////////////////////// Fine Provo a utilizzare una percentuale del massimo drawdown relativo per stoppare l'operatività  BUONO FUNZIONA !!! ////////////////////////////////////
+
+
+            //////////////////////////////////// Inizio Provo Start Stop Equity Trading Con una percentuale del massimo drawdown relativo Solo Per Prova ////////////////////////////////////
+
+// Condizioni Entrata/Uscita
+If relativeDrawdownPercent >= 0 and relativeDrawdownPercent <= 7 Then
+	buy(""Start"") 1 Contract next bar at Market;
+
+If relativeDrawdownPercent > 7 Then 
+	Sell(""Stop"") 1 Contract next bar at Market;
+
+                 //////////////////////////////////// Fine Provo Start Stop Equity Trading Con una percentuale del massimo drawdown relativo Solo Per Prova ////////////////////////////////////
+ 
+
+				//////////////////////////////////// Inizio Equity Filtered ""Non ha il pezzo di equity escluso dal equity control ////////////////////////////////////	
+// Sul file .csv carico: Date/Time/Open/High/Low /Equity/Volume Per una questione di caricamento su tradestatio... . Apro il grafico, clicco su una candela 2 volte e nelle impostazioni style clicco su line on close.			
+
+{Vars:
+    mp(0),
+    formattedDate(""""),
+    formattedTime(""""),
+    dateTimeString("""");
+
+mp = marketposition;
+
+If relativeDrawdownPercent >= 0 and relativeDrawdownPercent <= 7 Then Begin 
+    // Formatta la data nel formato ""MM-dd-yyyy"" 
+    formattedDate = FormatDate(""dd-MM-yyyy"", ElDateToDateTime(Date));
+    
+    // Formatta l'ora nel formato ""00:00:00""
+    formattedTime = BarDateTime.Format(""%H:%M:%S"");
+    
+    // Combina data e ora nel formato richiesto
+    dateTimeString = formattedDate + "","" + formattedTime;
+    
+    // Stampa nel file CSV
+    Print(File(""C:\Users\Utente\Desktop\Equity Control\Tradestation\Swing Trend Trailing\Exports\Export_Equity_Filtered.csv""), dateTimeString, "","", open, "","", high, "","", low, "","", NumToStr(Close, 2) , Volume, "","");
+end;}
+
+//////////////////////////////////// Fine Equity Filtered ""Non ha il pezzo di equity escluso dal equity control ////////////////////////////////////"
+K0SpLRBx,Untitled,sissou123,Java,Wednesday 20th of December 2023 02:44:46 PM CDT,"Learning Java is one of the fastest ways to improve your career prospects as it is one of the most in demand tech skills! This course will help you in better understanding every detail of Data Structures and how algorithms are implemented in high level programming language.
+for more:https://cuty.io/7BjgIJf14"
+hn6qPu4m,Indicatore Carica Dati Mancanti Equity Control,Maurizio-Ciullo,JavaScript,Wednesday 20th of December 2023 02:44:30 PM CDT,"
+                                                        // Indicatore Carica Dati Mancanti Equity Control //
+                              // Quando Estrapolo l'equity usando il bars back della strategia mancano i dati del barsback, in questo modo riempio il csv dei dati mancanti.
+                                                        // Sul print del file: NumToStr(100000, 2) inserire il capitale iniziale della strategia
+
+ 
+ Vars:
+    mp(0),
+    formattedDate(""""),
+    formattedTime(""""),
+    dateTimeString("""");
+    
+ Vars: 
+ 	balance(0),
+ 	highestRelativeEquity(0),
+ 	relativeDrawdownMonetary(0),
+ 	lowestRelativeEquity(0),
+ 	relativeDrawdownPercent(0);
+
+Begin
+    // Formatta la data nel formato ""MM-dd-yyyy""
+    formattedDate = FormatDate(""yyyy-MM-dd"", ElDateToDateTime(Date));
+    
+    // Formatta l'ora nel formato ""00:00:00""
+    formattedTime = BarDateTime.Format(""%H:%M:%S"");
+     
+    // Combina data e ora nel formato richiesto
+    dateTimeString = formattedDate + "","" + formattedTime;
+
+// Stampa nel file CSV  {ATTENZIONE: INSERIRE IL CAPITALE INIZIALE DELLA STRATEGIA SU CUI USARE L'EQUITY CONTROL: NumToStr(100000, 2) QUI USATI 100.000 $}
+	Print(File(""C:\Users\Utente\Desktop\Equity Control\Tradestation\Swing Trend Trailing\Exports\Export_Equity_Candel_Iniz.csv""), dateTimeString, "","", open, "","", high, "","", low, "","", NumToStr(100000, 2) , Volume, "",""); 
+End;"
+CKexJtQF,Untitled,Robear9992,C#,Wednesday 20th of December 2023 02:43:10 PM CDT,"using System;
+
+namespace JasonsGame.Items;
+
+public class Item
+{
+  private Rarity _rarity;
+  public string _name;
+
+  public Rarity Rarity
+  {
+    get
+    {
+      return _rarity;
+    }
+  }
+  public Item(Rarity rarity, string name)
+  {
+    #region Validation
+    if (String.IsNullOrWhiteSpace(name))
+      throw new ArgumentNullException(nameof(name));
+    #endregion
+
+    _rarity = rarity;
+    _name = name;
+  }
+}
+
+public class Backpack : Item
+{
+  public int _space;
+
+  public Backpack(Rarity rarity, string name, int space) : base(rarity, name) => _space = space;
+}
+
+public class Weapon : Item
+{
+  private int _damage;
+
+  public Weapon(Rarity rarity, string name, int damage) : base(rarity, name) => _damage = damage;
+}
+
+public enum Rartity
+{
+  Common,
+  Uncommon,
+  Epic,
+  Rare,
+  Legendary,
+  Mythic,
+}
+
+public class LootTable
+{
+  //1st roll for chest luck
+  public int CommonThreshold = 80;
+  public int UncommonThreshold = 55;
+  public int RareThreshold = 35;
+  public int EpicThreshold = 20;
+  public int LegendaryThreshold = 10;
+  public int MythicThreshold = 15;
+
+  public Rarity GetItemRarity()
+  {
+    //Instance of Random Class
+    Random randomGen = new Random();
+
+    //generate a random number between 1-100
+    int randomRoll = randomGen.Next(1, 100);
+
+    //2nd roll for specific item
+    if (randomRoll < CommonThreshold)
+    {
+      return Rarity.Common;
+    }
+    else if (randomRoll < UncommonThreshold)
+    {
+      return Rarity.Uncommon;
+    }
+    else if (randomRoll < RareThreshold)
+    {
+      return Rarity.Rare;
+    }
+    else if (randomRoll < EpicThreshold)
+    {
+      return Rarity.Epic;
+    }
+    else if (randomRoll < LegendaryThreshold)
+    {
+      return Rarity.Legendary;
+    }
+    else if (randomRoll < MythicThreshold)
+    {
+      return Rarity.Mythic;
+    }
+    else
+    {
+      throw new Exception(""No loot found"");
+    }
+  }
+
+  public LootTable() { }
+}
+
+public enum Rarity
+{
+  Common,
+  Uncommon,
+  Rare,
+  Epic,
+  Legendary,
+  Mythic
+}
+
+class Program
+{
+  public static void Main(string[] args)
+  {
+    var commonBackpack = new Backpack(Rarity.Legendary, ""Valuable Satchel"", 25);
+
+    var lootTable = new LootTable();
+    //lootTable.EpicThreshold = 1000;
+
+    var newItemsRarity = lootTable.GetItemRarity();
+
+    var rarity = (Rarity)new Random().Next(0, 5);
+  }
+}
+"
+MQjazyyJ,Bot Swing Trend Trailing Equity Control Drawdown,Maurizio-Ciullo,JavaScript,Wednesday 20th of December 2023 02:43:07 PM CDT,"
+														         // Bot Swing Trend Trailing Equity Control Drawdown //
+														         
+// **************************************************************************************************************************
+// 															2 Metodi EQC:
+// 1) Start sopra equityControlPercent ""relative rawdown percent"", stop sotto equityControlPercent ""relative rawdown percent""
+// 2) Start sopra equityControlPercent ""relative rawdown percent"" ma con una nuova rottura dell'equity , stop sotto equityControlPercent ""relative rawdown percent""
+// **************************************************************************************************************************														         													         
+														         
+// **************************************************************************************************************************
+// 																		Inizio Equity Control
+// **************************************************************************************************************************														         
+	  
+Input: Start_EQC_Inputs(""--------------""),  
+	   EQC_Method_Inp(0),
+	   equityControlPercent(7),    
+	   Start_Strategy_Inputs(""--------------""); 
+
+Var:   EQC_Method(false),
+	   EquityBroken(0), 
+	   balance2(0),
+ 	   highestRelativeEquity2(0),
+ 	   relativeDrawdownMonetary2(0),
+ 	   lowestRelativeEquity2(0),
+ 	   relativeDrawdownPercent2(0);
+ 	 
+balance2 = (close Of Data2);
+
+// Highest Relative Equity
+highestRelativeEquity2 = MaxList(balance2, highestRelativeEquity2);
+
+// LowestRelativeEquity E RelativeDrawdownMonetary E RelativeDrawdownPercent
+if balance2 <= highestRelativeEquity2 then
+	lowestRelativeEquity2 = minlist(highestRelativeEquity2, balance2);
+	relativeDrawdownMonetary2 = (highestRelativeEquity2 - balance2);
+	relativeDrawdownPercent2 = (relativeDrawdownMonetary2 / highestRelativeEquity2) * 100;
+
+
+// When we have a new Equity High and Relative Drawdown is Less then equityControlPercent the value is set to 0 else 1. ""Start Straidng Broke Equity Allowed""	
+If relativeDrawdownPercent2 > equityControlPercent then 
+	EquityBroken = EquityBroken +1
+else if
+	relativeDrawdownPercent2 = 0 then
+	EquityBroken = 0;
+	
+// **************************************************************************************************************************
+// Entrata Senza Equity Control EQC_Method = 0
+// **************************************************************************************************************************	
+if EQC_Method_Inp = 0 then begin
+	EQC_Method = true;
+end
+// **************************************************************************************************************************
+// Equity Control. Stoppa l'operatività ad una percentuale input derivanta dal massimo drawdown relativo della strategia originale caricata in data2 ""Balance Con Initial Capital di tutte le candele""  EQC_Method = 1
+// **************************************************************************************************************************		
+else if EQC_Method_Inp = 1 then begin
+	EQC_Method = relativeDrawdownPercent2 >= 0 and relativeDrawdownPercent2 <= equityControlPercent;
+end
+// **************************************************************************************************************************
+// Equity Control. Stoppa l'operatività ad una percentuale input derivanta dal massimo drawdown relativo della strategia originale caricata in data2 ""Balance Con Initial Capital di tutte le candele"" EQC_Method = 2
+// La strategia Riparte quando rompiamo un nuovo massimo dell'equity e non abbiamo raggiunto l'input del massimo drawdown ammesso ES: Stop >= 7% Max DD; Restart New Highest Equity High and < 7% Max DD;
+// **************************************************************************************************************************	
+else if
+	EQC_Method_Inp = 2 then Begin
+	EQC_Method =  EquityBroken = 0;
+end;
+	
+	
+	
+// **************************************************************************************************************************
+//																			 Inizio Strategia
+// **************************************************************************************************************************	
+	
+//Il trading system completo - Swing-Trend-Trailing (Strategia Trend Following Con Swing Di Posizione) - parte 1
+// (Exchange= FTX) (Sottostante ETH-PERP) (Timeframe= 4H) (Direzione= LONG E SHORT) (Swing Posizione= SI) (Esclusione Ore=NO) (Esclusione Giorni=NO') (Esclusione Mesi=NO) 
+// (Take Profit Long/Short Market = Trailing) (Take Profit Limit Long/Short= NO) (Stop Loss Limit Long/Short= -10%) (Stop Loss Market Long/Short= SI) (Trailing Stop=SI) (Stop Emergenza= NO)
+// (Rischio Operazione 2% Perdita Media)
+// (In Sample Dal=17/08/2017 Al 17/10/2020) (Out Of Sample Dal=18/10/2020 Al 15/03/2021)
+
+// GLI IMPUT POTREBBERO ESSERE DIVERSI E VANNO PRESI DAL CODICE DI PINESCRIPT, INSERIRE ANCHE LE VARIABILI SHORT CHE POTREBBERO AVERE INPUT DIVERSI
+
+// Auentare il Max Bars Back Su Tradestation Altrimenti Non Funziona Il Conteggio Barssinceentry 500 E Cliccare Su Enable Strategy Altrimenti Non Parte
+
+input:
+  InitialCapital(100000),
+  percent_risk(25),
+  lunghezza_ema(90),
+  perc_apertura_minima(2),
+  perc_apertura_massima(4),
+  perc_chiusura_minima(0),
+  input_trailing_stop_trigger(12),
+  input_trailing_stop_close(6),
+  input_stop_loss_percent(10),  // Unico Long E Short
+  //skipday(saturday),
+  //skipmonth1(10), 
+  //skipmonth2(9),
+  solo_long(false),
+  solo_short(false);
+   
+  
+Vars:
+   media_ema(0),
+   apertura_minima(0),
+   apertura_massima(0),
+   chiusura_minima(0),
+   stop_loss(0),
+   media_ema_1(0),
+   trailing_stop_trigger(0),
+   trailing_stop_close(0),
+   trailing_stop_trigger_long(0),
+   trailing_stop_close_long(0),
+   trailing_stop_trigger_short(0),
+   trailing_stop_close_short(0),
+   trailing_long(false),
+   trailing_short(false),
+   highesthigh(0),
+   lowestlow(0),
+   ATR(0),
+   risk(0),
+   nr_share(0);
+   
+
+// Calcololo degli indicatori 
+      media_ema = XAverage(Close, lunghezza_ema);
+      media_ema_1 = XAverage(Close[1], lunghezza_ema);
+  
+// calcolo dei filtri in percentuale
+  apertura_minima   = (media_ema / 100) * perc_apertura_minima;
+  apertura_massima  = (media_ema / 100) * perc_apertura_massima;
+  chiusura_minima   = (media_ema / 100) * perc_chiusura_minima;
+  
+  // Calcolo Trailing Stop Long E Short
+  trailing_stop_trigger_long = Entryprice + (entryprice * input_trailing_stop_trigger)/100;
+  trailing_stop_close_long = entryprice + (entryprice * input_trailing_stop_close)/100;
+  trailing_stop_trigger_short = Entryprice - (entryprice * input_trailing_stop_trigger)/100;
+  trailing_stop_close_short = entryprice - (entryprice * input_trailing_stop_close)/100;
+  
+  // Originale
+  {trailing_long = high >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[1] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long)  or (MarketPosition =1 and high[2] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[3] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long)
+     or (MarketPosition =1 and high[4] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[5] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[6] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[7] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long)
+     or (MarketPosition =1 and high[8] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[9] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[10] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[11] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long)
+     or (MarketPosition =1 and high[12] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[13] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[14] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long) or (MarketPosition =1 and high[15] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long)
+     or (MarketPosition =1 and high[16] >= trailing_stop_trigger_long and Close < trailing_stop_close_long and close[1] > trailing_stop_close_long);
+  
+  // Originale
+  trailing_short = low <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[1] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short)  or (MarketPosition =-1 and low[2] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[3] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short)
+     or (MarketPosition =-1 and low[4] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[5] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[6] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[7] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short)
+     or (MarketPosition =-1 and low[8] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[9] <=trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[10] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[11] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short)
+     or (MarketPosition =-1 and low[12] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[13] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[14] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short) or (MarketPosition =-1 and low[15] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short)
+     or (MarketPosition =-1 and low[16] <= trailing_stop_trigger_short and  Close > trailing_stop_close_short and close[1] < trailing_stop_close_short);}
+  
+ {trailing_long = high >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[1] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long)  or (MarketPosition =1 and high[2] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[3] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long)
+     or (MarketPosition =1 and high[4] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[5] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[6] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[7] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long)
+     or (MarketPosition =1 and high[8] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[9] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[10] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[11] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long)
+     or (MarketPosition =1 and high[12] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[13] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[14] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long) or (MarketPosition =1 and high[15] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long)
+     or (MarketPosition =1 and high[16] >= trailing_stop_trigger_long and Close cross under trailing_stop_close_long);
+  
+  trailing_short = low <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[1] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)  or (MarketPosition =-1 and low[2] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[3] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)
+     or (MarketPosition =-1 and low[4] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[5] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[6] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[7] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)
+     or (MarketPosition =-1 and low[8] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[9] <=trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[10] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[11] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)
+     or (MarketPosition =-1 and low[12] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[13] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[14] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short) or (MarketPosition =-1 and low[15] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)
+     or (MarketPosition =-1 and low[16] <= trailing_stop_trigger_short and  Close cross over trailing_stop_close_short)} 
+ 
+  highesthigh = highest(high, Barssinceentry);
+  trailing_long = (highesthigh >= trailing_stop_trigger_long and close <= trailing_stop_close_long);
+
+  lowestlow = lowest(low, Barssinceentry);	
+  trailing_short = (lowestlow <= trailing_stop_trigger_short and close >= trailing_stop_close_short);
+  
+  
+// Money menagment
+  risk = percent_risk/100;
+  nr_share = floor((InitialCapital + NetProfit) * risk) / close ;
+  stop_loss=((((InitialCapital + NetProfit) * risk)/100) * input_stop_loss_percent);
+  
+// **************************************************************************************************************************
+// // Entrata/Uscita Long
+// **************************************************************************************************************************	
+// Entrata Long
+                                                                                         { and (close[1] < ema1 + apertura_minima or low[1] < ema1 + apertura_minima Tradingview}
+    //if close > (media_ema+apertura_minima) and close < (media_ema + apertura_massima) and close[2] < (media_ema+apertura_minima) and open > close  and not solo_short {and Dayofweek(date) <> skipday and month(date) <> skipmonth1 and Dayofmonth(date) > 5} then
+      if close > (media_ema + apertura_minima)  and close < (media_ema + apertura_massima) and ((close[1] < (media_ema_1 + apertura_minima)) or (low[1] < (media_ema_1 + apertura_minima))) and close > open  and not solo_short {and Dayofweek(date) <> skipday and month(date) <> skipmonth1 and Dayofmonth(date) > 5} and EQC_Method then//and relativeDrawdownPercent2 >= 0 and relativeDrawdownPercent2 <= equityControlPercent then
+      Buy(""Long"") nr_share contracts Next Bar at market;
+              
+// Uscita Long    
+    if close < media_ema - chiusura_minima then
+       Sell(""Chiusura Long"") from entry(""Long"") Next Bar at market; 
+      
+ // Uscita Trailing Long  
+    If (MarketPosition =1 and trailing_long) then
+     Sell(""Trailing Long"") from entry(""Long"") Next Bar at market;
+  
+// **************************************************************************************************************************
+// Entrata/Uscita Short
+// **************************************************************************************************************************      
+// Entrata Short
+                                                                                           {and (close[1] > ema1 - apertura_minima or low[1] > ema1 - apertura_minima)}
+      if  close < (media_ema - apertura_minima) and close > (media_ema - apertura_massima) and ((close[1] > (media_ema_1 - apertura_minima)) or (high[1] > (media_ema_1 - apertura_minima))) and close < open and not solo_long {and Dayofweek(date) <> skipday and month(date) <> skipmonth1 and Dayofmonth > 5}  and EQC_Method then //and relativeDrawdownPercent2 >= 0 and relativeDrawdownPercent2 <= equityControlPercent then
+      Sellshort(""Short"") nr_share Contracts Next Bar at market;
+                  
+// Uscita Short  
+    if close > (media_ema + chiusura_minima) then
+        Buytocover(""Chiusura Short"") from entry(""Short"") Next Bar at market;
+   
+  // Uscita Trailing Short        
+     If (MarketPosition =-1 and trailing_short) then    
+        Buytocover(""Trailing Short"") from entry(""Short"") Next Bar at market;
+     
+Setstopposition;
+SetStopLoss(stop_loss);
+ 
+// **************************************************************************************************************************
+											 					// Fine Strategia
+// **************************************************************************************************************************
+
+
+// **************************************************************************************************************************
+// Calcolo dell relative drawdown della strategia attuale che stà girando Data1 ""Strategy""
+// **************************************************************************************************************************	
+inputs: Start_EQC_Input(""--------------"");
+ 
+ Vars:
+    mp(0),
+    formattedDate(""""),
+    formattedTime(""""),
+    dateTimeString("""");
+    
+ Vars: 
+ 	balance(0),
+ 	highestRelativeEquity(0),
+ 	relativeDrawdownMonetary(0),
+ 	lowestRelativeEquity(0),
+ 	relativeDrawdownPercent(0);
+
+// Balance 
+balance = (InitialCapital + NetProfit);
+mp = marketposition;
+
+// Highest Relative Equity 
+highestRelativeEquity = MaxList(balance, highestRelativeEquity);
+
+
+// LowestRelativeEquity E RelativeDrawdownMonetary E RelativeDrawdownPercent
+if balance <= highestRelativeEquity then
+	lowestRelativeEquity = minlist(highestRelativeEquity, balance);
+	relativeDrawdownMonetary = (highestRelativeEquity - balance);
+	relativeDrawdownPercent = (relativeDrawdownMonetary / highestRelativeEquity) * 100;
+ 
+// **************************************************************************************************************************
+// Export Equity Con Initial Capital Incluso Di Tutte Le Candele Eccetto BarsBack Della Strategia On Csv //
+// **************************************************************************************************************************													
+// Sul file .csv carico: Date/Time/Open/High/Low /Equity/Volume Per una questione di caricamento su tradestation... . Apro il grafico, clicco su una candela 2 volte e nelle impostazioni style clicco su line on close
+// per avere una linea con solo i valori dell'equity profitti/perdite cumulative con l'initial capital.
+
+//if mp[0] <> mp[1] and mp[0] <> 0 then begin { Solo per scaricare i dati ad ogni inizio nuova operazione, se commentato scarico tutte le candele.}
+// Quando carico Data2 il numero delle candele deve coincidere con il Data1, altrimenti tradestation non riesce a caricarli, per questo motivo scarico il balance di ongi candela.
+Inputs: printFileEquityWithInitCapitAllCandles(false),
+		printLogStrategy(false),
+        printLogEquity(false);
+
+If printFileEquityWithInitCapitAllCandles = True {and mp[0] <> mp[1] and mp[0] <> 0 then begin} Then Begin
+    // Formatta la data nel formato ""MM-dd-yyyy""
+    formattedDate = FormatDate(""yyyy-MM-dd"", ElDateToDateTime(Date));
+    
+    // Formatta l'ora nel formato ""00:00:00""
+    formattedTime = BarDateTime.Format(""%H:%M:%S"");
+     
+    // Combina data e ora nel formato richiesto
+    dateTimeString = formattedDate + "","" + formattedTime;
+
+// Stampa nel file CSV il balance della strategia originale tutte le candele eccetto barbacks
+	Print(File(""C:\Users\Utente\Desktop\Equity Control\Tradestation\Swing Trend Trailing\Exports\Export_Equity.csv""), dateTimeString, "","", open, "","", high, "","", low, "","", NumToStr(balance, 2) , Volume, "","");    
+End;
+
+// Print Log Strategy Data1 Tutte Le Candele
+if printLogStrategy = true Then
+Begin
+	Once Clearprintlog; // Clear the print log when the strategy first applyed or refreshed
+	print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ), "", "", "" HighestRelativeEQData1= "" ,highestRelativeEquity, "", "", "" LowestRelativeEQData1= "" ,lowestRelativeEquity, "", "", "" RelativeDrawdownMonetaryData1= "", relativeDrawdownMonetary, "", "", "" RelativeDrawdownPercentData1= "", relativeDrawdownPercent , "" %"", "", "", "" BarNumData1= "", BarNumber);
+End;
+
+// Print Log Equity Data2 Tutte Le Candele
+if printLogEquity = true Then
+Begin
+	Once Clearprintlog; // Clear the print log when the strategy first applyed or refreshed
+	print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ), "", "", "" HighestRelativeEQData2= "" ,highestRelativeEquity2, "", "", "" LowestRelativeEQData2= "" ,lowestRelativeEquity2, "", "", "" RelativeDrawdownMonetaryData2= "", relativeDrawdownMonetary2, "", "", "" RelativeDrawdownPercentData2= "", relativeDrawdownPercent2 , "" %"", "", "", "" BarNumData2= "", BarNumber);
+End;
+
+// **************************************************************************************************************************
+// Plotshape E Print Della Strategia Che Stà Girando Data1 ""Strategy"" //  Mostra solo se il DrawDown Supera o meno il valore di input. Non ha nulla a che fare con gli ingressi.                                             
+// **************************************************************************************************************************
+Input: plotshapeStrategy(false);
+       
+// Plot su strategy 1mo plot Start Della Strategia Che Stà Girando Data1 ""Strategy""
+If plotshapeStrategy = true and relativeDrawdownPercent < equityControlPercent {and mp <> 0} Then             
+Begin
+	Value1 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value1, Green);
+	Text_setstyle(Value1, 2, 0);
+End;
+
+// Plot su strategy 2ndo plot End Solo Dei Trade Conclusi Della Strategia Che Stà Girando Data1 ""Strategy""
+If plotshapeStrategy = true and (relativeDrawdownPercent > equityControlPercent) {and (mp = 0) or (mp <> 0))} Then
+Begin
+	Value2 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value2, Red);
+	Text_setstyle(Value2, 2, 0);
+End;
+
+// **************************************************************************************************************************
+// Plotshape E Print Start End Dell'Equity Di Data2 ""Equity"" // Questo ha a che fare con gli ingressi
+// **************************************************************************************************************************
+Input: plotshapeEquity(false),
+       printStartEndEquity(false);
+       
+// Plot su strategy 1mo plot Start Solo Del'equity Data2 ""Equity""
+If plotshapeEquity = true and EQC_Method {and mp <> 0} Then
+Begin
+	Value3 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value3, Green);
+	Text_setstyle(Value3, 2, 0);
+End;
+
+// Plot su strategy 2ndo plot End Solo Del'equity Data2 ""Equity""
+If plotshapeEquity = true and (relativeDrawdownPercent2 > equityControlPercent) {and (mp = 0) or (mp <> 0))} Then 
+Begin
+	Value4 = Text_new(D, T, L, ""*"");
+	Text_setcolor(Value4, Red);
+	Text_setstyle(Value4, 2, 0);
+End;
+
+
+// Print delle date Start Dell'equity Data2 ""Equity""
+If printStartEndEquity = true then
+Begin 
+	Once Clearprintlog; // Clear the print log when the strategy first applyed or refreshed
+	if EQC_Method and close of data2 <> close[1] of data2 Then {and close of data2 <> close[1] of data2 ""Riduce I Log Non Necessari""}
+	print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ),  "" Start Equity Data2"", "", "", "" DD="", relativeDrawdownPercent2, "" %"");
+// Print delle date End Dell'equity Data2 ""Equity""
+	if (relativeDrawdownPercent2 > equityControlPercent) and close of data2 <> close[1] of data2 Then {and close of data2 <> close[1] of data2 ""Riduce I Log Non Necessari""}
+	print(Formatdate(""dd/MM/yy"", ElDateToDateTime( Date )), "", "", BarDateTime.Format( ""%H%M.%S"" ),  "" End Equity Data2"", "", "", "" DD="", relativeDrawdownPercent2, "" %"");
+End;
+
+// **************************************************************************************************************************
+// Export Equity With No Initial Capital On Csv Solo Dei Trade Conclusi //
+// **************************************************************************************************************************													
+// Sul file .csv carico: Date/Time/Open/High/Low /Equity/Volume Per una questione di caricamento su tradestation... . Apro il grafico, clicco su una candela 2 volte e nelle impostazioni style clicco su line on close
+// per avere una linea con solo i valori dell'equity profitti/perdite cumulative.
+ 																				
+{Vars:
+    mp(0),
+    formattedDate(""""),
+    formattedTime(""""),
+    dateTimeString("""");
+
+mp = marketposition;
+
+if mp[0] <> mp[1] and mp[0] <> 0 then begin
+    // Formatta la data nel formato ""MM-dd-yyyy""
+    formattedDate = FormatDate(""dd-MM-yyyy"", ElDateToDateTime(Date));
+    
+    // Formatta l'ora nel formato ""00:00:00""
+    formattedTime = BarDateTime.Format(""%H:%M:%S"");
+    
+    // Combina data e ora nel formato richiesto
+    dateTimeString = formattedDate + "","" + formattedTime;
+    
+    // Stampa nel file CSV
+    Print(File(""C:\Users\Utente\Desktop\Equity Control\Tradestation\Swing Trend Trailing\Exports\Export_Equity.csv""), dateTimeString, "","", open, "","", high, "","", low, "","", NumToStr(NetProfit, 2) , Volume, "","");
+end;}"
+LpYUKzYw,Indicatore Export Trade List On Csv,Maurizio-Ciullo,JavaScript,Wednesday 20th of December 2023 02:39:30 PM CDT,"							// Export Trade List On Csv //
+
+
+// Sul file .csv carico: Date/Time/Open/High/Low /Equity/Volume Per una questione di caricamento su tradestatio... . Apro il grafico, clicco su una candela 2 volte e nelle impostazioni style clicco su line on close.
+ 																				
+
+Vars:
+    mp(0),
+    formattedDate(""""),
+    formattedTime(""""),
+    dateTimeString("""");
+
+mp = marketposition;
+
+if mp[0] <> mp[1] and mp[0] <> 0 then begin
+    // Formatta la data nel formato ""MM-dd-yyyy""
+    formattedDate = FormatDate(""dd-MM-yyyy"", ElDateToDateTime(Date));
+    
+    // Formatta l'ora nel formato ""00:00:00""
+    formattedTime = BarDateTime.Format(""%H:%M:%S"");
+    
+    // Combina data e ora nel formato richiesto
+    dateTimeString = formattedDate + "","" + formattedTime;
+    
+    // Stampa nel file CSV
+    Print(File(""C:\Users\Utente\Desktop\Equity Control\Tradestation\Swing Trend Trailing\Exports\Export_Equity.csv""), dateTimeString, "","", open, "","", high, "","", low, "","", NumToStr(NetProfit, 2) , Volume, "","");
+end;
+
+"
+CJ9KE4cP,Untitled,sissou123,Python,Wednesday 20th of December 2023 02:29:13 PM CDT,"Description
+Become a Python Programmer and learn one of employer's most requested skills of 2023!
+This is the most comprehensive, yet straight-forward, course for the Python programming 
+language on Udemy! Whether you have never programmed before, already know basic syntax, 
+or want to learn about the advanced features of Python, this course is for you! In this course we 
+will teach you Python 3
+for more:https://cuty.io/vUaaCxZXUbs"
+ncr4yPP7,"Модуль 4. Строки, списки. Часть 2. Задание 1, пункт 1",plarmi,Python,Wednesday 20th of December 2023 02:16:24 PM CDT,"# Дан текст. Мы делим предложения по (ВНИМАНИЕ) точке и пробелу!!!!
+text = ""lorem ipsum dolor sit amet. sagittis nisl rhoncus mattis rhoncus urna neque."".split("". "")
+
+# Получился список, где отдельный элемент это одно предложение, но последнее предложение осталось с точкой
+# Заменяем точку на пустоту и приводим весь текст в порядок, первая буква всегда большая, остальные маленькие
+for i in range(len(text)):
+    text[i] = text[i].replace(""."", """").capitalize()
+
+# Создаём единый текст: достаём предложения из списка и соединяем их точкой и пробелом
+# К последнему предложению «искусственно» добавляем точку (конкатенация)
+new_text = "". "".join(text) + "".""
+print(new_text)"
+fGDqwEqP,Untitled,sissou123,C#,Wednesday 20th of December 2023 02:00:02 PM CDT,"C# Advanced Topics - The Next Logical Step
+Learn advanced topics of the C# language like LINQ, Lambda, Extension Methods, Generics, Delegates, Events and more!
+for more:https://dz-linkk.com/aXo9br"
+MVfNLnaU,Timm.Thaler.oder.das.verkaufte.Lachen.2017.Deu.720p.h264.aac.Subs-bp,bpmircea,BrainFuck,Wednesday 20th of December 2023 01:51:26 PM CDT,"Timm Thaler oder Das verkaufte Lachen (The Legend of Timm Thaler or The Boy Who Sold His Laughter) (Andreas Dresen, 2017)
+aka
+Timm.Thaler.oder.das.verkaufte.Lachen.2017.Deu.720p.h264.aac.Subs-bp
+https://www.imdb.com/title/tt4578050/
+
+https://filecrypt.cc/Container/D370CF71F8.html
+
+Audio tracks: de | Subtitles: de en es ru"
+J5YN2Sn2,Timm.Thaler.oder.das.verkaufte.Lachen.2017.Deu.720p.h264.dts.Subs-bp,bpmircea,BrainFuck,Wednesday 20th of December 2023 01:50:13 PM CDT,"Timm Thaler oder Das verkaufte Lachen (The Legend of Timm Thaler or The Boy Who Sold His Laughter) (Andreas Dresen, 2017)
+aka
+Timm.Thaler.oder.das.verkaufte.Lachen.2017.Deu.720p.h264.dts.Subs-bp
+https://www.imdb.com/title/tt4578050/
+
+https://filecrypt.cc/Container/9814C1DF8E.html
+
+Audio tracks: de | Subtitles: de en es ru"
+gAGWj4Le,Untitled,sissou123,C#,Wednesday 20th of December 2023 01:49:22 PM CDT,"What's New in C#7, C#8, C#9 and C#10
+Learn about latest features of C#7, C#8, C#9 and C#10
+This short course covers the latest and greatest features of C#, covering versions 7, 7.1, 7.2, 7.3, 8.0, 9.0 and 10.0 of the language that are being sim-shipped with corresponding Visual Studio updates.
+for more:https://dz-linkk.com/k8lA80"
+FCdy65Sp,Untitled,sissou123,C#,Wednesday 20th of December 2023 01:42:02 PM CDT,"High Performance Coding with .NET Core and C#
+Learn how to write high performance and scalable .NET Core and ASP.NET Core applications in C#
+for more:https://dz-linkk.com/eZvo8x"
+rYVFu4MR,scanner2,Dragon_voyageur,Lua,Wednesday 20th of December 2023 01:40:02 PM CDT,"search={...}
+x=peripheral.wrap(""back"")
+y=nil
+while true do
+y=x.scan(tonumber(search[1]))
+if y ~= nil then
+    for i,b in pairs(y) do
+        if search[2]==nil or string.find(b[""name""],search[2]) then
+       term.write(string.sub(string.format(""%-10s"",string.match(b[""name""],""[^:]+$"")),1,10).."" "")
+       print(tostring(b[""x""]).."" ""..tostring(b[""y""]).."" ""..tostring(b[""z""]))
+        end
+    end
+end
+empty={term.getCursorPos()}
+for j=empty[2],20,1 do
+    term.clearLine()
+    print("""")
+    
+end
+sleep(1)
+term.setCursorPos(1,1)
+end"
+XeDhh9iP,чередование согл+гласн,nq1s788,Python,Wednesday 20th of December 2023 01:36:55 PM CDT,"f = open('24.txt').readline()
+answ = 0
+cur = 0
+s = ['CDF', 'AO']
+for i in range(len(f)):
+    if f[i] in s[cur % 2]:
+        cur += 1
+        if cur > answ:
+            answ = cur
+    else:
+        cur = 0
+print(answ)
+"
+LPQnJ5sY,соседние различные,nq1s788,Python,Wednesday 20th of December 2023 01:29:30 PM CDT,"f = open('24.txt').readline()
+answ = 0
+cur = 0
+for i in range(1, len(f)):
+    if f[i] != f[i - 1]:
+        cur += 1
+        if cur > answ:
+            answ = cur
+    else:
+        cur = 0
+print(answ + 1)"
+mZMz8R4F,соседние различные,nq1s788,Python,Wednesday 20th of December 2023 01:28:15 PM CDT,"f = '0' + open('24.txt').readline()
+answ = 0
+cur = 0
+for i in range(1, len(f)):
+    if f[i] != f[i - 1]:
+        cur += 1
+        if cur > answ:
+            answ = cur
+    else:
+        cur = 0
+print(answ)"
+i7euiWBw,HA - YAML - Send notification if doors / windows are open when last person leaves home,dykandDK,YAML,Wednesday 20th of December 2023 01:09:38 PM CDT,"alias: >-
+  Send notifikation hvis der er åbne døre eller vinuder, når sidste person
+  forlader hjemmet
+description: >-
+  Send notifikation hvis der er åbne døre eller vinuder, når sidste person
+  forlader hjemmet
+trigger:
+  - platform: state
+    entity_id: group.alle_personer
+    to: not_home
+condition:
+  - condition: template
+    value_template: >-
+      {{ states.binary_sensor | selectattr('state', 'eq', 'on') |
+      selectattr('attributes.device_class', 'eq', 'opening') |
+      map(attribute='entity_id') | list | count > 0}}
+action:
+  - service: notify.anders_devices
+    data:
+      data: {}
+      message: >-
+        Følgende døre eller vinduer er åbne: {{ states.binary_sensor |
+        selectattr('state', 'eq', 'on') | selectattr('attributes.device_class',
+        'eq', 'opening') | map(attribute='attributes.friendly_name') | list |
+        join(', ') }}
+      title: Døre eller vinduer er åbne!
+"
+7Yaiuvyj,бмо 2,vatman,Python,Wednesday 20th of December 2023 12:43:09 PM CDT,"if max_vertex_energy >= max_edge_energy and max_vertex_energy >= max_wedge_energy:
+    print(""hello1"")
+    # Добавляем новую вершину к вершине с наибольшей энергией
+    max_energy_vertex = vertex_energies.index(max_vertex_energy)
+    G.add_node(len(selected_vectors))
+    G.add_edge(max_energy_vertex, len(selected_vectors))
+    selected_vectors.append(np.random.randint(-6, 7, 3))  # Добавляем новый вектор
+elif max_edge_energy >= max_vertex_energy and max_edge_energy >= max_wedge_energy:
+    print(""hello2"")
+    # Разбиваем ребро с наибольшей энергией новой вершиной
+    edges = list(G.edges)  # Получаем список всех ребер
+    max_energy_edge = edges[edge_energies.index(max_edge_energy)]  # Находим ребро с максимальной энергией
+    G.add_node(len(selected_vectors))
+    G.add_edge(max_energy_edge[0], len(selected_vectors))
+    G.add_edge(max_energy_edge[1], len(selected_vectors))
+    G.remove_edge(max_energy_edge[0], max_energy_edge[1])
+    selected_vectors.append(np.random.randint(-6, 7, 3))  # Добавляем новый вектор
+else:
+    print(""hello3"")
+    if edge_combination==1:
+        old_edge_length = np.linalg.norm(selected_vectors[max_energy_wedge[0]] - selected_vectors[max_energy_wedge[1]])
+        new_edge_length = np.linalg.norm(selected_vectors[max_energy_wedge[2]] - selected_vectors[max_energy_wedge[1]])
+        if new_edge_length < old_edge_length:
+            # Удаляем старое ребро и добавляем новое
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])
+         else:
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])
+    elif edge_combination==2:
+        old_edge_length = np.linalg.norm(pos[max_energy_wedge[0]] - pos[max_energy_wedge[1]])
+        new_edge_length = np.linalg.norm(pos[max_energy_wedge[2]] - pos[max_energy_wedge[1]])
+        if new_edge_length < old_edge_length:
+            # Удаляем старое ребро и добавляем новое
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])
+        else:
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])
+    elif edge_combination==3:
+        old_edge_length = np.linalg.norm(pos[max_energy_wedge[0]] - pos[max_energy_wedge[1]])
+        new_edge_length = np.linalg.norm(pos[max_energy_wedge[2]] - pos[max_energy_wedge[1]])
+        if new_edge_length < old_edge_length:
+            # Удаляем старое ребро и добавляем новое
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])
+         else:
+            G.remove_edge(max_energy_wedge[0], max_energy_wedge[1])
+            G.add_edge(max_energy_wedge[2], max_energy_wedge[1])           
+    print(max_energy_wedge[0])
+    print(max_energy_wedge[1])
+    print(max_energy_wedge[2])
+
+for edges in G.edges:
+    print(edges)"
+9unuNkUA,бмо графы 1,vatman,Python,Wednesday 20th of December 2023 12:42:22 PM CDT,"import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import networkx as nx
+from scipy.spatial import distance
+from scipy.spatial import distance_matrix
+import itertools
+
+
+vertex_k = 100 # Замените на ваше значение для коэффициента аппроксимации вершин
+edge_k =1  # Замените на ваше значение для коэффициента растяжения ребер
+wedge_k = 1 # Замените на ваше значение для коэффициента изгиба клиньев
+np.random.seed(12)  
+vectors = [np.random.randint(-6, 7, 3) for _ in range(100)]
+
+
+# Выбираем три случайные точки (вектора)
+indices = np.random.choice(len(vectors),10, replace=False)
+selected_vectors = [vectors[i] for i in indices]
+#print(indices) 
+
+# Вычисляем матрицу расстояний между всеми векторами
+distances = distance_matrix(selected_vectors, selected_vectors)
+
+# Заменяем диагональные элементы на бесконечность
+np.fill_diagonal(distances, np.inf)
+#print(distances)
+# Создаем список пар (расстояние, вектор)
+dist_vector_pairs = [(np.min(dist), vec) for dist, vec in zip(distances, selected_vectors)]
+#print(dist_vector_pairs)
+# Сортируем список пар по расстоянию
+dist_vector_pairs.sort(key=lambda x: x[0])
+#print(dist_vector_pairs)
+# Извлекаем отсортированные векторы
+sorted_vectors = [pair[1] for pair in dist_vector_pairs]
+#print(sorted_vectors)
+selected_vectors =sorted_vectors 
+# Создаем граф
+# Вычисляем матрицу расстояний между всеми векторами
+distances = distance_matrix(selected_vectors, selected_vectors)
+# Заменяем диагональные элементы на бесконечность
+np.fill_diagonal(distances, np.inf)
+#print(distances)
+G = nx.Graph()
+
+#Добавляем вершины в граф
+for i in range(len(selected_vectors)):
+    G.add_node(i)
+    
+visited = set()  # Создаем множество для хранения посещенных вершин
+
+for i in range(len(selected_vectors)):
+    # Находим ближайшую вершину к текущей вершине
+    nearest_vertex = np.argmin(distances[i])
+    print(""ближайшие вершины"")
+    print(i, nearest_vertex)
+
+    # Проверяем, была ли уже посещена ближайшая вершина
+    if i not in visited:
+        # Если вершина не была посещена, добавляем ребро
+        G.add_edge(i, nearest_vertex)
+        # Добавляем вершину в множество посещенных вершин
+        visited.add(nearest_vertex)
+        print(visited)
+    else:
+        # Если вершина уже была посещена, пропускаем ее
+        print(""пропуск вершины"")
+        print(i, nearest_vertex)
+        continue
+
+
+def DFS(graph, start, visited=None):
+    if visited is None:
+        visited = set()
+    visited.add(start)
+    for next_node in set(graph[start]) - visited:
+        DFS(graph, next_node, visited)
+    return visited
+
+# Проверяем, является ли граф связным
+connected = len(DFS(G, 0)) == len(G)
+
+if not connected:
+    # Граф не связный, находим несвязанные компоненты
+    components = [list(c) for c in nx.connected_components(G)]
+    # Соединяем компоненты, добавляя ребра между их вершинами
+    for i in range(len(components) - 1):
+        G.add_edge(components[i][0], components[i+1][0])
+
+
+
+
+# Расчет энергии вершины
+def calculate_vertex_energy(vertex, vectors, k):
+    energy = 0
+    for vector in vectors:
+        energy += np.linalg.norm(vertex - vector)**2
+    return k * energy
+ 
+# Расчет энергии ребра
+def calculate_edge_energy(edge, vectors, k):
+    v1, v2 = vectors[edge[0]], vectors[edge[1]]
+    return k * np.linalg.norm(v1 - v2)**2
+ 
+# Расчет энергии клина
+def calculate_wedge_energy(wedge, vectors, k):
+    v1, v2, v3 = vectors[wedge[0]], vectors[wedge[1]], vectors[wedge[2]]
+    return k * np.linalg.norm(v1 + v3 - 2*v2)**2
+
+#global max_wedge_energy
+#max_wedge_energy=-np.inf# Инициализируем максимальную энергию клина как минус бесконечность
+max_energy_wedge = None  # Инициализируем клин с максимальной энергией как None
+edge_combination=0
+
+# Расчет энергии графа
+def calculate_energy(graph, vectors):
+    #vertex_k = 0.5 # Замените на ваше значение для коэффициента аппроксимации вершин
+    #edge_k = 0.5 # Замените на ваше значение для коэффициента растяжения ребер
+    #wedge_k = 0.5 # Замените на ваше значение для коэффициента изгиба клиньев
+    global max_wedge_energy
+    max_wedge_energy=-np.inf
+    
+    energy = 0
+    for node in graph.nodes:
+        energy += calculate_vertex_energy(vectors[int(node)], vectors, vertex_k)
+    for edge in graph.edges:
+        energy += calculate_edge_energy(edge, vectors, edge_k)
+        
+    # Добавляем энергию клина для всех подграфов из трех вершин
+    for nodes in itertools.combinations(graph.nodes, 3):
+        #print(nodes)
+        if graph.has_edge(nodes[0], nodes[1]) and graph.has_edge(nodes[0], nodes[2]):
+            wedge_energy = calculate_wedge_energy(nodes, vectors, wedge_k)
+            #print(""Энергия клина:"")
+            #print(p1)
+            if wedge_energy > max_wedge_energy:
+                max_wedge_energy = wedge_energy
+                max_energy_wedge = nodes
+                edge_combination=1
+            energy += wedge_energy
+        elif graph.has_edge(nodes[0], nodes[1]) and graph.has_edge(nodes[1], nodes[2]):
+            wedge_energy = calculate_wedge_energy(nodes, vectors, wedge_k)            
+            if wedge_energy > max_wedge_energy:
+                max_wedge_energy = wedge_energy
+                max_energy_wedge = nodes
+                edge_combination=2
+                #print(""Энергия клина:"")
+            #print(p1)
+            energy +=wedge_energy
+        elif graph.has_edge(nodes[0], nodes[2]) and graph.has_edge(nodes[1], nodes[2]):
+            wedge_energy = calculate_wedge_energy(nodes, vectors, wedge_k)
+            if wedge_energy > max_wedge_energy:
+                max_wedge_energy = wedge_energy
+                max_energy_wedge = nodes
+                edge_combination=3
+            #print(""Энергия клина:"")
+            #print(p1)
+            energy += wedge_energy        
+    return energy
+ 
+energy = calculate_energy(G, selected_vectors)
+print(f'Энергия графа: {energy}')
+   
+    
+# Визуализация проекции графа и векторов
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ 
+# Отображаем все векторы на графике
+for vector in vectors:
+    ax.scatter(vector[0], vector[1], vector[2], color='b')
+ 
+# Отображаем выбранные векторы на графике
+for vector in selected_vectors:
+    ax.scatter(vector[0], vector[1], vector[2], color='r')
+ 
+# Добавляем ребра между вершинами
+for edge in G.edges:    
+    ax.plot([selected_vectors[edge[0]][0], selected_vectors[edge[1]][0]],
+            [selected_vectors[edge[0]][1], selected_vectors[edge[1]][1]],
+            [selected_vectors[edge[0]][2], selected_vectors[edge[1]][2]], 'r-')
+#for edges in G.edges:
+#    print(edges) 
+    
+# Добавляем оси
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+plt.show()"
+09B5q0DR,script userlog,tuvok81,Bash,Wednesday 20th of December 2023 12:40:10 PM CDT,"#!/bin/bash
+############################################
+###copyright by dqb562@gmx.de Wüstenkäfer###
+###modify by StarWing & tuvok            ###
+############################################
+### dieses script, mit Argument auf die Logdatei starten###
+# version 25a
+#
+# beispiel:
+# sudo ./ip-ueberwachung.sh /pfad-und-datei-zur-userslog.txt
+#
+# alle ipś wieder löschen:
+# sudo iptables -S INPUT | grep ""DROP"" | grep -Eo ""([0-9]{1,3}\.){3}[0-9]{1,3}"" | while read -r ip; do sudo iptables -D INPUT -s ""$ip"" -j DROP; done
+#
+# alle gesperrten ip ,werden in eine logdatei geschrieben:
+# added_ips.log
+#
+if [ -z ""$1"" ]; then
+    echo ""Bitte gib den Dateinamen der Logdatei als Argument an.""
+    exit 1
+fi
+
+LOGFILE=""$1""
+THRESHOLD=4  # Anzahl der aufeinanderfolgenden Zeilen mit derselben IP oder Zeichenfolge
+LOG_ADDED_IPS=""/home/websdr/Schreibtisch/blocked_ips.log""  # Datei, um die hinzugefügten IPs zu speichern
+echo -e We Start up IP Scanner fuer Logfile $1
+
+while true; do
+    count=0
+    last_ip=""""
+    match=0
+
+    while read -r line; do
+        ip=$(echo ""$line"" | grep -E -o ""([0-9]{1,3}\.){3}[0-9]{1,3}"")
+        if [ ""$last_ip"" == ""$ip"" ]; then
+          match=$(( $match + 1 ));
+        else
+          last_ip=""${ip}""
+        fi
+
+        if [ $match -gt ${THRESHOLD} ]; then
+          #echo $ip
+            if [[ ""$line"" == *""$ad_string""* && -n ""$ip"" ]]; then
+                if ! sudo iptables -C OUTPUT -d ""$ip"" -j DROP &>/dev/null; then
+                    timestamp=$(date '+%Y-%m-%d %H:%M:%S')  # Aktuelles Datum und Uhrzeit
+                    echo ""[$timestamp] Added IP: $ip"" >> ""$LOG_ADDED_IPS""
+                    echo ""[$timestamp] Added IP: $ip""
+                    sudo iptables -I OUTPUT -d ""$ip"" -j DROP
+                    #break  # Stoppt die Schleife, wenn die IP bereits hinzugefügt wurde
+                fi
+           fi
+        fi
+    done < <(tail -n 10 ""$LOGFILE"")
+
+    sleep 1  # Warte 10 Sekunden, bevor die nächste Prüfung beginnt
+done
+"
+S3btWzE5,Untitled,dllbridge,C,Wednesday 20th of December 2023 12:39:33 PM CDT,"
+
+#include    <stdio.h>
+#include   <stdlib.h>
+
+
+struct  TT
+{
+	
+    int ch;
+	int  z;	
+	
+};
+
+
+void foo(TT *);
+
+////////////////////////////////////////////////////////// sizeof(TT)
+int main()
+{
+	
+    TT *p = new(TT);
+    
+    
+    TT &aT = *p;
+
+    aT.ch = 1;
+	aT. z = 3; 
+
+
+    foo(&aT); 
+
+   delete(p);	
+}
+
+
+
+
+////////////////////////////////////////////////////////////
+void foo(TT *p1)
+{
+
+
+    printf(""aT.ch = %d\n"", p1->ch);
+    printf(""aT. z = %d\n"", p1-> z);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+
+#include    <stdio.h>
+#include   <stdlib.h>
+
+
+struct  TT
+{
+	
+    int ch;
+	int  z;	
+	
+};
+
+
+void foo(TT *);
+
+//////////////////////////////////////////////////////////
+int main()
+{
+    
+    TT *p = (TT*)malloc(sizeof(TT));
+    
+    
+    TT &aT = *p;
+
+    aT.ch = 1;
+	aT. z = 3; 
+
+
+    foo(&aT); 
+
+    free(p);
+}
+
+
+
+
+////////////////////////////////////////////////////////////
+void foo(TT *p1)
+{
+
+
+    printf(""aT.ch = %d\n"", p1->ch);
+    printf(""aT. z = %d\n"", p1-> z);
+}
+
+*/
+
+
+
+/*
+#include    <stdio.h>
+#include   <stdlib.h>
+
+
+struct  TT
+{
+	
+    int ch;
+	int  z;	
+	
+};
+
+
+//////////////////////////////////////////////////////////
+int main()
+{
+    
+    int *p = (int*)malloc(sizeof(int));
+    
+    
+    int &a = *p;
+
+    a = 12000; 
+
+    printf(""a = %d\n"", a);
+
+
+    free(p);
+}
+
+
+*/
+
+
+
+"
+PSBBmTEi,linked list,mrWeiss,C,Wednesday 20th of December 2023 12:36:37 PM CDT,"#include <stdlib.h>
+#include <stdio.h>
+
+struct node {
+	int value;
+	struct node *next;
+};
+
+struct node *list_from_array(int *array, int length);
+void list_print(struct node *list);
+struct node *list_find(struct node **list, int value);
+void list_clear(struct node **list);
+
+void test_init(struct node **list);
+void test(struct node **list, int value);
+
+int main(void) {
+	struct node *list_head;
+	test_init(&list_head);
+
+	test(&list_head, 11);
+	test(&list_head, 1);
+	test(&list_head, 12);
+	test(&list_head, 10);
+	test(&list_head, 9);
+	test(&list_head, 13);
+	test(&list_head, 9);
+	test(&list_head, 7);
+	test(&list_head, 14);
+	test(&list_head, 1);
+	test(&list_head, 4);
+	test(&list_head, 15);
+
+	list_clear(&list_head);
+	return 0;
+}
+
+void test_init(struct node **list) {
+	int init_array[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+	*list = list_from_array(init_array, sizeof init_array / sizeof *init_array);
+
+	list_print(*list);
+	printf(""\n"");	
+}
+
+void test(struct node **list, int value) {
+	struct node *found = list_find(list, value);
+	if(!found)
+		printf(""%d NO\n"", value);
+	else
+		printf(""%d OK\n"", found->value);
+
+	list_print(*list);
+	printf(""\n"");
+}
+
+struct node *list_from_array(int *array, int length) {
+	struct node *list = NULL;
+	struct node **next_ptr = &list;
+	for(int i = 0; i < length; i++) {
+		struct node *new = malloc(sizeof *new);
+		if(!new) {
+			list_clear(&list);
+			break;
+		}
+		*new = (struct node) {
+			.value = array[i],
+			.next  = NULL,
+		};
+		*next_ptr = new;
+		next_ptr = &new->next;
+	}
+	return list;
+}
+
+void list_print(struct node *list) {
+    if (!list) {
+        printf(""[]"");
+        return;
+    }
+
+    printf(""[%d"", list->value);
+    list = list->next;
+
+    while (list) {
+        printf("", %d"", list->value);
+        list = list->next;
+    }
+
+    printf(""]"");
+}
+
+struct node *list_find(struct node **list, int value) {
+	struct node **next_ptr = list;
+	while(*next_ptr) {
+		struct node *cur = *next_ptr;
+		if (cur->value == value) {
+			*next_ptr = cur->next;
+			cur->next = *list;
+			return *list = cur;
+		}
+		next_ptr = &cur->next;
+	}
+	return NULL;
+}
+
+void list_clear(struct node **list) {
+	struct node *cur = *list;
+	while(cur) {
+		struct node *next = cur->next;
+		free(cur);
+		cur = next;
+	}
+	*list = NULL;
+}
+"
+r8JhjU7b,values,valenki13,C++,Wednesday 20th of December 2023 12:27:03 PM CDT,"#include <iostream>
+
+using namespace std;
+
+void main() {
+	setlocale(LC_ALL, ""ru"");
+	/*
+	cout << ""\tHello  \\\\ \n"" << endl;
+	cout << R""(\tHello  \\\\ \n)"" << endl;
+
+	int val1 = 12;
+	int val2 = 13;
+	int res = val1 + val2;
+
+	cout << val1 << "" + "" 
+		 << val2 << "" = "" 
+		 << res << endl;
+
+	double val3 = -3.1415;
+	double val4 = 15.34;
+	cout << val3 << "" / "" 
+		 << val4 << "" = "" 
+		 << val3 / val4 << endl;
+		
+	char ch1;
+	ch1 = '?'; 
+	cout << ch1 << endl;
+
+	bool is_true = true;
+	cout << is_true << endl;
+
+	cout << ""--------------------------------"";
+	
+	cout << ""Расчёт стоимости установки забора\n"";
+	double a;
+	double b;
+	cout << ""Введите сторону A: "";
+	cin >> a;
+	cout << ""Введите сторону B: "";
+	cin >> b;
+	double price = 3000;
+	double P = a + a + b + b;
+	cout << ""Итого: "" << P * price << "" руб."" << endl;
+	*/	
+	
+	double pi = 3.1415926;
+	double r = 1.5;
+
+	double area = pi * r * r;
+	double depo1 = 17;
+	//cout << ""Enter :""; cin >> depo1;
+
+	double depo2 = 14;
+	//cout << ""Enter :""; cin >> depo2;
+	
+	double depo3 = 15;
+	//cout << ""Enter :""; cin >> depo3;
+
+	cout << ""Sum: "" 
+		<< depo1 + depo2 + depo3 << "" rub.\n"";
+
+	system(""pause"");
+}"
+RFLGBb05,Untitled,eliax1996,Python,Wednesday 20th of December 2023 12:07:35 PM CDT,"import time
+from enum import Enum
+from dataclasses import dataclass
+from functools import cache
+from typing import Any
+
+
+class Signal(Enum):
+    LOW = ""LOW""
+    HIGH = ""HIGH""
+
+    def __repr__(self):
+        return self.value.lower()
+
+    def __str__(self):
+        return self.value.lower()
+
+
+class Component:
+    def apply(self, signal: Signal, index: int) -> Signal | None:
+        raise NotImplementedError()
+
+    def state(self) -> Any:
+        raise NotImplementedError()
+
+    def set_state(self, state: Any):
+        raise NotImplementedError()
+
+
+@dataclass
+class FlipFlop(Component):
+    name: str
+    active: bool = False
+
+    def apply(self, signal: Signal, index: int) -> Signal | None:
+        if index != 0:
+            raise Exception(f""FlipFlop can only receive one signal, not {index}"")
+
+        match signal:
+            case Signal.LOW:
+                self.active = not self.active
+                if self.active:
+                    return Signal.HIGH
+                else:
+                    return Signal.LOW
+            case _:
+                return None
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def state(self):
+        return self.active
+
+    def set_state(self, state: Any):
+        self.active = state
+
+    def __repr__(self):
+        return f""FlipFlop({self.name})""
+
+
+@dataclass
+class TestComponent(Component):
+    name: str
+
+    def apply(self, signal: Signal, index: int) -> Signal | None:
+        return None
+
+    def state(self):
+        return None
+
+    def set_state(self, state: Any):
+        pass
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+@dataclass
+class Conjunction(Component):
+    name: str
+    memory: list[Signal]
+
+    def apply(self, signal: Signal, index: int) -> Signal:
+        print(index)
+        self.memory[index] = signal
+        if all([signal == Signal.HIGH for signal in self.memory]):
+            return Signal.LOW
+        else:
+            return Signal.HIGH
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def state(self):
+        return tuple(self.memory)
+
+    def set_state(self, state: Any):
+        self.memory = list(state)
+
+    def __repr__(self):
+        return f""Conjunction({self.name}: {self.memory})""
+
+
+@dataclass
+class Broadcaster(Component):
+    name: str = ""broadcaster""
+
+    def apply(self, signal: Signal, index: int) -> Signal:
+        if index != 0:
+            raise Exception(""Broadcaster can only receive one signal"")
+
+        return signal
+
+    def __hash__(self):
+        return hash(""constant"")
+
+    def state(self):
+        return None
+
+    def set_state(self, state: Any):
+        pass
+
+    def __repr__(self):
+        return f""Broadcaster()""
+
+
+text = """"""
+%jr -> mq, xn
+%zl -> tz, cm
+&lh -> nr
+%hx -> jx, tz
+%cm -> tz, ls
+&fk -> nr
+broadcaster -> sj, pf, kh, cn
+%gz -> mq, lq
+%gb -> xf, kr
+%zc -> rq
+%ln -> qj, xf
+%gq -> pp
+%fb -> xf
+%pf -> tg, nv
+%bc -> cf
+&tz -> cn, fk, ls
+%cq -> fb, xf
+%rq -> tg, dx
+%km -> gq
+&mq -> gq, xn, fv, km, lh, xv, sj
+%zp -> mq, xv
+%jx -> tz, np
+&tg -> mm, rp, zc, pf, bc
+%cv -> sq, xf
+%nv -> ht, tg
+%sq -> gb
+%kr -> ln
+%dk -> cv
+%xn -> zp
+%sx -> xf, cq
+%zt -> tz, fq
+%dx -> tg, qn
+&ff -> nr
+%bn -> hx, tz
+%fj -> zt, tz
+%ht -> rr, tg
+%fq -> tz, bn
+%kh -> dk, xf
+%sj -> mq, fv
+%vm -> zl, tz
+&mm -> nr
+%rp -> bc
+%fh -> sx
+%ls -> fj
+%xz -> mq, gz
+%fv -> km
+&nr -> rx
+%lq -> mq
+%xv -> xz
+%cn -> tz, vm
+%pp -> jr, mq
+%hn -> tg
+%qn -> hn, tg
+%rr -> rp, tg
+%cf -> tg, zc
+%qj -> fh, xf
+&xf -> sq, dk, fh, ff, kh, kr
+%np -> tz
+""""""
+
+
+def parse_elem(elem: str):
+    if elem == ""broadcaster"":
+        return Broadcaster()
+    if elem.startswith(""%""):
+        return FlipFlop(name=elem.strip(""%""))
+    if elem.startswith(""&""):
+        return Conjunction(name=elem.strip(""&""), memory=[])
+    return TestComponent(name=elem)
+
+
+game = text.strip().split(""\n"")
+
+topology = {}
+name_to_component = {}
+
+for line in game:
+    source_, destinations_raw = line.split(""->"")
+    father = parse_elem(source_.strip())
+    children = [child.strip() for child in destinations_raw.split("","")]
+    topology[father.name] = children
+    name_to_component[father.name] = father
+
+for children in topology.values():
+    for child in children:
+        if child not in name_to_component:
+            name_to_component[child] = parse_elem(child)
+
+reversed_topology = {}
+for father, children in topology.items():
+    for child in children:
+        reversed_topology.setdefault(child, []).append(father)
+
+for component_name, component in name_to_component.items():
+    if isinstance(component, Conjunction):
+        component.memory = list(Signal.LOW for child in reversed_topology[component_name])
+
+from collections import deque
+
+
+class HDict(dict):
+    def __hash__(self):
+        return hash(frozenset(self.items()))
+
+
+@cache
+def compute_high_and_low_signals(
+        topology: HDict[str, list[str]],
+        name_to_component: HDict[str, Component],
+        components_state: HDict[str, Any],
+        next_signal: Signal,
+) -> tuple[HDict[str, Any], tuple[int, int]]:
+    """"""
+    Given a signal, the topology and the current state of the components, compute the next state of the components, the unprocessed signals
+    and returns the number of low and high signals.
+    """"""
+
+    #for component_name, component_state in components_state.items():
+    #    name_to_component[component_name].state = component_state
+
+    to_forward = topology[""broadcaster""]
+    print(""computing new state"")
+
+    signal_queue = deque()
+
+    high_signals = 0 if next_signal == Signal.LOW else 1
+    low_signals = 0 if next_signal == Signal.HIGH else 1
+
+    for component_name in to_forward:
+        signal_queue.append(((""broadcaster"", component_name), next_signal))
+
+    while signal_queue:
+        (source, destination), signal = signal_queue.popleft()
+
+
+        match signal:
+            case Signal.HIGH:
+                high_signals += 1
+            case Signal.LOW:
+                low_signals += 1
+            case _:
+                pass
+
+        print(f""{source} -{signal}-> {destination}"")
+        component_state = name_to_component[destination]
+        index = reversed_topology[destination].index(source) if isinstance(component_state, Conjunction) else 0
+        emitted_signal = component_state.apply(signal, index)
+
+        if emitted_signal is None:
+            continue
+
+        for component_child in topology[destination]:
+            signal_queue.append(((destination, component_child), emitted_signal))
+
+    return (
+        HDict(
+            dict((component, name_to_component[component].state()) for component in sorted(name_to_component.keys()))),
+        (high_signals, low_signals),
+    )
+
+
+def click_button(times: int = 1000):
+    frozen_topology = HDict((k, tuple(v)) for k, v in topology.items())
+    frozen_name_to_component = HDict(name_to_component)
+
+    def compute_frozen_components_state():
+        return HDict(
+            (component, name_to_component[component].state()) for component in sorted(name_to_component.keys()))
+
+    total_high_signals = 0
+    total_low_signals = 0
+    component_state_map = None
+    for i in range(times):
+        component_state_map, (high, low) = compute_high_and_low_signals(
+            frozen_topology,
+            frozen_name_to_component,
+            compute_frozen_components_state() if component_state_map is None else component_state_map,
+            Signal.LOW
+        )
+        total_high_signals += high
+        total_low_signals += low
+
+    return total_high_signals, total_low_signals
+
+
+print(f""source to destination: {topology}"")
+print(f""destination to source: {reversed_topology}"")
+
+high, low = click_button()
+print(high*low)"
+gChPVTUL,Untitled,pasholnahuy,C,Wednesday 20th of December 2023 12:00:32 PM CDT,"#include <fcntl.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char *argv[]) {
+    char *input = argv[1];
+    char *output = argv[2];
+    int input_filedesc = open(input, O_RDONLY);
+    int output_filedesc =
+        open(output, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    int32_t mod = atoi(argv[3]);
+    int read_bytes;
+    uint64_t ind = 1;
+    uint64_t sum = 0;
+    uint8_t buf;
+    while ((read_bytes = read(input_filedesc, &buf, 1)) == 1) {
+        for (size_t i = 0; i < (1 << 3); ++i) {
+            sum = (sum + (ind * ind) % mod) % mod;
+            if ((buf & (1 << i)) >> i) {
+                if (write(output_filedesc, &sum, sizeof(int32_t)) ==
+                    sizeof(int32_t)) {
+                }
+            }
+            ++ind;
+        }
+    }
+    close(input_filedesc);
+    close(output_filedesc);
+}"
+dgkD5JH8,Untitled,pasholnahuy,C,Wednesday 20th of December 2023 11:31:33 AM CDT,"#include <fcntl.h>
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char *argv[]) {
+    int input_file = open(argv[1], O_RDONLY);
+    int ouput_file =
+        open(argv[2], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+    uint32_t mod = atoll(argv[3]);
+
+    uint64_t current_sum = 0;
+    uint64_t current_x = 0;
+    uint8_t buffer;
+    while (read(input_file, &buffer, 1) == 1) {
+        for (int i = 0; i < (1 << 3); ++i) {
+            ++current_x;
+            current_sum = (current_sum + current_x * current_x) % mod;
+            if (buffer & (1 << i)) {
+                if (write(ouput_file, &current_sum, 4) != 4) {
+                    continue;
+                }
+            }
+        }
+    }
+    close(input_file);
+    close(ouput_file);
+}"
+iyEbCcGp,Using FileDialog,Zgragselus,C++,Wednesday 20th of December 2023 10:58:42 AM CDT,"		mSctex->mMenuUI->AddMenuItem(0, ""Save"", ICON_LC_SAVE, """", nullptr,
+			[&]() -> void
+			{
+				std::string filename;
+				bool save = Engine::FileDialog::Show(mSctex->mLog, ""Save Compressed Image"", ""Skye Cuillin Texture\0*.sctex\0All Files\0*.*\0"", Engine::FileDialog::Type::SAVE_FILE_DIALOG, filename);
+				if (save)
+				{
+					Engine::LoaderSctex* sctexLoader = new Engine::LoaderSctex(mSctex->mLog);
+
+					std::vector<Engine::LoaderSctex::Image> data;
+
+					for (size_t i = 0; i < mSctex->mCompressedLevels; i++)
+					{
+						Engine::LoaderSctex::Image image;
+						image.mWidth = mSctex->mCompressedWidth[i];
+						image.mHeight = mSctex->mCompressedHeight[i];
+						image.mData = mSctex->mCompressedData[i];
+
+						data.push_back(image);
+					}
+
+					sctexLoader->Save(filename, mSctex->mCompressedFormat, data);
+
+					delete sctexLoader;
+				}
+			});
+"
+NemtEhAR,FileDialog.cpp,Zgragselus,C++,Wednesday 20th of December 2023 10:58:12 AM CDT,"///////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// FileDialog.cpp
+//
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Header section
+
+#include ""FileDialog.h""
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Declaration section
+
+using namespace Engine;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Definition section
+
+/// <summary>
+/// Open and show file dialog. Note that ""OFN_NOCHANGEDIR"" is used to reset current working 
+/// directory back to the executable file.
+/// </summary>
+/// <param name=""log"">Log for storing errors</param>
+/// <param name=""title"">Title for dialog</param>
+/// <param name=""filter"">Filter for specific file formats (Windows format - e.g. Image\0*.bmp\0All Files\0*.*\0</param>
+/// <param name=""type"">Dialog type (Open, Save, ...)</param>
+/// <param name=""filename"">Resulting filename</param>
+/// <return>True if file selected, false otherwise</return>
+bool FileDialog::Show(Log* log, const std::string& title, const char* filter, Type type, std::string& filename)
+{
+	char result[MAX_PATH] = { 0 };
+
+	OPENFILENAME ofn = { 0 };
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = nullptr;
+	ofn.lpstrFilter = filter;
+	ofn.lpstrFile = result;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrTitle = title.c_str();
+	ofn.Flags = OFN_DONTADDTORECENT | OFN_NOCHANGEDIR | (type == FileDialog::Type::OPEN_FILE_DIALOG ? OFN_FILEMUSTEXIST : 0);
+
+	if (type == FileDialog::Type::SAVE_FILE_DIALOG ? GetSaveFileName(&ofn) : GetOpenFileName(&ofn))
+	{
+		filename = result;
+		return true;
+	}
+	else
+	{
+		switch (CommDlgExtendedError())
+		{
+		case CDERR_DIALOGFAILURE:	log->Print(""Engine::FileDialog"", ""The dialog box could not be created.""); break;
+		case CDERR_FINDRESFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function failed to find a specified resource.""); break;
+		case CDERR_INITIALIZATION:	log->Print(""Engine::FileDialog"", ""The common dialog box function failed during initialization. This error often occurs when sufficient memory is not available.""); break;
+		case CDERR_LOADRESFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function failed to load a specified resource.""); break;
+		case CDERR_LOADSTRFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function failed to load a specified string.""); break;
+		case CDERR_LOCKRESFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function failed to lock a specified resource.""); break;
+		case CDERR_MEMALLOCFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function was unable to allocate memory for internal structures.""); break;
+		case CDERR_MEMLOCKFAILURE:	log->Print(""Engine::FileDialog"", ""The common dialog box function was unable to lock the memory associated with a handle.""); break;
+		case CDERR_NOHINSTANCE:		log->Print(""Engine::FileDialog"", ""The ENABLETEMPLATE flag was set in the Flags member of the initialization structure for the corresponding common dialog box, but you failed to provide a corresponding instance handle.""); break;
+		case CDERR_NOHOOK:			log->Print(""Engine::FileDialog"", ""The ENABLEHOOK flag was set in the Flags member of the initialization structure for the corresponding common dialog box, but you failed to provide a pointer to a corresponding hook procedure.""); break;
+		case CDERR_NOTEMPLATE:		log->Print(""Engine::FileDialog"", ""The ENABLETEMPLATE flag was set in the Flags member of the initialization structure for the corresponding common dialog box, but you failed to provide a corresponding template.""); break;
+		case CDERR_STRUCTSIZE:		log->Print(""Engine::FileDialog"", ""The RegisterWindowMessage function returned an error code when it was called by the common dialog box function.""); break;
+		case FNERR_BUFFERTOOSMALL:	log->Print(""Engine::FileDialog"", ""The lStructSize member of the initialization structure for the corresponding common dialog box is invalid.""); break;
+		case FNERR_INVALIDFILENAME:	log->Print(""Engine::FileDialog"", ""A file name is invalid.""); break;
+		case FNERR_SUBCLASSFAILURE:	log->Print(""Engine::FileDialog"", ""An attempt to subclass a list box failed because sufficient memory was not available.""); break;
+		default:					break;
+		}
+
+		return false;
+	}
+}"
+FF1bsFpN,FileDialog.h,Zgragselus,C++,Wednesday 20th of December 2023 10:57:50 AM CDT,"///////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// FileDialog.h
+//
+// Defines class for file dialog and its operations. Allows to show open/close file dialog and 
+// return whether any file was selected, and if it was - then which file.
+// 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifndef __FILE_DIALOG__H__
+#define __FILE_DIALOG__H__
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Header section
+
+#include <Windows.h>
+#include ""Engine.h""
+#include ""Core/Log/Log.h""
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Class & Structures definition
+
+namespace Engine
+{
+	class ENGINE_API FileDialog
+	{
+	public:
+		/// <summary>Specifies type of file dialog</summary>
+		enum class Type
+		{
+			/// <summary>Open file dialog</summary>
+			OPEN_FILE_DIALOG,
+
+			/// <summary>Save file dialog</summary>
+			SAVE_FILE_DIALOG
+		};
+
+		/// <summary>Open and show file dialog</summary>
+		/// <param name=""log"">Log for storing errors</param>
+		/// <param name=""title"">Title for dialog</param>
+		/// <param name=""filter"">Filter for specific file formats (Windows format - e.g. Image\0*.bmp\0All Files\0*.*\0</param>
+		/// <param name=""type"">Dialog type (Open, Save, ...)</param>
+		/// <param name=""filename"">Resulting filename</param>
+		/// <return>True if file selected, false otherwise</return>
+		static bool Show(Log* log, const std::string& title, const char* filter, Type type, std::string& filename);
+	};
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// EOH
+
+#endif
+"
+5rsuDhhW,spline c#,ad3rrch,C#,Wednesday 20th of December 2023 10:47:13 AM CDT,"using System;
+using static MathNet.Numerics.LinearAlgebra.CreateMatrix;
+using static MathNet.Numerics.LinearAlgebra.CreateVector;
+
+namespace CubicSpline
+{
+    internal class Spline
+    {
+        private readonly double[] pointsX;
+        private readonly double[] pointsY;
+        private readonly double[][] coeffs;
+
+        public Spline(double[] pointsX, double[] pointsY)
+        {
+            if (pointsX.Length != pointsY.Length)
+            {
+                throw new ArgumentException(""Массивы должны иметь одинаковую длину."");
+            }
+
+            this.pointsX = pointsX;
+            this.pointsY = pointsY;
+            coeffs = GetCoefficients();
+        }
+
+        private double[][] GetCoefficients()
+        {
+            double[][] matrix = new double[(pointsX.Length - 1) * 4][];
+            double[] vector = new double[(pointsX.Length - 1) * 4];
+
+            for (int i = 0; i < matrix.Length; i++)
+            {
+                matrix[i] = new double[(pointsX.Length - 1) * 4];
+
+                for (int j = 0; j < matrix[i].Length; j++)
+                {
+                    matrix[i][j] = 0;
+                }
+            }
+
+            for (int i = 0; i < pointsX.Length - 1; i++)
+            {
+                // сплайны проходят через стыковые точки
+                matrix[i * 2][i * 4] = 1;
+                vector[i * 2] = pointsY[i];
+
+                matrix[i * 2 + 1][i * 4] = 1;
+                matrix[i * 2 + 1][i * 4 + 1] = pointsX[i + 1] - pointsX[i];
+                matrix[i * 2 + 1][i * 4 + 2] = Math.Pow(pointsX[i + 1] - pointsX[i], 2);
+                matrix[i * 2 + 1][i * 4 + 3] = Math.Pow(pointsX[i + 1] - pointsX[i], 3);
+                vector[i * 2 + 1] = pointsY[i + 1];
+            }
+
+            for (int i = 0; i < pointsX.Length - 2; i++)
+            {
+                // сплайны сохраняют плавность на стыках
+                matrix[(pointsX.Length + i - 1) * 2][i * 4 + 1] = 1;
+                matrix[(pointsX.Length + i - 1) * 2][i * 4 + 2] = 2 * (pointsX[i + 1] - pointsX[i]);
+                matrix[(pointsX.Length + i - 1) * 2][i * 4 + 3] = 3 * Math.Pow(pointsX[i + 1] - pointsX[i], 2);
+                matrix[(pointsX.Length + i - 1) * 2][i * 4 + 5] = -1;
+
+                matrix[(pointsX.Length + i - 1) * 2 + 1][i * 4 + 2] = 2;
+                matrix[(pointsX.Length + i - 1) * 2 + 1][i * 4 + 3] = 6 * (pointsX[i + 1] - pointsX[i]);
+                matrix[(pointsX.Length + i - 1) * 2 + 1][i * 4 + 6] = -2;
+            }
+
+            matrix[^2][2] = 2;
+
+            matrix[^1][^3] = 2;
+            matrix[^1][^2] = 6 * (pointsX[^1] - pointsX[^2]);
+
+            var A = DenseOfRowArrays(matrix);
+            var b = DenseOfArray(vector);
+
+            double[] solution = A.Solve(b).AsArray();
+            double[][] coefficients = new double[solution.Length / 4][];
+
+            for (int i = 0; i < solution.Length / 4; i++)
+            {
+                coefficients[i] = new double[4];
+
+                coefficients[i][0] = solution[i * 4];
+                coefficients[i][1] = solution[i * 4 + 1];
+                coefficients[i][2] = solution[i * 4 + 2];
+                coefficients[i][3] = solution[i * 4 + 3];
+            }
+
+            return coefficients;
+        }
+
+        public double GetValueAt(double x)
+        {
+            for (int i = 0; i < pointsX.Length - 1; i++)
+            {
+                if (x >= pointsX[i] && x <= pointsX[i + 1])
+                {
+                    return coeffs[i][0] + coeffs[i][1] * (x - pointsX[i])
+                        + coeffs[i][2] * Math.Pow(x - pointsX[i], 2) + coeffs[i][3] * Math.Pow(x - pointsX[i], 3);
+                }
+            }
+
+            return 0;
+        }
+    }
+}
+"
+GfYG09m1,Модуль 4. Строки. Списки. Часть 2. Задание 1,plarmi,Python,Wednesday 20th of December 2023 09:59:28 AM CDT,"expression = input(""Введите арифметическое выражение: "")
+
+if ""+"" in expression:
+    expression = expression.split(""+"")
+    print(f""{expression[0]} + {expression[1]} = {int(expression[0]) + int(expression[1])}"")
+elif ""-"" in expression:
+    expression = expression.split(""-"")
+    print(f""{expression[0]} - {expression[1]} = {int(expression[0]) - int(expression[1])}"")
+elif ""**"" in expression:
+    expression = expression.split(""**"")
+    print(f""{expression[0]} ** {expression[1]} = {int(expression[0]) ** int(expression[1])}"")
+elif ""*"" in expression:
+    expression = expression.split(""*"")
+    print(f""{expression[0]} * {expression[1]} = {int(expression[0]) * int(expression[1])}"")
+elif ""/"" in expression:
+    expression = expression.split(""/"")
+    print(f""{expression[0]} / {expression[1]} = {int(expression[0]) / int(expression[1])}"")
+else:
+    print(""Ошибка! Либо нет такой операции, либо нарушен формат ввода!"")"
+3ukjYgXx,polynomial,maxim_shlyahtin,C++,Wednesday 20th of December 2023 09:57:54 AM CDT,"#include <algorithm>
+#include <iostream>
+#include <utility>
+#include <vector>
+
+template <typename T>
+class Polynomial {
+private:
+    std::vector<T> coef;
+
+    // delete leading non-significant zeros
+    void Delete_Front_Zeros() {
+        while (!coef.empty() && coef.back() == T())
+            coef.pop_back();
+    }
+public:
+    // initialize polynomial with vector of coefficients
+    Polynomial(const std::vector<T>& v) : coef(v) {
+        Delete_Front_Zeros();
+    }
+
+    std::vector<T> get_coef() const{
+        return this->coef;
+    }
+
+    void set_coef(const std::vector<T>& v){
+        this->coef = v;
+    }
+    // initialize constant polynomial
+    Polynomial(T c = T()) {
+        if (c != T())
+            coef.push_back(c);
+    }
+
+    // initialize polynomial with the pair of iterators
+    template <typename Iter>
+    Polynomial(Iter first, Iter last) {
+        while (first != last) {
+            coef.push_back(*first++);
+        }
+        Delete_Front_Zeros();
+    }
+    
+    // returns degree of polynomial or -1 if it is zero polynomial
+    int Degree() const {
+        for (int i = coef.size() - 1; i >= 0; --i) {
+            if (coef[i] != T())
+                return i;
+        }
+        return -1;
+    }
+
+    // returns coefficient before this degree
+    T operator[] (size_t degree) const {
+        if (coef.size() > degree)
+            return coef[degree];
+        else
+            return T();  // returns default value if requested degree is higher than max degree
+    }
+
+    // returns true if two polynomials are equal, false otherwise
+    bool operator == (const Polynomial<T>& other) const {
+        int fd = Degree();
+        int sd = other.Degree();
+        if (fd != sd) {
+            return false;
+        } else {
+            for (; fd >= 0; --fd) {
+                if ((*this)[fd] != other[fd]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    // returns true if two polynomials are not equal, false otherwise
+    bool operator != (const Polynomial<T>& other) const {
+        return !(*this == other);
+    }
+
+    // sum of two polynomials
+    Polynomial<T> operator + (const Polynomial<T>& other) const {
+        size_t pol_size = std::max(coef.size(), other.coef.size());
+        std::vector<T> pol(pol_size, T());  // resizing with default values
+        for (size_t i = 0; i != pol_size; ++i)
+            pol[i] = (*this)[i] + other[i];
+        return Polynomial<T> {pol};
+    }
+
+    // difference of two polynomials
+    Polynomial<T> operator - (const Polynomial<T>& other) const {  
+        size_t pol_size = std::max(coef.size(), other.coef.size());
+        std::vector<T> pol(pol_size, T());
+        for (size_t i = 0; i != pol_size; ++i)
+            pol[i] = (*this)[i] - other[i];
+        return Polynomial<T> {pol};
+    }
+
+    // product of two polynomials
+    Polynomial<T> operator * (const Polynomial<T>& other) const {  
+        size_t pol_size = coef.size() + other.coef.size();
+        std::vector<T> pol(pol_size, T());
+        for (size_t i = 0; i != coef.size(); ++i) {
+            for (size_t j = 0; j != other.coef.size(); ++j)
+                pol[i + j] += (*this)[i] * other[j];
+        }
+        return Polynomial<T> {pol};
+    }
+
+    // sum of two polynomials
+    Polynomial<T>& operator += (const Polynomial<T>& other) {
+        size_t pol_size = std::max(coef.size(), other.coef.size());
+        coef.resize(pol_size, T());
+        for (size_t i = 0; i != pol_size; ++i)
+            coef[i] += other[i];
+        Delete_Front_Zeros();
+        return *this;
+    }
+
+    // difference of two polynomials
+    Polynomial<T>& operator -= (const Polynomial<T>& other) {
+        size_t pol_size = std::max(coef.size(), other.coef.size());
+        coef.resize(pol_size, T());
+        for (size_t i = 0; i != pol_size; ++i)
+            coef[i] -= other[i];
+        Delete_Front_Zeros();
+        return *this;
+    }
+
+    // product of two polynomials
+    Polynomial& operator *= (const Polynomial<T>& other) {
+        Polynomial poly = *this * other;
+        *this = poly;
+        return *this;
+    }
+
+    // calculates f(value)
+    T operator() (T value) const {  
+        T ans = T();
+        for (int i = coef.size() - 1; i >= 0; --i)
+            ans = coef[i] + ans * value;  // Horner's method
+        return ans;
+    }
+
+    typename std::vector<T>::const_iterator begin() const {
+        return coef.begin();
+    }
+
+    typename std::vector<T>::const_iterator end() const {
+        return coef.end();
+    }
+
+    // returns composition
+    Polynomial<T> operator & (const Polynomial<T>& other) const {  
+        Polynomial<T> composition;
+        for (size_t i = 0; i != coef.size(); ++i) {
+            if (coef[i] != T()) {
+                Polynomial<T> tmp{T(coef[i])};
+                for (size_t j = 1; j != i + 1; ++j)
+                    tmp *= other;
+                composition += tmp;
+            }
+        }
+        return composition;
+    }
+
+    // divides one polynomial by another
+    std::pair<Polynomial<T>, T> operator / (const Polynomial<T>& other) const {
+        Polynomial<T> first = *this;
+        Polynomial<T> baza = *this;
+        T b = 1;
+        gohere:
+        first = baza;
+        std::vector<T> result(coef.size());
+        int fd = first.Degree();
+        while (fd >= other.Degree()) {
+            if((first[fd] * first[fd]) < (other[other.Degree()] * other[other.Degree()])){
+                baza = baza * other[other.Degree()];
+                b = b * other[other.Degree()];
+                goto gohere;
+            }
+            T t = first[fd] / other[other.Degree()];
+            std::vector<T> tmp;
+            for (int i = 0; i != fd - other.Degree(); ++i)
+                tmp.push_back(T());
+            tmp.push_back(t);
+            Polynomial<T> p {tmp};
+            first -= other * p;
+            result[fd - other.Degree()] += t;
+            fd = first.Degree();
+        }
+        return std::make_pair(Polynomial<T> {result}, b);
+    }
+
+    // returns remainder
+    Polynomial<T> operator % (const Polynomial<T>& other) const {
+        std::pair<Polynomial<T>, T> a = (*this/ other);
+        return (*this * a.second) - (a.first * other);
+    }
+
+    // returns PolynomialGCD (greatest common divisor)
+    Polynomial<T> operator , (const Polynomial<T>& other) const {  
+        Polynomial<T> first = *this, second = other;
+        if (first.Degree() < second.Degree()) {
+            std::swap(first, second);
+        }
+        while (second.Degree() > 0) {
+            Polynomial<T> tmp = second;
+            first = first % second;
+            second = first;
+            first = tmp;
+        }
+        if (second != T(0))
+            return Polynomial(T(1));
+        first = (first / first[first.Degree()]).first;
+        return first;
+    }
+};
+
+// overload ""<<"" operator to print polynomials as: std::cout << polynomial;
+// example: x^3+2*x^2-x+3
+template <typename T>
+std::ostream& operator << (std::ostream& out, const Polynomial<T>& pol) {
+    int deg = pol.Degree();
+    if (deg == -1) {
+        // zero polynomial
+        out << '0';  
+    } else {
+        for (int i = deg; i != -1; --i) {
+            if (pol[i] != T(0)) {
+                // printing only degree with non-zero coefficient
+                if (pol[i] != T(1) && pol[i] != T(-1)) {
+                    if (i != deg && pol[i] > T(0)) {
+                        out << ""+"";
+                    }
+                    out << pol[i];
+                    if (i > 1)
+                        out << ""*x^"" << i;
+                    if (i == 1)
+                        out << ""*x"";
+                } else if (pol[i] == T(-1)) {
+                    // coefficient -1 for non-zero degree prints as -
+                    if (i > 1)
+                        out << ""-x^"" << i;
+                    if (i == 1)
+                        out << ""-x"";
+                    if (i == 0)
+                        out << pol[i];
+                } else if (pol[i] == T(1)) {
+                    if (i != deg)
+                        out << ""+"";
+                    if (i > 1)
+                        out << ""x^"" << i;
+                    if (i == 1)
+                        out << ""x"";
+                    if (i == 0)
+                        out << pol[i];
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// int main(){
+//     // std::vector<int> a = {8, 0, -5, 4};
+//     // std::vector<int> b = {4, 2, 8};
+//     std::vector<int> a = {2, -1, 0, -2, 1};
+//     std::vector<int> b = {2, -1, -4, 0, 1};
+//     Polynomial t(a);
+//     Polynomial d(b);
+//     Polynomial f = (t,d);
+//     std::cout << t << "" "" << d << "" "" << f << std::endl;
+
+// }"
