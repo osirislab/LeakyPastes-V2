@@ -1,0 +1,3602 @@
+id,title,username,language,date,content
+tQ379bMe,glasses.lua,ComboMaster,Lua,Saturday 30th of December 2023 11:56:54 PM CDT,"local component = require(""component"")
+local fs = require(""filesystem"")
+local computer = require(""computer"")
+local bridge = component.openperipheral_bridge
+local gpu = component.gpu
+local lapotronka=require('component').impact_lsc
+local items = {
+  {""GregTech:dustNeutronium"", 0},
+  {""GregTech:dustDraconium"", 1},
+  {""minecraft:glass"", 0},
+}
+ 
+local players = {
+  {""Imforceble"", false},
+  {""kosta1809"", false},
+  {""SemKa09"", false}
+}
+local chat_box, me, radar, counter
+local average, me_a, cb, r = false, false, false, false
+-------------{TIME OPTIONS}------------------
+local TIME_ZONE = 3 --Ваш часовой пояс
+---------------------------------------------
+ 
+---------------------------------------------
+local t_correction = TIME_ZONE * 3600
+local chat_box_name = ""§8[§4Галлий§8]""
+local adm = ""kosta1809"" -- Ник админа компа
+local allow_mem = false -- Отображать на экране кол-во памяти или нет
+local localize = {
+  time = ""§9Время МСК:"",
+  join_in_game = "" §7вошел в игру!"",
+  left_from_game = "" §7покинул игру!"",
+  user_online = ""online"",
+  user_offline = ""offline"",
+  near_ME = ""Игроки около МЭ""
+}
+local colors = {
+  item_size = 0x05F5F0, -- кол-во предметов
+  eu = 0x5555FF, -- еу/т
+  mem = 0xFFFFFF, -- память
+  time = 0xFFFF00, --Время
+  time_text = 0xFFFF00, -- текст ""Время МСК:""(пример)
+  online = 0x008000, --онлайн на очках
+  offline = 0xB22222, -- оффлайн на очках
+  near = 0xFFFF00, --текст ""Игроки рядом с МЭ""
+  players_near = 0xFFFF00, -- цвет игроков рядом
+  players = 0xFFFFFF -- цвет игроков в Online/offline
+}
+--------------------------------------------
+local function digital(n)
+  local text=''
+  for f in string.gmatch(n,'%d') do text=text..f end
+  return text
+end
+
+function energyLSC()
+  local info=lapotronka.getSensorInformation()
+  local text,eu,eu_in,eu_out='','','',''
+  text=digital(info[2])
+  eu=tonumber(text)
+  ener=tostring(math.floor(eu/1000000))..'M  '
+  bridge.addText(10,160,""Энергия:"",0xFFFF00)
+  bridge.addText(55,160,ener)
+end
+ 
+function check()
+  if component.isAvailable(""average_counter"") then
+    average = true
+    counter = component.average_counter
+  end
+  if component.isAvailable(""chat_box"") then
+    cb = true
+    chat_box = component.chat_box
+    chat_box.setName(chat_box_name)
+  end
+  if component.isAvailable(""me_controller"") then
+    me_a = true
+    me = component.me_controller
+  end
+  if component.isAvailable(""radar"") then
+    r = true
+    radar = component.radar
+  end
+  componentsOnScreen()
+end
+ 
+local function getTimeHost()
+  local file = io.open('/tmp/UNIX.tmp', 'w')
+  file:write('TIME_ZONE = '..TIME_ZONE)
+  file:close()
+  local lastmod = tonumber(string.sub(fs.lastModified('/tmp/UNIX.tmp'), 1, -4)) + t_correction
+  local dt = os.date('%H:%M:%S', lastmod)
+  return dt
+end
+ 
+function addBox(x, y, w, h, color, tran)
+  bridge.addBox(x, y, w, h, color, tran)
+end
+ 
+function addText(x, y, text, color)
+  bridge.addText(x, y, text, color)
+end
+ 
+function addIcon(x, y, name, meta)
+  bridge.addIcon(x, y, name, meta)
+end
+ 
+function gui()
+  w, h = gpu.maxResolution()
+  gpu.fill(1, 1, w, h, "" "")
+end
+ 
+function componentsOnScreen()
+  gpu.set(1, 1, ""Chat-box: "" .. tostring(cb))
+  gpu.set(1, 2, ""ME: "" .. tostring(me_a))
+  gpu.set(1, 3, ""Radar: "" .. tostring(r))
+  gpu.set(1, 4, ""Counter: "" .. tostring(average))
+end
+ 
+function addAllIcons()
+  y = 25
+  for i = 1, #items do
+    y = y + 15
+    addIcon(0, y, items[i][1], items[i][2])
+  end
+end
+ 
+function getSize(name,dmg)
+ for _, item in ipairs(me.getItemsInNetwork()) do
+  if item.name == name and item.damage == dmg then
+   return item.size
+  end
+ end
+ return 0
+end
+ 
+function setEnergy()
+  addIcon(0, 25, ""AdvancedSolarPanel:BlockMolecularTransformer"", 0)
+  if counter.getAverage() / 1000 <= 1 then
+    av = string.format(""%.3f"", tostring(counter.getAverage())) .. ""EU/t""
+  elseif counter.getAverage() / 1000000 >= 1 then
+    av = string.format(""%.3f"", tostring(counter.getAverage() / 1000000)) .. ""MEU/t""
+  else
+    av = string.format(""%.1f"", tostring(counter.getAverage() / 1000)) .. ""kEU/t""
+  end
+  addText(25, 27, av, colors.eu)
+end
+ 
+function setTime()
+  addText(10, 110, localize.time, colors.time_text)
+  addText(65, 110, getTimeHost(), colors.time)
+end
+ 
+function freeMemory()
+  if allow_mem then
+    addText(0, 12, ""MEM: ""..math.floor((computer.freeMemory() / 1000))..""mb""..""/""..math.floor((computer.totalMemory() / 1000))..""mb"".."" ""..math.floor(((computer.freeMemory() / computer.totalMemory()) * 100))..""%"", colors.mem)
+  end
+end
+ 
+function checkOnline(n)
+  computer.removeUser(adm)
+  if computer.addUser(players[n][1]) then
+    computer.removeUser(players[n][1])
+    if players[n][2] == false then
+      if cb then
+        chat_box.say(""§a""..players[n][1] .. localize.join_in_game)
+      end
+      players[n][2] = true
+    end
+    return true
+  else
+    if players[n][2] == true then
+      if cb then
+        chat_box.say(""§c""..players[n][1] .. localize.left_from_game)
+      end
+      players[n][2] = false
+    end
+    computer.removeUser(players[n][1])
+    return false
+  end
+end
+ 
+function drawOnline()
+  yy = 120
+  for i = 1, #players do
+    yy = yy + 10
+    addText(10, yy, players[i][1], colors.players)
+    if checkOnline(i) then
+      addText(65, yy, localize.user_online, colors.online)
+    else
+      addText(65, yy, localize.user_offline, colors.offline)
+    end
+  end
+end
+ 
+function getPlayersNearME()
+  addText(10, 170, localize.near_ME, colors.near)
+  a = 180
+  temp = radar.getPlayers()
+  for i = 1, #temp do
+    a = a + 10
+    for j = 1, #players do
+      if temp[i].name == players[j][1] then
+        return
+      else
+        addText(10, a, temp[i].name.."" ""..math.floor(temp[i].distance).."", ""..""м"", colors.players_near)
+      end
+    end
+  end
+end
+ 
+check()
+bridge.clear()
+addBox(10, 0, 100, 100, 0xFFFFFF, 0)
+addAllIcons()
+bridge.sync()
+gui()
+ 
+while true do
+  check()
+  computer.addUser(adm)
+  bridge.clear()
+  if me_a then
+    addAllIcons()
+    y = 27
+    for i = 1, #items do
+      y = y + 15
+      addText(25, y, getSize(items[i][1], items[i][2]), colors.item_size)
+    end
+  end
+  if average then
+    setEnergy()
+  end
+  setTime()
+  drawOnline()
+  bridge.addBox(10,100,115,200,0x000000,0.3)
+  energyLSC()
+  freeMemory()
+  if r then
+    getPlayersNearME()
+  end
+  os.sleep(0.001)
+  bridge.sync()
+end"
+B3b2xVsB,News Dec30 23,Newscaster_Ned,Email,Saturday 30th of December 2023 11:55:12 PM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎.‎
+
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎T‎r‎u‎m‎p‎:‎ ‎‘‎D‎e‎p‎r‎e‎s‎s‎i‎o‎n‎ ‎l‎i‎k‎e‎ ‎1‎9‎2‎9‎’‎ ‎L‎o‎o‎m‎s‎ ‎i‎f‎ ‎‘‎I‎ ‎D‎o‎n‎’‎t‎ ‎W‎i‎n‎’‎
+
+S‎t‎o‎c‎k‎ ‎M‎a‎r‎k‎e‎t‎ ‎R‎a‎l‎l‎y‎i‎n‎g‎ ‎B‎e‎c‎a‎u‎s‎e‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎s‎ ‎‘‎T‎h‎i‎n‎k‎ ‎I‎’‎m‎ ‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎W‎i‎n‎’‎
+W‎A‎S‎H‎I‎N‎G‎T‎O‎N‎,‎ ‎D‎C‎ ‎-‎ ‎J‎U‎N‎E‎ ‎2‎4‎:‎ ‎R‎e‎p‎u‎b‎l‎i‎c‎a‎n‎ ‎p‎r‎e‎s‎i‎d‎e‎n‎t‎i‎a‎l‎ ‎c‎a‎n‎d‎i‎d‎a‎t‎e‎ ‎f‎o‎r‎m‎e‎r‎ ‎U‎.‎S‎.‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎s‎p‎e‎a‎k‎s‎ ‎a‎t‎ ‎t‎h‎e‎ ‎F‎a‎i‎t‎h‎ ‎a‎n‎d‎ ‎F‎r‎e‎e‎d‎o‎m‎ ‎R‎o‎a‎d‎ ‎t‎o‎ ‎M‎a‎j‎o‎r‎i‎t‎y‎ ‎c‎o‎n‎f‎e‎r‎e‎n‎c‎e‎ ‎a‎t‎ ‎t‎h‎e‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎ ‎H‎i‎l‎t‎o‎n‎ ‎o‎n‎ ‎J‎u‎n‎e‎ ‎2‎4‎,‎ ‎2‎0‎2‎3‎ ‎i‎n‎ ‎W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎,‎ ‎D‎C‎.‎ ‎T‎r‎u‎m‎p‎ ‎s‎p‎o‎k‎e‎ ‎o‎n‎ ‎a‎ ‎r‎a‎n‎g‎e‎ ‎o‎f‎ ‎t‎o‎p‎i‎c‎s‎ ‎t‎o‎ ‎a‎n‎ ‎a‎u‎d‎i‎e‎n‎c‎e‎ ‎o‎f‎ ‎c‎o‎n‎s‎e‎r‎v‎a‎t‎i‎v‎e‎ ‎e‎v‎a‎n‎g‎e‎l‎i‎c‎a‎l‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎.‎ ‎(‎P‎h‎o‎t‎o‎ ‎b‎y‎ ‎…‎
+D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎t‎o‎l‎d‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎t‎h‎a‎t‎ ‎i‎f‎ ‎h‎e‎ ‎d‎o‎e‎s‎ ‎n‎o‎t‎ ‎w‎i‎n‎ ‎t‎h‎e‎ ‎2‎0‎2‎4‎ ‎p‎r‎e‎s‎i‎d‎e‎n‎t‎i‎a‎l‎ ‎e‎l‎e‎c‎t‎i‎o‎n‎,‎ ‎t‎h‎e‎ ‎e‎c‎o‎n‎o‎m‎y‎ ‎w‎i‎l‎l‎ ‎s‎p‎i‎r‎a‎l‎ ‎i‎n‎t‎o‎ ‎a‎ ‎“‎d‎e‎p‎r‎e‎s‎s‎i‎o‎n‎.‎”‎
+
+B‎o‎y‎l‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎W‎e‎a‎k‎e‎n‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎ ‎b‎y‎ ‎P‎r‎e‎d‎i‎c‎t‎i‎n‎g‎ ‎H‎e‎ ‎W‎o‎n‎’‎t‎ ‎b‎e‎ ‎N‎o‎m‎i‎n‎e‎e‎
+B‎o‎y‎l‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎W‎e‎a‎k‎e‎n‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎ ‎b‎y‎ ‎P‎r‎e‎d‎i‎c‎t‎i‎n‎g‎ ‎H‎e‎ ‎W‎o‎n‎’‎t‎ ‎b‎e‎ ‎N‎o‎m‎i‎n‎e‎e‎
+1‎3‎9‎
+D‎e‎a‎n‎:‎ ‎'‎T‎r‎u‎m‎p‎ ‎I‎s‎ ‎i‎n‎ ‎T‎r‎o‎u‎b‎l‎e‎'‎ ‎M‎a‎i‎n‎e‎ ‎D‎e‎c‎i‎s‎i‎o‎n‎ ‎T‎o‎ ‎D‎i‎s‎q‎u‎a‎l‎i‎f‎y‎ ‎H‎i‎m‎ ‎I‎s‎ ‎V‎e‎r‎y‎ ‎S‎o‎l‎i‎d‎
+D‎e‎a‎n‎:‎ ‎'‎T‎r‎u‎m‎p‎ ‎I‎s‎ ‎i‎n‎ ‎T‎r‎o‎u‎b‎l‎e‎'‎ ‎M‎a‎i‎n‎e‎ ‎D‎e‎c‎i‎s‎i‎o‎n‎ ‎T‎o‎ ‎D‎i‎s‎q‎u‎a‎l‎i‎f‎y‎ ‎H‎i‎m‎ ‎I‎s‎ ‎V‎e‎r‎y‎ ‎S‎o‎l‎i‎d‎
+3‎,‎7‎3‎7‎
+N‎e‎w‎s‎o‎m‎ ‎t‎o‎ ‎O‎f‎f‎e‎r‎ ‎H‎e‎a‎l‎t‎h‎ ‎C‎a‎r‎e‎ ‎t‎o‎ ‎W‎o‎r‎l‎d‎'‎s‎ ‎M‎i‎g‎r‎a‎n‎t‎s‎ ‎I‎f‎ ‎T‎h‎e‎y‎ ‎C‎a‎n‎ ‎G‎e‎t‎ ‎t‎o‎ ‎C‎A‎
+N‎e‎w‎s‎o‎m‎ ‎t‎o‎ ‎O‎f‎f‎e‎r‎ ‎H‎e‎a‎l‎t‎h‎ ‎C‎a‎r‎e‎ ‎t‎o‎ ‎W‎o‎r‎l‎d‎'‎s‎ ‎M‎i‎g‎r‎a‎n‎t‎s‎ ‎I‎f‎ ‎T‎h‎e‎y‎ ‎C‎a‎n‎ ‎G‎e‎t‎ ‎t‎o‎ ‎C‎A‎
+2‎,‎4‎6‎8‎
+P‎o‎p‎e‎ ‎F‎r‎a‎n‎c‎i‎s‎ ‎U‎n‎d‎e‎r‎ ‎F‎i‎r‎e‎ ‎f‎r‎o‎m‎ ‎B‎l‎a‎c‎k‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎ ‎f‎o‎r‎ ‎G‎a‎y‎ ‎B‎l‎e‎s‎s‎i‎n‎g‎s‎
+P‎o‎p‎e‎ ‎F‎r‎a‎n‎c‎i‎s‎ ‎U‎n‎d‎e‎r‎ ‎F‎i‎r‎e‎ ‎f‎r‎o‎m‎ ‎B‎l‎a‎c‎k‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎ ‎f‎o‎r‎ ‎G‎a‎y‎ ‎B‎l‎e‎s‎s‎i‎n‎g‎s‎
+6‎5‎1‎
+D‎e‎S‎a‎n‎t‎i‎s‎ ‎F‎l‎o‎a‎t‎s‎ ‎H‎a‎v‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎ ‎S‎t‎r‎u‎c‎k‎ ‎O‎f‎f‎ ‎t‎h‎e‎ ‎B‎a‎l‎l‎o‎t‎ ‎i‎n‎ ‎F‎l‎o‎r‎i‎d‎a‎
+D‎e‎S‎a‎n‎t‎i‎s‎ ‎F‎l‎o‎a‎t‎s‎ ‎H‎a‎v‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎ ‎S‎t‎r‎u‎c‎k‎ ‎O‎f‎f‎ ‎t‎h‎e‎ ‎B‎a‎l‎l‎o‎t‎ ‎i‎n‎ ‎F‎l‎o‎r‎i‎d‎a‎
+9‎6‎4‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎:‎ ‎'‎D‎e‎p‎r‎e‎s‎s‎i‎o‎n‎ ‎L‎i‎k‎e‎ ‎1‎9‎2‎9‎'‎ ‎L‎o‎o‎m‎s‎ ‎i‎f‎ ‎'‎I‎ ‎D‎o‎n‎'‎t‎ ‎W‎i‎n‎'‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎:‎ ‎'‎D‎e‎p‎r‎e‎s‎s‎i‎o‎n‎ ‎L‎i‎k‎e‎ ‎1‎9‎2‎9‎'‎ ‎L‎o‎o‎m‎s‎ ‎i‎f‎ ‎'‎I‎ ‎D‎o‎n‎'‎t‎ ‎W‎i‎n‎'‎
+9‎,‎4‎9‎1‎
+N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎ ‎V‎o‎w‎s‎ ‎t‎o‎ ‎P‎a‎r‎d‎o‎n‎ ‎T‎r‎u‎m‎p‎ ‎I‎f‎ ‎H‎e‎ ‎I‎s‎ ‎C‎o‎n‎v‎i‎c‎t‎e‎d‎ ‎o‎f‎ ‎C‎r‎i‎m‎e‎s‎
+N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎ ‎V‎o‎w‎s‎ ‎t‎o‎ ‎P‎a‎r‎d‎o‎n‎ ‎T‎r‎u‎m‎p‎ ‎I‎f‎ ‎H‎e‎ ‎I‎s‎ ‎C‎o‎n‎v‎i‎c‎t‎e‎d‎ ‎o‎f‎ ‎C‎r‎i‎m‎e‎s‎
+4‎6‎1‎
+C‎a‎l‎i‎f‎o‎r‎n‎i‎a‎ ‎M‎a‎n‎ ‎F‎e‎n‎d‎s‎ ‎O‎f‎f‎ ‎5‎0‎0‎-‎l‎b‎ ‎B‎l‎a‎c‎k‎ ‎B‎e‎a‎r‎ ‎w‎i‎t‎h‎ ‎P‎a‎i‎n‎t‎b‎a‎l‎l‎ ‎G‎u‎n‎
+C‎a‎l‎i‎f‎o‎r‎n‎i‎a‎ ‎M‎a‎n‎ ‎F‎e‎n‎d‎s‎ ‎O‎f‎f‎ ‎5‎0‎0‎-‎l‎b‎ ‎B‎l‎a‎c‎k‎ ‎B‎e‎a‎r‎ ‎w‎i‎t‎h‎ ‎P‎a‎i‎n‎t‎b‎a‎l‎l‎ ‎G‎u‎n‎
+8‎2‎
+M‎a‎i‎n‎e‎ ‎S‎e‎c‎.‎ ‎o‎f‎ ‎S‎t‎a‎t‎e‎ ‎M‎a‎k‎e‎s‎ ‎L‎e‎g‎a‎l‎ ‎R‎u‎l‎i‎n‎g‎ ‎S‎t‎r‎i‎k‎i‎n‎g‎ ‎T‎r‎u‎m‎p‎ ‎f‎r‎o‎m‎ ‎B‎a‎l‎l‎o‎t‎
+M‎a‎i‎n‎e‎ ‎S‎e‎c‎.‎ ‎o‎f‎ ‎S‎t‎a‎t‎e‎ ‎M‎a‎k‎e‎s‎ ‎L‎e‎g‎a‎l‎ ‎R‎u‎l‎i‎n‎g‎ ‎S‎t‎r‎i‎k‎i‎n‎g‎ ‎T‎r‎u‎m‎p‎ ‎f‎r‎o‎m‎ ‎B‎a‎l‎l‎o‎t‎
+9‎,‎9‎4‎3‎
+A‎f‎r‎i‎c‎a‎n‎ ‎B‎i‎s‎h‎o‎p‎ ‎R‎e‎j‎e‎c‎t‎s‎ ‎V‎a‎t‎i‎c‎a‎n‎ ‎C‎a‎l‎l‎ ‎t‎o‎ ‎B‎l‎e‎s‎s‎ ‎T‎h‎o‎s‎e‎ ‎i‎n‎ ‎S‎a‎m‎e‎-‎S‎e‎x‎ ‎R‎e‎l‎a‎t‎i‎o‎n‎s‎h‎i‎p‎
+A‎f‎r‎i‎c‎a‎n‎ ‎B‎i‎s‎h‎o‎p‎ ‎R‎e‎j‎e‎c‎t‎s‎ ‎V‎a‎t‎i‎c‎a‎n‎ ‎C‎a‎l‎l‎ ‎t‎o‎ ‎B‎l‎e‎s‎s‎ ‎T‎h‎o‎s‎e‎ ‎i‎n‎ ‎S‎a‎m‎e‎-‎S‎e‎x‎ ‎R‎e‎l‎a‎t‎i‎o‎n‎s‎h‎i‎p‎
+
+S‎t‎.‎ ‎L‎o‎u‎i‎s‎ ‎M‎a‎n‎ ‎D‎e‎a‎d‎ ‎A‎f‎t‎e‎r‎ ‎T‎e‎e‎n‎a‎p‎e‎r‎ ‎S‎h‎o‎o‎t‎s‎ ‎H‎i‎m‎.‎
+
+B‎l‎a‎c‎k‎ ‎l‎i‎v‎e‎s‎ ‎m‎a‎t‎t‎e‎r‎?‎
+
+
+M‎i‎n‎n‎e‎a‎p‎o‎l‎i‎s‎ ‎C‎o‎o‎n‎ ‎A‎t‎t‎a‎c‎k‎s‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎ ‎a‎n‎d‎ ‎H‎i‎s‎ ‎G‎i‎r‎l‎f‎r‎i‎e‎n‎d‎.‎
+
+
+P‎h‎i‎l‎l‎y‎ ‎B‎a‎b‎o‎o‎n‎ ‎R‎u‎n‎s‎ ‎O‎v‎e‎r‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎.‎
+
+
+M‎o‎n‎k‎e‎y‎ ‎S‎h‎o‎w‎s‎ ‎H‎i‎s‎ ‎P‎e‎n‎i‎s‎ ‎t‎o‎ ‎a‎ ‎G‎r‎o‎u‎p‎ ‎o‎f‎ ‎P‎e‎o‎p‎l‎e‎ ‎i‎n‎ ‎M‎o‎r‎e‎n‎o‎ ‎V‎a‎l‎l‎e‎y‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+S‎u‎n‎n‎y‎
+6‎8‎°‎
+/‎3‎8‎°‎
+0‎%‎
+S‎S‎W‎ ‎8‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎3‎0‎ ‎|‎ ‎D‎a‎y‎
+6‎8‎°‎
+S‎S‎W‎
+8‎
+ ‎
+m‎p‎h‎
+P‎l‎e‎n‎t‎i‎f‎u‎l‎ ‎s‎u‎n‎s‎h‎i‎n‎e‎.‎ ‎H‎i‎g‎h‎ ‎6‎8‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎S‎S‎W‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+ ‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+3‎2‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+4‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎2‎5‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+5‎:‎4‎0‎ ‎p‎m‎
+S‎a‎t‎ ‎3‎0‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+3‎8‎°‎
+3‎%‎
+S‎S‎W‎
+5‎
+ ‎
+m‎p‎h‎
+A‎ ‎f‎e‎w‎ ‎c‎l‎o‎u‎d‎s‎.‎ ‎L‎o‎w‎ ‎3‎8‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎l‎i‎g‎h‎t‎ ‎a‎n‎d‎ ‎v‎a‎r‎i‎a‎b‎l‎e‎.‎
+ ‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+6‎5‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+9‎:‎1‎1‎ ‎p‎m‎
+W‎a‎n‎i‎n‎g‎ ‎G‎i‎b‎b‎o‎u‎s‎
+M‎o‎o‎n‎s‎e‎t‎
+1‎0‎:‎1‎5‎ ‎a‎m‎
+S‎u‎n‎ ‎3‎1‎
+S‎u‎n‎n‎y‎
+7‎3‎°‎
+/‎4‎3‎°‎
+3‎%‎
+S‎S‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎7‎°‎
+/‎3‎8‎°‎
+4‎%‎
+N‎ ‎1‎5‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎2‎
+P‎M‎ ‎R‎a‎i‎n‎
+5‎7‎°‎
+/‎4‎1‎°‎
+8‎3‎%‎
+E‎N‎E‎ ‎8‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎0‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎0‎°‎
+/‎3‎3‎°‎
+2‎4‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎4‎
+S‎u‎n‎n‎y‎
+5‎9‎°‎
+/‎3‎9‎°‎
+7‎%‎
+E‎N‎E‎ ‎6‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎5‎
+S‎h‎o‎w‎e‎r‎s‎
+5‎8‎°‎
+/‎3‎9‎°‎
+5‎8‎%‎
+E‎ ‎1‎1‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎6‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+6‎0‎°‎
+/‎3‎5‎°‎
+1‎9‎%‎
+N‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎7‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎3‎°‎
+/‎5‎0‎°‎
+7‎%‎
+S‎S‎E‎ ‎8‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎8‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+6‎8‎°‎
+/‎4‎4‎°‎
+5‎1‎%‎
+S‎S‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎9‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎3‎°‎
+/‎3‎7‎°‎
+1‎2‎%‎
+N‎W‎ ‎1‎6‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+5‎9‎°‎
+/‎3‎6‎°‎
+1‎3‎%‎
+N‎N‎W‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎7‎°‎
+/‎3‎7‎°‎
+2‎%‎
+N‎ ‎1‎1‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎1‎°‎
+/‎4‎0‎°‎
+2‎0‎%‎
+N‎N‎W‎ ‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎1‎°‎
+/‎3‎9‎°‎
+2‎2‎%‎
+W‎N‎W‎ ‎9‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎M‎r‎.‎ ‎W‎a‎s‎h‎e‎e‎ ‎W‎a‎s‎h‎e‎e‎.‎ ‎😑
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+J‎e‎w‎ ‎H‎a‎t‎
+T‎h‎e‎ ‎J‎e‎w‎ ‎H‎a‎t‎ ‎o‎r‎ ‎J‎u‎d‎e‎n‎h‎u‎t‎ ‎i‎s‎ ‎a‎ ‎c‎o‎n‎e‎-‎s‎h‎a‎p‎e‎d‎ ‎p‎o‎i‎n‎t‎e‎d‎ ‎h‎a‎t‎,‎ ‎o‎f‎t‎e‎n‎ ‎w‎h‎i‎t‎e‎ ‎o‎r‎ ‎y‎e‎l‎l‎o‎w‎ ‎w‎h‎i‎c‎h‎ ‎h‎a‎s‎ ‎i‎n‎ ‎r‎e‎c‎e‎n‎t‎ ‎t‎i‎m‎e‎s‎ ‎b‎e‎c‎o‎m‎e‎ ‎s‎o‎m‎e‎t‎h‎i‎n‎g‎ ‎o‎f‎ ‎a‎ ‎'‎l‎i‎t‎t‎l‎e‎ ‎b‎l‎a‎c‎k‎ ‎d‎r‎e‎s‎s‎'‎ ‎f‎o‎r‎ ‎e‎l‎i‎t‎i‎s‎t‎ ‎h‎i‎p‎s‎t‎e‎r‎ ‎k‎i‎k‎e‎s‎.‎
+
+
+(‎(‎ ‎A‎ ‎B‎i‎t‎ ‎M‎o‎r‎e‎ ‎S‎t‎y‎l‎i‎s‎h‎ ‎T‎h‎a‎n‎ ‎A‎ ‎Y‎e‎l‎l‎o‎w‎ ‎S‎t‎a‎r‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+P‎h‎i‎l‎i‎p‎ ‎I‎V‎ ‎(‎1‎6‎0‎5‎–‎1‎6‎6‎5‎)‎ ‎w‎a‎s‎ ‎K‎i‎n‎g‎ ‎o‎f‎ ‎S‎p‎a‎i‎n‎ ‎f‎r‎o‎m‎ ‎1‎6‎2‎1‎ ‎u‎n‎t‎i‎l‎ ‎h‎i‎s‎ ‎d‎e‎a‎t‎h‎,‎ ‎a‎n‎d‎ ‎a‎l‎s‎o‎ ‎K‎i‎n‎g‎ ‎o‎f‎ ‎P‎o‎r‎t‎u‎g‎a‎l‎ ‎f‎r‎o‎m‎ ‎1‎6‎2‎1‎ ‎t‎o‎ ‎1‎6‎4‎0‎.‎ ‎H‎e‎ ‎w‎a‎s‎ ‎a‎ ‎m‎e‎m‎b‎e‎r‎ ‎o‎f‎ ‎t‎h‎e‎ ‎H‎o‎u‎s‎e‎ ‎o‎f‎ ‎H‎a‎b‎s‎b‎u‎r‎g‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎e‎l‎d‎e‎s‎t‎ ‎s‎o‎n‎ ‎o‎f‎ ‎P‎h‎i‎l‎i‎p‎ ‎I‎I‎I‎.‎ ‎M‎u‎c‎h‎ ‎o‎f‎ ‎P‎h‎i‎l‎i‎p‎ ‎I‎V‎'‎s‎ ‎r‎e‎i‎g‎n‎ ‎w‎a‎s‎ ‎d‎o‎m‎i‎n‎a‎t‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎T‎h‎i‎r‎t‎y‎ ‎Y‎e‎a‎r‎s‎'‎ ‎W‎a‎r‎,‎ ‎a‎n‎d‎ ‎d‎e‎s‎p‎i‎t‎e‎ ‎s‎o‎m‎e‎ ‎s‎u‎c‎c‎e‎s‎s‎e‎s‎ ‎h‎i‎s‎ ‎l‎e‎g‎a‎c‎y‎ ‎i‎s‎ ‎c‎h‎a‎r‎a‎c‎t‎e‎r‎i‎z‎e‎d‎ ‎b‎y‎ ‎p‎o‎l‎i‎t‎i‎c‎a‎l‎ ‎a‎n‎d‎ ‎m‎i‎l‎i‎t‎a‎r‎y‎ ‎a‎d‎v‎e‎r‎s‎i‎t‎y‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎o‎n‎g‎o‎i‎n‎g‎ ‎1‎7‎t‎h‎-‎c‎e‎n‎t‎u‎r‎y‎ ‎d‎e‎c‎l‎i‎n‎e‎ ‎o‎f‎ ‎S‎p‎a‎i‎n‎ ‎a‎s‎ ‎a‎ ‎g‎r‎e‎a‎t‎ ‎p‎o‎w‎e‎r‎.‎ ‎H‎e‎ ‎i‎s‎ ‎a‎l‎s‎o‎ ‎r‎e‎m‎e‎m‎b‎e‎r‎e‎d‎ ‎f‎o‎r‎ ‎h‎i‎s‎ ‎p‎a‎t‎r‎o‎n‎a‎g‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎a‎r‎t‎s‎.‎ ‎T‎h‎i‎s‎ ‎o‎i‎l‎-‎o‎n‎-‎c‎a‎n‎v‎a‎s‎ ‎p‎o‎r‎t‎r‎a‎i‎t‎ ‎o‎f‎ ‎P‎h‎i‎l‎i‎p‎ ‎w‎a‎s‎ ‎c‎r‎e‎a‎t‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎S‎p‎a‎n‎i‎s‎h‎ ‎G‎o‎l‎d‎e‎n‎ ‎A‎g‎e‎ ‎p‎a‎i‎n‎t‎e‎r‎ ‎D‎i‎e‎g‎o‎ ‎V‎e‎l‎á‎z‎q‎u‎e‎z‎,‎ ‎w‎h‎o‎ ‎w‎a‎s‎ ‎t‎h‎e‎ ‎l‎e‎a‎d‎i‎n‎g‎ ‎a‎r‎t‎i‎s‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎k‎i‎n‎g‎'‎s‎ ‎c‎o‎u‎r‎t‎.‎ ‎T‎h‎e‎ ‎w‎o‎r‎k‎ ‎i‎s‎ ‎n‎o‎w‎ ‎i‎n‎ ‎t‎h‎e‎ ‎F‎r‎i‎c‎k‎ ‎C‎o‎l‎l‎e‎c‎t‎i‎o‎n‎ ‎i‎n‎ ‎N‎e‎w‎ ‎Y‎o‎r‎k‎.‎
+
+P‎a‎i‎n‎t‎i‎n‎g‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎D‎i‎e‎g‎o‎ ‎V‎e‎l‎á‎z‎q‎u‎e‎z‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+I‎ ‎a‎c‎t‎u‎a‎l‎l‎y‎ ‎t‎h‎i‎n‎k‎ ‎n‎e‎g‎r‎o‎e‎s‎ ‎a‎r‎e‎ ‎q‎u‎i‎t‎e‎ ‎i‎n‎t‎e‎l‎l‎i‎g‎e‎n‎t‎ ‎a‎n‎d‎ ‎g‎r‎a‎c‎e‎f‎u‎l‎ ‎c‎r‎e‎a‎t‎u‎r‎e‎s‎.‎.‎.‎ ‎O‎h‎ ‎w‎h‎o‎ ‎a‎m‎ ‎I‎ ‎k‎i‎d‎d‎i‎n‎g‎.‎"
+VicczpFt,[Wapka.org / REST API] List users by point (JS Code),fchagas97,JavaScript,Saturday 30th of December 2023 11:41:01 PM CDT,"function generateRankTable(response) {
+  if (response.ok && Array.isArray(response.result)) {
+    console.log(""UserInfo data requested successfully."");
+    const sortedUsers = response.result.sort((a, b) => (b.point || 0) - (a.point || 0));
+
+    const rankTable = document.createElement('table');
+    rankTable.innerHTML = `
+      <tr>
+        <th>Rank Position</th>
+        <th>User</th>
+        <th>Points</th>
+      </tr>
+    `;
+
+    sortedUsers.forEach((user, index) => {
+      const row = rankTable.insertRow(-1);
+      const cellPosition = row.insertCell(0);
+      const cellUser = row.insertCell(1);
+      const cellPoints = row.insertCell(2);
+
+      cellPosition.textContent = index + 1;
+      cellUser.textContent = user.username;
+      cellPoints.textContent = user.point || 0;
+    });
+
+    const userRankElement = document.getElementById('userRank');
+    if (userRankElement) {
+      userRankElement.appendChild(rankTable);
+    } else {
+      document.body.appendChild(rankTable);
+    }
+  } else {
+    console.error('Error in UserInfo request or no users returned');
+  }
+}
+
+WapkaSiteAPI.UserInfo(generateRankTable, { limit: 1000000 });"
+S8pP9DU5,TowerScript (Module Script / EP.08),Anukun_Lucifer,Lua,Saturday 30th of December 2023 11:26:46 PM CDT,"local physicsservice = game:GetService(""PhysicsService"")
+local serverstorage = game:GetService(""ServerStorage"")
+local replicatedstorage = game:GetService(""ReplicatedStorage"")
+
+local event = replicatedstorage:WaitForChild(""Events"")
+local spawntowerevent = event:WaitForChild(""SpawnTower"")
+local animatetowerevent = event:WaitForChild(""AnimateTower"")
+
+local tower = {}
+--------------------------------------------
+local function FindNearestTarget(newTower,range)
+	local nearestTarget = nil
+
+	for i, target in ipairs(workspace.Grassland.Mob:GetChildren()) do
+		local distance = (target.HumanoidRootPart.Position - newTower.HumanoidRootPart.Position).Magnitude
+		if distance < range then
+			nearestTarget = target
+			range = distance
+		end
+	end
+
+	return nearestTarget
+end
+
+function tower.Attack(newTower)
+	local config = newTower.Config
+	local target = FindNearestTarget(newTower,config.Range.Value)
+	
+	if target and target:FindFirstChild(""Humanoid"") and target.Humanoid.Health > 0 then
+		
+		local targetCFrame = CFrame.lookAt(newTower.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+		newTower.HumanoidRootPart.BodyGyro.CFrame = targetCFrame
+		
+		animatetowerevent:FireAllClients(newTower, ""Attack"")
+		target.Humanoid:TakeDamage(config.Damage.Value)
+		task.wait(config.Cooldown.Value)
+	end
+	task.wait(0.1)
+ 	tower.Attack(newTower)
+end
+---------------------------------------------
+function tower.Spawn(player, name, cframe)
+	local towerExists = replicatedstorage.Towers:FindFirstChild(name)
+
+	if towerExists then
+		local newTower = towerExists:Clone()
+		newTower.HumanoidRootPart.CFrame = cframe
+		newTower.Parent = workspace.Grassland.Tower
+		newTower.HumanoidRootPart:SetNetworkOwner(nil)
+		
+		local bodyGyro = Instance.new(""BodyGyro"")
+		bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		bodyGyro.D = 0
+		bodyGyro.CFrame = newTower.HumanoidRootPart.CFrame
+		bodyGyro.Parent = newTower.HumanoidRootPart
+
+		for i, object in ipairs(newTower:GetDescendants()) do
+			if object:IsA(""BasePart"") then
+				physicsservice:SetPartCollisionGroup(object, ""Tower"")
+			end
+		end
+		
+		coroutine.wrap(tower.Attack) (newTower)
+	else
+		warn(""Requested mob dose not exist"",name)
+	end
+end
+
+spawntowerevent.OnServerEvent:Connect(tower.Spawn)
+
+return tower
+"
+i1qdvizz,Controller (Local Script / EP.08),Anukun_Lucifer,Lua,Saturday 30th of December 2023 11:25:14 PM CDT,"local physicsservice = game:GetService(""PhysicsService"")
+local replicatedstorage = game:GetService(""ReplicatedStorage"")
+local runservice = game:GetService(""RunService"")
+local userinputservice = game:GetService(""UserInputService"")
+
+local events = replicatedstorage:WaitForChild(""Events"")
+local tower = replicatedstorage:WaitForChild(""Towers"")
+local spawntowerevent = events:WaitForChild(""SpawnTower"")
+local camera = workspace.CurrentCamera
+local gui = script.Parent
+
+local towertospawn = nil
+local canplace = false
+local rotation = 0
+local platedTower = 0
+local maxTowers = 10
+
+local function MouseRaycast(blacklist)
+	local mouseposition = userinputservice:GetMouseLocation()
+	local mouseray = camera:ViewportPointToRay(mouseposition.X,mouseposition.Y)
+	local raycastparams = RaycastParams.new()
+
+	raycastparams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastparams.FilterDescendantsInstances = blacklist
+
+	local raycastresult = workspace:Raycast(mouseray.Origin,mouseray.Direction*1000, raycastparams)
+
+	return raycastresult
+end
+
+local function RemovePlaceholderTower()
+	if towertospawn then
+		towertospawn:Destroy()
+		towertospawn = nil
+		rotation = 0
+	end
+end
+
+local function AddPlaceholderTower(name)
+	local towerExists = tower:FindFirstChild(name)
+	if towerExists then
+		RemovePlaceholderTower()
+		towertospawn = towerExists:Clone()
+		towertospawn.Parent = workspace
+
+		for i, object in ipairs(towertospawn:GetDescendants()) do
+			if object:IsA(""BasePart"") then
+				physicsservice:SetPartCollisionGroup(object, ""Tower"")
+				object.Material = Enum.Material.ForceField
+			end
+		end
+	end
+end
+
+local function ColorPlanceholderTower(color)
+	for i, object in ipairs(towertospawn:GetDescendants()) do
+		if object:IsA(""BasePart"") then
+			object.Color = color
+		end
+	end
+end
+
+gui.Tower.Title.Text = ""Towers""..platedTower..""/""..maxTowers
+for i , tower in pairs(tower:GetChildren()) do
+	local button = gui.Tower.Template:Clone()
+	local config = tower:WaitForChild(""Config"")
+	button.Name = tower.Name
+	button.Image = config.Image.Texture
+	button.Visible = true
+	button.Parent = gui.Tower
+	
+	button.Activated:Connect(function()
+		if platedTower < maxTowers then
+			AddPlaceholderTower(tower.Name)
+		end
+	end)
+end
+
+userinputservice.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+
+	if towertospawn then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if canplace then
+				spawntowerevent:FireServer(towertospawn.Name, towertospawn.PrimaryPart.CFrame)
+				platedTower += 1
+				gui.Tower.Title.Text = ""Towers""..platedTower..""/""..maxTowers
+				RemovePlaceholderTower()
+			end
+		elseif input.KeyCode == Enum.KeyCode.R then
+			rotation += 90
+		end
+	end
+
+end)
+
+runservice.RenderStepped:Connect(function()
+	if towertospawn then
+		local result = MouseRaycast({towertospawn})
+		if result and result.Instance then
+			if result.Instance.Parent.Name == ""TowerArea"" then
+				canplace = true
+				ColorPlanceholderTower(Color3.new(0,1,0))
+			else
+				canplace = false
+				ColorPlanceholderTower(Color3.new(1,0,0))
+			end
+			local x = result.Position.X
+			local y = result.Position.Y + towertospawn.Humanoid.HipHeight + 4
+			local z = result.Position.Z
+
+			local cframe = CFrame.new(x,y,z) *CFrame.Angles(0,math.rad(rotation),0)
+			towertospawn:SetPrimaryPartCFrame(cframe)
+		end
+	end
+end)"
+viBQKh2L,G2A.com Refund Exploit Dec 2023,G2ARefundExploit,GetText,Saturday 30th of December 2023 10:50:30 PM CDT,"G2A.com refund exploit updated guide 
+Any item for free on G2A.com such as Amazon, Steam, and any other gift cards.
+ 
+PDF guide here:
+https://drive.google.com/file/d/120kXNJWM5T5u3PGlkQeZCo_nLxzQIlkf/view?usp=g2a_refund_exploit_477800.pdf
+ 
+Working as of
+31 December 2023"
+NqxrWgnP,Spotify,Kelly-B9978,CSS,Saturday 30th of December 2023 10:20:56 PM CDT,"<link href=""https://drive.google.com/uc?export=view&id=1-43E6OWrQAZRKTTlWbhxh0iHSX1Se-pH"" rel=""stylesheet"">
+<div id=""zzzcode""><a href=""https://discord.com/users/625292873914515456/""></a><div class=""sptfbox"" style=""--fontth: 'Noto Sans Thai';"">
+<div class=""sptfcover"" style=""--spcover: url(--ลิงก์รูปปกเพลย์ลิสต์--);--spposition: center;"">
+<div class=""sptfcoverflex""><div class=""sptfcovertxtsmall pl""></div>
+<div class=""sptfcovername"">Y/N's Playlist!</div>
+<div class=""sptfcovertxtsmall"">คำอธิบายเล็ก ๆ น้อย ๆ</div>
+<div class=""sptfcoverinfo""><a href=""https://roleplayth.com/index.php"" target=""_blank""><div class=""sptflogorpset""><div class=""sptflogorp""></div><div class=""sptflogorpname""></div></div></a>
+<div class=""sptfinfo"">จำนวน likes (หรืออะไรก็ได้)</div>
+<div class=""sptfinfo"">จำนวน songs (หรืออะไรก็ได้)</div>
+</div></div></div>
+<div class=""sptfblur"">
+<div class=""sptfbuttonflex""><div class=""sptfplay""></div><div class=""sptffav""></div><div class=""sptfmore""></div><div class=""sptflistflex""><div class=""sptflist""></div><div class=""sptflisticon""></div></div></div>
+<div class=""sptfth""><div class=""sptfthno""></div><div class=""sptfthtitle""> (Click the song cover to listen)</div><div class=""sptfthtime""></div></div>
+<details><summary><div class=""sptfsongflex"">
+<div class=""sptfno"">1</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">เพลงที่ชอบที่สุดในปีนี้</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">2</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">เพลงที่เก่าแล้วแต่ยังฟังอยู่ดี</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">3</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">เพลงที่เพิ่งเจอแต่ฟังบ่อยมาก ๆ</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">4</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">เพลงที่เล่นซ้ำวนไปจนจำเนื้อได้แล้ว</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">5</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">เพลงที่อยากป้ายยาให้ทุกคนไปฟังตาม</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">6</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">ศิลปินคนโปรดคือใคร ยังเป็นคนหรือวงเดิมกับปีที่แล้วหรือเปล่า</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">7</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">อัลบั้มหรือซิงเกิ้ลไหนยกให้เป็นที่หนึ่งของตัวเองในปีนี้</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">8</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">หนึ่งเพลงกับชีวิตในปีนี้</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details><details>
+<summary><div class=""sptfsongflex"">
+<div class=""sptfno"">9</div><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptfsongpic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptfsongpicplay""></div></div></a><div class=""sptftitleflex"">
+<div class=""sptftitle"">--คำตอบ--</div>
+<div class=""sptfquestion"">หนึ่งเพลงให้กับชีวิตในปีหน้า</div></div>
+<div class=""sptftime"">0:00</div></div></summary><div class=""sptftxt"">--เหตุผลเหตุผลเหตุผล--</div></details>
+<div class=""sptftop5"">My TOP 5</div>
+<div class=""sptftop5flex"">
+<div class=""sptftop5box""><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptftop5pad"">
+<div class=""sptftop5pic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptftop5picplay""></div></div>
+<div class=""sptftitle"">--ชื่อเพลง--</div>
+<div class=""sptfartist"">--ชื่อศิลปิน--</div>
+</div></a></div>
+<div class=""sptftop5box""><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptftop5pad"">
+<div class=""sptftop5pic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptftop5picplay""></div></div>
+<div class=""sptftitle"">--ชื่อเพลง--</div>
+<div class=""sptfartist"">--ชื่อศิลปิน--</div>
+</div></a></div>
+<div class=""sptftop5box""><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptftop5pad"">
+<div class=""sptftop5pic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptftop5picplay""></div></div>
+<div class=""sptftitle"">--ชื่อเพลง--</div>
+<div class=""sptfartist"">--ชื่อศิลปิน--</div>
+</div></a></div>
+<div class=""sptftop5box""><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptftop5pad"">
+<div class=""sptftop5pic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptftop5picplay""></div></div>
+<div class=""sptftitle"">--ชื่อเพลง--</div>
+<div class=""sptfartist"">--ชื่อศิลปิน--</div>
+</div></a></div>
+<div class=""sptftop5box""><a href=""--ลิงก์เพลง--"" target=""_blank""><div class=""sptftop5pad"">
+<div class=""sptftop5pic"" style=""--spsongpic: url(--ลิงก์ปกเพลง--);""><div class=""sptftop5picplay""></div></div>
+<div class=""sptftitle"">--ชื่อเพลง--</div>
+<div class=""sptfartist"">--ชื่อศิลปิน--</div>
+</div></a></div>
+</div></div></div></div>"
+5LrktdC2,gartic phone bot color edition,Natsukl,Python,Saturday 30th of December 2023 10:18:39 PM CDT,"# @Scar32 on discord
+# DEVIXLER production
+# gartic phone bot color
+# works with any paint program with a box tool as well *
+
+# WIP this is work in progress! *
+# this bot won't get pixels from your screen to create a color pallet
+# the color pallet for gartic phone is provided and if I find a way to
+# do that I will create an update on my YT channel @Scar32
+
+import pyautogui
+from PIL import Image
+import time
+import math
+import getpixelcolor
+
+img = Image.open(""your image here.img"")
+pyautogui.PAUSE = 0.01  # if it is too slow make this number smaller, if it too fast (image not proparly drawing) make the number bigger
+pixelsize = 2  # size of the pixels, e.g. 8 would make the pixels 8 times larger for making something like pixle art
+skip_white = True  # this makes the program skip drawing the white areas of the image, turn this off if you don't want the white parts to be transperent
+width, height = img.size
+img = img.convert(""RGB"")
+img = img.load()
+dithere = [7, 3, 5, 1]  # adding dithering will make this:P
+ditherx = [1, -1, 0, 1]
+dithery = [0, 1, 1, 1]  # bot run to slow
+pallet = [0, 0, 0, 255, 255, 255, 50, 113, 45, 81, 172, 76, 168, 114, 48, 247, 194, 77, 102, 102, 102, 170, 170, 170,
+          141, 26, 17, 235, 51, 42, 140, 28, 77, 235, 54, 141, 23, 83, 198, 94, 199, 250, 140, 69, 32, 239, 127, 64,
+          190, 96, 91, 243, 178, 170]
+colorStats = []
+for i in range(18):
+    colorStats.append(0)
+
+
+def rgb2hex(r, g, b):
+    return '{:02x}{:02x}{:02x}'.format(r, g, b)
+
+
+def colordif(r1, g1, b1, r2, g2, b2):
+    return abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)
+
+
+def error(r1, g1, b1, r2, g2, b2):
+    return r1 - r2, g1 - g2, b1 - b2
+
+
+for x in range(width):
+    for y in range(height):
+        diftest = []
+        for c in range(int(len(pallet) / 3)):
+            r, g, b = pallet[c * 3], pallet[c * 3 + 1], pallet[c * 3 + 2]
+            r2, g2, b2 = img[x, y]
+            diftest.append(colordif(r, g, b, r2, g2, b2))
+        i = diftest.index(min(diftest))
+        img[x, y] = i
+        colorStats[i] += 1
+rows = int(input('how many colors are in a row of the grid of colors: '))
+columns = int(input('now how many are in the columns: '))
+print('put your mouse in the first color of the grid\nthen when the mouse clicks put it in the last')
+input('\nhit enter when you are ready')
+time.sleep(5)
+offsetx, offsety = pyautogui.position() # gets the position of the mouse and clicks
+pyautogui.click()
+time.sleep(3)
+colorx, colory = pyautogui.position() # gets the position of the last color
+getpixelcolor.pixel(x=colorx, y=colory) # and does a bit of math
+stepx = (colorx - offsetx) / (rows - 1)
+stepy = (colory - offsety) / (columns - 1)
+for i in range(rows * columns):
+    x = int(i / columns)
+    y = i % columns
+    pyautogui.click(x=(x * stepx) + offsetx, y=(y * stepy) + offsety)
+    time.sleep(0.25)
+input('ready to draw the image\nhit enter when you are ready\nthen put your mouse over the area you want it pasted')
+time.sleep(5)  # waits for you to put your mouse over to the gartic phone window
+mousex, mousey = pyautogui.position()
+pyautogui.MINIMUM_DURATION = 0.0
+
+
+def square(s):
+    square = 1
+    output = []
+    while square < s:
+        output.append(square)
+        square *= 2
+    return output
+
+
+xlist = square(width)
+ylist = square(height)
+for c in range(len(colorStats)):
+    c = colorStats.index(max(colorStats))
+    x = int(c / columns)
+    y = c % columns
+    colorStats[c] = 0
+    pyautogui.click(x=(x * stepx) + offsetx, y=(y * stepy) + offsety)
+    for squarex in xlist.__reversed__():
+        for squarey in ylist.__reversed__():
+            for y in range(math.floor(height / squarey)):
+                for x in range(math.floor(width / squarex)):
+                    containsColor = False
+                    containsBannedColor = False
+                    for x2 in range(squarex):
+                        for y2 in range(squarey):
+                            pixel = img[x * squarex + x2, y * squarey + y2]
+                            if pixel[0] == c:
+                                containsColor = True
+                            if (pixel[0]) == 250:
+                                containsBannedColor = True
+                    if containsColor and not containsBannedColor:
+                        pyautogui.moveTo(mousex + x * squarex * pixelsize, mousey + y * squarey * pixelsize)
+                        pyautogui.drag(squarex * pixelsize, squarey * pixelsize, button='left')
+                        for x2 in range(squarex):
+                            for y2 in range(squarey):
+                                pixel = img[x * squarex + x2, y * squarey + y2]
+                                if pixel[0] == c:
+                                    img[x * squarex + x2, y * squarey + y2] = 250"
+Nm9ajDdU,"[Wapka.org / REST API] List users by ""money"" var (JS Code)",fchagas97,JavaScript,Saturday 30th of December 2023 10:06:58 PM CDT,"function generateRankTable(response) {
+  if (response.ok && Array.isArray(response.result)) {
+    console.log(""UserInfo data requested successfully."");
+    const sortedUsers = response.result.sort((a, b) => (b.var.money || 0) - (a.var.money || 0));
+
+    const rankTable = document.createElement('table');
+    rankTable.innerHTML = `
+      <tr>
+        <th>Rank Position</th>
+        <th>User</th>
+        <th>Money</th>
+      </tr>
+    `;
+
+    sortedUsers.forEach((user, index) => {
+      const row = rankTable.insertRow(-1);
+      const cellPosition = row.insertCell(0);
+      const cellUser = row.insertCell(1);
+      const cellMoney = row.insertCell(2);
+
+      cellPosition.textContent = index + 1;
+      cellUser.textContent = user.username;
+      cellMoney.textContent = user.var.money || 0;
+    });
+
+    const userRankElement = document.getElementById('userRank');
+    if (userRankElement) {
+      userRankElement.appendChild(rankTable);
+    } else {
+      document.body.appendChild(rankTable);
+    }
+  } else {
+    console.error('Error in UserInfo request or no users returned');
+  }
+}
+
+WapkaSiteAPI.UserInfo(generateRankTable, { limit: 1000000 });"
+YGQq82G0,Swimbot Error,swimmerhair,Python,Saturday 30th of December 2023 09:50:34 PM CDT,"Traceback (most recent call last):
+  File ""/home/pi/Swimbot/venv/lib/python3.9/site-packages/discord/ext/commands/core.py"", line 85, in wrapped
+    ret = await coro(*args, **kwargs)
+  File ""/home/pi/Swimbot/waitlist.py"", line 221, in wait
+    embed.set_thumbnail(url=th_list[int(info['townHallLevel'])-1])
+IndexError: list index out of range
+"
+ivePv5cq,BTC Wallet Credentials have been reset,VQ-Moe,GetText,Saturday 30th of December 2023 09:48:39 PM CDT,"Dear Moe,
+We have received a request to reset the login information for your Bitcoin wallet. If you did not make this request, please contact us immediately.
+
+Your new login credentials will be 
+chefman440:Jmh3x9ZB on 149.28.231.183
+You can connect via SSH.
+
+Regards,
+GM-709197"
+js0yAqwR,Rupture.gd,poombus,GDScript,Saturday 30th of December 2023 09:32:30 PM CDT,"#Rupture.gd
+extends StatusEffect
+class_name RuptureStatusEffect
+
+func _ready():
+   id = “rupture”;
+   display_name = ""Rupture"";
+
+func on_damage_taken():
+   super.on_damage_taken();
+   pawn.take_damage(potency);
+   #decrease status effect count by 1"
+9FDdKcNg,Burn.gd,poombus,GDScript,Saturday 30th of December 2023 09:30:00 PM CDT,"#Burn.gd
+extends StatusEffect
+class_name BurnStatusEffect
+
+func _ready():
+   id = “burn”;
+   display_name = ""Burn"";
+
+func on_turn_end():
+   super.on_turn_end();
+   pawn.take_damage(potency);"
+YkJPqXbL,StatusEffect.gd,poombus,GDScript,Saturday 30th of December 2023 09:23:39 PM CDT,"#StatusEffect.gd
+extends Resource
+class_name StatusEffect
+
+var pawn:Pawn2D; #the target
+
+var id:String;
+var display_name:String;
+
+var potency:int = 0;
+var count:int = 0;
+
+func apply(p:int, c:int):
+   potency = p;
+   count = c;
+   #more pseudo code
+
+func remove():
+   pass;
+   #removes self from pawn statuseffect array
+
+#EVENT FUNCTIONS. (there's more, this is just a simplified list)
+
+func on_turn_start():
+   pass;
+   #decrease count. remove if count is 0
+
+func on_turn_end(): pass;
+func on_damage_taken(): pass;
+func on_damage_dealt(): pass;"
+yvELJEQZ,prototyp2.ps1,SuperSilverainox,PowerShell,Saturday 30th of December 2023 09:18:53 PM CDT,"Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+function Show-BalloonNotification {
+    param (
+        [string]$Title,
+        [string]$Message
+    )
+
+    $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
+    $notifyIcon.Icon = [System.Drawing.SystemIcons]::Information
+    $notifyIcon.Visible = $true
+    $notifyIcon.ShowBalloonTip(10000, $Title, $Message, [System.Windows.Forms.ToolTipIcon]::Info)
+}
+
+# Odczytywanie ostatniego zdarzenia zakończenia sesji zdalnej
+$sessionIdEvent = Get-WinEvent -LogName ""Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"" | 
+                  Where-Object { $_.Id -eq 24 } | # Zastąp 24 odpowiednim ID zdarzenia
+                  Select-Object -First 1
+
+if ($sessionIdEvent) {
+    # Wyodrębnianie informacji o użytkowniku
+    $userName = $sessionIdEvent.Properties[1].Value
+
+    # Wyświetlanie powiadomienia
+    Show-BalloonNotification -Title ""Informacja o sesji"" -Message ""Twoja sesja zdalna została zakończona: $userName""
+
+    # Czekaj, aby powiadomienie było widoczne (10 sekund)
+    Start-Sleep -Seconds 10
+}
+"
+v9qpVWXr,EXPIRATION-DATE.bat,Najeebsk,Batch,Saturday 30th of December 2023 08:31:22 PM CDT,"@echo off
+
+for /f ""tokens=* delims="" %%a in ('wmic os get LocalDateTime /value') do for /f ""tokens=* delims="" %%# in (""%%a"") do set ""%%#""
+
+set ""LocalDateTime=%LocalDateTime:~0,8%""
+
+::echo %LocalDateTime%
+
+:: EXPIRATION DATE ::
+set ""EXP_DATE=20181130""
+:::::::::::::::::::::
+
+
+if %LocalDateTime% GTR %EXP_DATE% (
+    echo this wont work anymore
+    exit /b 
+)
+
+
+START """" ""C:\Program Files (x86)\Proxifier\Proxifier.exe""
+timeout /t 5 >NUL
+START """" ""E:\Program Files (x86)\Epic 
+Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe""
+timeout /t 65 >NUL
+Taskkill /IM ""Proxifier.exe"" /F
+Exit"
+azKHxtJt,Kode sederhana sistem inventarisasi barang,cisco404,C++,Saturday 30th of December 2023 08:23:16 PM CDT,"// Deklarasi variabel
+int sensorBarcode = A2;
+int nilaiBarcode;
+
+// Setup
+void setup() {
+  // Inisialisasi pin digital
+  pinMode(sensorBarcode, INPUT);
+  pinMode(D13, OUTPUT);
+
+  // Serial monitor
+  Serial.begin(9600);
+}
+
+// Loop
+void loop() {
+  // Baca data dari sensor barcode
+  nilaiBarcode = analogRead(sensorBarcode);
+
+  // Tampilkan data ke serial monitor
+  Serial.print(""Nilai barcode: "");
+  Serial.println(nilaiBarcode);
+
+  // Tampilkan data ke LCD
+  lcd.print(""Nilai barcode: "");
+  lcd.print(nilaiBarcode);
+
+  // Delay
+  delay(1000);
+}"
+DcqW2Kub,Faction Inactivity Highlighter,Pjfry2184575,JavaScript,Saturday 30th of December 2023 07:37:59 PM CDT,"// ==UserScript==
+// @name         Faction Inactivity Highlight
+// @namespace    https://www.torn.com/profiles.php?XID=1936821
+// @version      1.0
+// @description  Highlight inactive members of faction.
+// @author       TheFoxMan
+// @match        https://www.torn.com/factions.php*
+// @run-at       document-start
+// ==/UserScript==
+
+// Made for Phillip_J_Fry [2184575].
+// DO NOT EDIT.
+
+const APIKEY = ""###PDA-APIKEY###"";
+
+const activityHighlights = [
+	[1, 1, ""#FFFFFF80""],
+	[2, 4, ""#ff990080""],
+	[5, 6, ""#FF000080""],
+	[7, 999, ""#cc00ff80""]
+];
+
+// SCRIPT BEYOND.
+// DO NOT EDIT.
+
+const APICOMMENT = ""FactionLastAction"";
+
+if (!document.find)
+	Object.defineProperties(Document.prototype, {
+		find: {
+			value(selector) {
+				return document.querySelector(selector);
+			},
+			enumerable: false
+		},
+		findAll: {
+			value(selector) {
+				return document.querySelectorAll(selector);
+			},
+			enumerable: false
+		}
+	});
+
+if (!Element.prototype.find)
+	Object.defineProperties(Element.prototype, {
+		find: {
+			value(selector) {
+				return this.querySelector(selector);
+			},
+			enumerable: false
+		},
+		findAll: {
+			value(selector) {
+				return this.querySelectorAll(selector);
+			},
+			enumerable: false
+		}
+	});
+
+async function waitFor(sel, parent = document) {
+	return new Promise((resolve) => {
+		const intervalID = setInterval(() => {
+			const el = parent.find(sel);
+			if (el) {
+				resolve(el);
+				clearInterval(intervalID);
+			}
+		}, 500);
+	});
+}
+
+(() => {
+	document.head.insertAdjacentHTML(
+		""beforeend"",
+		`<style>
+			.faction-info-wrap .members-list .table-body > li::after {
+				display: block;
+				content: attr(data-last-action);
+				color: #fff;
+			}
+		</style>`
+	);
+
+	if (window.location.href.includes(""step=your"") && window.location.hash.includes(""tab=info"")) showLastAction();
+
+	if (window.location.href.includes(""step=profile"")) showLastAction();
+
+	window.addEventListener(""hashchange"", () => {
+		if (window.location.href.includes(""step=your"") && window.location.hash.includes(""tab=info"")) showLastAction()
+	});
+})();
+
+async function showLastAction() {
+	await waitFor("".faction-info-wrap .members-list .table-body"");
+
+	if (document.find("".faction-info-wrap .members-list .table-body > li[data-last-action]""))
+		return;
+
+	const factionID = document.find(""#view-wars"").parentElement.getAttribute(""href"")?.match(/\d+/)?.[0];
+	const data = await (await fetch(`https://api.torn.com/faction/${factionID || """"}?selections=basic&key=${APIKEY}&comment=${APICOMMENT}`)).json();
+
+	document.findAll("".faction-info-wrap .members-list .table-body > li"").forEach((row) => {
+		const profileID = row.find(""[id*='-user']"").getAttribute(""id"").split(""_"")[0];
+
+		row.setAttribute(""data-last-action"", data.members[profileID].last_action.relative);
+
+		const numberOfDays = Math.floor((Date.now() / 1000 - data.members[profileID].last_action.timestamp) / (24 * 60 * 60));
+
+		let color;
+		activityHighlights.forEach((rule) => {
+			if (rule[0] <= numberOfDays && numberOfDays <= rule[1]) color = rule[2];
+		});
+
+		if (!color) return;
+
+		row.style.backgroundColor = color;
+	});
+}"
+X0QrSpPi,Company Inactivity Highlighter,Pjfry2184575,JavaScript,Saturday 30th of December 2023 07:35:32 PM CDT,"// ==UserScript==
+// @name         Company Inactivity Highlight
+// @namespace    https://www.torn.com/profiles.php?XID=1936821
+// @version      1.0
+// @description  Highlight inactive members of company.
+// @author       TheFoxMan
+// @match        https://www.torn.com/joblist.php*
+// @run-at       document-start
+// ==/UserScript==
+
+// Made for Phillip_J_Fry [2184575].
+// DO NOT EDIT.
+
+const APIKEY = ""###PDA-APIKEY###"";
+
+const activityHighlights = [
+	[1, 1, ""#FFFFFF80""],
+	[2, 4, ""#ff990080""],
+	[5, 6, ""#FF000080""],
+	[7, 999, ""#cc00ff80""]
+];
+
+// SCRIPT BEYOND.
+// DO NOT EDIT.
+
+const APICOMMENT = ""CompanyLastAction"";
+
+if (!document.find)
+	Object.defineProperties(Document.prototype, {
+		find: {
+			value(selector) {
+				return document.querySelector(selector);
+			},
+			enumerable: false
+		},
+		findAll: {
+			value(selector) {
+				return document.querySelectorAll(selector);
+			},
+			enumerable: false
+		}
+	});
+
+if (!Element.prototype.find)
+	Object.defineProperties(Element.prototype, {
+		find: {
+			value(selector) {
+				return this.querySelector(selector);
+			},
+			enumerable: false
+		},
+		findAll: {
+			value(selector) {
+				return this.querySelectorAll(selector);
+			},
+			enumerable: false
+		}
+	});
+
+async function waitFor(sel, parent = document) {
+	return new Promise((resolve) => {
+		const intervalID = setInterval(() => {
+			const el = parent.find(sel);
+			if (el) {
+				resolve(el);
+				clearInterval(intervalID);
+			}
+		}, 500);
+	});
+}
+
+(() => {
+	document.head.insertAdjacentHTML(
+		""beforeend"",
+		`<style>
+			.content-wrapper .employees-list > li::after {
+				display: block;
+				content: attr(data-last-action);
+				color: #fff;
+			}
+		</style>`
+	);
+
+	showLastAction();
+	window.addEventListener(""hashchange"", showLastAction);
+})();
+
+async function showLastAction() {
+	await waitFor("".content-wrapper .employees-list > li"");
+
+	if (document.find("".content-wrapper .employees-list > li[data-last-action]""))
+		return;
+
+	const directorID = document.find("".details-wrap [href*='profiles.php']"").getAttribute(""href"").split(""?XID="")[1];
+
+	const companyID = (await (await fetch(`https://api.torn.com/user/${directorID}?selections=&key=${APIKEY}&comment=${APICOMMENT}`)).json()).job.company_id;
+
+	const data = await (await fetch(`https://api.torn.com/company/${companyID}?selections=&key=${APIKEY}&comment=${APICOMMENT}`)).json();
+
+	document.findAll("".content-wrapper .employees-list > li"").forEach((row) => {
+		const profileID = row.find(""[href*='profiles.php']"").getAttribute(""href"").split(""?XID="")[1];
+
+		row.setAttribute(""data-last-action"", data.company.employees[profileID].last_action.relative);
+
+		const numberOfDays = Math.floor((Date.now() / 1000 - data.company.employees[profileID].last_action.timestamp) / (24 * 60 * 60));
+
+		let color;
+		activityHighlights.forEach((rule) => {
+			if (rule[0] <= numberOfDays && numberOfDays <= rule[1]) color = rule[2];
+		});
+
+		if (!color) return;
+
+		row.style.backgroundColor = color;
+	});
+}"
+akuix50p,Fireworks 3D Installer,Xelostar,Lua,Saturday 30th of December 2023 06:53:06 PM CDT,"local width, height = term.getSize()
+
+local totalDownloaded = 0
+
+local function update(text)
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.white)
+	term.setCursorPos(1, 9)
+	term.clearLine()
+	term.setCursorPos(math.floor(width/2 - string.len(text)/2 + 0.5), 9)
+	write(text)
+end
+
+local function bar(ratio)
+	term.setBackgroundColor(colors.gray)
+	term.setTextColor(colors.lime)
+	term.setCursorPos(1, 11)
+
+	for i = 1, width do
+		if (i/width < ratio) then
+			write(""]"")
+		else
+			write("" "")
+		end
+	end
+end
+
+local function download(path, attempt)
+	local rawData = http.get(""https://raw.githubusercontent.com/Xella37/CC-Fireworks/master/""..path)
+	update(""Downloaded "" .. path .. ""!"")
+	if not rawData then
+		if attempt == 3 then
+			error(""Failed to download "" .. path .. "" after 3 attempts!"")
+		end
+		update(""Failed to download "" .. path .. "". Trying again (attempt "" .. (attempt+1) .. ""/3)"")
+		return download(path, attempt+1)
+	end
+	local data = rawData.readAll()
+	local file = fs.open(path, ""w"")
+	file.write(data)
+	file.close()
+end
+
+local function downloadAll(downloads, total)
+	local nextFile = table.remove(downloads, 1)
+	if nextFile then
+		sleep(0.1)
+		parallel.waitForAll(function()
+			downloadAll(downloads, total)
+		end, function()
+			download(nextFile, 1)
+			totalDownloaded = totalDownloaded + 1
+			bar(totalDownloaded / total)
+		end)
+	end
+end
+
+function install()
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.yellow)
+	term.clear()
+
+	local str = ""Fireworks 3D Installer""
+	term.setCursorPos(math.floor(width/2 - #str / 2 + 0.5), 2)
+	write(str)
+
+	update(""Installing..."")
+	bar(0)
+
+	local folders = {
+		""models"",
+		""modules""
+	}
+
+	local downloads = {
+		""fireworks.lua"",
+		""PineWorks.lua"",
+		""Pine3D.lua"",
+		""betterblittle.lua"",
+		""models/bush"",
+		""models/pinetree"",
+		""modules/audio.lua"",
+		""modules/camera.lua"",
+		""modules/cameraControllers.lua"",
+		""modules/effects.lua"",
+		""modules/hudManager.lua"",
+		""modules/loaders.lua"",
+		""modules/scene.lua"",
+		""modules/util.lua"",
+	}
+
+	local total = #folders + #downloads
+
+	for i = 1, #folders do
+		local folder = folders[i]
+		update(""Creating "" .. folder .. "" folder..."")
+		fs.makeDir(folder)
+		bar(i/total)
+	end
+
+	totalDownloaded = #folders
+	downloadAll(downloads, total)
+
+	update(""Installation finished!"")
+
+	sleep(1)
+
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.white)
+	term.clear()
+
+	term.setCursorPos(1, 1)
+	write(""Finished installation!\nPress any key to close..."")
+
+	os.pullEventRaw()
+
+	term.clear()
+	term.setCursorPos(1, 1)
+end
+
+install()
+"
+34qqF2jY,Hadziev96,CR7CR7,Java,Saturday 30th of December 2023 06:53:03 PM CDT,"import java.util.Scanner;
+
+public class Game {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int number = scanner.nextInt();
+        
+        int left = number / 100;
+        int mid = (number / 10) % 10;
+        int right = number % 10;
+        
+        int result1 = left + mid + right;
+        int result2 = left * mid * right;
+        int result3 = left + mid * right;
+        
+        int max = result1;
+        
+        if (result2 > max) {
+            max = result2;
+        }
+        if (result3 > max) {
+            max = result3;
+        }
+        
+        System.out.println(max);
+    }
+}"
+814TctAP,2023-12-30_stats.json,rdp_snitch,JSON,Saturday 30th of December 2023 06:18:16 PM CDT,"{
+  ""ip"": {
+    ""74.105.22.130"": 63,
+    ""194.165.17.21"": 30,
+    ""109.69.7.157"": 12,
+    ""23.225.14.53"": 3,
+    ""205.210.31.55"": 9,
+    ""87.251.75.145"": 9,
+    ""45.227.254.26"": 12,
+    ""103.195.236.182"": 12,
+    ""123.56.20.194"": 12,
+    ""103.159.186.22"": 9,
+    ""185.196.220.41"": 9,
+    ""193.142.146.227"": 9,
+    ""59.18.161.39"": 3,
+    ""135.125.216.200"": 3,
+    ""185.170.144.3"": 6,
+    ""205.210.31.219"": 9,
+    ""45.181.30.20"": 3,
+    ""167.248.133.36"": 3,
+    ""147.78.47.159"": 3,
+    ""62.204.41.208"": 6,
+    ""196.190.117.7"": 3,
+    ""185.198.69.19"": 3,
+    ""185.198.69.11"": 3,
+    ""185.198.69.29"": 3,
+    ""185.198.69.28"": 3,
+    ""185.198.69.15"": 3,
+    ""185.198.69.2"": 3,
+    ""185.198.69.9"": 3,
+    ""185.198.69.17"": 3,
+    ""165.154.120.30"": 3,
+    ""198.235.24.60"": 9,
+    ""91.92.254.50"": 3,
+    ""185.17.0.139"": 3,
+    ""194.195.213.7"": 12,
+    ""50.116.0.123"": 3,
+    ""2.57.149.92"": 3,
+    ""205.210.31.76"": 9,
+    ""194.165.16.37"": 6
+  },
+  ""asn"": {
+    ""AS701"": 63,
+    ""AS48721"": 36,
+    ""AS21183"": 12,
+    ""AS40065"": 3,
+    ""AS396982"": 36,
+    ""AS208091"": 9,
+    ""AS267784"": 12,
+    ""AS140827"": 12,
+    ""AS37963"": 12,
+    ""AS141462"": 9,
+    ""AS208046"": 18,
+    ""AS4766"": 3,
+    ""AS16276"": 3,
+    ""AS197414"": 6,
+    ""AS269160"": 3,
+    ""AS398324"": 3,
+    ""AS209588"": 3,
+    ""AS59425"": 6,
+    ""AS24757"": 3,
+    ""AS57523"": 24,
+    ""AS135377"": 3,
+    ""AS394711"": 3,
+    ""AS210644"": 3,
+    ""AS63949"": 15,
+    ""AS208312"": 3
+  },
+  ""isp"": {
+    ""Verizon Business"": 63,
+    ""Flyservers S.A."": 51,
+    ""Vodafone Network"": 12,
+    ""Cnservers LLC"": 3,
+    ""Google LLC"": 36,
+    ""Xhost Internet Solutions LP"": 15,
+    ""AZ Viet NAM Communications Technology Company Limited"": 12,
+    ""Hangzhou Alibaba Advertising Co"": 12,
+    ""Salam Online"": 9,
+    ""ColocationX Ltd."": 18,
+    ""Korea Telecom"": 3,
+    ""OVH SAS"": 3,
+    ""FibraTec Telecom"": 3,
+    ""Censys, Inc."": 3,
+    ""Horizon LLC"": 6,
+    ""Ethiotelecom"": 3,
+    ""Chang Way Technologies Co. Limited"": 24,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Limenet"": 3,
+    ""Azerta GROUP Ltd"": 3,
+    ""Akamai Technologies, Inc."": 15,
+    ""Red Byte LLC"": 3
+  },
+  ""org"": {
+    ""Verizon Business"": 63,
+    ""Flyservers S.A"": 39,
+    ""Unknown"": 15,
+    ""CloudRadium L.L.C"": 3,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Xhost Internet Solutions"": 9,
+    ""UAB Host Baltic"": 12,
+    ""DULIEUAZ"": 12,
+    ""Aliyun Computing Co., LTD"": 12,
+    ""SalamOnline"": 9,
+    ""Makut Investments"": 9,
+    ""ColocationX Ltd"": 9,
+    ""(ju)sion"": 3,
+    ""OVH GmbH"": 3,
+    ""Xhostis"": 6,
+    ""Dblock"": 3,
+    ""Censys, Inc."": 3,
+    ""Horizon LLC"": 6,
+    ""Chang Way Technologies Co. Limited"": 27,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Limenet LLC"": 3,
+    ""Azerta Group LLC"": 3,
+    ""Linode, LLC"": 12,
+    ""Linode"": 3
+  },
+  ""regionName"": {
+    ""New Jersey"": 63,
+    ""Kaunas"": 36,
+    ""Tirana"": 12,
+    ""California"": 42,
+    ""North Holland"": 30,
+    ""Vilnius"": 12,
+    ""Ho Chi Minh"": 12,
+    ""Beijing"": 12,
+    ""Dhaka Division"": 9,
+    ""Virginia"": 9,
+    ""Gyeonggi-do"": 3,
+    ""Hesse"": 3,
+    ""Parana"": 3,
+    ""Michigan"": 3,
+    ""Moscow"": 33,
+    ""Addis Ababa"": 3,
+    ""Bangkok"": 3,
+    ""Georgia"": 12,
+    ""Lesser Poland"": 3
+  },
+  ""country"": {
+    ""United States"": 129,
+    ""Lithuania"": 48,
+    ""Albania"": 12,
+    ""The Netherlands"": 30,
+    ""Vietnam"": 12,
+    ""China"": 12,
+    ""Bangladesh"": 9,
+    ""South Korea"": 3,
+    ""Germany"": 3,
+    ""Brazil"": 3,
+    ""Russia"": 33,
+    ""Ethiopia"": 3,
+    ""Thailand"": 3,
+    ""Poland"": 3
+  },
+  ""account"": {
+    ""142.93.8.59"": 108,
+    ""uXQSJWmac"": 3,
+    ""gwwUPi"": 3,
+    ""rFAyTc"": 3,
+    ""Administr"": 51,
+    ""Test"": 24,
+    ""hello"": 36,
+    ""Domain"": 24,
+    ""(empty)"": 6,
+    ""JSGYAoaVe"": 3,
+    ""gMpsNj"": 3,
+    ""CQCsYQ"": 3,
+    ""Administrator"": 3,
+    ""HgCEluvgQ"": 3,
+    ""pkSWxA"": 3,
+    ""tfvrOJ"": 3,
+    ""in2sr42z"": 12,
+    ""beio"": 3,
+    ""ykNPiQIOV"": 3,
+    ""UBqpiA"": 3,
+    ""lRMzuN"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 303
+  },
+  ""client_build"": {
+    ""Unknown"": 303
+  },
+  ""client_name"": {
+    ""Unknown"": 303
+  },
+  ""ip_type"": {
+    ""Unknown"": 186,
+    ""mobile"": 21,
+    ""hosting"": 72,
+    ""proxy"": 24
+  }
+}"
+3JjdKh2t,2023-12-30_stats.json,rdp_snitch,JSON,Saturday 30th of December 2023 06:16:04 PM CDT,"{
+  ""ip"": {
+    ""74.105.22.130"": 42,
+    ""194.165.17.21"": 20,
+    ""109.69.7.157"": 8,
+    ""23.225.14.53"": 2,
+    ""205.210.31.55"": 6,
+    ""87.251.75.145"": 6,
+    ""45.227.254.26"": 8,
+    ""103.195.236.182"": 8,
+    ""123.56.20.194"": 8,
+    ""103.159.186.22"": 6,
+    ""185.196.220.41"": 6,
+    ""193.142.146.227"": 6,
+    ""59.18.161.39"": 2,
+    ""135.125.216.200"": 2,
+    ""185.170.144.3"": 4,
+    ""205.210.31.219"": 6,
+    ""45.181.30.20"": 2,
+    ""167.248.133.36"": 2,
+    ""147.78.47.159"": 2,
+    ""62.204.41.208"": 4,
+    ""196.190.117.7"": 2,
+    ""185.198.69.19"": 2,
+    ""185.198.69.11"": 2,
+    ""185.198.69.29"": 2,
+    ""185.198.69.28"": 2,
+    ""185.198.69.15"": 2,
+    ""185.198.69.2"": 2,
+    ""185.198.69.9"": 2,
+    ""185.198.69.17"": 2,
+    ""165.154.120.30"": 2,
+    ""198.235.24.60"": 6,
+    ""91.92.254.50"": 2,
+    ""185.17.0.139"": 2,
+    ""194.195.213.7"": 8,
+    ""50.116.0.123"": 2,
+    ""2.57.149.92"": 2,
+    ""205.210.31.76"": 6,
+    ""194.165.16.37"": 4
+  },
+  ""asn"": {
+    ""AS701"": 42,
+    ""AS48721"": 24,
+    ""AS21183"": 8,
+    ""AS40065"": 2,
+    ""AS396982"": 24,
+    ""AS208091"": 6,
+    ""AS267784"": 8,
+    ""AS140827"": 8,
+    ""AS37963"": 8,
+    ""AS141462"": 6,
+    ""AS208046"": 12,
+    ""AS4766"": 2,
+    ""AS16276"": 2,
+    ""AS197414"": 4,
+    ""AS269160"": 2,
+    ""AS398324"": 2,
+    ""AS209588"": 2,
+    ""AS59425"": 4,
+    ""AS24757"": 2,
+    ""AS57523"": 16,
+    ""AS135377"": 2,
+    ""AS394711"": 2,
+    ""AS210644"": 2,
+    ""AS63949"": 10,
+    ""AS208312"": 2
+  },
+  ""isp"": {
+    ""Verizon Business"": 42,
+    ""Flyservers S.A."": 34,
+    ""Vodafone Network"": 8,
+    ""Cnservers LLC"": 2,
+    ""Google LLC"": 24,
+    ""Xhost Internet Solutions LP"": 10,
+    ""AZ Viet NAM Communications Technology Company Limited"": 8,
+    ""Hangzhou Alibaba Advertising Co"": 8,
+    ""Salam Online"": 6,
+    ""ColocationX Ltd."": 12,
+    ""Korea Telecom"": 2,
+    ""OVH SAS"": 2,
+    ""FibraTec Telecom"": 2,
+    ""Censys, Inc."": 2,
+    ""Horizon LLC"": 4,
+    ""Ethiotelecom"": 2,
+    ""Chang Way Technologies Co. Limited"": 16,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Limenet"": 2,
+    ""Azerta GROUP Ltd"": 2,
+    ""Akamai Technologies, Inc."": 10,
+    ""Red Byte LLC"": 2
+  },
+  ""org"": {
+    ""Verizon Business"": 42,
+    ""Flyservers S.A"": 26,
+    ""Unknown"": 10,
+    ""CloudRadium L.L.C"": 2,
+    ""Palo Alto Networks, Inc"": 24,
+    ""Xhost Internet Solutions"": 6,
+    ""UAB Host Baltic"": 8,
+    ""DULIEUAZ"": 8,
+    ""Aliyun Computing Co., LTD"": 8,
+    ""SalamOnline"": 6,
+    ""Makut Investments"": 6,
+    ""ColocationX Ltd"": 6,
+    ""(ju)sion"": 2,
+    ""OVH GmbH"": 2,
+    ""Xhostis"": 4,
+    ""Dblock"": 2,
+    ""Censys, Inc."": 2,
+    ""Horizon LLC"": 4,
+    ""Chang Way Technologies Co. Limited"": 18,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Limenet LLC"": 2,
+    ""Azerta Group LLC"": 2,
+    ""Linode, LLC"": 8,
+    ""Linode"": 2
+  },
+  ""regionName"": {
+    ""New Jersey"": 42,
+    ""Kaunas"": 24,
+    ""Tirana"": 8,
+    ""California"": 28,
+    ""North Holland"": 20,
+    ""Vilnius"": 8,
+    ""Ho Chi Minh"": 8,
+    ""Beijing"": 8,
+    ""Dhaka Division"": 6,
+    ""Virginia"": 6,
+    ""Gyeonggi-do"": 2,
+    ""Hesse"": 2,
+    ""Parana"": 2,
+    ""Michigan"": 2,
+    ""Moscow"": 22,
+    ""Addis Ababa"": 2,
+    ""Bangkok"": 2,
+    ""Georgia"": 8,
+    ""Lesser Poland"": 2
+  },
+  ""country"": {
+    ""United States"": 86,
+    ""Lithuania"": 32,
+    ""Albania"": 8,
+    ""The Netherlands"": 20,
+    ""Vietnam"": 8,
+    ""China"": 8,
+    ""Bangladesh"": 6,
+    ""South Korea"": 2,
+    ""Germany"": 2,
+    ""Brazil"": 2,
+    ""Russia"": 22,
+    ""Ethiopia"": 2,
+    ""Thailand"": 2,
+    ""Poland"": 2
+  },
+  ""account"": {
+    ""142.93.8.59"": 72,
+    ""uXQSJWmac"": 2,
+    ""gwwUPi"": 2,
+    ""rFAyTc"": 2,
+    ""Administr"": 34,
+    ""Test"": 16,
+    ""hello"": 24,
+    ""Domain"": 16,
+    ""(empty)"": 4,
+    ""JSGYAoaVe"": 2,
+    ""gMpsNj"": 2,
+    ""CQCsYQ"": 2,
+    ""Administrator"": 2,
+    ""HgCEluvgQ"": 2,
+    ""pkSWxA"": 2,
+    ""tfvrOJ"": 2,
+    ""in2sr42z"": 8,
+    ""beio"": 2,
+    ""ykNPiQIOV"": 2,
+    ""UBqpiA"": 2,
+    ""lRMzuN"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 202
+  },
+  ""client_build"": {
+    ""Unknown"": 202
+  },
+  ""client_name"": {
+    ""Unknown"": 202
+  },
+  ""ip_type"": {
+    ""Unknown"": 124,
+    ""mobile"": 14,
+    ""hosting"": 48,
+    ""proxy"": 16
+  }
+}"
+FmB6aptC,2023-12-30_stats.json,rdp_snitch,JSON,Saturday 30th of December 2023 06:15:08 PM CDT,"{
+  ""ip"": {
+    ""74.105.22.130"": 21,
+    ""194.165.17.21"": 10,
+    ""109.69.7.157"": 4,
+    ""23.225.14.53"": 1,
+    ""205.210.31.55"": 3,
+    ""87.251.75.145"": 3,
+    ""45.227.254.26"": 4,
+    ""103.195.236.182"": 4,
+    ""123.56.20.194"": 4,
+    ""103.159.186.22"": 3,
+    ""185.196.220.41"": 3,
+    ""193.142.146.227"": 3,
+    ""59.18.161.39"": 1,
+    ""135.125.216.200"": 1,
+    ""185.170.144.3"": 2,
+    ""205.210.31.219"": 3,
+    ""45.181.30.20"": 1,
+    ""167.248.133.36"": 1,
+    ""147.78.47.159"": 1,
+    ""62.204.41.208"": 2,
+    ""196.190.117.7"": 1,
+    ""185.198.69.19"": 1,
+    ""185.198.69.11"": 1,
+    ""185.198.69.29"": 1,
+    ""185.198.69.28"": 1,
+    ""185.198.69.15"": 1,
+    ""185.198.69.2"": 1,
+    ""185.198.69.9"": 1,
+    ""185.198.69.17"": 1,
+    ""165.154.120.30"": 1,
+    ""198.235.24.60"": 3,
+    ""91.92.254.50"": 1,
+    ""185.17.0.139"": 1,
+    ""194.195.213.7"": 4,
+    ""50.116.0.123"": 1,
+    ""2.57.149.92"": 1,
+    ""205.210.31.76"": 3,
+    ""194.165.16.37"": 2
+  },
+  ""asn"": {
+    ""AS701"": 21,
+    ""AS48721"": 12,
+    ""AS21183"": 4,
+    ""AS40065"": 1,
+    ""AS396982"": 12,
+    ""AS208091"": 3,
+    ""AS267784"": 4,
+    ""AS140827"": 4,
+    ""AS37963"": 4,
+    ""AS141462"": 3,
+    ""AS208046"": 6,
+    ""AS4766"": 1,
+    ""AS16276"": 1,
+    ""AS197414"": 2,
+    ""AS269160"": 1,
+    ""AS398324"": 1,
+    ""AS209588"": 1,
+    ""AS59425"": 2,
+    ""AS24757"": 1,
+    ""AS57523"": 8,
+    ""AS135377"": 1,
+    ""AS394711"": 1,
+    ""AS210644"": 1,
+    ""AS63949"": 5,
+    ""AS208312"": 1
+  },
+  ""isp"": {
+    ""Verizon Business"": 21,
+    ""Flyservers S.A."": 17,
+    ""Vodafone Network"": 4,
+    ""Cnservers LLC"": 1,
+    ""Google LLC"": 12,
+    ""Xhost Internet Solutions LP"": 5,
+    ""AZ Viet NAM Communications Technology Company Limited"": 4,
+    ""Hangzhou Alibaba Advertising Co"": 4,
+    ""Salam Online"": 3,
+    ""ColocationX Ltd."": 6,
+    ""Korea Telecom"": 1,
+    ""OVH SAS"": 1,
+    ""FibraTec Telecom"": 1,
+    ""Censys, Inc."": 1,
+    ""Horizon LLC"": 2,
+    ""Ethiotelecom"": 1,
+    ""Chang Way Technologies Co. Limited"": 8,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""Limenet"": 1,
+    ""Azerta GROUP Ltd"": 1,
+    ""Akamai Technologies, Inc."": 5,
+    ""Red Byte LLC"": 1
+  },
+  ""org"": {
+    ""Verizon Business"": 21,
+    ""Flyservers S.A"": 13,
+    ""Unknown"": 5,
+    ""CloudRadium L.L.C"": 1,
+    ""Palo Alto Networks, Inc"": 12,
+    ""Xhost Internet Solutions"": 3,
+    ""UAB Host Baltic"": 4,
+    ""DULIEUAZ"": 4,
+    ""Aliyun Computing Co., LTD"": 4,
+    ""SalamOnline"": 3,
+    ""Makut Investments"": 3,
+    ""ColocationX Ltd"": 3,
+    ""(ju)sion"": 1,
+    ""OVH GmbH"": 1,
+    ""Xhostis"": 2,
+    ""Dblock"": 1,
+    ""Censys, Inc."": 1,
+    ""Horizon LLC"": 2,
+    ""Chang Way Technologies Co. Limited"": 9,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""Limenet LLC"": 1,
+    ""Azerta Group LLC"": 1,
+    ""Linode, LLC"": 4,
+    ""Linode"": 1
+  },
+  ""regionName"": {
+    ""New Jersey"": 21,
+    ""Kaunas"": 12,
+    ""Tirana"": 4,
+    ""California"": 14,
+    ""North Holland"": 10,
+    ""Vilnius"": 4,
+    ""Ho Chi Minh"": 4,
+    ""Beijing"": 4,
+    ""Dhaka Division"": 3,
+    ""Virginia"": 3,
+    ""Gyeonggi-do"": 1,
+    ""Hesse"": 1,
+    ""Parana"": 1,
+    ""Michigan"": 1,
+    ""Moscow"": 11,
+    ""Addis Ababa"": 1,
+    ""Bangkok"": 1,
+    ""Georgia"": 4,
+    ""Lesser Poland"": 1
+  },
+  ""country"": {
+    ""United States"": 43,
+    ""Lithuania"": 16,
+    ""Albania"": 4,
+    ""The Netherlands"": 10,
+    ""Vietnam"": 4,
+    ""China"": 4,
+    ""Bangladesh"": 3,
+    ""South Korea"": 1,
+    ""Germany"": 1,
+    ""Brazil"": 1,
+    ""Russia"": 11,
+    ""Ethiopia"": 1,
+    ""Thailand"": 1,
+    ""Poland"": 1
+  },
+  ""account"": {
+    ""142.93.8.59"": 36,
+    ""uXQSJWmac"": 1,
+    ""gwwUPi"": 1,
+    ""rFAyTc"": 1,
+    ""Administr"": 17,
+    ""Test"": 8,
+    ""hello"": 12,
+    ""Domain"": 8,
+    ""(empty)"": 2,
+    ""JSGYAoaVe"": 1,
+    ""gMpsNj"": 1,
+    ""CQCsYQ"": 1,
+    ""Administrator"": 1,
+    ""HgCEluvgQ"": 1,
+    ""pkSWxA"": 1,
+    ""tfvrOJ"": 1,
+    ""in2sr42z"": 4,
+    ""beio"": 1,
+    ""ykNPiQIOV"": 1,
+    ""UBqpiA"": 1,
+    ""lRMzuN"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 101
+  },
+  ""client_build"": {
+    ""Unknown"": 101
+  },
+  ""client_name"": {
+    ""Unknown"": 101
+  },
+  ""ip_type"": {
+    ""Unknown"": 62,
+    ""mobile"": 7,
+    ""hosting"": 24,
+    ""proxy"": 8
+  }
+}"
+aukyBYFi,Tkinter grab..,Rnery,Python,Saturday 30th of December 2023 05:45:03 PM CDT,"#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import tkinter as tk
+from PIL import ImageGrab
+
+class RegionSelector:
+    def __init__(self, root):
+        self.root = root
+        self.root.title(""Region Selector"")
+        self.canvas = tk.Canvas(root, cursor=""cross"")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.select_region_button = tk.Button(root, text=""Select Region"", command=self.start_selection)
+        self.select_region_button.pack(pady=10)
+        self.selecting_region = False
+        self.start_x = None
+        self.start_y = None
+
+    def start_selection(self):
+        self.selecting_region = True
+        self.root.iconify()
+        self.root.update()
+        self.canvas.bind(""<ButtonPress-1>"", self.start_drawing)
+        self.canvas.bind(""<B1-Motion>"", self.draw_marker)
+        self.canvas.bind(""<ButtonRelease-1>"", self.finish_selection)
+
+    def start_drawing(self, event):
+        self.start_x = self.canvas.canvasx(event.x)
+        self.start_y = self.canvas.canvasy(event.y)
+
+    def draw_marker(self, event):
+        if not self.selecting_region:
+            return
+        current_x = self.canvas.canvasx(event.x)
+        current_y = self.canvas.canvasy(event.y)
+        self.canvas.delete(""marker"")
+        self.canvas.create_rectangle(self.start_x, self.start_y, current_x, current_y, outline=""red"", tags=""marker"")
+
+    def finish_selection(self, event):
+        if not self.selecting_region:
+            return
+        self.selecting_region = False
+        x, y, w, h = self.get_coordinates()
+        print(f""Selected region: x={x}, y={y}, width={w}, height={h}"")
+        self.root.deiconify()
+        screenshot = ImageGrab.grab(bbox=(x, y, x + w, y + h))
+        screenshot.save(""capture.png"")
+        self.canvas.unbind(""<ButtonPress-1>"")
+        self.canvas.unbind(""<B1-Motion>"")
+        self.canvas.unbind(""<ButtonRelease-1>"")
+        self.canvas.delete(""marker"")
+
+    def get_coordinates(self):
+        bbox = self.canvas.bbox(""marker"")
+        if bbox:
+            x1, y1, x2, y2 = bbox
+            return x1, y1, x2 - x1, y2 - y1
+        else:
+            return 0, 0, 0, 0
+
+if __name__ == ""__main__"":
+    root = tk.Tk()
+    root.geometry(""400x300"")
+    app = RegionSelector(root)
+    root.mainloop()
+"
+qcYwwywm,# rgb_at_sum.py,here2share,Python,Saturday 30th of December 2023 05:31:35 PM CDT,"# rgb_at_sum.py
+
+combos = []
+def rgb_at_sum(target_sum):
+	min_g = target_sum - 256
+	for r in range(256):
+		for g in range(min_g, target_sum - r + 1):
+			b = target_sum - r - g
+			rgb = r, g, b
+			print(rgb, sum(rgb), [target_sum])
+			combos.append(rgb)
+
+target_sum = 128 * 3 # or any other desired target sum
+rgb_at_sum(target_sum)
+print(len(combos))"
+psbnCgQX,Blender Export All Selected To Blender Save File,krlyx2,Python,Saturday 30th of December 2023 05:08:50 PM CDT,"# exports each selected object into its own file
+
+import bpy
+import os
+
+# export to blend file location
+basedir = os.path.dirname(bpy.data.filepath)
+
+if not basedir:
+    raise Exception(""Blend file is not saved"")
+
+view_layer = bpy.context.view_layer
+
+obj_active = view_layer.objects.active
+selection = bpy.context.selected_objects
+
+bpy.ops.object.select_all(action='DESELECT')
+
+for obj in selection:
+
+    obj.select_set(True)
+
+    # some exporters only use the active object
+    view_layer.objects.active = obj
+
+    name = bpy.path.clean_name(obj.name)
+    fn = os.path.join(basedir, name)
+
+    bpy.ops.export_scene.obj(filepath=fn + "".obj"", use_selection=True)
+
+    # Can be used for multiple formats
+    # bpy.ops.export_scene.x3d(filepath=fn + "".x3d"", use_selection=True)
+
+    obj.select_set(False)
+
+    print(""written:"", fn)
+
+
+view_layer.objects.active = obj_active
+
+for obj in selection:
+    obj.select_set(True)"
+8vvSgRjz,just a script,Pvhak,Java,Saturday 30th of December 2023 04:46:56 PM CDT,"$.ajax({
+  method: ""POST"",
+  url: ""https://avatar.roblox.com/v1/avatar/thumbnail-customization"",
+  contentType: ""application/json"",
+  data: JSON.stringify({
+    ""camera"": {
+        ""distanceScale"": 2, // 0.5 to 4 - distance from camera to character
+        ""fieldOfViewDeg"": 30, // 15 to 45 - fov
+        ""yRotDeg"": 0 // -60 to 60 - Y rotation
+    },
+    ""emoteAssetId"": 0,
+    ""thumbnailType"": 1
+  //   1 = Closeup  (headshot)
+  //   2 = FullBody (bodyshot)
+  })
+}).then(data => console.log(data)).fail(error => alert(error.responseJSON.errors[0].message));"
+i30daPxf,Untitled,sissou123,Python,Saturday 30th of December 2023 04:41:50 PM CDT,"TheCompleteNeuralNetworksBootcampTheoryApplications
+Overview
+Deep Learning and Neural Networks Theory and Applications with PyTorch! Including Transformers, BERT and GPT!
+
+What you'll learn:
+Understand How Neural Networks Work (Theory and Applications)
+Understand How Convolutional Networks Work (Theory and Applications)
+Understand How Recurrent Networks and LSTMs work (Theory and Applications)
+Learn how to use PyTorch in depth
+for more:https://cuty.io/9WDLsurddM"
+XeGpLj1c,Makefile template,leonkasovan,C,Saturday 30th of December 2023 04:08:23 PM CDT,"CC = gcc
+CFLAGS = -Wall -Wextra -g
+
+SRCS = src/file1.c src/file2.c
+OBJS = $(SRCS:.c=.o)
+
+TARGET = myprogram
+
+$(TARGET): $(OBJS)
+    $(CC) $(CFLAGS) -o $@ $^
+
+%.o: %.c
+    $(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+    rm -f $(OBJS) $(TARGET)
+"
+GgQmphaF,Untitled,sissou123,Python,Saturday 30th of December 2023 04:02:22 PM CDT,"The Complete Python Bootcamp From Zero to Hero in Python
+Learn Python like a Professional Start from the basics and go all the way to creating your own applications and games
+for more:https://dz-linkk.com/ZCUH4"
+wHnR0RnC,Untitled,sissou123,PHP,Saturday 30th of December 2023 04:00:23 PM CDT,"PHP for Beginners
+Build a Content Management System from Scratch with PHP and MySQL 
+for more:https://cuty.io/wQU2
+"
+JGb2qQnq,Untitled,sissou123,Python,Saturday 30th of December 2023 03:48:22 PM CDT,"MachineLearningAZAIPythonRChatGPTPrize2023
+
+Best Machine Learning course - Machine Learning A-Z™: AI, Python & R + ChatGPT Bonus [2023]-42 Hours -Complete course- Low Priced Course
+for more:https://cuty.io/etewFZfrBO5B"
+kKaLFnK2,Nigerian scammers [30-12/2023],bombaires,AIMMS,Saturday 30th of December 2023 03:42:59 PM CDT,"<a href=""mailto:laimohammedng_nig@outlook.com"">laimohammedng_nig@outlook.com</a>
+<a href=""mailto:aminuharunaa1@gmail.com"">aminuharunaa1@gmail.com</a>
+<a href=""mailto:a.m.i.n.uha.r.u.na.a1@gmail.com"">a.m.i.n.uha.r.u.na.a1@gmail.com</a>
+<a href=""mailto:amin.u.h.ar.un.aa.1@gmail.com"">amin.u.h.ar.un.aa.1@gmail.com</a>
+<a href=""mailto:am.inu.haru.n.a.a.1@gmail.com"">am.inu.haru.n.a.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.har.una.a1@gmail.com"">ami.nu.har.una.a1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.har.u.n.aa1@gmail.com"">a.m.i.n.u.har.u.n.aa1@gmail.com</a>
+<a href=""mailto:am.i.n.u.h.a.r.una.a.1@gmail.com"">am.i.n.u.h.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:a.min.u.h.a.r.un.aa.1@gmail.com"">a.min.u.h.a.r.un.aa.1@gmail.com</a>
+<a href=""mailto:a.m.in.uh.a.r.u.n.a.a.1@gmail.com"">a.m.in.uh.a.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:a.minuh.a.runaa.1@gmail.com"">a.minuh.a.runaa.1@gmail.com</a>
+<a href=""mailto:am.in.uh.aruna.a.1@gmail.com"">am.in.uh.aruna.a.1@gmail.com</a>
+<a href=""mailto:aminuh.a.run.aa.1@gmail.com"">aminuh.a.run.aa.1@gmail.com</a>
+<a href=""mailto:amin.u.h.a.r.u.n.aa1@gmail.com"">amin.u.h.a.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:a.m.i.n.uha.r.u.n.a.a.1@gmail.com"">a.m.i.n.uha.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:a.mi.nu.ha.r.u.naa.1@gmail.com"">a.mi.nu.ha.r.u.naa.1@gmail.com</a>
+<a href=""mailto:ami.n.u.h.arunaa1@gmail.com"">ami.n.u.h.arunaa1@gmail.com</a>
+<a href=""mailto:a.min.u.ha.r.u.n.aa1@gmail.com"">a.min.u.ha.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:am.inu.h.ar.una.a.1@gmail.com"">am.inu.h.ar.una.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.h.ar.u.n.a.a.1@gmail.com"">ami.nu.h.ar.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.i.nuh.aru.n.aa1@gmail.com"">am.i.nuh.aru.n.aa1@gmail.com</a>
+<a href=""mailto:ami.nuha.r.u.n.aa1@gmail.com"">ami.nuha.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:a.min.uh.a.ru.naa.1@gmail.com"">a.min.uh.a.ru.naa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.u.ha.r.u.naa.1@gmail.com"">a.mi.n.u.ha.r.u.naa.1@gmail.com</a>
+<a href=""mailto:am.i.nu.h.a.r.u.n.aa1@gmail.com"">am.i.nu.h.a.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:ami.n.u.harunaa1@gmail.com"">ami.n.u.harunaa1@gmail.com</a>
+<a href=""mailto:a.minuhar.un.aa.1@gmail.com"">a.minuhar.un.aa.1@gmail.com</a>
+<a href=""mailto:a.m.in.u.ha.ru.na.a.1@gmail.com"">a.m.in.u.ha.ru.na.a.1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.ha.ru.n.a.a.1@gmail.com"">a.m.i.nu.ha.ru.n.a.a.1@gmail.com</a>
+<a href=""mailto:a.minu.haruna.a.1@gmail.com"">a.minu.haruna.a.1@gmail.com</a>
+<a href=""mailto:a.m.inuha.runa.a1@gmail.com"">a.m.inuha.runa.a1@gmail.com</a>
+<a href=""mailto:am.i.n.u.ha.ru.n.aa1@gmail.com"">am.i.n.u.ha.ru.n.aa1@gmail.com</a>
+<a href=""mailto:a.m.in.uh.aru.n.aa1@gmail.com"">a.m.in.uh.aru.n.aa1@gmail.com</a>
+<a href=""mailto:a.m.inu.ha.r.unaa1@gmail.com"">a.m.inu.ha.r.unaa1@gmail.com</a>
+<a href=""mailto:a.minuha.run.a.a1@gmail.com"">a.minuha.run.a.a1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.har.u.naa.1@gmail.com"">a.m.i.n.u.har.u.naa.1@gmail.com</a>
+<a href=""mailto:a.mi.nu.h.a.run.a.a1@gmail.com"">a.mi.nu.h.a.run.a.a1@gmail.com</a>
+<a href=""mailto:a.minuh.ar.u.naa1@gmail.com"">a.minuh.ar.u.naa1@gmail.com</a>
+<a href=""mailto:a.minuh.a.r.un.aa1@gmail.com"">a.minuh.a.r.un.aa1@gmail.com</a>
+<a href=""mailto:am.inu.har.un.aa1@gmail.com"">am.inu.har.un.aa1@gmail.com</a>
+<a href=""mailto:amin.u.h.ar.u.na.a.1@gmail.com"">amin.u.h.ar.u.na.a.1@gmail.com</a>
+<a href=""mailto:a.m.inu.ha.r.u.naa.1@gmail.com"">a.m.inu.ha.r.u.naa.1@gmail.com</a>
+<a href=""mailto:ami.n.u.ha.r.un.a.a1@gmail.com"">ami.n.u.ha.r.un.a.a1@gmail.com</a>
+<a href=""mailto:a.m.inuhar.un.a.a.1@gmail.com"">a.m.inuhar.un.a.a.1@gmail.com</a>
+<a href=""mailto:amin.uha.run.aa.1@gmail.com"">amin.uha.run.aa.1@gmail.com</a>
+<a href=""mailto:am.in.uha.r.una.a.1@gmail.com"">am.in.uha.r.una.a.1@gmail.com</a>
+<a href=""mailto:am.i.nuharun.a.a.1@gmail.com"">am.i.nuharun.a.a.1@gmail.com</a>
+<a href=""mailto:aminuha.ru.naa.1@gmail.com"">aminuha.ru.naa.1@gmail.com</a>
+<a href=""mailto:am.i.nuh.ar.u.n.a.a1@gmail.com"">am.i.nuh.ar.u.n.a.a1@gmail.com</a>
+<a href=""mailto:ami.nuh.a.r.una.a.1@gmail.com"">ami.nuh.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.uhar.u.na.a.1@gmail.com"">am.i.n.uhar.u.na.a.1@gmail.com</a>
+<a href=""mailto:ami.nuh.a.run.aa1@gmail.com"">ami.nuh.a.run.aa1@gmail.com</a>
+<a href=""mailto:am.inuhar.un.aa.1@gmail.com"">am.inuhar.un.aa.1@gmail.com</a>
+<a href=""mailto:aminu.h.a.r.u.na.a.1@gmail.com"">aminu.h.a.r.u.na.a.1@gmail.com</a>
+<a href=""mailto:amin.u.h.a.ru.n.aa.1@gmail.com"">amin.u.h.a.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:am.i.n.uh.a.ru.n.a.a1@gmail.com"">am.i.n.uh.a.ru.n.a.a1@gmail.com</a>
+<a href=""mailto:a.mi.n.uh.a.r.un.a.a1@gmail.com"">a.mi.n.uh.a.r.un.a.a1@gmail.com</a>
+<a href=""mailto:ami.nu.h.a.r.u.n.aa1@gmail.com"">ami.nu.h.a.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:ami.n.uh.ar.un.aa.1@gmail.com"">ami.n.uh.ar.un.aa.1@gmail.com</a>
+<a href=""mailto:am.i.n.u.har.una.a.1@gmail.com"">am.i.n.u.har.una.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.har.u.naa1@gmail.com"">ami.nu.har.u.naa1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.h.arun.aa.1@gmail.com"">a.m.i.nu.h.arun.aa.1@gmail.com</a>
+<a href=""mailto:ami.n.u.h.a.runa.a.1@gmail.com"">ami.n.u.h.a.runa.a.1@gmail.com</a>
+<a href=""mailto:ami.n.uh.ar.una.a.1@gmail.com"">ami.n.uh.ar.una.a.1@gmail.com</a>
+<a href=""mailto:am.in.uh.aru.n.aa.1@gmail.com"">am.in.uh.aru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.nuh.a.runaa.1@gmail.com"">a.mi.nuh.a.runaa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.u.har.un.aa.1@gmail.com"">a.mi.n.u.har.un.aa.1@gmail.com</a>
+<a href=""mailto:amin.uh.aruna.a1@gmail.com"">amin.uh.aruna.a1@gmail.com</a>
+<a href=""mailto:a.m.inuh.a.ru.n.a.a.1@gmail.com"">a.m.inuh.a.ru.n.a.a.1@gmail.com</a>
+<a href=""mailto:a.min.uharu.n.a.a.1@gmail.com"">a.min.uharu.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.inuha.r.u.n.a.a1@gmail.com"">am.inuha.r.u.n.a.a1@gmail.com</a>
+<a href=""mailto:am.i.nuhar.un.aa1@gmail.com"">am.i.nuhar.un.aa1@gmail.com</a>
+<a href=""mailto:ami.nu.ha.run.a.a1@gmail.com"">ami.nu.ha.run.a.a1@gmail.com</a>
+<a href=""mailto:ami.n.u.ha.ru.n.aa.1@gmail.com"">ami.n.u.ha.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:ami.n.uha.run.aa1@gmail.com"">ami.n.uha.run.aa1@gmail.com</a>
+<a href=""mailto:aminuh.aru.n.aa.1@gmail.com"">aminuh.aru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.uh.a.ru.naa.1@gmail.com"">a.mi.n.uh.a.ru.naa.1@gmail.com</a>
+<a href=""mailto:a.m.i.nuh.arunaa1@gmail.com"">a.m.i.nuh.arunaa1@gmail.com</a>
+<a href=""mailto:am.inu.ha.ru.n.aa1@gmail.com"">am.inu.ha.ru.n.aa1@gmail.com</a>
+<a href=""mailto:a.min.uha.runa.a1@gmail.com"">a.min.uha.runa.a1@gmail.com</a>
+<a href=""mailto:a.m.in.uha.r.u.naa.1@gmail.com"">a.m.in.uha.r.u.naa.1@gmail.com</a>
+<a href=""mailto:aminu.ha.runa.a.1@gmail.com"">aminu.ha.runa.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.h.arunaa.1@gmail.com"">ami.nu.h.arunaa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.uharun.aa.1@gmail.com"">a.mi.n.uharun.aa.1@gmail.com</a>
+<a href=""mailto:a.minu.h.a.run.a.a1@gmail.com"">a.minu.h.a.run.a.a1@gmail.com</a>
+<a href=""mailto:a.mi.n.uha.ru.n.a.a1@gmail.com"">a.mi.n.uha.ru.n.a.a1@gmail.com</a>
+<a href=""mailto:a.min.uh.aruna.a.1@gmail.com"">a.min.uh.aruna.a.1@gmail.com</a>
+<a href=""mailto:a.m.in.uha.r.u.n.aa.1@gmail.com"">a.m.in.uha.r.u.n.aa.1@gmail.com</a>
+<a href=""mailto:a.min.u.har.u.n.aa.1@gmail.com"">a.min.u.har.u.n.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.nuhar.u.n.a.a1@gmail.com"">a.mi.nuhar.u.n.a.a1@gmail.com</a>
+<a href=""mailto:a.min.uha.r.u.n.a.a1@gmail.com"">a.min.uha.r.u.n.a.a1@gmail.com</a>
+<a href=""mailto:am.i.n.uh.arunaa.1@gmail.com"">am.i.n.uh.arunaa.1@gmail.com</a>
+<a href=""mailto:a.m.i.nuh.a.ru.n.aa.1@gmail.com"">a.m.i.nuh.a.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.m.inu.h.ar.u.na.a1@gmail.com"">a.m.inu.h.ar.u.na.a1@gmail.com</a>
+<a href=""mailto:ami.n.uh.a.ru.naa.1@gmail.com"">ami.n.uh.a.ru.naa.1@gmail.com</a>
+<a href=""mailto:am.in.u.h.arunaa.1@gmail.com"">am.in.u.h.arunaa.1@gmail.com</a>
+<a href=""mailto:a.minu.har.unaa.1@gmail.com"">a.minu.har.unaa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.u.h.aru.n.a.a1@gmail.com"">a.mi.n.u.h.aru.n.a.a1@gmail.com</a>
+<a href=""mailto:a.m.in.u.h.a.ru.na.a.1@gmail.com"">a.m.in.u.h.a.ru.na.a.1@gmail.com</a>
+<a href=""mailto:am.in.u.h.a.r.un.a.a1@gmail.com"">am.in.u.h.a.r.un.a.a1@gmail.com</a>
+<a href=""mailto:amin.u.ha.run.aa.1@gmail.com"">amin.u.ha.run.aa.1@gmail.com</a>
+<a href=""mailto:a.min.u.h.a.r.u.naa.1@gmail.com"">a.min.u.h.a.r.u.naa.1@gmail.com</a>
+<a href=""mailto:a.mi.nuh.ar.un.a.a.1@gmail.com"">a.mi.nuh.ar.un.a.a.1@gmail.com</a>
+<a href=""mailto:am.inu.h.a.r.una.a.1@gmail.com"">am.inu.h.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:aminuh.aru.na.a1@gmail.com"">aminuh.aru.na.a1@gmail.com</a>
+<a href=""mailto:a.minu.h.a.runaa1@gmail.com"">a.minu.h.a.runaa1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.h.a.r.un.a.a.1@gmail.com"">a.m.i.n.u.h.a.r.un.a.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.uharuna.a.1@gmail.com"">am.i.n.uharuna.a.1@gmail.com</a>
+<a href=""mailto:am.i.nuh.a.r.un.a.a1@gmail.com"">am.i.nuh.a.r.un.a.a1@gmail.com</a>
+<a href=""mailto:am.i.n.uha.r.u.na.a1@gmail.com"">am.i.n.uha.r.u.na.a1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.ha.r.u.naa1@gmail.com"">a.m.i.nu.ha.r.u.naa1@gmail.com</a>
+<a href=""mailto:a.minuh.a.r.un.aa.1@gmail.com"">a.minuh.a.r.un.aa.1@gmail.com</a>
+<a href=""mailto:am.i.nuhar.u.na.a1@gmail.com"">am.i.nuhar.u.na.a1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.harun.aa1@gmail.com"">a.m.i.n.u.harun.aa1@gmail.com</a>
+<a href=""mailto:aminu.ha.r.un.a.a.1@gmail.com"">aminu.ha.r.un.a.a.1@gmail.com</a>
+<a href=""mailto:am.inu.haru.naa1@gmail.com"">am.inu.haru.naa1@gmail.com</a>
+<a href=""mailto:a.m.in.uha.run.aa1@gmail.com"">a.m.in.uha.run.aa1@gmail.com</a>
+<a href=""mailto:a.m.i.nuh.a.runa.a1@gmail.com"">a.m.i.nuh.a.runa.a1@gmail.com</a>
+<a href=""mailto:a.mi.nu.h.a.r.u.naa.1@gmail.com"">a.mi.nu.h.a.r.u.naa.1@gmail.com</a>
+<a href=""mailto:ami.nuha.r.un.a.a.1@gmail.com"">ami.nuha.r.un.a.a.1@gmail.com</a>
+<a href=""mailto:a.minuh.a.r.una.a.1@gmail.com"">a.minuh.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:amin.uh.a.ru.n.a.a1@gmail.com"">amin.uh.a.ru.n.a.a1@gmail.com</a>
+<a href=""mailto:aminuh.ar.un.a.a.1@gmail.com"">aminuh.ar.un.a.a.1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.h.arunaa1@gmail.com"">a.m.i.n.u.h.arunaa1@gmail.com</a>
+<a href=""mailto:a.mi.nuh.a.runa.a.1@gmail.com"">a.mi.nuh.a.runa.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.uh.a.r.una.a.1@gmail.com"">am.i.n.uh.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.har.u.n.a.a1@gmail.com"">ami.nu.har.u.n.a.a1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.h.a.r.u.naa1@gmail.com"">a.m.i.n.u.h.a.r.u.naa1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.ha.ru.na.a1@gmail.com"">a.m.i.nu.ha.ru.na.a1@gmail.com</a>
+<a href=""mailto:a.m.in.uh.a.r.u.na.a1@gmail.com"">a.m.in.uh.a.r.u.na.a1@gmail.com</a>
+<a href=""mailto:a.m.in.uhar.una.a.1@gmail.com"">a.m.in.uhar.una.a.1@gmail.com</a>
+<a href=""mailto:a.minuh.a.ru.n.aa.1@gmail.com"">a.minuh.a.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:ami.n.uha.r.u.n.a.a.1@gmail.com"">ami.n.uha.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:ami.n.uharu.naa1@gmail.com"">ami.n.uharu.naa1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.ha.r.u.n.aa.1@gmail.com"">a.m.i.n.u.ha.r.u.n.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.uhar.un.a.a1@gmail.com"">a.mi.n.uhar.un.a.a1@gmail.com</a>
+<a href=""mailto:am.i.nu.h.arun.aa.1@gmail.com"">am.i.nu.h.arun.aa.1@gmail.com</a>
+<a href=""mailto:am.inuh.ar.u.naa.1@gmail.com"">am.inuh.ar.u.naa.1@gmail.com</a>
+<a href=""mailto:a.mi.nu.h.a.r.u.n.a.a.1@gmail.com"">a.mi.nu.h.a.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.inu.ha.r.un.a.a.1@gmail.com"">am.inu.ha.r.un.a.a.1@gmail.com</a>
+<a href=""mailto:a.mi.n.uh.a.ru.n.aa.1@gmail.com"">a.mi.n.uh.a.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.m.i.n.u.ha.r.u.n.a.a.1@gmail.com"">a.m.i.n.u.ha.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.in.u.ha.ru.n.aa.1@gmail.com"">am.in.u.ha.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.nuhar.un.a.a1@gmail.com"">a.mi.nuhar.un.a.a1@gmail.com</a>
+<a href=""mailto:a.min.u.haru.n.a.a.1@gmail.com"">a.min.u.haru.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.u.h.a.r.u.n.aa1@gmail.com"">am.i.n.u.h.a.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:ami.n.u.ha.runa.a.1@gmail.com"">ami.n.u.ha.runa.a.1@gmail.com</a>
+<a href=""mailto:ami.n.u.h.ar.u.n.aa.1@gmail.com"">ami.n.u.h.ar.u.n.aa.1@gmail.com</a>
+<a href=""mailto:a.minu.h.a.r.un.a.a1@gmail.com"">a.minu.h.a.r.un.a.a1@gmail.com</a>
+<a href=""mailto:am.i.nuharun.aa1@gmail.com"">am.i.nuharun.aa1@gmail.com</a>
+<a href=""mailto:a.m.i.n.uh.a.r.un.aa.1@gmail.com"">a.m.i.n.uh.a.r.un.aa.1@gmail.com</a>
+<a href=""mailto:a.mi.n.uh.a.ru.naa1@gmail.com"">a.mi.n.uh.a.ru.naa1@gmail.com</a>
+<a href=""mailto:a.m.inu.haruna.a.1@gmail.com"">a.m.inu.haruna.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.ha.ru.n.aa1@gmail.com"">ami.nu.ha.ru.n.aa1@gmail.com</a>
+<a href=""mailto:am.i.nuha.r.u.n.a.a.1@gmail.com"">am.i.nuha.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:ami.nuh.a.ru.n.aa.1@gmail.com"">ami.nuh.a.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.m.i.n.uh.arunaa.1@gmail.com"">a.m.i.n.uh.arunaa.1@gmail.com</a>
+<a href=""mailto:am.inuh.ar.u.n.a.a.1@gmail.com"">am.inuh.ar.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.uha.ru.n.a.a1@gmail.com"">am.i.n.uha.ru.n.a.a1@gmail.com</a>
+<a href=""mailto:a.mi.nuh.a.ru.naa.1@gmail.com"">a.mi.nuh.a.ru.naa.1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.har.u.na.a.1@gmail.com"">a.m.i.nu.har.u.na.a.1@gmail.com</a>
+<a href=""mailto:am.inuh.arunaa.1@gmail.com"">am.inuh.arunaa.1@gmail.com</a>
+<a href=""mailto:ami.n.uh.ar.un.aa1@gmail.com"">ami.n.uh.ar.un.aa1@gmail.com</a>
+<a href=""mailto:ami.n.uha.ru.na.a1@gmail.com"">ami.n.uha.ru.na.a1@gmail.com</a>
+<a href=""mailto:am.in.uharu.na.a.1@gmail.com"">am.in.uharu.na.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.u.h.a.ru.n.a.a1@gmail.com"">am.i.n.u.h.a.ru.n.a.a1@gmail.com</a>
+<a href=""mailto:am.inuh.ar.una.a1@gmail.com"">am.inuh.ar.una.a1@gmail.com</a>
+<a href=""mailto:a.m.i.nuh.a.r.una.a.1@gmail.com"">a.m.i.nuh.a.r.una.a.1@gmail.com</a>
+<a href=""mailto:a.min.uh.a.ru.n.a.a.1@gmail.com"">a.min.uh.a.ru.n.a.a.1@gmail.com</a>
+<a href=""mailto:am.inuharu.naa.1@gmail.com"">am.inuharu.naa.1@gmail.com</a>
+<a href=""mailto:a.m.in.uharun.a.a1@gmail.com"">a.m.in.uharun.a.a1@gmail.com</a>
+<a href=""mailto:a.m.i.n.uh.a.ru.n.a.a.1@gmail.com"">a.m.i.n.uh.a.ru.n.a.a.1@gmail.com</a>
+<a href=""mailto:ami.nu.h.a.r.u.na.a.1@gmail.com"">ami.nu.h.a.r.u.na.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.uha.r.u.naa.1@gmail.com"">am.i.n.uha.r.u.naa.1@gmail.com</a>
+<a href=""mailto:am.in.u.h.a.ru.naa.1@gmail.com"">am.in.u.h.a.ru.naa.1@gmail.com</a>
+<a href=""mailto:am.in.u.har.u.na.a1@gmail.com"">am.in.u.har.u.na.a1@gmail.com</a>
+<a href=""mailto:a.mi.n.u.ha.ru.na.a.1@gmail.com"">a.mi.n.u.ha.ru.na.a.1@gmail.com</a>
+<a href=""mailto:am.inu.haruna.a1@gmail.com"">am.inu.haruna.a1@gmail.com</a>
+<a href=""mailto:am.i.nu.ha.r.un.aa1@gmail.com"">am.i.nu.ha.r.un.aa1@gmail.com</a>
+<a href=""mailto:a.m.i.nuh.a.r.una.a1@gmail.com"">a.m.i.nuh.a.r.una.a1@gmail.com</a>
+<a href=""mailto:am.inu.h.a.runaa.1@gmail.com"">am.inu.h.a.runaa.1@gmail.com</a>
+<a href=""mailto:am.in.uh.ar.una.a.1@gmail.com"">am.in.uh.ar.una.a.1@gmail.com</a>
+<a href=""mailto:a.min.uharuna.a.1@gmail.com"">a.min.uharuna.a.1@gmail.com</a>
+<a href=""mailto:am.i.nuh.ar.u.naa.1@gmail.com"">am.i.nuh.ar.u.naa.1@gmail.com</a>
+<a href=""mailto:am.in.uh.arun.a.a.1@gmail.com"">am.in.uh.arun.a.a.1@gmail.com</a>
+<a href=""mailto:a.minu.haru.n.a.a1@gmail.com"">a.minu.haru.n.a.a1@gmail.com</a>
+<a href=""mailto:am.i.n.uh.a.r.u.n.aa1@gmail.com"">am.i.n.uh.a.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:am.in.u.har.u.n.aa1@gmail.com"">am.in.u.har.u.n.aa1@gmail.com</a>
+<a href=""mailto:ami.nuh.aruna.a.1@gmail.com"">ami.nuh.aruna.a.1@gmail.com</a>
+<a href=""mailto:am.i.n.u.ha.r.unaa.1@gmail.com"">am.i.n.u.ha.r.unaa.1@gmail.com</a>
+<a href=""mailto:a.min.u.h.a.ru.naa1@gmail.com"">a.min.u.h.a.ru.naa1@gmail.com</a>
+<a href=""mailto:am.i.nu.ha.r.u.n.aa1@gmail.com"">am.i.nu.ha.r.u.n.aa1@gmail.com</a>
+<a href=""mailto:am.in.uh.ar.un.a.a1@gmail.com"">am.in.uh.ar.un.a.a1@gmail.com</a>
+<a href=""mailto:am.i.n.uha.r.un.a.a.1@gmail.com"">am.i.n.uha.r.un.a.a.1@gmail.com</a>
+<a href=""mailto:a.m.in.u.har.unaa.1@gmail.com"">a.m.in.u.har.unaa.1@gmail.com</a>
+<a href=""mailto:a.m.inu.h.a.run.a.a.1@gmail.com"">a.m.inu.h.a.run.a.a.1@gmail.com</a>
+<a href=""mailto:a.mi.n.u.ha.r.un.aa1@gmail.com"">a.mi.n.u.ha.r.un.aa1@gmail.com</a>
+<a href=""mailto:amin.uha.r.u.n.a.a.1@gmail.com"">amin.uha.r.u.n.a.a.1@gmail.com</a>
+<a href=""mailto:a.m.i.nuha.ru.n.aa.1@gmail.com"">a.m.i.nuha.ru.n.aa.1@gmail.com</a>
+<a href=""mailto:a.m.i.nu.haru.n.a.a.1@gmail.com"">a.m.i.nu.haru.n.a.a.1@gmail.com</a>
+<a href=""mailto:ami.n.u.h.aru.na.a.1@gmail.com"">ami.n.u.h.aru.na.a.1@gmail.com</a>
+<a href=""mailto:a.m.in.u.ha.r.un.a.a.1@gmail.com"">a.m.in.u.ha.r.un.a.a.1@gmail.com</a>"
+NTuR6u7M,Redstone signal 1s,karelvysinka,Lua,Saturday 30th of December 2023 02:57:29 PM CDT,"while true do
+    -- Zapnutí redstone signálu
+    redstone.setOutput(""back"", true)
+    print(""Redstone signal set to ON"")
+    sleep(1)
+
+    -- Vypnutí redstone signálu
+    redstone.setOutput(""back"", false)
+    print(""Redstone signal set to OFF"")
+    sleep(1)
+end
+"
+vTuGwMes,GhostWebScan.py,xGHOSTSECx,Python,Saturday 30th of December 2023 02:49:13 PM CDT,"#!/data/data/com.termux/files/usr/bin/env python
+
+import argparse
+import asyncio
+import aiohttp
+import json
+import logging
+from urllib.parse import urlparse
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+
+logging.basicConfig(level=logging.INFO)
+
+async def fetch_subdomains_expert(session, domain, depth):
+    subdomains = set()
+
+    if depth == 0:
+        return subdomains
+
+    try:
+        response = await session.get(f'https://crt.sh/?q=%.{domain}&output=json', timeout=5)
+        data = await response.json()
+        new_subdomains = {entry['name_value'] for entry in data}
+        subdomains.update(new_subdomains)
+
+        tasks = []
+
+        for new_domain in new_subdomains:
+            tasks.append(asyncio.ensure_future(fetch_subdomains_expert(session, new_domain, depth - 1)))
+
+        await asyncio.gather(*tasks)
+
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logging.error(f""Error in fetch_subdomains_expert: {str(e)}"")
+
+    return subdomains
+
+async def fetch_subdomains_async(url, depth):
+    subdomains = set()
+
+    try:
+        base_domain = urlparse(url).netloc
+        async with aiohttp.ClientSession() as session:
+            subdomains = await fetch_subdomains_expert(session, base_domain, depth)
+
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logging.error(f""Error in fetch_subdomains_async: {str(e)}"")
+
+    return list(subdomains)
+
+async def gather_technology_info_expert(session, subdomain):
+    tech_info = {}
+    try:
+        response = await session.get(f'http://{subdomain}', timeout=5)
+        soup = BeautifulSoup(await response.text(), 'html.parser')
+
+        tech_info['title'] = soup.title.text if soup.title else None
+        tech_info['meta_tags'] = [meta['name'] for meta in soup.find_all('meta', {'name': True})]
+        tech_info['scripts'] = [script['src'] for script in soup.find_all('script', {'src': True})]
+
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logging.error(f""Error in gather_technology_info_expert: {str(e)}"")
+
+    return tech_info
+
+async def scan_website_expert(url, depth, output_format, output_file, concurrency, rate_limit, custom_headers, interactive_mode, command):
+    try:
+        base_domain = urlparse(url).netloc
+        async with aiohttp.ClientSession(headers=custom_headers) as session:
+            subdomains = await fetch_subdomains_expert(session, base_domain, depth)
+
+            tech_info_func = partial(gather_technology_info_expert, session)
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                tech_info_list = list(executor.map(tech_info_func, subdomains))
+
+            # Process command
+            if ""links"" in command:
+                links = set()
+                for subdomain in subdomains:
+                    try:
+                        response = await session.get(f'http://{subdomain}', timeout=5)
+                        soup = BeautifulSoup(await response.text(), 'html.parser')
+                        links.update({a['href'] for a in soup.find_all('a', href=True)})
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        continue
+                print(""\nLinks:"")
+                print(""\n"".join(links))
+
+            if ""status_codes"" in command:
+                status_codes = {}
+                for subdomain in subdomains:
+                    try:
+                        response = await session.get(f'http://{subdomain}', timeout=5)
+                        status_codes[subdomain] = response.status
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        status_codes[subdomain] = ""Error""
+                print(""\nHTTP Status Codes:"")
+                for subdomain, status in status_codes.items():
+                    print(f""{subdomain}: {status}"")
+
+            if ""keywords"" in command:
+                keywords = set([""security"", ""vulnerability""])  # Customize keywords as needed
+                print(""\nKeywords Found:"")
+                for subdomain in subdomains:
+                    try:
+                        response = await session.get(f'http://{subdomain}', timeout=5)
+                        soup = BeautifulSoup(await response.text(), 'html.parser')
+                        text = soup.get_text().lower()
+                        if any(keyword in text for keyword in keywords):
+                            print(f""{subdomain}: Keywords Found"")
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        continue
+
+            if output_file:
+                with open(output_file, 'w') as file:
+                    if output_format == 'json':
+                        json.dump({'subdomains': list(subdomains), 'technology_info': tech_info_list}, file, indent=2)
+                    # Add support for other output formats as needed
+
+    except Exception as e:
+        logging.error(f""Error in scan_website_expert: {str(e)}"")
+
+def print_gui():
+    print(""\033[93m=============================================================="")
+    print(""\033[1m                      GhostSec Web Scanner                      "")
+    print(""\033[93m==============================================================\033[0m"")
+    print(""\033[92mUsage: ./your_script_name.py example.com [options]\n"")
+    print(""\033[1mOptions:\033[0m"")
+    print(""  -h, --help            Show this help message and exit"")
+    print(""  --depth DEPTH         Depth of subdomain enumeration (default: 1)"")
+    print(""  --output-format {json} Output format (default: json)"")
+    print(""  --output-file OUTPUT_FILE Output file path"")
+    print(""  --concurrency CONCURRENCY Number of concurrent tasks (default: 5)"")
+    print(""  --rate-limit RATE_LIMIT Rate limit in requests per minute (default: 0)"")
+    print(""  --custom-headers CUSTOM_HEADERS Custom HTTP headers as a JSON object"")
+    print(""  --interactive-mode   Enable interactive mode"")
+    print(""\n\033[1mCommand Options:\033[0m"")
+    print(""  --command {links,status_codes,keywords} Execute specific commands"")
+    print(""\n\033[1mExamples:\033[0m"")
+    print(""  ./your_script_name.py example.com --depth 2 --output-format json --output-file results.json --command links,status_codes"")
+    print(""  ./your_script_name.py example.com --interactive-mode --command keywords"")
+    print(""\n\033[93m==============================================================\033[0m"")
+
+if __name__ == ""__main__"":
+    parser = argparse.ArgumentParser(
+        description='GhostSec Web Scanner - Scan a website for subdomains and technology information.',
+        epilog=""Example: ./your_script_name.py example.com --depth 2 --output-format json --output-file results.json --command links,status_codes""
+    )
+    parser.add_argument('url', help='Target website URL')
+    parser.add_argument('--depth', type=int, default=1, help='Depth of subdomain enumeration')
+    parser.add_argument('--output-format', choices=['json'], default='json', help='Output format')
+    parser.add_argument('--output-file', help='Output file path')
+    parser.add_argument('--concurrency', type=int, default=5, help='Number of concurrent tasks')
+    parser.add_argument('--rate-limit', type=int, default=0, help='Rate limit in requests per minute')
+    parser.add_argument('--custom-headers', type=json.loads, default={}, help='Custom HTTP headers as a JSON object')
+    parser.add_argument('--interactive-mode', action='store_true', help='Enable interactive mode')
+    parser.add_argument('--command', choices=['links', 'status_codes', 'keywords'], help='Execute specific commands')
+
+    args = parser.parse_args()
+
+    if args.url == ""--help"" or args.url == ""-h"":
+        print_gui()
+    else:
+        try:
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(scan_website_expert(
+                args.url, args.depth, args.output_format, args.output_file, args.concurrency, args.rate_limit,
+                args.custom_headers, args.interactive_mode, args.command
+            ))
+        except KeyboardInterrupt:
+            print(""\nScan aborted by user."")
+        except Exception as e:
+            print(f""An error occurred: {str(e)}"")"
+ZyBKUwn0,Untitled,localhostport80,Python,Saturday 30th of December 2023 02:47:40 PM CDT,"
+def set_visited_of_child_to_true(child_key, children_array):
+    """"""
+    Sets the visited key of a given child in a given list of dictionaries containing the children information
+    :param child_key: key of the child to be set
+    :param children_array: array of children information
+    :return: dictionary: new dictionary of children information with set key
+    """"""
+    children_array_backup = children_array
+
+    for element in children_array:
+        current_key_of_child = list(element.keys())[0]
+
+        if current_key_of_child == child_key:
+            object_to_be_updated = element[current_key_of_child]
+            new_object = (object_to_be_updated[0], object_to_be_updated[1], True)
+            children_array_backup[children_array_backup.index(element)] = {child_key: new_object}
+
+    return children_array_backup
+
+
+d = [
+ {'a': (0, 0.26, False)},
+ {'b': (1, 0.09, False)},
+ {'c': (2, 0.36, False)},
+ {'d': (3, 0.08, False)},
+ {'e': (4, 0.21, False)},
+ {'bd': (None, 0.17, False)}
+]
+
+print(d)
+d = set_visited_of_child_to_true(""e"", d)
+print(d)
+d = set_visited_of_child_to_true(""c"", d)
+print(d)
+
+
+"
+71kFUuTq,Click Plus Button,Forlolop,Lua,Saturday 30th of December 2023 02:15:44 PM CDT,"script.Parent.MouseButton1Click:Connect(function()
+local player = game.Players.LocalPlayer
+local clicks = player.leaderstats.Clicks
+clicks.Value = clicks.Value +1
+end)"
+Mn9Xq0kh,Text Visibility,Forlolop,Lua,Saturday 30th of December 2023 02:14:56 PM CDT,"local player = game.Players.LocalPlayer
+local clicks = player.leaderstats.Clicks
+
+while true do
+ wait()
+ script.Parent.Text = ""Clicks:""..clicks.Value
+end"
+58qSLfUC,Leaderstats Clicks,Forlolop,Lua,Saturday 30th of December 2023 02:11:45 PM CDT,"game.Players.PlayerAdded:Connect(function(player)
+ local leaderstats = Instance.new(""Folder"")
+ leaderstats.Name = ""leaderstats""
+ leaderstats.Parent = player
+ 
+ local clicks = Instance.new(""NumberValue"")
+ clicks.Name = ""Clicks""
+ clicks.Parent = leaderstats
+ clicks.Value = 0
+end)
+"
+FngaV9kc,card riscaldamento + batterie,fabrizio97726,YAML,Saturday 30th of December 2023 01:57:31 PM CDT,"type: horizontal-stack
+cards:
+  - type: custom:mushroom-template-card
+    icon: mdi:radiator
+    icon_color: '{{ ''red'' if is_state(entity, ''on'') else ''disabled'' }}'
+    primary: ''
+    secondary: Richiesta media {{ states('sensor.heating_medio') }} %
+    entity: binary_sensor.caldaia
+    tap_action:
+      action: navigate
+      navigation_path: /iphone-riscaldamento/0
+    fill_container: true
+    layout: vertical
+    card_mod:
+      style:
+        mushroom-shape-icon$: |
+
+          ha-icon {
+            {{ '--icon-animation: rotation 1s linear infinite;' if is_state(config.entity, 'on') }}
+            transform-origin: 29% 88%;
+          }
+          @keyframes clip {
+            0% {
+              clip-path: inset(50% 0 0 0);
+            }
+            100% {
+              clip-path: inset(0 0 0 0);
+            }
+          }
+          .shape {
+            --shape-animation: ping 2s infinite;
+          }
+          @keyframes ping {
+            0% {
+              box-shadow: 0 0 0 0 rgba(var(--rgb-red), 0.7);
+            }
+            
+            70% {
+              box-shadow: 0 0 0 10px transparent;
+            }
+            
+            100% {
+              box-shadow: 0 0 0 0 transparent;
+            }
+          ha-card {
+            background-color: rgba(0,0,0,0);
+            box-shadow: none;
+            border-style: hidden;
+          }         
+  - type: custom:mushroom-template-card
+    icon: mdi:battery-high
+    primary: null
+    icon_color: green
+    secondary: >-
+      {{ states('sensor.iphone_13_battery_level') | round(0) }}% iPhone  | {{
+      states('sensor.ipad_490_battery_level') | round(0) }}% iPad
+    layout: vertical
+    tap_action:
+      action: navigate
+      navigation_path: /lovelace-casa2/iphone-13
+    double_tap_action:
+      action: navigate
+      navigation_path: /lovelace-casa2/andrea
+    card_mod:
+      style:
+        mushroom-shape-icon$: |
+          .shape {
+            background: radial-gradient(var(--card-background-color) 60%, transparent 0%), conic-gradient(rgb(var(--rgb-{{ config.icon_color }})) {{ states('sensor.iphone_13_battery_level') }}% 0%, var(--card-background-color) 0% 100%);
+          }
+          .shape:before {
+            content: """";
+            background: radial-gradient(var(--card-background-color) 60%, transparent 0%), conic-gradient(rgb(var(--rgb-teal)) {{ states('sensor.ipad_490_battery_level') }}% 0%, var(--card-background-color) 0% 100%);
+            position: absolute;
+            border-radius: var(--icon-border-radius);
+            width: 81%;
+            height: 81%;
+          }
+          .shape:after {
+            content: """";
+            height: 100%;
+            width: 100%;
+            position: absolute;
+            border-radius: var(--icon-border-radius);
+            background: rgba(var(--rgb-{{ config.icon_color }}), 0.2);
+          }
+card_mod:
+  style:
+    mushroom-shape-icon$: |
+
+      ha-icon {
+        {{ '--icon-animation: rotation 1s linear infinite;' if is_state(config.entity, 'on') }}
+        transform-origin: 29% 88%;
+      }
+      @keyframes clip {
+        0% {
+          clip-path: inset(50% 0 0 0);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+        }
+      }
+      .shape {
+        --shape-animation: ping 2s infinite;
+      }
+      @keyframes ping {
+        0% {
+          box-shadow: 0 0 0 0 rgba(var(--rgb-red), 0.7);
+        }
+        
+        70% {
+          box-shadow: 0 0 0 10px transparent;
+        }
+        
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+        }
+      ha-card {
+        background-color: rgba(0,0,0,0);
+        box-shadow: none;
+        border-style: hidden;
+      }         
+"
+bd7cJGPm,Untitled,jessedirisu,Swift,Saturday 30th of December 2023 01:45:50 PM CDT,"import UIKit
+import Flutter
+import AVFoundation
+import MediaPlayer
+
+import flutter_downloader
+
+@available(iOS 11, *)
+@UIApplicationMain
+@objc class AppDelegate: FlutterAppDelegate {
+    var player: AVPlayer?
+    var volume: Float = 1
+    var muted: Bool = false
+    var lastTrack: String = """"
+    var channel: FlutterMethodChannel!
+    override func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        GeneratedPluginRegistrant.register(with: self)
+        FlutterDownloaderPlugin.setPluginRegistrantCallback(registerPlugins)
+        let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
+        channel = FlutterMethodChannel(name: ""lighthouse_audio_stream"", binaryMessenger: controller.binaryMessenger)
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerItemDidReachEnd),
+            name: NSNotification.Name.AVPlayerItemDidPlayToEndTime,
+            object: nil
+        )
+
+        channel.setMethodCallHandler({
+                (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
+                switch(call.method) {
+                case ""play"":
+                    if let args = call.arguments as? Dictionary<String, String> {
+                        let url = args[""url""] ?? """"
+                        let title = args[""title""] ?? """"
+                        let description = args[""description""] ?? """"
+                        let image = args[""image""] ?? """"
+                        if (url.isEmpty) {
+                            result(FlutterError.init(code: ""no url passed"", message: ""nill"", details: ""Nill""))
+                        } else {
+                            do {
+                               let isSameTrack = self.lastTrack == url;
+                               if !isSameTrack {
+                                   self.lastTrack = url;
+                               }
+                               try self.play(url: url, isSameTrack: isSameTrack, title: title, description: description, image: image)
+                               UIApplication.shared.beginReceivingRemoteControlEvents()
+                               result(0)
+                           } catch {
+                               result(0)
+                           }
+                        }
+                    } else {
+                        result(FlutterError.init(code: ""no url passed"", message: ""nill"", details: ""Nill""))
+                    }
+                    result(0)
+                    return
+                case ""disk"":
+                    if let args = call.arguments as? Dictionary<String, Any>,
+                        let path = args[""path""] as? String {
+                        result(self.diskUsage(path: path))
+                    } else {
+                        result(FlutterError.init(code: ""no url passed"", message: ""nill"", details: ""Nill""))
+                    }
+                    result(0)
+                    return
+                case ""seek"":
+                    if let args = call.arguments as? Dictionary<String, Any>,
+                        let pos = args[""pos""] as? Double {
+                        self.seek(pos: pos / 1000)
+                        result(nil)
+                    } else {
+                        result(FlutterError.init(code: ""no position passed"", message: ""nill"", details: ""Nill""))
+                    }
+                    result(0)
+                    return
+                case ""pause"":
+                    self.pause()
+                    result(nil)
+                    return
+                case ""stop"":
+                    self.stop()
+                    result(nil)
+                    return
+                case ""mute"":
+                    self.mute()
+                    result(nil)
+                    return
+                case ""forward"":
+                    self.seekTo(forward: true)
+                    return
+                case ""rewind"":
+                    self.seekTo(forward: false)
+                    return
+                case ""currentPos"":
+                    let position = self.currentPos();
+                    result(position)
+                    return
+                case ""rate"":
+                    self.rate()
+                    result(nil)
+                    return
+                default:
+                    result(FlutterMethodNotImplemented)
+                }
+            })
+        return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+    
+    @objc func playerItemDidReachEnd(notification: NSNotification) {
+        channel.invokeMethod(""stop"", arguments: 0)
+    }
+    
+
+    override func remoteControlReceived(with event: UIEvent?) {
+        guard let event = event else {
+            
+            return
+        }
+        guard event.type == UIEvent.EventType.remoteControl else {
+            return
+        }
+        switch event.subtype {
+        case UIEventSubtype.remoteControlPlay:
+            player?.play()
+            channel.invokeMethod(""playing"", arguments: 0)
+        case UIEventSubtype.remoteControlPause:
+            player?.pause()
+            channel.invokeMethod(""pause"", arguments: nil)
+        case UIEventSubtype.remoteControlTogglePlayPause:
+            print(""received toggle\n"")
+        case UIEventSubtype.remoteControlNextTrack:
+            channel.invokeMethod(""next"", arguments: nil)
+        case UIEventSubtype.remoteControlPreviousTrack:
+            channel.invokeMethod(""prev"", arguments: nil)
+        default:
+            print(""received \(event.subtype) which we did not process\n"")
+        }
+    }
+    
+
+    
+    private func play(url: String, isSameTrack: Bool, title: String, description: String, image: String) throws {
+        let location: URL? = url.hasPrefix(""http"") ? URL(string: url) : NSURL.fileURL(withPath: url);
+        if let audioUrl = location {
+            
+            if (player == nil || !isSameTrack) {
+                player = AVPlayer(url: audioUrl)
+                player?.automaticallyWaitsToMinimizeStalling = false;
+                setupNowPlayingInfo(title: title, artist: description, image: image)
+            }
+            player?.play()
+        } else {
+            throw PlayerErrors.InvalidUrl
+        }
+    }
+    
+    private func seekTo(forward: Bool)  {
+        if player != nil {
+            let currentPos = CMTimeGetSeconds(player?.currentTime() ?? CMTime(seconds: 0.0, preferredTimescale: 1))
+            let goto = forward ? (currentPos + 10.0) : (currentPos - 10.0)
+            player?.seek(to: CMTime(seconds: goto, preferredTimescale: 1))
+        }
+    }
+    
+    private func seek(pos: Double)  {
+        if player != nil {
+            player?.seek(to: CMTime(seconds: pos, preferredTimescale: 1))
+        }
+    }
+    
+    private func pause() {
+        if player != nil {
+            player?.pause()
+        }
+    }
+    
+    private func stop() {
+        if player != nil {
+            player?.pause()
+            player = nil
+        }
+    }
+    
+    private func rate() {
+        if let url = URL(string: ""itms-apps://apple.com/app/com.thelighthouseapp.app"") {
+            UIApplication.shared.open(url)
+        } 
+    }
+    
+    private func currentPos() -> [String: Double] {
+        if player != nil {
+            var duration = CMTimeGetSeconds(player?.currentItem?.duration ?? CMTime(seconds: 1.0, preferredTimescale: 1))
+            if (duration.isNaN || duration < 1) {
+                duration = 1
+            }
+            let currentTime = CMTimeGetSeconds(player?.currentTime() ?? CMTime(seconds: 0.0, preferredTimescale: 1));
+            MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] = (currentTime / duration) * 100
+            return [""duration"": duration * 1000.0, ""currentPos"": currentTime * 1000.0]
+        }
+        return [""duration"": 1.0, ""currentPos"": 0.0]
+    }
+    
+    private func mute() {
+        if player != nil {
+            if muted {
+                player?.volume = volume
+                muted = false
+            } else {
+                volume = player?.volume ?? 1.0
+                player?.volume = 0.0
+                muted = true
+            }
+        }
+    }
+    
+    @available(iOS 11, *)
+    private func diskUsage(path: String) -> [String: Int] {
+        let dirURL = URL(fileURLWithPath: path)
+        do {
+            let values = try dirURL.resourceValues(forKeys: [.volumeAvailableCapacityKey, .fileSizeKey, .isDirectoryKey])
+            if (values.isDirectory ?? false) {
+                let diskSize = values.volumeAvailableCapacity ?? 0
+                var usedSpace = 0
+                (FileManager.default.enumerator(at: dirURL, includingPropertiesForKeys: nil)?.allObjects as? [URL])?.lazy.forEach {
+                    usedSpace += (try? $0.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? 0
+                }
+                return [""totalSpace"": diskSize, ""usedSpace"": usedSpace]
+            } else {
+                return [""totalSpace"": 1, ""usedSpace"": 0]
+            }
+        } catch {
+            return [""totalSpace"": 1, ""usedSpace"": 0]
+        }
+    }
+    
+    func setupNowPlayingInfo(title: String, artist: String, image: String) {
+            var nowPlayingInfo = [String: Any]()
+            nowPlayingInfo[MPMediaItemPropertyTitle] = title
+            nowPlayingInfo[MPMediaItemPropertyArtist] = artist
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+    }
+
+        fileprivate func setupAudioSession() {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(AVAudioSession.Category.playback, mode: .default)
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch let sessionErr {
+                print(""Failed to activate session:"", sessionErr)
+            }
+        }
+    
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+}
+
+enum PlayerErrors: Error {
+    case InvalidUrl
+    
+    func val() -> String {
+        switch self {
+        case .InvalidUrl:
+            return ""Cannot play file from this url""
+        }
+    }
+}
+
+private func registerPlugins(registry: FlutterPluginRegistry) {
+    if (!registry.hasPlugin(""FlutterDownloaderPlugin"")) {
+        FlutterDownloaderPlugin.register(with: registry.registrar(forPlugin: ""FlutterDownloaderPlugin""))
+    }
+}"
+XkKS5Wbs,Gunfight Arena Script 2024,Artani,Lua,Saturday 30th of December 2023 01:20:09 PM CDT,"ROBLOX GUNFIGHT ARENA SCRIPT HACK PASTEBIN 2024 AIMBOT + GET ALL GUNS!
+https://www.youtube.com/watch?v=pY97nt_4QKs
+GET SCRIPT FROM VIDEO!"
+TDBs2Fn4,Untitled,soyl,Java,Saturday 30th of December 2023 01:10:00 PM CDT,"public static final String SQL_QUERY_UPDATE_FILM =
+            ""UPDATE films "" +
+            ""SET name = ?, description = ?, release_date = ?, duration = ?, rate = ?, mpa_rating_id = ?, directors_id = ? "" +
+            ""WHERE film_id = ?;"";
+
+    public static final String SQL_QUERY_GET_ALL_FILMS =
+            ""SELECT f.film_id, "" +
+                    ""f.name, "" +
+                    ""f.description, "" +
+                    ""f.release_date, "" +
+                    ""f.duration, "" +
+                    ""f.rate, "" +
+                    ""mr.mpa_rating_id, "" +
+                    ""mr.name AS mpa_name, "" +
+                    ""g.genre_id, "" +
+                    ""g.name AS genre_name, "" +
+                    ""d.director_id, "" +
+                    ""d.name AS director_name "" +
+                    ""FROM films AS f "" +
+                    ""LEFT OUTER JOIN mpa_rating AS mr ON (f.mpa_rating_id = mr.mpa_rating_id) "" +
+                    ""LEFT OUTER JOIN film_genres AS fg ON (f.film_id = fg.film_id) "" +
+                    ""LEFT OUTER JOIN genre AS g ON (fg.genre_id = g.genre_id) "" +
+                    ""LEFT OUTER JOIN directors AS d ON (f.directors_id = d.director_id);"";
+
+    public static final String SQL_QUERY_GET_FILM_BY_ID =
+            ""SELECT f.film_id, "" +
+                    ""f.name, "" +
+                    ""f.description, "" +
+                    ""f.release_date, "" +
+                    ""f.duration, "" +
+                    ""f.rate, "" +
+                    ""mr.mpa_rating_id, "" +
+                    ""mr.name AS mpa_name, "" +
+                    ""g.genre_id, "" +
+                    ""g.name AS genre_name, "" +
+                    ""d.director_id, "" +
+                    ""d.name AS director_name "" +
+               ""FROM films AS f "" +
+               ""LEFT OUTER JOIN mpa_rating AS mr ON (f.mpa_rating_id = mr.mpa_rating_id) "" +
+               ""LEFT OUTER JOIN film_genres AS fg ON (f.film_id = fg.film_id) "" +
+               ""LEFT OUTER JOIN genre AS g ON (fg.genre_id = g.genre_id) "" +
+               ""LEFT OUTER JOIN directors AS d ON (f.directors_id = d.director_id) "" +
+               ""WHERE f.film_id = ?;"";"
+j20KmUVU,Untitled,Fhehudjreturn,Python,Saturday 30th of December 2023 12:48:01 PM CDT,"import os
+import shutil
+
+def find_and_copy_sequence(folder_path, target_sequence, destination_folder):
+    files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+
+    # Список для хранения файлов, в которых найдена последовательность
+    files_with_sequence = []
+
+    # Итерируемся по каждому файлу и ищем последовательность
+    for file_name in files:
+        file_path = os.path.join(folder_path, file_name)
+        with open(file_path, 'rb') as file:
+            content = file.read()
+            target_bytes = bytes.fromhex(target_sequence)
+            if content.find(target_bytes) != -1:
+                files_with_sequence.append(file_name)
+
+                # Копирование файла в новую папку
+                destination_path = os.path.join(destination_folder, file_name)
+                shutil.copyfile(file_path, destination_path)
+
+    if files_with_sequence:
+        print(""Последовательность байтов найдена в следующих файлах:"")
+        for file_name in files_with_sequence:
+            print(file_name)
+    else:
+        print(""Последовательность байтов не найдена ни в одном файле."")
+
+folder_path = r'C:\TEST1\bynarniky_dlya_testa'  # путь к вашей папке
+target_sequence = '5611' #указать последовательность
+destination_folder = r'C:\TEST1\bynarniky_podxoduashie'  # путь к новой папке
+find_and_copy_sequence(folder_path, target_sequence, destination_folder)
+"
+wyV1mfKb,allowlist,nirmaljp,Bash,Saturday 30th of December 2023 12:29:47 PM CDT,"# Google Ads
+# (\.|^)googleadservices\.com$
+# clients{0-9}.google.com
+
+0.client-channel.google.com
+1drv.com
+2.android.pool.ntp.org
+akamaihd.net
+akamaitechnologies.com
+akamaized.net
+amazonaws.com
+android.clients.google.com
+api.ipify.org
+app-api.ted.com
+api.rlje.net
+appleid.apple.com
+apps.skype.com
+appsbackup-pa.clients6.google.com
+appsbackup-pa.googleapis.com
+apt.sonarr.tv
+aspnetcdn.com
+attestation.xboxlive.com
+ax.phobos.apple.com.edgesuite.net
+brightcove.net
+c.s-microsoft.com
+cdn.cloudflare.net
+cdn.embedly.com
+cdn.optimizely.com
+cdn.vidible.tv
+cdn2.optimizely.com
+cdn3.optimizely.com
+cdnjs.cloudflare.com
+cert.mgt.xboxlive.com
+clientconfig.passport.net
+clients1.google.com
+clients2.google.com
+clients3.google.com
+clients4.google.com
+clients5.google.com
+clients6.google.com
+cpms.spop10.ams.plex.bz
+cpms35.spop10.ams.plex.bz
+cse.google.com
+ctldl.windowsupdate.com
+cws.conviva.com
+livepassdl.conviva.com
+zee.cws.conviva.com
+pings.conviva.com
+gfwsl.geforce.com
+appspot-preview.l.google.com
+d2c8v52ll5s99u.cloudfront.net
+d2gatte9o95jao.cloudfront.net
+dashboard.plex.tv
+dataplicity.com
+def-vef.xboxlive.com
+delivery.vidible.tv
+dev.virtualearth.net
+device.auth.xboxlive.com
+display.ugc.bazaarvoice.com
+displaycatalog.mp.microsoft.com
+dl.delivery.mp.microsoft.com
+dl.dropbox.com
+dl.dropboxusercontent.com
+dns.msftncsi.com
+download.sonarr.tv
+drift.com
+driftt.com
+dynupdate.no-ip.com
+ecn.dev.virtualearth.net
+edge.api.brightcove.com
+eds.xboxlive.com
+fonts.gstatic.com
+forums.sonarr.tv
+g.live.com
+geo-prod.do.dsp.mp.microsoft.com
+geo3.ggpht.com
+giphy.com
+github.com
+github.io
+googleapis.com
+gravatar.com
+gstatic.com
+help.ui.xboxlive.com
+hls.ted.com
+i.ytimg.com
+i1.ytimg.com
+imagesak.secureserver.net
+img.vidible.tv
+imgix.net
+imgs.xkcd.com
+instantmessaging-pa.googleapis.com
+intercom.io
+jquery.com
+jsdelivr.net
+keystone.mwbsys.com
+lastfm-img2.akamaized.net
+licensing.xboxlive.com
+live.com
+login.live.com
+login.microsoftonline.com
+manifest.googlevideo.com
+meta-db-worker02.pop.ric.plex.bz
+meta.plex.bz
+meta.plex.tv
+microsoftonline.com
+msftncsi.com
+my.plexapp.com
+nexusrules.officeapps.live.com
+npr-news.streaming.adswizz.com
+nine.plugins.plexapp.com
+no-ip.com
+node.plexapp.com
+notify.xboxlive.com
+ns1.dropbox.com
+ns2.dropbox.com
+o1.email.plex.tv
+o2.sg0.plex.tv
+ocsp.apple.com
+office.com
+office.net
+office365.com
+officeclient.microsoft.com
+om.cbsi.com
+onedrive.live.com
+outlook.live.com
+outlook.office365.com
+placehold.it
+placeholdit.imgix.net
+players.brightcove.net
+pricelist.skype.com
+products.office.com
+proxy.plex.bz
+proxy.plex.tv
+proxy02.pop.ord.plex.bz
+pubsub.plex.bz
+pubsub.plex.tv
+raw.githubusercontent.com
+redirector.googlevideo.com
+res.cloudinary.com
+s.gateway.messenger.live.com
+s.marketwatch.com
+s.youtube.com
+s.ytimg.com
+s1.wp.com
+s2.youtube.com
+s3.amazonaws.com
+sa.symcb.com
+secure.avangate.com
+secure.brightcove.com
+secure.surveymonkey.com
+services.sonarr.tv
+skyhook.sonarr.tv
+spclient.wg.spotify.com
+ssl.p.jwpcdn.com
+staging.plex.tv
+status.plex.tv
+t.co
+t0.ssl.ak.dynamic.tiles.virtualearth.net
+t0.ssl.ak.tiles.virtualearth.net
+tawk.to
+tedcdn.com
+themoviedb.com
+thetvdb.com
+tinyurl.com
+title.auth.xboxlive.com
+title.mgt.xboxlive.com
+traffic.libsyn.com
+tvdb2.plex.tv
+tvthemes.plexapp.com
+twimg.com
+ui.skype.com
+video-stats.l.google.com
+videos.vidible.tv
+widget-cdn.rpxnow.com
+win10.ipv6.microsoft.com
+wp.com
+ws.audioscrobbler.com
+www.dataplicity.com
+www.googleapis.com
+www.msftncsi.com
+www.no-ip.com
+www.youtube-nocookie.com
+xbox.ipv6.microsoft.com
+xboxexperiencesprod.experimentation.xboxlive.com
+xflight.xboxlive.com
+xkms.xboxlive.com
+xsts.auth.xboxlive.com
+youtube-nocookie.com
+youtu.be
+yt3.ggpht.com
+vidtech.cbsinteractive.com
+continuum.dds.microsoft.com
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+www.msftconnecttest.com
+cdn.jsdelivr.net
+"
+9ALLK2sB,RescueT Produc Plot.ipynb,TheDemystifier,Python,Saturday 30th of December 2023 12:08:51 PM CDT,"# Import necessary libraries for the plot
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import make_interp_spline
+from matplotlib.colors import LinearSegmentedColormap
+
+# Given productivity scores data
+scores = {
+    2016: {9: 62, 10: 63, 11: 68, 12: 73},
+    2017: {1: 71, 2: 70, 3: 79, 4: 78, 5: 70, 6: 77, 7: 74, 8: 64, 9: 65, 10: 62, 11: 54, 12: 49},
+    2018: {1: 44, 2: 65, 3: 57, 4: 49, 5: 54, 6: 45, 7: 33, 8: 36, 9: 48, 10: 58, 11: 76, 12: 81},
+    2019: {1: 70, 2: 68, 3: 71, 4: 84, 5: 79, 6: 78, 7: 68, 8: 62, 9: 73, 10: 83, 11: 79, 12: 79},
+    2020: {1: 69, 2: 70, 3: 58, 4: 46, 5: 64, 6: 60, 7: 75, 8: 49, 9: 71, 10: 75, 11: 68, 12: 61},
+    2021: {1: 67, 2: 66, 3: 45, 4: 50, 5: 50, 6: 54, 7: 61, 8: 48, 9: 54, 10: 59, 11: 56, 12: 54},
+    2022: {1: 49, 2: 46, 3: 53, 4: 56, 5: 45, 6: 42, 7: 49, 8: 39, 9: 51, 10: 61, 11: 54, 12: 52},
+    2023: {1: 82, 2: 85, 3: 77, 4: 78, 5: 71, 6: 60, 7: 23, 8: 43, 9: 66, 10: 91, 11: 90, 12: 89},
+}
+
+# Plotting
+plt.figure(figsize=(40, 10))
+
+# Add vertical lines to separate years
+plt.vlines(
+    x=[4, 16, 28, 40, 52, 64, 76],
+    ymin=0,
+    ymax=100,
+    colors=""#eba434"",
+    linestyles=""dashed"",
+    label=""Year Separators"",
+)
+
+all_scores = [scores[year][month] for year in scores for month in scores[year]]
+dates = [f""{month}/{year}"" for year in scores for month in scores[year]]
+xpoints = np.array(list(range(len(all_scores))))
+
+# Create a Pandas DataFrame
+df = pd.DataFrame({""Date"": dates, ""Score"": all_scores})
+
+# Calculate the moving average with a window size of 3
+df[""Moving_Avg""] = df[""Score""].rolling(window=3).mean()
+
+# Calculate the standard deviation with the same window size
+df[""Std_Dev""] = df[""Score""].rolling(window=3).std()
+
+# Calculate the upper and lower bounds for the confidence interval
+df[""Upper_Bound""] = df[""Moving_Avg""] + (2 * df[""Std_Dev""])
+df[""Lower_Bound""] = df[""Moving_Avg""] - (2 * df[""Std_Dev""])
+
+# Create more points for a smoother curve
+xnew = np.linspace(xpoints.min(), xpoints.max(), 300)
+
+# Interpolation for original scores
+spl = make_interp_spline(xpoints, df[""Score""], k=3)
+y_smooth = spl(xnew)
+
+# Interpolation for confidence intervals
+spl_upper = make_interp_spline(
+    xpoints[~np.isnan(df[""Upper_Bound""])], df[""Upper_Bound""].dropna(), k=3
+)
+y_upper_smooth = spl_upper(xnew)
+
+spl_lower = make_interp_spline(
+    xpoints[~np.isnan(df[""Lower_Bound""])], df[""Lower_Bound""].dropna(), k=3
+)
+y_lower_smooth = spl_lower(xnew)
+
+# Define the colormap to transition from red to blue
+colors = [(1, 0, 0), (0, 0, 1)]  # Red to blue
+n_bins = 100
+cmap_name = ""red_to_blue""
+colormap = LinearSegmentedColormap.from_list(cmap_name, colors, N=n_bins)
+
+# Plot the original scores with gradient color
+norm = plt.Normalize(y_smooth.min(), y_smooth.max())
+for i in range(len(y_smooth) - 1):
+    plt.plot(
+        xnew[i : i + 2], y_smooth[i : i + 2], c=colormap(norm(y_smooth[i])), linewidth=2
+    )
+
+# Add a colorbar for original scores
+sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+sm.set_array([])
+plt.colorbar(
+    sm,
+    ticks=np.linspace(0, 100, 11),
+    boundaries=np.arange(-0.05, 100.1, 0.1),
+    label=""Original Scores"",
+)
+
+
+# Plot the confidence intervals with interpolation for smoothness
+plt.fill_between(
+    xnew,
+    y_upper_smooth,
+    y_lower_smooth,
+    color=""grey"",
+    alpha=0.5,
+    label=""Confidence Interval (Smoothed)"",
+)
+
+
+plt.xticks(ticks=xpoints, labels=dates, rotation=90)
+plt.yticks(range(0, 101, 10))
+plt.ylim(0, 100)
+plt.title(""Productivity Scores Over the Years (Smoothed, With Gradient Color)"")
+plt.xlabel(""Months"")
+plt.ylabel(""Productivity Score"")
+plt.grid(axis=""y"")
+plt.legend()
+
+plt.show()"
+t34VMHUJ,bhop cpp,REALshocK,C++,Saturday 30th of December 2023 11:55:08 AM CDT,"// Include the necessary libraries
+#include ""memory.h""
+#include ""offsets.h""
+
+#include <thread>
+#include <iostream>
+#include <iomanip>
+
+
+
+int main()
+{
+
+	// Set the output format for hexadecimal numbers
+	std::cout << std::hex << std::uppercase;
+
+	// Print the memory offsets
+	std::cout << ""dwForceJump: 0x"" << offsets::dwForceJump << std::endl;
+	std::cout << ""dwLocalPlayerPawn: 0x"" << offsets::dwLocalPlayerPawn << std::endl;
+	std::cout << ""m_fFlags: 0x"" << offsets::m_fFlags << std::endl;
+
+	// Main loop
+	while (true)
+	{
+		// Sleep for 1 millisecond to reduce CPU usage
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+		// Read the local player's memory address
+		uintptr_t localPlayer = VARS::memRead<uintptr_t>(VARS::baseAddress + offsets::dwLocalPlayerPawn);
+
+		// If the local player's memory address is null, skip this iteration
+		if (!localPlayer)
+		{
+			continue;
+		}
+
+		// Read the local player's flags
+		int32_t m_fFlags = VARS::memRead<int32_t>(localPlayer + offsets::m_fFlags);
+
+		// If the space key is pressed and the local player is on the ground, perform a jump
+		if (GetAsyncKeyState(VK_SPACE) && (m_fFlags & (1 << 0)))
+		{
+			std::this_thread::sleep_for(std::chrono::microseconds(15625));
+			VARS::memWrite(VARS::baseAddress + offsets::dwForceJump, 256);
+			VARS::memWrite(VARS::baseAddress + offsets::dwForceJump, 65537);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			VARS::memWrite(VARS::baseAddress + offsets::dwForceJump, 256);
+		}
+	}
+
+	return 0;
+}"
+ThPg2vFW,bhop,REALshocK,Python,Saturday 30th of December 2023 11:52:21 AM CDT,"import keyboard
+import pymem
+import pymem.process
+import time
+import ctypes
+import ctypes.wintypes
+
+user32 = ctypes.windll.user32
+
+# dwForceJump = (0x16C2380)
+# dwLocalPlayer = (0x16C8F38)
+# m_fFlags = (0x3C8)
+
+
+def get_foreground_window_title():
+    hwnd = user32.GetForegroundWindow()
+    length = user32.GetWindowTextLengthW(hwnd) + 1
+    buffer = ctypes.create_unicode_buffer(length)
+    user32.GetWindowTextW(hwnd, buffer, length)
+    return buffer.value
+
+
+def main():
+    pm = pymem.Pymem(""cs2.exe"")
+    client = pymem.process.module_from_name(pm.process_handle, ""client.dll"").lpBaseOfDll
+    # engine = pymem.process.module_from_name(pm.process_handle, ""engine.dll"").lpBaseOfDll
+
+    while True:
+        window_name = ""Counter-Strike 2""
+        foreground_window_title = get_foreground_window_title()
+        if foreground_window_title != window_name:
+            continue
+
+        # Bhop
+        try:
+            dwLocalPlayerPawn = pm.read_longlong(client + 0x16C8F38)  # client_dll.dwLocalPlayerPawn // offsets
+            m_fFlags = pm.read_int(dwLocalPlayerPawn + 0x3C8)  # C_BaseEntity.m_fFlags // client.dll
+            # client_dll.dwForceJump // offsets
+            if keyboard.is_pressed(""space"") & m_fFlags & (1 << 0):
+                time.sleep(0.016)
+                pm.write_int(client + 0x16C2380, 256)
+                # time.sleep(0.015)
+                pm.write_int(client + 0x16C2380, 65537)
+                time.sleep(0.016)
+                pm.write_int(client + 0x16C2380, 256)
+            else:
+                pm.write_int(client + 0x16C2380, 256)
+                time.sleep(0.001)
+        except Exception as ex:
+            pass
+
+
+if __name__ == '__main__':
+    main()
+"
+kd34XR4a,Untitled,EnGold,C++,Saturday 30th of December 2023 11:40:12 AM CDT,"#include <iostream>
+#include <list>
+long long fibonachi(long long n, int p);
+
+long long fib[85]{
+	1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368, 75025, 121393, 196418, 317811, 514229, 832040, 1346269, 2178309, 3524578, 5702887, 9227465, 14930352, 24157817, 39088169, 63245986, 102334155, 165580141, 267914296, 433494437, 701408733, 1134903170, 1836311903, 2971215073, 4807526976, 7778742049, 12586269025, 20365011074, 32951280099, 53316291173, 86267571272, 139583862445, 225851433717, 365435296162, 591286729879, 956722026041, 1548008755920, 2504730781961, 4052739537881, 6557470319842, 10610209857723, 17167680177565, 27777890035288, 44945570212853, 72723460248141, 117669030460994, 190392490709135, 308061521170129, 498454011879264, 806515533049393, 1304969544928657, 2111485077978050, 3416454622906707, 5527939700884757, 8944394323791464, 14472334024676221, 23416728348467685, 37889062373143906, 61305790721611591, 99194853094755497, 160500643816367088, 259695496911122585
+};
+
+int main()
+{
+	int n;
+	std::cin >> n;
+	std::list<long long> res(n);             // пустой список
+	for (long long i : res) {
+		std::cin >> i;
+		i = fibonachi(i,0);
+	}
+	for (long long i : res) {
+		std::cout << i << std::endl;
+	}
+}
+
+long long fibonachi(long long n, int p) {
+	if (n == 1) return 1;
+	if (p >= (sizeof(fib) / sizeof(long long))) return 0;
+	if(n < fib[p]) return 0;
+	long long res = fibonachi(n, p + 1);
+	if(n % fib[p] == 0) {
+		res += fibonachi(n / fib[p], p);
+	}
+	return res;
+}"
