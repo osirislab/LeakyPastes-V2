@@ -1,0 +1,2791 @@
+id,title,username,language,date,content
+3VwG8G4Z,🎁 List of all FREE Crypto Airdrops! 🎁,VQ-Moe,GetText,Monday 8th of January 2024 12:03:17 PM CDT,"Looking for a list of all the current, free airdrops from all blockchains?
+Check out NetDrop - https://netdrop.netlify.app/
+
+NetDrop provides a list of all active airdrops, which is updated every minute so you can claim the newest airdrops as soon as they are available.
+No more finding airdrops; the airdrops find you.
+
+Visit NetDrop completely free now, no sign-up required.
+https://netdrop.netlify.app/
+
+742895"
+XDsJNLv9,Untitled,burcev,PHP,Monday 8th of January 2024 12:00:12 PM CDT,"<?php
+
+namespace Aniart\Main\Bkservice;
+
+use Bitrix\Main\Entity\ReferenceField;
+use Bitrix\Main\ORM\Query\Join;
+use Bitrix\Main\Entity;
+use Aniart\Main\Bkservice\BonusCard;
+use Aniart\Main\Bkservice\newBcCardEntity;
+use Bitrix\Main\UserTable;
+use \Bitrix\Main\Type\DateTime;
+use Bitrix\Main\Config\Option;
+use Aniart\Main\Budgets\BudgetsTable;
+
+class CheckAutoBindBonusCard
+{
+    const KEY_LAST_START = 'checker_bind_bonus_card_last_start';
+
+    /**
+     * @var array $arErrors
+     */
+    private $arErrors = [];
+
+    /**
+     * @var array $success
+     */
+    private $arSuccess = [];
+
+    /** @var DateTime $dateTimeStart */
+    protected $dateTimeStart;
+
+    /** @var DateTime $dateTimeStart */
+    protected $dateTimeFinish;
+
+    public function __construct(DateTime $dateTimeFinish)
+    {
+        $this->dateTimeFinish = $dateTimeFinish;
+        $this->setDateTimeLastStart($this->determiningLastStart());
+    }
+
+    public function setDateTimeLastStart(DateTime $dateTime): void
+    {
+        $this->dateTimeStart = $dateTime;
+    }
+
+    protected function addError(string $str): void
+    {
+        $this->arErrors[] = $str;
+    }
+
+    public function getErrors(): array
+    {
+        return $this->arErrors;
+    }
+
+    protected function addSuccess(string $str): void
+    {
+        $this->arSuccess[] = $str;
+    }
+
+    public function getSuccess(): array
+    {
+        return $this->arSuccess;
+    }
+
+    public function run(): void
+    {
+        $start = 0;
+        $max = $this->getMaxRow();
+        $this->getItems($start, $max);
+    }
+
+    public function reset(): void
+    {
+        Option::delete(""main"", ['name' => self::KEY_LAST_START]);
+        $this->setDateTimeLastStart($this->determiningLastStart());
+    }
+
+    private function getMaxRow(): int
+    {
+        $connection = \Bitrix\Main\Application::getInstance()->getConnection();
+
+        $result = $connection->query(
+            ""SELECT 
+  `b_user`.`ID` AS `ID` 
+FROM 
+  `b_user` 
+  LEFT JOIN `u_budgets` ON `b_user`.`ID` = `u_budgets`.`UF_USER_ID` 
+  LEFT JOIN `b_uts_user` ON `b_user`.`ID` = `b_uts_user`.`VALUE_ID` 
+WHERE "".implode("" AND "", $this->getFilter())."" 
+ORDER BY `b_user`.`ID` DESC
+LIMIT 
+  0, 1""
+        );
+        if($item = $result->fetch()){
+            return $item['ID'];
+        }
+
+        return 0;
+    }
+
+    private function getItems($startId = 0, $lastId, $limit = 500)
+    {
+        $this->addSuccess('migrate slice start: '.$startId.' last: '.$lastId);
+
+        if($lastId == 0 || $startId == $lastId){
+            return;
+        }
+
+        $lastPartId = $startId;
+
+        $connection = \Bitrix\Main\Application::getInstance()->getConnection();
+
+        $result = $connection->query(
+            ""SELECT "".$this->getSelect()."" FROM 
+  `b_user` 
+  LEFT JOIN `u_budgets` ON `b_user`.`ID` = `u_budgets`.`UF_USER_ID` 
+  LEFT JOIN `b_uts_user` ON `b_user`.`ID` = `b_uts_user`.`VALUE_ID` 
+WHERE "".implode("" AND "", $this->getFilter()).""
+LIMIT 
+  0, "".$limit
+        );
+
+        while($item = $result->fetch()){
+            try{
+                $this->processing($item);
+            }catch(\Exception $exception){
+                $this->addSuccess(""USER #"".$item['ID']."" | ERROR: "".$exception->getMessage());
+                break;
+            }
+
+            $lastPartId = $item['ID'];
+        }
+
+        if($lastPartId == 0){
+            $this->addSuccess('migrate slice no data');
+            return;
+        }
+
+
+        unset($result, $res, $data, $existFmData, $query);
+//        if($lastId > $lastPartId){
+//            $this->getItems($lastPartId, $lastId);
+//        }
+    }
+
+    private function processing(array $item): void
+    {
+        if(!empty($item['UF_INTERTOP_PLUS'])){
+            $obCard = new BonusCard();
+            $arCard = $obCard->getCard([], $item['ID']);
+
+            if(!empty($arCard['ERROR'])){
+                throw new \Exception('Сервис временно недоступен.');
+            }
+            $cardData = current($arCard);
+
+            if(!empty($item['UF_PHONE_VERIFY_DATE']) && $cardData){
+                $obCard = newBcCardEntity::getInstance($cardData['ID_CLIENT'], $cardData['CARD_NUM']);
+                $obCard->setStatus($cardData['USER_STATUS'] === 'Активна');
+
+                $budgetId = 0;
+                $cards = BudgetsTable::getByCardNum($cardData['CARD_NUM']);
+                if(!empty($cards)){
+                    $budgetId = current($cards)['ID'];
+                }
+
+                if($budgetId === 0){
+                    $userBudget = new \userBudget($item['ID']);
+                    $userAccounts = $userBudget->checkUserAccount($item['ID'], DEFAULT_CURRENCY);
+                    $userAccount = !empty($userAccounts) ? current($userAccounts) : null;
+
+                    $arFields = [
+                        'PERSONAL_ACCOUNT_ID' => !is_null($userAccount) ? $userAccount['ID'] : 0,
+                        'CARD_NUMBER_ID' => $cardData['CARD_NUM'],
+                        'ACTIVE_SUM' => (float)$cardData['ACTIVE_BONUS'],
+                        'INACTIVE_SUM' => (float)$cardData['INACTIVE_BONUS'],
+                        'PAS_SUM' => (float)$cardData['SPENT_BONUS'],
+                    ];
+
+                    $userBudget->Add($arFields);
+                }
+
+                if($obCard->isActive()){
+                    $this->setCardToUser($item['ID'], $cardData['CARD_NUM'], $cards['UF_DATE_ACTIVATION']);
+                }
+                unset($obCard, $arCard);
+            }
+        }
+    }
+
+    private function setCardToUser(int $userId, string $cardNumber, string $dataActivation): void
+    {
+        (new \userBudget($userId))::setUserCardToBonusFields(
+            $userId,
+            $cardNumber,
+            true,
+            new DateTime($dataActivation)
+        );
+    }
+
+    private function getSelect(): string
+    {
+        $table = [
+            'b_user' => [
+                'ID' => 'ID',
+                'PERSONAL_MOBILE' => 'PERSONAL_MOBILE',
+            ],
+            'b_uts_user' => [
+                'UF_BONUS_CARD_FLAG' => 'UF_BONUS_CARD_FLAG',
+                'UF_INTERTOP_PLUS' => 'UF_INTERTOP_PLUS',
+                'UF_PHONE_VERIFY_DATE' => 'UF_PHONE_VERIFY_DATE',
+                'UF_PHONE_VERIFY_CASE' => 'UF_PHONE_VERIFY_CASE',
+            ],
+            'u_budgets' => [
+                'UF_BONUS_CARD' => 'MAIN_USER_BONUS_CARD_UF_BONUS_CARD',
+                'UF_ACTIVE_STATUS' => 'MAIN_USER_BONUS_CARD_UF_ACTIVE_STATUS'
+            ]
+        ];
+        $arSelect = [];
+        foreach($table as $tableName => $arFields){
+            foreach($arFields as $field => $alias){
+                $arSelect[] = '`'.$tableName.'`.'.$field.' AS '.$alias;
+            }
+        }
+
+        return implode(', ', $arSelect);
+    }
+
+    private function getBaseFilters(): array
+    {
+        $params = [
+            'b_user' => [
+                ['ACTIVE', '=', '""Y""'],
+                ['PERSONAL_COUNTRY', '=', app('UsersRepository')->getBxCountryBySystem()],
+            ],
+            'b_uts_user' => [
+                ['UF_PHONE_VERIFY_DATE', '>=', '""'.$this->dateTimeStart->format('Y-m-d H:i:s').'""'],
+                ['UF_PHONE_VERIFY_DATE', '<=', '""'.$this->dateTimeFinish->format('Y-m-d H:i:s').'""']
+            ]
+        ];
+        $arrFilter = [];
+
+        foreach($params as $tableName => $fields){
+            foreach($fields as $field){
+                $arrFilter[] = $tableName.'.'.$field[0].' '.$field[1].' '.$field[2];
+            }
+        }
+        return $arrFilter;
+    }
+
+    private function getFilter(int $startId = 0): array
+    {
+        return array_merge($this->getBaseFilters(), [""`b_user`.`ID` = 2174187""]);
+//        return array_merge($this->getBaseFilters(), ['b_user.ID >'.$startId]);
+    }
+
+    private function determiningLastStart(): ?DateTime
+    {
+        $timestampLastStart = Option::get(""main"", self::KEY_LAST_START, null, SITE_ID);
+        if(is_null($timestampLastStart)){
+            $timestampLastStart = strtotime(""-15 years"");
+        }
+
+        return DateTime::createFromTimestamp(IntVal($timestampLastStart));
+    }
+
+    private function saveTimestamp(): void
+    {
+        Option::set(""main"", self::KEY_LAST_START, time(), SITE_ID);
+    }
+}"
+wDkkL3zk,Untitled,hoz65105,HTML,Monday 8th of January 2024 11:49:32 AM CDT,https://pastebin.com/1EDQQnQu
+8LKFkuJY,start,Killmey9,Lua,Monday 8th of January 2024 11:48:09 AM CDT,"--Created By RenKylo
+local robot = require(""robot"")
+local component = require(""component"")
+local inv = component.inventory_controller
+local inv_size = robot.inventorySize()
+
+local function Text()
+    os.execute(""cls"")
+    print(""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃            Программа запущена.                 ┃"")
+    print(""┃            Версия кода: 2.6.7                  ┃"")
+    print(""┃            Программа предназначена для:        ┃"")
+    print(""┃            Робота [Шахтёра]                    ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┃                                                ┃"")
+    print(""┗━━━━━━━[Warp wim]━━━━━━━━━━━━━━━━━[Killmey]━━━━━┛"")
+end
+ 
+Text()
+
+--SETTINGS
+local MIN_TOOL_CHARGE = 0.3 --Минимальный заряд бура
+local CHARGING_TIME = 10 --Время зарядки
+--FUNCTIONS
+function robot_action() --Основные действия
+	robot.select(1)
+	if robot.suck() then
+		size = robot.count(1)
+		robot.turnRight()
+		for i = 1, size do
+			robot.place()
+			robot.swing()
+		end
+		robot.turnRight()
+		for n = 1, inv_size do
+			robot.select(n)
+			if robot.drop() == false and n ~= 1 then
+				break
+			end
+		end
+		robot.turnAround()
+	end
+	os.sleep(0.2)
+end
+while true do
+	if robot.durability() ~= nil then --Выполняется только если есть инструмент
+		robot.select(1)
+		robot_action()
+	end
+end"
+ANMKVXN1,🤑 G2A.com Refund Exploit Jan 2024 🤑,G2ARefundExploit,GetText,Monday 8th of January 2024 11:26:20 AM CDT,"G2A.com refund exploit updated guide 
+Any item for free on G2A.com such as Amazon, Steam, and any other gift cards.
+ 
+PDF guide here:
+https://drive.google.com/file/d/120kXNJWM5T5u3PGlkQeZCo_nLxzQIlkf/view?usp=g2a_refund_exploit_638841.pdf
+ 
+Working as of
+08 January 2024"
+iUf4Lxpd,error,lord_shadow,JSON,Monday 8th of January 2024 11:22:40 AM CDT,"C:\Karai-Bot\node_modules\got\index.js:73
+                        ee.emit('error', new got.RequestError(err, opts));
+                    ^
+ErrorClass [RequestError]
+    at ClientRequest.<anonymous> (C:\Karai-Bot\node_modules\got\index.js:73:21)
+    at Object.onceWrapper (node:events:629:26)
+    at ClientRequest.emit (node:events:514:28)
+    at ClientRequest.emit (node:domain:488:12)
+    at Socket.socketErrorListener (node:_http_client:495:9)
+    at Socket.emit (node:events:514:28)
+    at Socket.emit (node:domain:488:12)
+    at emitErrorNT (node:internal/streams/destroy:151:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:116:3)
+    at processTicksAndRejections (node:internal/process/task_queues:82:21) {
+  code: 'ECONNREFUSED',
+  host: undefined,
+  hostname: undefined,
+  method: 'GET',
+  path: ''
+}"
+MJTAZD1u,Rotate Array,jayati,C++,Monday 8th of January 2024 11:00:14 AM CDT,"//{ Driver Code Starts
+#include<bits/stdc++.h>
+using namespace std;
+
+
+// } Driver Code Ends
+class Solution{
+    public:
+    
+    void reverse(int arr[], int low, int high){
+        while(low<high){
+            swap(arr[low], arr[high]);
+            low++;
+            high--;
+        }
+    }
+    //Function to rotate an array by d elements in counter-clockwise direction. 
+    void rotateArr(int arr[], int d, int n){
+        // code here
+        d = d%n;
+        reverse(arr, 0, d-1);
+        reverse(arr, d, n-1);
+        reverse(arr, 0, n-1);
+    }
+};
+
+//{ Driver Code Starts.
+
+int main() {
+	int t;
+	//taking testcases
+	cin >> t;
+	
+	while(t--){
+	    int n, d;
+	    
+	    //input n and d
+	    cin >> n >> d;
+	    
+	    int arr[n];
+	    
+	    //inserting elements in the array
+	    for(int i = 0; i < n; i++){
+	        cin >> arr[i];
+	    }
+	    Solution ob;
+	    //calling rotateArr() function
+	    ob.rotateArr(arr, d,n);
+	    
+	    //printing the elements of the array
+	    for(int i =0;i<n;i++){
+	        cout << arr[i] << "" "";
+	    }
+	    cout << endl;
+	}
+	return 0;
+}
+// } Driver Code Ends"
+dAuKNsPS,Untitled,SkymaxTV,Lua,Monday 8th of January 2024 10:56:53 AM CDT,"-- Script Here --
+repeat  task.wait() until game:IsLoaded()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/SKOIXLL/RIVERHUB-SKYHUB/main/WL.lua'))();"
+4087JyJn,jardinería,RJNewbyte,MySQL,Monday 8th of January 2024 10:38:19 AM CDT,"SELECT puesto, nombre, apellido1, apellido2, email 
+FROM empleado 
+WHERE puesto = 'Director General' AND codigo_jefe IS NULL;"
+Aa2CqAWu,Тип №19. Выигрышная стратегия. Задание 1. Две кучи. Найти наибольшее,Rakabidasta,Python,Monday 8th of January 2024 10:24:08 AM CDT,"# Тип №19. Выигрышная стратегия. Задание 1. Две кучи №27777
+# Найдите наибольшее значение А
+
+# Функция игры в камни (0 - проигрыш, 1 - победа)
+def f(x, y, h):
+    # Если условия победы выполнены и 1-ый ход Вани
+    if x + y <= 40 and h == 2:
+        return 1
+
+    # Если игра продолжается и 1-ый ход Вани
+    if x + y > 40 and h == 2:
+        return 0
+
+    # Если условия победы выполнены и НЕ 1-ый ход Вани
+    if x + y <= 40 and h < 2:
+        return 0
+
+    # Если игра продолжается и не 1-ый ход Вани
+    if x + y > 40 and h < 2:
+
+        # Если ходит Петя (общий ход кратен 2), Петя ходит стратегией победителя (не в свою пользу)
+        if h % 2 == 0: 
+            return f(x - 1, y, h + 1) or f(x, y - 1, h + 1) or f(x // 2 + x % 2, y, h + 1) or f(x, y // 2 + y % 2, h + 1)
+
+		# Если ходит Ваня (общий ход не кратен 2), Ваня ходит стратегией победителя
+        else: 
+            return f(x - 1, y, h + 1) or f(x, y - 1, h + 1) or f(x // 2 + x % 2, y, h + 1) or f(x, y // 2 + y % 2, h + 1)
+
+# Стартовое значение для S (минимальный шаг, повторённый два раза)
+s = 22
+
+# Пока s победное идём к следующему S
+while f(20, s, 0) == 1:
+    s += 1
+
+# Как только нашли порог выводим его
+print(s - 1)"
+dVipVQCp,Untitled,Mysoft,FreeBasic,Monday 8th of January 2024 10:16:28 AM CDT,"sub Sound( fFreq as single , fDuration as single , bKeepOn as byte = 0 )  
+  const PitFreq = 1193180
+  out &h43, &b10110110 'cnt 2 | LSB+MSB | squarewave | binary
+  dim as long iFreq = PitFreq/fFreq  
+  if iFreq>65535 then iFreq=65536 else if iFreq<0 then iFreq=0
+  iFreq = (iFreq+1) and 65535  
+  out &H42, (iFreq and 255)
+  out &H42, (iFreq shr 8)    
+  out &H61, inp(&H61) or 3
+  dim as long iDuration = fDuration*(60/(PitFreq/65536))  
+  if fDuration=0 then iDuration=0 else if iDuration < 1 then iDuration = 1
+  for iL as long = 0 to iDuration-1
+    wait &H3DA, 8: wait &H3DA, 8, 8
+  next iL
+  if bKeepOn=0 then out &H61, inp(&H61) and (not 1)
+end sub
+
+for N as long = 37 to 1023
+  print !""\r"";N;: sound N,.03
+next N
+"
+cajJ6dvh,Тип №19. Выигрышная стратегия. Задание 1. Две кучи,Rakabidasta,Python,Monday 8th of January 2024 10:09:19 AM CDT,"# Тип №19. Выигрышная стратегия. Задание 1. Две кучи №27747
+# Найдите наименьшее значение А
+
+# Функция игры в камни (0 - проигрыш, 1 - победа)
+def f(x, y, h):
+	# Если условия победы выполнены и 1-ый ход Вани
+    if x + y >= 82 and h == 2:
+        return 1
+
+	# Если игра продолжается и 1-ый ход Вани
+    if x + y < 82 and h == 2:
+        return 0
+
+	# Если условия победы выполнены и НЕ 1-ый ход Вани
+    if x + y >= 82 and h < 2:
+        return 0
+
+	# Если игра продолжается и не 1-ый ход Вани
+    if x + y < 82 and h < 2:
+
+		# Если ходит Петя (общий ход кратен 2), Петя ходит стратегией победителя (не в свою пользу)
+        if h % 2 == 0:  
+            return f(x + 1, y, h + 1) or f(x, y + 1, h + 1) or f(x * 4, y, h + 1) or f(x, y * 4, h + 1)
+
+		# Если ходит Ваня (общий ход не кратен 2), Ваня ходит стратегией победителя
+        else:
+            return f(x + 1, y, h + 1) or f(x, y + 1, h + 1) or f(x * 4, y, h + 1) or f(x, y * 4, h + 1)
+
+# Стартовое значение s            
+s = 1
+
+# Пока истина
+while True:
+	# Если найдено минимальное победное решение
+    if f(4, s, 0) == 1:
+		
+		# Выводим s и выходим из цикла
+        print(s)
+        break
+	# Иначе идём к следующему числу
+    s += 1"
+QdnKCcd2,N_8,Mastanka,C++,Monday 8th of January 2024 10:00:40 AM CDT,"#include <vector> 
+
+template<typename C, template <typename > class T > 
+class S { 
+  std::vector<C> v; 
+  std::vector<T<C>> t; 
+};"
+zX6JsxMF,N_4,Mastanka,C++,Monday 8th of January 2024 09:57:26 AM CDT,"/*
+Создавая объект мы создаём сначала объект родителя и его виртуальная функция может работать с полями наследника, которые ещё даже не были созданы или использовать непроиницализированную память
+*/
+
+#include <iostream> 
+
+struct A { 
+  virtual void pvf() = 0; 
+ 
+  A() { 
+    A* ptr = (A*)this; 
+    ptr->pvf(); 
+  } 
+}; 
+ 
+void A::pvf() { 
+  std::cout << ""A pvf\n""; 
+} 
+ 
+struct B: A { 
+  void pvf() override { 
+    std::cout << ""B pvf\n""; 
+  } 
+}; 
+ 
+int main() { 
+  B b = B(); 
+}"
+4mArRff8,N_1,Mastanka,C++,Monday 8th of January 2024 09:54:21 AM CDT,"struct Granny {
+  int g = 0;
+  virtual ~Granny() = 0;
+};
+
+struct Mom: Granny {
+  int m = 1;
+};
+
+struct Dad: Granny {
+  int d = 2;
+};
+
+struct Son: Mom, Dad {
+  int s = 3;
+};
+
+int main() {
+  Son s;
+  Mom& m = s;
+//  Dad& d = static_cast<Dad&>(m); CE
+//  Dad& d = dynamic_cast<Dad&>(m); OK
+//  Dad& d = reinterpret_cast<Dad&>(m); UB
+}"
+AYgD7scr,my script for note  limiting,danielftosta176,JavaScript,Monday 8th of January 2024 09:50:45 AM CDT,"let THE_LIMIT=44;
+map=[""a-1"",""as-1"",""b-1"",""c0"",""cs0"",""d0"",""ds0"",""e0"",""f0"",""fs0"",""g0"",""gs0"",""a0"",""as0"",""b0"",""c1"",""cs1"",""d1"",""ds1"",""e1"",""f1"",""fs1"",""g1"",""gs1"",""a1"",""as1"",""b1"",""c2"",""cs2"",""d2"",""ds2"",""e2"",""f2"",""fs2"",""g2"",""gs2"",""a2"",""as2"",""b2"",""c3"",""cs3"",""d3"",""ds3"",""e3"",""f3"",""fs3"",""g3"",""gs3"",""a3"",""as3"",""b3"",""c4"",""cs4"",""d4"",""ds4"",""e4"",""f4"",""fs4"",""g4"",""gs4"",""a4"",""as4"",""b4"",""c5"",""cs5"",""d5"",""ds5"",""e5"",""f5"",""fs5"",""g5"",""gs5"",""a5"",""as5"",""b5"",""c6"",""cs6"",""d6"",""ds6"",""e6"",""f6"",""fs6"",""g6"",""gs6"",""a6"",""as6"",""b6"",""c7""],MPP.client.startNote=function(s,e){if(!(map.findIndex(e=>e==s)>THE_LIMIT)&&""string""==typeof s&&this.isConnected()){var e=typeof e>""u""?void 0:+e.toFixed(3);this.noteBufferTime?this.noteBuffer.push({d:Date.now()-this.noteBufferTime,n:s,v:e}):(this.noteBufferTime=Date.now(),this.noteBuffer.push({n:s,v:e}))}};"
+r9u2Ai15,N_6,Mastanka,C++,Monday 8th of January 2024 09:44:22 AM CDT,"/*
+SFINAE - substitution failure is not an error
+
+компилятор просто ищет подходящий шаблон 
+*/
+
+template<typename T> 
+void Test() { 
+   
+} 
+ 
+// перегрузка 
+template<typename T, typename L> 
+void Test() { 
+   
+} 
+ 
+// спецализация 
+template<int n, int q> 
+void Test() { 
+   
+}
+
+int main() {
+  Test<int>();
+  Test<char, double>();
+}"
+KiqjrnQL,Domains with SPECIAL CHARS,wheresTheAnyKey,C,Monday 8th of January 2024 09:42:11 AM CDT,"Pasted at: 08/01/2024 15:42
+Test data generated by 98823c9ce7f73d22c0e84a43ab6f6ed3
+
+DATA_ID_TESTDATATOFIND
+
+www.qatesting.com
+blog.qatesting.com
+www.qatesting.com/index.html
+www.qatesting.com/home
+www.qatestingblog.com
+www.qatestingtutorials.com
+shop.qatesting.co.uk
+admin.qatesting.io 
+qatesting
+qatesting.co.uk
+qatesting.cn
+qatesting.io
+findmetesting.com
+www.qatesting-blog.com
+www.qatesting-blog23.com
+www.qatesting
+www.qatesting.co.uk
+www.qatesting.cn
+www.qatesting.io
+www.findmetesting.com
+www.wobsut.gov
+
+The difference is that QA is process oriented and QC is product oriented.
+
+Testing, therefore is product oriented and thus is in the QC domain. Testing for quality isn't assuring quality, it's controlling it.
+
+
+
+Fuzzy-Wuzzy	- DASH
+Fuzzy;Wuzzy	- COLON
+Fuzzy!Wuzzy	- EXCLAMATION
+Fuzzy£Wuzzy	- POUND
+Fuzzy#Wuzzy	- HASH
+Fuzzy%Wuzzy	- PERCENT
+Fuzzy@Wuzzy	- AT
+Fuzzy&Wuzzy	- AND
+Fuzzy=Wuzzy	- EQUAL
+Fuzzy§Wuzzy
+Fuzzy~Wuzzy
+Fuzzy?Wuzzy	 - QUESTION MARK
+Fuzzy$Wuzzy	 - DOLLAR
+Fuzzy[Wuzzy] - BRACKETS
+Fuzzy^Wuzzy
+Fuzzy(Wuzzy) - BRACKETS
+Fuzzy+Wuzzy	 - PLUS
+Fuzzy±Wuzzy	 - PLUS/MINUE
+Fuzzy|Wuzzy	 - PIPE
+Fuzzy/Wuzzy	 - FORWARDSLASH
+Fuzzy<Wuzzy> - BRACKETS
+Fuzzy{Wuzzy} - CURLY
+Fuzzy\Wuzzy  - BACKSLASH
+"
+k5rnz6yE,wp_update_post() random publish from draft by id,ssaidz,PHP,Monday 8th of January 2024 09:33:11 AM CDT,"<?php 
+
+/* Template Name: UPDATE POST 1.1 */
+ get_header(); ?>
+ 
+<div class="""">
+<?php
+// Buat query untuk mengambil semua post dengan status draft
+$draft_posts_query = new WP_Query(array(
+    'post_status' => 'draft',
+    'posts_per_page' => -1, // Mengambil semua post dengan status draft
+));
+
+// Cek apakah terdapat post dengan status draft
+if ($draft_posts_query->have_posts()) {
+    // Buat array untuk menyimpan ID dari semua post dengan status draft
+    $draft_post_ids = array();
+
+    // Loop melalui setiap post dan simpan ID-nya ke dalam array
+    while ($draft_posts_query->have_posts()) {
+        $draft_posts_query->the_post();
+        $draft_post_ids[] = get_the_ID();
+    }
+
+    // Pilih secara acak satu ID post dari array
+    $random_post_id = $draft_post_ids[array_rand($draft_post_ids)];
+
+echo $random_post_id; echo '<br/>';
+echo '<a href=""'.get_permalink($random_post_id).'"">'.get_permalink($random_post_id).'</a><br/><b>';
+echo get_the_title($random_post_id); echo '</b><br/>';
+
+    // Data post yang akan diupdate
+    $post_data = array(
+        'ID' => $random_post_id,
+        'post_status' => 'publish'
+    );
+
+    // Update post menggunakan fungsi wp_update_post()
+    wp_update_post($post_data);
+
+    // Reset query
+    wp_reset_postdata();
+} ?>
+<div>
+ 
+ <?php get_footer(); ?> "
+QSKVXdhx,N_7,Mastanka,C++,Monday 8th of January 2024 09:28:44 AM CDT,"/*
+CRTP - рекурсивное наследование от шаблонного класса
+*/
+
+template <class T>  
+struct Base { 
+  void some_interface_fun() {
+    static_cast<T*>(this)->Impl(); 
+  } 
+}; 
+ 
+struct Derived : Base<Derived> { 
+  void Impl(); 
+}; 
+ 
+int main() { 
+  Derived d = Derived(); 
+  d.some_interface_fun(); 
+}"
+eTZd5hH7,N_2,Mastanka,C++,Monday 8th of January 2024 09:13:40 AM CDT,"#include <iostream>
+
+struct Base {
+  int x_;
+};
+
+struct Derived: Base {
+  int y_;
+  Derived(int x, int y) {
+    Base::x_ = x;
+    y_ = y;
+  }
+};
+
+int main() {
+  Derived d(555, 1);
+  std::cout << d.Base::x_ << ' ' << d.x_ << ' ' << d.y_ << std::endl;
+  return 0;
+}
+"
+2kHZSsng,Untitled,suburg,PostgreSQL,Monday 8th of January 2024 09:03:03 AM CDT,"WITH input_id AS
+(
+	SELECT 
+		ce.id AS ce_id,
+		ce.sequence_number,
+		ROW_NUMBER() OVER (ORDER BY sequence_number DESC) AS rn
+	FROM
+		administrations.contract con
+		INNER JOIN administrations.contract_edition ce ON con.id = ce.contract_id
+	WHERE 
+		-- Вставить идентификатор договора сюда. Выгрузится последняя редакция
+		con.id = '77bea8e2-4f02-45a9-a94c-cd6e27045284')
+SELECT
+	'<?xml version=""1.0"" encoding=""utf-8""?>' || E'\n' ||
+	'<Contract xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xmlns:xsd=""http://www.w3.org/2001/XMLSchema""' || 
+	' Number=""' || ce_first.""number""  || '"" Date=""' || ce_first.date_conclusion || '""' ||
+	CASE WHEN ce.sequence_number > 1 THEN
+	' SupplementaryAgreementNumber=""'|| ce.""number"" || '"" SupplementaryAgreementDate=""' || ce.date_conclusion || '""' ELSE '' END ||
+	' SchoolNumber=""' || eo.code || '"" SchoolName=""' || REPLACE(o.full_title, '""', '&quot;') || '"" ' ||
+	' FeedOrganizationName=""' || REPLACE(feed_o.full_title, '""', '&quot;') || '"" ' ||
+	' StartDate=""' || ce.date_from || '"" EndDate=""' || ce.date_to || '"" xmlns=""urn:ekburg.ru:feed:Contract:1.0"">' || E'\n' ||
+
+	'<School RegistrationName=""' || REPLACE(o.full_title, '""', '&quot;') || '"" ShortName=""' || REPLACE(COALESCE(o.short_title, 'не указано'), '""', '&quot;') || 
+	'"" Address=""' || REPLACE(o.address, '""', '&quot;') || '"" INN=""' || o.inn || '"" KPP=""' || o.kpp || 
+	'"" PayeeName=""' || eo.parent_payment_info || '"" AccountNumber=""03234643657010006200"" BIK=""016577551"" CorrespondenceNumber=""40102810645370000054"" Bank=""Уральское ГУ Банка России//УФК по Свердловской области г. Екатеринбург"" />' || E'\n' ||
+
+	'<FeedOrganization RegistrationName=""' || REPLACE(feed_o.full_title, '""', '&quot;') || '"" ShortName=""' || REPLACE(COALESCE(feed_o.short_title, 'не указано'), '""', '&quot;') || 
+	'"" Address=""' || REPLACE(feed_o.address, '""', '&quot;') || '"" INN=""' || feed_o.inn || '"" KPP=""' || feed_o.kpp ||
+	'"" PayeeName=""' || REPLACE(COALESCE(feed_o.short_title, feed_o.full_title), '""', '&quot;') || '"" AccountNumber=""' || bank_account.account_number || 
+	'"" BIK=""' || bank_account.bik || '"" CorrespondenceNumber=""' || bank_account.corr_account_number || '"" Bank=""' || REPLACE(bank_account.bank_name, '""', '&quot;') || '"" />' || E'\n' ||
+
+	'' || fo.fo_list || E'\n' ||
+	'</Contract>'
+FROM
+	input_id
+	INNER JOIN administrations.contract_edition ce ON ce.id = input_id.ce_id AND input_id.rn = 1
+	INNER JOIN administrations.contract con ON con.id = ce.contract_id
+	INNER JOIN administrations.bank_account ON bank_account.id = ce.bank_account_id
+	INNER JOIN administrations.contract_edition ce_first ON ce_first.contract_id = con.id AND ce_first.sequence_number = 1
+	INNER JOIN administrations.organization o ON con.educational_organization_id = o.id
+	INNER JOIN administrations.educational_organization eo ON o.educational_id = eo.id
+	INNER JOIN administrations.organization feed_o ON feed_o.id = con.catering_organization_id
+	INNER JOIN LATERAL (
+		SELECT
+			STRING_AGG (DISTINCT
+				'<FeedComplex Name=""' || cfo.name || '"" ' || 
+				' ParentPrice=""' || COALESCE(cfo.parent_money, 0) || '"" BudgetPrice=""' || COALESCE(cfo.subsidy_money, 0) || '"" ' || 
+				CASE WHEN cfo.products_cost IS NOT NULL 
+					THEN ' ProductSet=""' || cfo.products_cost || '"" Markup=""' || cfo.margin || '"" '
+					ELSE  ''
+				END ||				
+				' ClassFrom=""' || cfo.minimum_class || '"" ClassTo=""' || cfo.maximum_class || '"" ' || 
+				CASE WHEN cfo.subsidy_money IS NOT NULL 
+					THEN ' IsCorrection=""' || CASE WHEN subsidy_pc.is_two_meals THEN 'true' ELSE 'false' END || 
+						'"" IsInvalid=""' || CASE WHEN subsidy_pc.invalid = 1 THEN 'true' ELSE 'false' END || '"" ' || 
+						' IsLargeFamily=""' || CASE WHEN subsidy_pc.large_family = 1 THEN 'true' ELSE 'false' END || '"" ' ||
+						' IsLowIncome=""' ||  CASE WHEN subsidy_pc.swo + subsidy_pc.ukraine_resident + subsidy_pc.low_income + subsidy_pc.military_children >= 1 THEN 'true' ELSE 'false' END || '"" ' ||
+						' IsOrphan=""' || CASE WHEN subsidy_pc.orphan = 1 THEN 'true' ELSE 'false' END || '""' 
+					ELSE ''
+				END ||
+				' PortionCount=""' || cfo.max_portion_count || '"" />',
+				E'\n'
+			) as fo_list
+		FROM
+			administrations.contract_feeding_option cfo
+			LEFT JOIN (
+				SELECT
+					subsidy.id AS subsidy_id,
+					subsidy.is_two_meals,
+					MAX(CASE WHEN privilege_category.code = 'LargeFamily' THEN 1 ELSE 0 END) AS large_family,
+					MAX(CASE WHEN privilege_category.code = 'UkraineResident' THEN 1 ELSE 0 END) AS ukraine_resident,
+					MAX(CASE WHEN privilege_category.code = 'LowIncome' THEN 1 ELSE 0 END) AS low_income,
+					MAX(CASE WHEN privilege_category.code = 'MilitaryChildren' THEN 1 ELSE 0 END) AS military_children,
+					MAX(CASE WHEN privilege_category.code = 'Invalid' THEN 1 ELSE 0 END) AS invalid,
+					MAX(CASE WHEN privilege_category.code = 'Orphan' THEN 1 ELSE 0 END) AS orphan,
+					MAX(CASE WHEN privilege_category.code = 'SWO' THEN 1 ELSE 0 END) AS swo
+				FROM 
+					administrations.subsidy 
+					INNER JOIN administrations.subsidy_privilege_category subsidy_pc ON subsidy_pc.subsidy_id = subsidy.id
+					INNER JOIN administrations.privilege_category ON privilege_category.id = subsidy_pc.privilege_category_id
+				GROUP BY
+					subsidy.id
+			) subsidy_pc ON subsidy_pc.subsidy_id = cfo.subsidy_id			
+		WHERE
+			cfo.contract_edition_id = ce.id
+		GROUP BY
+			cfo.contract_edition_id
+	) fo ON TRUE;"
+xvLaT45u,News Jan8 24,Newscaster_Ned,Email,Monday 8th of January 2024 08:46:40 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎e‎r‎e‎'‎s‎ ‎t‎h‎e‎ ‎n‎e‎w‎s‎ ‎a‎g‎a‎i‎n‎.‎
+
+R‎e‎p‎u‎b‎l‎i‎c‎a‎n‎ ‎S‎t‎e‎v‎e‎ ‎G‎a‎r‎v‎e‎y‎ ‎V‎a‎u‎l‎t‎s‎ ‎i‎n‎t‎o‎ ‎S‎e‎c‎o‎n‎d‎ ‎P‎l‎a‎c‎e‎ ‎i‎n‎ ‎C‎a‎l‎i‎f‎o‎r‎n‎i‎a‎ ‎S‎e‎n‎a‎t‎e‎ ‎R‎a‎c‎e‎
+W‎a‎r‎ ‎w‎i‎t‎h‎ ‎H‎e‎z‎b‎o‎l‎l‎a‎h‎ ‎L‎o‎o‎m‎s‎ ‎a‎s‎ ‎B‎l‎i‎n‎k‎e‎n‎ ‎V‎i‎s‎i‎t‎s‎ ‎I‎s‎r‎a‎e‎l‎
+F‎a‎r‎m‎e‎r‎s‎ ‎R‎e‎v‎o‎l‎t‎!‎ ‎T‎r‎a‎c‎t‎o‎r‎ ‎P‎r‎o‎t‎e‎s‎t‎s‎ ‎B‎r‎i‎n‎g‎ ‎G‎e‎r‎m‎a‎n‎y‎ ‎t‎o‎ ‎S‎t‎a‎n‎d‎s‎t‎i‎l‎l‎
+D‎i‎s‎n‎e‎y‎ ‎H‎u‎l‎u‎'‎s‎ ‎'‎1‎6‎1‎9‎ ‎P‎r‎o‎j‎e‎c‎t‎'‎ ‎D‎o‎c‎u‎s‎e‎r‎i‎e‎s‎ ‎W‎i‎n‎s‎ ‎E‎m‎m‎y‎ ‎f‎o‎r‎ ‎N‎i‎k‎o‎l‎e‎ ‎H‎a‎n‎n‎a‎h‎-‎J‎o‎n‎e‎s‎
+O‎b‎a‎m‎a‎ ‎B‎e‎a‎t‎s‎ ‎M‎o‎r‎g‎a‎n‎ ‎F‎r‎e‎e‎m‎a‎n‎ ‎t‎o‎ ‎W‎i‎n‎ ‎S‎e‎c‎o‎n‎d‎ ‎E‎m‎m‎y‎ ‎f‎o‎r‎ ‎B‎e‎s‎t‎ ‎N‎a‎r‎r‎a‎t‎o‎r‎
+N‎e‎v‎a‎d‎a‎ ‎J‎u‎d‎g‎e‎ ‎A‎t‎t‎a‎c‎k‎e‎d‎ ‎b‎y‎ ‎D‎e‎f‎e‎n‎d‎a‎n‎t‎ ‎i‎n‎ ‎C‎o‎u‎r‎t‎r‎o‎o‎m‎ ‎t‎o‎ ‎F‎a‎c‎e‎ ‎A‎t‎t‎a‎c‎k‎e‎r‎ ‎a‎g‎a‎i‎n‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+F‎a‎r‎m‎e‎r‎s‎ ‎R‎e‎v‎o‎l‎t‎!‎
+
+T‎r‎a‎c‎t‎o‎r‎s‎ ‎—‎ ‎a‎n‎d‎ ‎T‎r‎u‎c‎k‎e‎r‎s‎ ‎—‎ ‎B‎r‎i‎n‎g‎ ‎G‎e‎r‎m‎a‎n‎y‎ ‎t‎o‎ ‎S‎t‎a‎n‎d‎s‎t‎i‎l‎l‎ ‎o‎v‎e‎r‎ ‎G‎o‎v‎e‎r‎n‎m‎e‎n‎t‎’‎s‎ ‎G‎l‎o‎b‎a‎l‎i‎s‎t‎ ‎A‎g‎e‎n‎d‎a‎
+F‎a‎r‎m‎e‎r‎s‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎i‎r‎ ‎t‎r‎a‎c‎t‎o‎r‎s‎ ‎s‎t‎a‎n‎d‎ ‎a‎t‎ ‎O‎d‎e‎o‎n‎s‎p‎l‎a‎t‎z‎ ‎s‎q‎u‎a‎r‎e‎ ‎i‎n‎ ‎t‎h‎e‎ ‎c‎i‎t‎y‎ ‎c‎e‎n‎t‎e‎r‎ ‎t‎o‎ ‎t‎a‎k‎e‎ ‎p‎a‎r‎t‎ ‎i‎n‎ ‎p‎r‎o‎t‎e‎s‎t‎s‎ ‎a‎g‎a‎i‎n‎s‎t‎ ‎t‎h‎e‎ ‎f‎e‎d‎e‎r‎a‎l‎ ‎g‎o‎v‎e‎r‎n‎m‎e‎n‎t‎'‎s‎ ‎a‎u‎s‎t‎e‎r‎i‎t‎y‎ ‎p‎l‎a‎n‎s‎ ‎i‎n‎ ‎M‎u‎n‎i‎c‎h‎,‎ ‎s‎o‎u‎t‎h‎e‎r‎n‎ ‎G‎e‎r‎m‎a‎n‎y‎,‎ ‎o‎n‎ ‎J‎a‎n‎u‎a‎r‎y‎ ‎8‎,‎ ‎2‎0‎2‎4‎.‎ ‎T‎h‎e‎ ‎G‎e‎r‎m‎a‎n‎ ‎g‎o‎v‎e‎r‎n‎m‎e‎n‎t‎ ‎o‎n‎ ‎J‎a‎n‎u‎a‎r‎y‎ ‎4‎,‎ ‎2‎0‎2‎4‎ ‎h‎a‎d‎ ‎d‎r‎o‎p‎p‎e‎d‎ ‎p‎a‎r‎t‎ ‎o‎f‎ ‎i‎t‎s‎ ‎p‎l‎a‎n‎s‎ ‎t‎o‎ ‎c‎u‎t‎ ‎a‎g‎r‎i‎c‎u‎l‎t‎u‎r‎a‎l‎ ‎s‎u‎b‎s‎i‎d‎i‎e‎s‎ ‎i‎n‎ ‎t‎h‎e‎ ‎…‎
+F‎a‎r‎m‎e‎r‎s‎ ‎b‎r‎o‎u‎g‎h‎t‎ ‎G‎e‎r‎m‎a‎n‎y‎ ‎t‎o‎ ‎a‎ ‎s‎t‎a‎n‎d‎s‎t‎i‎l‎l‎ ‎w‎i‎t‎h‎ ‎t‎r‎a‎c‎t‎o‎r‎ ‎p‎r‎o‎t‎e‎s‎t‎s‎ ‎i‎n‎ ‎r‎e‎s‎p‎o‎n‎s‎e‎ ‎t‎o‎ ‎g‎l‎o‎b‎a‎l‎i‎s‎t‎ ‎p‎o‎l‎i‎c‎i‎e‎s‎ ‎o‎f‎ ‎C‎h‎a‎n‎c‎e‎l‎l‎o‎r‎ ‎O‎l‎a‎f‎ ‎S‎c‎h‎o‎l‎z‎.‎
+
+S‎a‎i‎n‎t‎s‎ ‎P‎l‎a‎y‎e‎r‎s‎ ‎D‎e‎f‎y‎ ‎T‎h‎e‎i‎r‎ ‎O‎w‎n‎ ‎C‎o‎a‎c‎h‎e‎s‎ ‎a‎n‎d‎ ‎S‎c‎o‎r‎e‎ ‎f‎r‎o‎m‎ ‎K‎n‎e‎e‎l‎-‎D‎o‎w‎n‎ ‎F‎o‎r‎m‎a‎t‎i‎o‎n‎,‎
+S‎a‎i‎n‎t‎s‎ ‎P‎l‎a‎y‎e‎r‎s‎ ‎D‎e‎f‎y‎ ‎T‎h‎e‎i‎r‎ ‎O‎w‎n‎ ‎C‎o‎a‎c‎h‎e‎s‎ ‎a‎n‎d‎ ‎S‎c‎o‎r‎e‎ ‎f‎r‎o‎m‎ ‎K‎n‎e‎e‎l‎-‎D‎o‎w‎n‎ ‎F‎o‎r‎m‎a‎t‎i‎o‎n‎,‎
+3‎0‎6‎
+L‎l‎o‎y‎d‎ ‎A‎u‎s‎t‎i‎n‎ ‎H‎i‎d‎i‎n‎g‎ ‎H‎i‎s‎ ‎H‎o‎s‎p‎i‎t‎a‎l‎i‎z‎a‎t‎i‎o‎n‎ ‎f‎r‎o‎m‎ ‎B‎i‎d‎e‎n‎,‎ ‎O‎t‎h‎e‎r‎s‎,‎ ‎R‎o‎c‎k‎s‎ ‎D‎.‎C‎.‎
+L‎l‎o‎y‎d‎ ‎A‎u‎s‎t‎i‎n‎ ‎H‎i‎d‎i‎n‎g‎ ‎H‎i‎s‎ ‎H‎o‎s‎p‎i‎t‎a‎l‎i‎z‎a‎t‎i‎o‎n‎ ‎f‎r‎o‎m‎ ‎B‎i‎d‎e‎n‎,‎ ‎O‎t‎h‎e‎r‎s‎,‎ ‎R‎o‎c‎k‎s‎ ‎D‎.‎C‎.‎
+7‎0‎1‎
+W‎i‎c‎k‎e‎r‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎a‎ ‎B‎r‎i‎e‎f‎i‎n‎g‎ ‎A‎f‎t‎e‎r‎ ‎t‎h‎e‎ ‎P‎e‎n‎t‎a‎g‎o‎n‎ ‎H‎i‎d‎ ‎A‎u‎s‎t‎i‎n‎'‎s‎ ‎H‎o‎s‎p‎i‎t‎a‎l‎i‎z‎a‎t‎i‎o‎n‎
+W‎i‎c‎k‎e‎r‎ ‎C‎a‎l‎l‎s‎ ‎f‎o‎r‎ ‎a‎ ‎B‎r‎i‎e‎f‎i‎n‎g‎ ‎A‎f‎t‎e‎r‎ ‎t‎h‎e‎ ‎P‎e‎n‎t‎a‎g‎o‎n‎ ‎H‎i‎d‎ ‎A‎u‎s‎t‎i‎n‎'‎s‎ ‎H‎o‎s‎p‎i‎t‎a‎l‎i‎z‎a‎t‎i‎o‎n‎
+5‎,‎1‎4‎7‎
+G‎o‎l‎d‎e‎n‎ ‎G‎l‎o‎b‎e‎s‎ ‎H‎o‎s‎t‎ ‎J‎o‎ ‎K‎o‎y‎ ‎O‎p‎e‎n‎i‎n‎g‎ ‎M‎o‎n‎o‎l‎o‎g‎u‎e‎ ‎T‎r‎a‎s‎h‎e‎d‎ ‎b‎y‎ ‎V‎i‎e‎w‎e‎r‎s‎
+G‎o‎l‎d‎e‎n‎ ‎G‎l‎o‎b‎e‎s‎ ‎H‎o‎s‎t‎ ‎J‎o‎ ‎K‎o‎y‎ ‎O‎p‎e‎n‎i‎n‎g‎ ‎M‎o‎n‎o‎l‎o‎g‎u‎e‎ ‎T‎r‎a‎s‎h‎e‎d‎ ‎b‎y‎ ‎V‎i‎e‎w‎e‎r‎s‎
+7‎7‎0‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎-‎-‎T‎r‎u‎m‎p‎ ‎o‎n‎ ‎M‎i‎l‎e‎i‎,‎ ‎I‎n‎t‎e‎r‎n‎a‎t‎i‎o‎n‎a‎l‎ ‎P‎o‎p‎u‎l‎i‎s‎t‎ ‎W‎i‎n‎s‎:‎ ‎'‎S‎t‎r‎o‎n‎g‎e‎r‎'‎ ‎t‎h‎a‎n‎ ‎'‎1‎6‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎-‎-‎T‎r‎u‎m‎p‎ ‎o‎n‎ ‎M‎i‎l‎e‎i‎,‎ ‎I‎n‎t‎e‎r‎n‎a‎t‎i‎o‎n‎a‎l‎ ‎P‎o‎p‎u‎l‎i‎s‎t‎ ‎W‎i‎n‎s‎:‎ ‎'‎S‎t‎r‎o‎n‎g‎e‎r‎'‎ ‎t‎h‎a‎n‎ ‎'‎1‎6‎
+4‎,‎4‎6‎1‎
+T‎r‎u‎m‎p‎ ‎T‎e‎l‎l‎s‎ ‎B‎i‎d‎e‎n‎ ‎t‎o‎ ‎F‎i‎r‎e‎ ‎L‎l‎o‎y‎d‎ ‎A‎u‎s‎t‎i‎n‎ ‎f‎o‎r‎ ‎'‎I‎m‎p‎r‎o‎p‎e‎r‎ ‎P‎r‎o‎f‎e‎s‎s‎i‎o‎n‎a‎l‎ ‎C‎o‎n‎d‎u‎c‎t‎'‎
+T‎r‎u‎m‎p‎ ‎T‎e‎l‎l‎s‎ ‎B‎i‎d‎e‎n‎ ‎t‎o‎ ‎F‎i‎r‎e‎ ‎L‎l‎o‎y‎d‎ ‎A‎u‎s‎t‎i‎n‎ ‎f‎o‎r‎ ‎'‎I‎m‎p‎r‎o‎p‎e‎r‎ ‎P‎r‎o‎f‎e‎s‎s‎i‎o‎n‎a‎l‎ ‎C‎o‎n‎d‎u‎c‎t‎'‎
+2‎,‎4‎8‎1‎
+W‎h‎i‎t‎e‎ ‎H‎o‎u‎s‎e‎ ‎M‎a‎y‎ ‎C‎u‎r‎b‎ ‎'‎P‎a‎r‎o‎l‎e‎'‎ ‎M‎i‎g‎r‎a‎t‎i‎o‎n‎ ‎t‎o‎ ‎G‎e‎t‎ ‎D‎e‎a‎l‎ ‎w‎i‎t‎h‎ ‎G‎O‎P‎
+W‎h‎i‎t‎e‎ ‎H‎o‎u‎s‎e‎ ‎M‎a‎y‎ ‎C‎u‎r‎b‎ ‎'‎P‎a‎r‎o‎l‎e‎'‎ ‎M‎i‎g‎r‎a‎t‎i‎o‎n‎ ‎t‎o‎ ‎G‎e‎t‎ ‎D‎e‎a‎l‎ ‎w‎i‎t‎h‎ ‎G‎O‎P‎
+7‎4‎
+R‎u‎s‎s‎i‎a‎ ‎L‎a‎u‎n‎c‎h‎e‎s‎ ‎F‎r‎e‎s‎h‎ ‎W‎a‎v‎e‎ ‎o‎f‎ ‎M‎i‎s‎s‎i‎l‎e‎ ‎S‎t‎r‎i‎k‎e‎s‎ ‎A‎g‎a‎i‎n‎s‎t‎ ‎U‎k‎r‎a‎i‎n‎e‎
+R‎u‎s‎s‎i‎a‎ ‎L‎a‎u‎n‎c‎h‎e‎s‎ ‎F‎r‎e‎s‎h‎ ‎W‎a‎v‎e‎ ‎o‎f‎ ‎M‎i‎s‎s‎i‎l‎e‎ ‎S‎t‎r‎i‎k‎e‎s‎ ‎A‎g‎a‎i‎n‎s‎t‎ ‎U‎k‎r‎a‎i‎n‎e‎
+4‎7‎
+D‎N‎C‎ ‎C‎a‎l‎l‎s‎ ‎N‎e‎w‎ ‎H‎a‎m‎p‎s‎h‎i‎r‎e‎ ‎P‎r‎i‎m‎a‎r‎y‎ ‎P‎r‎o‎c‎e‎s‎s‎ ‎'‎D‎e‎t‎r‎i‎m‎e‎n‎t‎a‎l‎'‎
+D‎N‎C‎ ‎C‎a‎l‎l‎s‎ ‎N‎e‎w‎ ‎H‎a‎m‎p‎s‎h‎i‎r‎e‎ ‎P‎r‎i‎m‎a‎r‎y‎ ‎P‎r‎o‎c‎e‎s‎s‎ ‎'‎D‎e‎t‎r‎i‎m‎e‎n‎t‎a‎l‎'‎
+2‎4‎3‎
+S‎C‎O‎T‎U‎S‎ ‎B‎l‎o‎c‎k‎s‎ ‎B‎i‎d‎e‎n‎ ‎A‎d‎m‎i‎n‎'‎s‎ ‎E‎R‎ ‎D‎o‎c‎t‎o‎r‎ ‎A‎b‎o‎r‎t‎i‎o‎n‎ ‎R‎u‎l‎e‎ ‎i‎n‎ ‎I‎d‎a‎h‎o‎
+S‎C‎O‎T‎U‎S‎ ‎B‎l‎o‎c‎k‎s‎ ‎B‎i‎d‎e‎n‎ ‎A‎d‎m‎i‎n‎'‎s‎ ‎E‎R‎ ‎D‎o‎c‎t‎o‎r‎ ‎A‎b‎o‎r‎t‎i‎o‎n‎ ‎R‎u‎l‎e‎ ‎i‎n‎ ‎I‎d‎a‎h‎o‎
+
+N‎e‎g‎r‎o‎i‎d‎ ‎K‎i‎l‎l‎s‎ ‎W‎h‎i‎t‎e‎ ‎P‎o‎l‎i‎c‎e‎ ‎O‎f‎f‎i‎c‎e‎r‎ ‎i‎n‎ ‎R‎a‎n‎c‎h‎o‎ ‎C‎o‎r‎d‎o‎v‎a‎.‎
+
+D‎o‎n‎'‎t‎ ‎w‎o‎r‎r‎y‎ ‎a‎b‎o‎u‎t‎ ‎b‎l‎a‎c‎k‎s‎.‎ ‎T‎h‎e‎y‎ ‎d‎o‎n‎'‎t‎ ‎u‎s‎u‎a‎l‎l‎y‎ ‎h‎a‎t‎e‎ ‎t‎h‎e‎ ‎p‎o‎l‎i‎c‎e‎.‎
+
+
+T‎h‎i‎r‎d‎ ‎N‎W‎o‎r‎d‎ ‎B‎u‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎B‎r‎i‎g‎h‎t‎o‎n‎ ‎H‎o‎m‎e‎ ‎I‎n‎v‎a‎s‎i‎o‎n‎.‎
+
+
+P‎o‎r‎t‎l‎a‎n‎d‎ ‎K‎F‎C‎l‎i‎p‎s‎ ‎B‎r‎e‎a‎k‎s‎ ‎i‎n‎t‎o‎ ‎E‎l‎d‎e‎r‎l‎y‎ ‎W‎o‎m‎a‎n‎'‎s‎ ‎H‎o‎m‎e‎ ‎a‎n‎d‎ ‎R‎a‎p‎e‎s‎ ‎H‎e‎r‎.‎
+
+
+P‎a‎c‎k‎ ‎o‎f‎ ‎N‎i‎g‎l‎e‎t‎s‎ ‎B‎r‎e‎a‎k‎ ‎i‎n‎t‎o‎ ‎H‎o‎u‎s‎t‎o‎n‎ ‎H‎o‎m‎e‎ ‎a‎n‎d‎ ‎A‎t‎t‎a‎c‎k‎ ‎a‎ ‎B‎u‎n‎c‎h‎ ‎o‎f‎ ‎P‎e‎o‎p‎l‎e‎,‎ ‎I‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎E‎l‎d‎e‎r‎l‎y‎ ‎M‎a‎n‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎/‎W‎i‎n‎d‎
+7‎0‎°‎
+/‎3‎9‎°‎
+7‎0‎%‎
+S‎W‎ ‎2‎1‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎8‎ ‎|‎ ‎D‎a‎y‎
+7‎0‎°‎
+7‎0‎%‎
+S‎W‎
+2‎1‎
+ ‎
+m‎p‎h‎
+B‎e‎c‎o‎m‎i‎n‎g‎ ‎w‎i‎n‎d‎y‎ ‎w‎i‎t‎h‎ ‎s‎h‎o‎w‎e‎r‎s‎ ‎a‎n‎d‎ ‎s‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎t‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎.‎ ‎H‎i‎g‎h‎ ‎n‎e‎a‎r‎ ‎7‎0‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎S‎W‎ ‎a‎t‎ ‎2‎0‎ ‎t‎o‎ ‎3‎0‎ ‎m‎p‎h‎.‎ ‎C‎h‎a‎n‎c‎e‎ ‎o‎f‎ ‎r‎a‎i‎n‎ ‎7‎0‎%‎.‎ ‎W‎i‎n‎d‎s‎ ‎c‎o‎u‎l‎d‎ ‎o‎c‎c‎a‎s‎i‎o‎n‎a‎l‎l‎y‎ ‎g‎u‎s‎t‎ ‎o‎v‎e‎r‎ ‎4‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+7‎3‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+3‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎2‎7‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+5‎:‎4‎6‎ ‎p‎m‎
+M‎o‎n‎ ‎0‎8‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+3‎9‎°‎
+3‎%‎
+W‎N‎W‎
+2‎6‎
+ ‎
+m‎p‎h‎
+P‎a‎r‎t‎l‎y‎ ‎c‎l‎o‎u‎d‎y‎ ‎s‎k‎i‎e‎s‎ ‎w‎i‎t‎h‎ ‎g‎u‎s‎t‎y‎ ‎w‎i‎n‎d‎s‎.‎ ‎L‎o‎w‎ ‎3‎9‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎W‎N‎W‎ ‎a‎t‎ ‎2‎5‎ ‎t‎o‎ ‎3‎5‎ ‎m‎p‎h‎.‎ ‎W‎i‎n‎d‎s‎ ‎c‎o‎u‎l‎d‎ ‎o‎c‎c‎a‎s‎i‎o‎n‎a‎l‎l‎y‎ ‎g‎u‎s‎t‎ ‎o‎v‎e‎r‎ ‎4‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+4‎1‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+4‎:‎4‎4‎ ‎a‎m‎
+W‎a‎n‎i‎n‎g‎ ‎C‎r‎e‎s‎c‎e‎n‎t‎
+M‎o‎o‎n‎s‎e‎t‎
+2‎:‎5‎7‎ ‎p‎m‎
+T‎u‎e‎ ‎0‎9‎
+S‎u‎n‎n‎y‎
+5‎9‎°‎
+/‎3‎3‎°‎
+0‎%‎
+N‎W‎ ‎1‎8‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎0‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎8‎°‎
+/‎4‎7‎°‎
+1‎%‎
+S‎S‎W‎ ‎1‎6‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎6‎°‎
+/‎4‎6‎°‎
+1‎4‎%‎
+S‎ ‎1‎5‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎2‎
+S‎u‎n‎n‎y‎
+5‎6‎°‎
+/‎3‎3‎°‎
+0‎%‎
+N‎W‎ ‎1‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎3‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+6‎1‎°‎
+/‎3‎8‎°‎
+0‎%‎
+S‎S‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎4‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎6‎°‎
+/‎3‎7‎°‎
+8‎%‎
+S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎5‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+4‎8‎°‎
+/‎2‎2‎°‎
+2‎4‎%‎
+N‎ ‎1‎6‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎6‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+4‎5‎°‎
+/‎2‎6‎°‎
+6‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎7‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎6‎°‎
+/‎4‎0‎°‎
+1‎%‎
+S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎8‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎3‎°‎
+/‎4‎0‎°‎
+1‎7‎%‎
+N‎N‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎9‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎0‎°‎
+/‎3‎6‎°‎
+8‎%‎
+N‎ ‎1‎1‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎2‎0‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎8‎°‎
+/‎3‎9‎°‎
+2‎%‎
+N‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎2‎1‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎2‎°‎
+/‎4‎4‎°‎
+1‎2‎%‎
+E‎S‎E‎ ‎9‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎2‎2‎
+S‎h‎o‎w‎e‎r‎s‎
+6‎3‎°‎
+/‎4‎3‎°‎
+4‎2‎%‎
+E‎ ‎1‎0‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎K‎e‎t‎a‎m‎i‎n‎e‎.‎ ‎🧴
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+T‎r‎a‎n‎s‎p‎h‎o‎b‎i‎a‎
+T‎r‎a‎n‎s‎p‎h‎o‎b‎i‎a‎ ‎i‎s‎ ‎a‎ ‎b‎u‎l‎l‎s‎h‎i‎t‎ ‎t‎e‎r‎m‎ ‎t‎o‎ ‎d‎e‎s‎c‎r‎i‎b‎e‎ ‎e‎v‎e‎r‎y‎ ‎p‎e‎r‎s‎o‎n‎ ‎w‎h‎o‎ ‎i‎s‎n‎'‎t‎ ‎t‎r‎a‎n‎s‎g‎e‎n‎d‎e‎r‎e‎d‎.‎ ‎B‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎e‎ ‎o‎n‎l‎y‎ ‎w‎a‎y‎ ‎t‎o‎ ‎n‎o‎t‎ ‎b‎e‎ ‎t‎r‎a‎n‎s‎p‎h‎o‎b‎i‎c‎ ‎i‎s‎ ‎t‎o‎ ‎b‎e‎ ‎t‎r‎a‎n‎s‎g‎e‎n‎d‎e‎r‎e‎d‎,‎ ‎a‎n‎d‎ ‎e‎v‎e‎n‎ ‎t‎h‎e‎n‎,‎ ‎i‎f‎ ‎y‎o‎u‎ ‎d‎i‎s‎a‎g‎r‎e‎e‎ ‎t‎h‎a‎t‎ ‎e‎v‎e‎r‎y‎ ‎n‎o‎n‎-‎t‎r‎a‎n‎n‎y‎ ‎i‎s‎ ‎t‎r‎a‎n‎s‎p‎h‎o‎b‎i‎c‎,‎ ‎y‎o‎u‎ ‎a‎r‎e‎ ‎p‎e‎r‎p‎e‎t‎u‎a‎t‎i‎n‎g‎ ‎t‎h‎e‎ ‎t‎r‎a‎n‎s‎p‎h‎o‎b‎i‎a‎ ‎y‎o‎u‎ ‎h‎a‎v‎e‎ ‎f‎o‎r‎ ‎y‎o‎u‎r‎s‎e‎l‎f‎.‎ ‎T‎r‎a‎n‎s‎p‎h‎o‎b‎i‎a‎ ‎r‎e‎f‎e‎r‎s‎ ‎t‎o‎ ‎t‎h‎e‎ ‎r‎e‎a‎s‎o‎n‎a‎b‎l‎e‎ ‎f‎e‎a‎r‎ ‎o‎f‎ ‎t‎h‎e‎ ‎a‎b‎o‎m‎i‎n‎a‎t‎i‎o‎n‎s‎ ‎t‎h‎a‎t‎ ‎a‎r‎e‎ ‎t‎r‎a‎n‎n‎i‎e‎s‎ ‎i‎n‎ ‎a‎n‎y‎ ‎s‎h‎a‎p‎e‎ ‎o‎r‎ ‎f‎o‎r‎m‎.‎ ‎P‎e‎o‎p‎l‎e‎ ‎w‎h‎o‎ ‎s‎u‎f‎f‎e‎r‎ ‎f‎r‎o‎m‎ ‎t‎h‎i‎s‎ ‎a‎r‎e‎ ‎s‎c‎a‎r‎e‎d‎ ‎o‎f‎ ‎h‎a‎t‎e‎ ‎g‎e‎n‎d‎e‎r‎-‎c‎o‎n‎f‎u‎s‎e‎d‎ ‎m‎e‎n‎t‎a‎l‎ ‎c‎a‎s‎e‎s‎,‎ ‎a‎n‎d‎ ‎w‎o‎u‎l‎d‎ ‎k‎i‎l‎l‎ ‎t‎h‎e‎m‎ ‎i‎f‎ ‎t‎h‎e‎y‎ ‎c‎o‎u‎l‎d‎,‎ ‎l‎i‎k‎e‎ ‎a‎n‎y‎ ‎g‎o‎o‎d‎ ‎a‎m‎e‎r‎i‎c‎a‎n‎.‎
+
+(‎(‎ ‎T‎e‎r‎f‎s‎ ‎m‎u‎s‎t‎ ‎d‎i‎e‎!‎!‎!‎1‎1‎!‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+T‎h‎e‎ ‎c‎o‎m‎m‎o‎n‎ ‎b‎l‎a‎c‎k‎ ‎h‎a‎w‎k‎ ‎(‎B‎u‎t‎e‎o‎g‎a‎l‎l‎u‎s‎ ‎a‎n‎t‎h‎r‎a‎c‎i‎n‎u‎s‎)‎ ‎i‎s‎ ‎a‎ ‎b‎i‎r‎d‎ ‎o‎f‎ ‎p‎r‎e‎y‎ ‎i‎n‎ ‎t‎h‎e‎ ‎f‎a‎m‎i‎l‎y‎ ‎A‎c‎c‎i‎p‎i‎t‎r‎i‎d‎a‎e‎,‎ ‎w‎h‎i‎c‎h‎ ‎a‎l‎s‎o‎ ‎i‎n‎c‎l‎u‎d‎e‎s‎ ‎t‎h‎e‎ ‎e‎a‎g‎l‎e‎s‎,‎ ‎h‎a‎w‎k‎s‎,‎ ‎a‎n‎d‎ ‎O‎l‎d‎ ‎W‎o‎r‎l‎d‎ ‎v‎u‎l‎t‎u‎r‎e‎s‎.‎ ‎T‎h‎e‎ ‎m‎a‎n‎g‎r‎o‎v‎e‎ ‎b‎l‎a‎c‎k‎ ‎h‎a‎w‎k‎,‎ ‎t‎r‎a‎d‎i‎t‎i‎o‎n‎a‎l‎l‎y‎ ‎t‎h‎o‎u‎g‎h‎t‎ ‎t‎o‎ ‎b‎e‎ ‎a‎ ‎d‎i‎s‎t‎i‎n‎c‎t‎ ‎s‎p‎e‎c‎i‎e‎s‎,‎ ‎i‎s‎ ‎n‎o‎w‎ ‎g‎e‎n‎e‎r‎a‎l‎l‎y‎ ‎c‎o‎n‎s‎i‎d‎e‎r‎e‎d‎ ‎a‎ ‎s‎u‎b‎s‎p‎e‎c‎i‎e‎s‎,‎ ‎B‎.‎ ‎a‎.‎ ‎s‎u‎b‎t‎i‎l‎i‎s‎,‎ ‎o‎f‎ ‎t‎h‎e‎ ‎c‎o‎m‎m‎o‎n‎ ‎b‎l‎a‎c‎k‎ ‎h‎a‎w‎k‎.‎
+
+T‎h‎i‎s‎ ‎p‎i‎c‎t‎u‎r‎e‎ ‎s‎h‎o‎w‎s‎ ‎a‎ ‎b‎i‎r‎d‎ ‎o‎f‎ ‎t‎h‎e‎ ‎B‎u‎t‎e‎o‎g‎a‎l‎l‎u‎s‎ ‎a‎n‎t‎h‎r‎a‎c‎i‎n‎u‎s‎ ‎g‎u‎n‎d‎l‎a‎c‎h‎i‎i‎ ‎s‎u‎b‎s‎p‎e‎c‎i‎e‎s‎,‎ ‎i‎n‎ ‎C‎u‎b‎a‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎:‎ ‎C‎h‎a‎r‎l‎e‎s‎ ‎J‎.‎ ‎S‎h‎a‎r‎p‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎r‎a‎p‎e‎ ‎s‎o‎m‎e‎ ‎e‎s‎k‎i‎m‎o‎s‎.‎ ‎"
+4e858UXE,邮件批量分发工具,shinemic,Python,Monday 8th of January 2024 08:32:39 AM CDT,"import logging
+import mimetypes
+import os
+import re
+import smtplib
+import socket
+import sys
+import traceback
+from copy import deepcopy
+from email.headerregistry import Address
+from email.message import EmailMessage
+from itertools import groupby
+from operator import itemgetter
+from pathlib import Path
+from typing import Dict, List
+
+import pyexcel
+import tabulate
+
+__version__ = ""1.2.0 (20231019)""
+__author__ = ""科技部 · 牛逼科 · 数智组""
+__email__ = ""mumu@mumu.com""
+
+
+class BatchEmailParseError(Exception):
+    pass
+
+
+class BatchEmailSendError(Exception):
+    pass
+
+
+def _filter_row(row_index, row):
+    """"""
+    过滤空行 helper 函数
+    """"""
+
+    result = [element for element in row if element != """"]
+
+    return len(result) == 0
+
+
+class BatchEmailSender:
+    """"""
+    批量邮件发送
+    """"""
+
+    LOG_FORMAT = ""[%(asctime)s.%(msecs)03d] [%(levelname)5s] | %(message)s""
+    LOG_DATE_FMT = ""%Y-%m-%d %H:%M:%S""
+    LOG_LEVEL = logging.DEBUG
+
+    SENDMAIL_ALL_OPTIONS = {""是否发送"", ""附件干预""}
+
+    def __init__(self, /, **kwargs):
+        """"""
+        批量邮件发送类初始化
+
+        @kwparam       config_file : 邮件分发配置文件（xlsx 文件格式）
+        @kwparam [opt] log_file    : 日志文件路径
+        """"""
+
+        # 运行环境相关信息
+        self.cur_dir = Path(sys.argv[0]).parent
+
+        # 方便起见，构造函数中直接对所有命名参数赋给实例
+        for arg_k, arg_v in kwargs.items():
+            setattr(self, arg_k, arg_v)
+
+        self.set_logger()
+
+        # SMTP 配置组，键为参数配置中的配置名，值为包括 SMTP server 信息的登录信息字典
+        self.smtp_servers: Dict[str, Dict] = {}
+
+    def set_logger(self):
+        """"""
+        日志设置
+        """"""
+
+        if not hasattr(self, ""log_file""):
+            cur_file = Path(sys.argv[0])
+            self.log_file = cur_file.parent / (cur_file.stem + "".log"")
+
+        self.o_logfile = Path(self.log_file)
+        self.o_logfile.parent.mkdir(parents=True, exist_ok=True)
+        self.logger = logging.getLogger(self.o_logfile.stem)
+        self.logger.setLevel(self.LOG_LEVEL)
+        handler = logging.FileHandler(self.o_logfile, encoding=""UTF-8"")
+        handler.setFormatter(logging.Formatter(self.LOG_FORMAT, self.LOG_DATE_FMT))
+        self.logger.addHandler(handler)
+
+        self.logger.info(""-"" * 80)
+        self.logger.info(f""{Path(sys.argv[0]).stem}: 程序开始运行"")
+
+    def parse_config(self):
+        """"""
+        解析 Excel 配置文件
+        """"""
+
+        if not Path(self.config_file).is_file():
+            self.logger.error(f""配置文件 [{self.config_file}] 不存在！"")
+            raise BatchEmailParseError(f""配置文件解析错误：{self.config_file}"")
+            sys.exit(1)
+
+        self.logger.info(f""配置文件解析中 [{self.config_file}]"")
+
+        book = pyexcel.get_book(file_name=self.config_file)
+
+        # 参数表 Sheet 设置
+        self.sheet_config = book[""参数配置""]
+        self.sheet_config.name_columns_by_row(0)
+        del self.sheet_config.row[_filter_row]
+
+        # 仅供日志输出用
+        sheet_config_view = list(self.sheet_config.records)
+        for d in sheet_config_view:
+            d[""登录密码""] = ""******""
+
+        self.logger.debug(
+            ""参数配置信息：\n""
+            + tabulate.tabulate(sheet_config_view, headers=""keys"", tablefmt=""simple"")
+        )
+
+        # 邮件分发信息
+        self.sheet_data = book[""邮件分发""]
+        self.sheet_data.name_columns_by_row(0)
+        del self.sheet_data.row[_filter_row]
+
+        self.logger.info(f""配置文件解析完成"")
+        print(f""配置文件解析完成"")
+
+    def smtp_login(self, timeout=5, /, **login_info):
+        """"""
+        连接至邮箱服务器
+        """"""
+
+        (
+            profile,
+            smtp_host,
+            smtp_port,
+            smtp_ssl,
+            sender_mail,
+            sender_password,
+        ) = itemgetter(""配置名称"", ""邮箱服务器"", ""邮箱服务端口"", ""SSL加密"", ""发件人邮箱"", ""登录密码"")(login_info)
+
+        auth_status = False
+        smtp_info = f""{sender_mail}/******@{smtp_host}:{smtp_port}""
+
+        smtp_method = smtplib.SMTP_SSL if smtp_ssl == ""是"" else smtplib.SMTP
+
+        try:
+            self.logger.info(f""尝试登录至 SMTP 服务器 ({smtp_info})"")
+            server = smtp_method(smtp_host, smtp_port, timeout=timeout)
+            server.login(sender_mail, sender_password)
+        except smtplib.SMTPAuthenticationError:
+            self.logger.error(f""发件人信息配置错误：{smtp_info}"")
+            print(f""发件人信息配置错误，详见日志 {self.o_logfile.resolve()}"")
+        except (smtplib.SMTPConnectError, socket.gaierror):
+            self.logger.error(f""邮箱服务器配置错误：{smtp_info}"")
+            print(f""邮件服务器配置错误，详见日志 {self.o_logfile.resolve()}"")
+        except (socket.timeout, smtplib.SMTPServerDisconnected):
+            self.logger.error(f""连接邮箱服务器超时：{smtp_info}"")
+            print(f""连接邮箱服务器超时，详见日志 {self.o_logfile.resolve()}"")
+        else:
+            print(f""成功连接邮箱服务器 ({smtp_info})\n"")
+            self.logger.info(f""成功连接邮箱服务器 ({smtp_info})"")
+            self.smtp_servers[profile] = {
+                ""server"": server,
+                **login_info,
+            }
+            auth_status = True
+
+        return auth_status
+
+    @staticmethod
+    def _parse_single_option(option_str):
+        """"""
+        解析单条选项
+        """"""
+
+        mat = re.search(r""(\S+)\s*[:：]\s*(\S+)"", option_str)
+        if (
+            mat
+            and len(mat.groups()) == 2
+            and mat.group(1) in BatchEmailSender.SENDMAIL_ALL_OPTIONS
+            and mat.group(2)
+        ):
+            option = {mat.group(1): mat.group(2)}
+            return option
+        else:
+            return dict()
+
+    @staticmethod
+    def parse_options(option_str):
+        """"""
+        解析单元格选项（可为多个）
+        """"""
+
+        options_res = {}
+        raw_options = list(map(str.strip, re.split(r""[\n；;]+"", option_str.strip())))
+        for option in raw_options:
+            options_res.update(BatchEmailSender._parse_single_option(option))
+
+        return options_res
+
+    def run(self):
+        """"""
+        批量发送邮件
+        """"""
+
+        self.parse_config()
+
+        # 发送顺序：对 (发件配置, 序号) 进行排列，每个发件配置内依次发件
+        send_data = list(
+            map(
+                itemgetter(1),
+                (
+                    sorted(
+                        enumerate(self.sheet_data.records),
+                        key=lambda x: (x[1][""发件配置""], x[0]),
+                    )
+                ),
+            )
+        )
+
+        # 无待发邮件
+        if not send_data:
+            print(""无待发邮件，退出程序"")
+            self.logger.warning(""无待发邮件，退出程序"")
+            return
+
+        send_data_view = deepcopy(send_data)
+
+        for record in send_data_view:
+            if len(record[""邮件正文""]) > 60:
+                record[""邮件正文""] = record[""邮件正文""][:30] + "" ... "" + record[""邮件正文""][-30:]
+
+        self.logger.info(
+            ""发件信息：\n""
+            + tabulate.tabulate(
+                send_data_view,
+                headers=""keys"",
+                tablefmt=""simple"",
+                maxcolwidths=[40] * len(self.sheet_data.colnames),
+            )
+        )
+
+        # 邮件发送结果
+        send_result = {}
+
+        self.logger.info(""邮件准备分发中..."")
+        self.logger.info("""")
+        print(""邮件准备分发...\n"")
+
+        # 分组发送邮件
+        for profile, send_info in groupby(send_data, key=itemgetter(""发件配置"")):
+            # 根据 profile 获取发送配置信息
+            for profile_record in self.sheet_config.records:
+                if profile_record[""配置名称""] == profile:
+                    login_info = profile_record
+                    break
+            else:
+                print(f""没有找到 <{profile}> 的配置信息"")
+                continue
+
+            # 尝试登录
+            login_status = self.smtp_login(**login_info)
+
+            # 如登录失败，尝试登录下一组配置
+            if not login_status:
+                continue
+
+            # 防止迭代器失效，提前展开并存储
+            send_info = list(send_info)
+
+            for info in send_info:
+                # 发件人
+                sender_username, sender_domain = self.smtp_servers[profile][
+                    ""发件人邮箱""
+                ].split(""@"")
+                sender_display_name = self.smtp_servers[profile][""发件人显示名""].strip()
+                if sender_display_name:
+                    mail_sender_address = Address(
+                        sender_display_name, sender_username, sender_domain
+                    )
+                else:
+                    mail_sender_address = Address(sender_username, sender_domain)
+
+                # 收件人组
+                mail_receiver_address = self.parse_address(info[""收件人""])
+                mail_receiver_view = ""; "".join(
+                    f""({i}) {c}"" for i, c in enumerate(mail_receiver_address, 1)
+                )
+
+                # 抄送组
+                mail_cc_address = self.parse_address(info[""抄送""])
+                mail_cc_view = ""; "".join(
+                    f""({i}) {c}"" for i, c in enumerate(mail_cc_address, 1)
+                )
+
+                # 密送组
+                mail_bcc_address = self.parse_address(info[""密送""])
+                mail_bcc_view = ""; "".join(
+                    f""({i}) {c}"" for i, c in enumerate(mail_bcc_address, 1)
+                )
+
+                # 主题
+                mail_subject = info[""邮件主题""]
+
+                # 正文
+                mail_content_view = mail_content = info[""邮件正文""]
+                if len(mail_content) > 100:
+                    mail_content_view = mail_content[:50] + "" ... "" + mail_content[-50:]
+
+                # 附件路径
+                mail_attaches = []
+                if info[""附件路径""].strip():
+                    mail_attaches = list(
+                        map(
+                            lambda s: s.strip(' ""'),
+                            re.split(r""\s*[,;]\s*"", info[""附件路径""].strip()),
+                        )
+                    )
+
+                # 发送选项
+                mail_options = BatchEmailSender.parse_options(info[""发送选项""])
+
+                # -------------------------------------------------------
+                # 日志输出发件信息
+
+                self.logger.info(f""发件人：{mail_sender_address}"")
+                self.logger.info(f""收件人：{mail_receiver_view}"")
+
+                if mail_cc_address:
+                    self.logger.info(f""抄送：{mail_cc_view}"")
+
+                if mail_bcc_address:
+                    self.logger.info(f""密送：{mail_bcc_view}"")
+
+                self.logger.info(f""主题：{mail_subject}"")
+                self.logger.info(f""正文：{mail_content_view}"")
+                if mail_attaches:
+                    self.logger.info(""附件："" + ""; "".join(mail_attaches))
+
+                for option_idx, (option_key, option_val) in enumerate(
+                    mail_options.items(), 1
+                ):
+                    self.logger.info(
+                        f""选项 #{option_idx} | [{option_key}]: [{option_val}]""
+                    )
+
+                # -------------------------------------------------------
+
+                send_info_abstract = ""\n"".join(
+                    filter(
+                        len,
+                        [
+                            f""配置：{profile}"",
+                            f""发件：{mail_sender_address}"",
+                            ""收件："" + ""; "".join(map(str, mail_receiver_address)),
+                            (""抄送："" + ""; "".join(map(str, mail_cc_address)))
+                            if mail_cc_address
+                            else """",
+                            (""密送："" + ""; "".join(map(str, mail_bcc_address)))
+                            if mail_bcc_address
+                            else """",
+                            f""主题：{mail_subject}"",
+                        ],
+                    )
+                )
+
+                print(f""邮件发送中...\n{send_info_abstract}"")
+
+                # 邮件发送干预
+                # -----------
+
+                # 问题附件路径（不符文件名规范或该路径下文件不存在）
+                problem_attaches = []
+
+                # :: 是否发送 :: 如该选项为「否」，直接停止发送
+                if mail_options.get(""是否发送"", ""是"") == ""否"":
+                    print(""发送选项中该邮件设置为不发送！"")
+                    print(""-"" * 40, end=""\n\n"")
+                    self.logger.warning(""邮件发送失败"")
+                    self.logger.info("""")
+                    send_result[""失败""] = send_result.get(""失败"", 0) + 1
+                    continue
+
+                # :: 附件干预 :: 如该选项为「否」，直接停止发送
+                if mail_options.get(""附件干预"", ""否"") == ""是"":
+                    for attach_file in mail_attaches:
+                        if not (
+                            Path(attach_file).is_file() and Path(attach_file).exists()
+                        ):
+                            problem_attaches.append(attach_file)
+                    if problem_attaches:
+                        problem_attaches_str = ""、"".join(problem_attaches)
+                        print(f""附件 {problem_attaches_str} 不存在，不发送该邮件"")
+                        print(""-"" * 40, end=""\n\n"")
+                        send_result[""失败""] = send_result.get(""失败"", 0) + 1
+                        self.logger.warning(""邮件发送失败"")
+                        self.logger.info("""")
+                        continue
+
+                # -------------------------------------------------------
+
+                try:
+                    self.send_email(
+                        self.smtp_servers[profile][""server""],
+                        mail_sender_address,
+                        mail_receiver_address,
+                        mail_cc_address,
+                        mail_bcc_address,
+                        mail_subject,
+                        mail_content,
+                        mail_attaches,
+                    )
+                except Exception as e:
+                    send_result[""失败""] = send_result.get(""失败"", 0) + 1
+                    self.logger.exception(e)
+                    self.logger.error(""邮件发送失败"")
+                    print(f""邮件发送失败，详见日志 {self.log_file}"")
+                else:
+                    send_result[""成功""] = send_result.get(""成功"", 0) + 1
+                    self.logger.info(""邮件发送成功"")
+                    print(""邮件发送成功"")
+                    print(""-"" * 40, end=""\n\n"")
+                finally:
+                    self.logger.info("""")
+
+        send_conclusion = (
+            f""批量发送完成，成功发件 {send_result.get('成功', 0)} 封，失败 {send_result.get('失败', 0)} 封""
+        )
+        self.logger.info(send_conclusion)
+        print(""\n"" + send_conclusion)
+
+        self.logger.info(f""{Path(sys.argv[0]).stem}: 程序运行结束"")
+        self.logger.info(""="" * 80)
+        self.logger.info("""")
+
+    @staticmethod
+    def parse_address(addr_str: str) -> List[Address]:
+        """"""
+        将收件 / 抄送 / 密送组人员解析为 Address 列表
+        """"""
+
+        addr_list = []
+
+        split_addrs = re.split(r""\s*[,;]\s*"", addr_str)
+        for addr in map(str.strip, split_addrs):
+            # 匹配两种类型邮箱地址：
+            #   - display name <rec1@xx.com>
+            #   - rec2@xx.com
+            mat = re.search(
+                r""^(?P<display_name>.*?)\s*<(?P<comp_username>\S+)@(?P<comp_domain>\S+)>""
+                r""|^(?P<username>\S+)@(?P<domain>\S+)"",
+                addr,
+                re.VERBOSE,
+            )
+
+            # 错误地址类型，忽略
+            if not mat:
+                continue
+
+            # 带有显示名称类型地址
+            if mat[""display_name""]:
+                addr_list.append(
+                    Address(
+                        mat[""display_name""], mat[""comp_username""], mat[""comp_domain""]
+                    )
+                )
+            # 单纯邮箱地址
+            elif mat[""username""]:
+                addr_list.append(
+                    Address(username=mat[""username""], domain=mat[""domain""])
+                )
+
+        return tuple(addr_list)
+
+    def send_email(
+        self,
+        server: smtplib.SMTP,
+        sender: Address,
+        receiver: List[Address],
+        cc: List[Address],
+        bcc: List[Address],
+        subject: str,
+        content: str,
+        attach_files=None,
+    ):
+        """"""
+        单封邮件发送
+        """"""
+
+        msg = EmailMessage()
+        msg[""Subject""] = subject
+        msg[""From""] = sender
+        msg[""To""] = receiver
+
+        if cc:
+            msg[""Cc""] = cc
+
+        if bcc:
+            msg[""Bcc""] = bcc
+
+        msg.set_content(content, charset=""utf-8"", subtype=""html"")
+
+        for attach_file in attach_files:
+            o_attach_file = Path(attach_file)
+
+            # 附件路径需存在
+            if not o_attach_file.is_file():
+                continue
+
+            ctype, encoding = mimetypes.guess_type(o_attach_file)
+            if ctype is None or encoding is not None:
+                ctype = ""application/octet-stream""
+            maintype, subtype = ctype.split(""/"", 1)
+            msg.add_attachment(
+                o_attach_file.read_bytes(),
+                maintype=maintype,
+                subtype=subtype,
+                filename=o_attach_file.name,
+            )
+
+        try:
+            server.send_message(msg)
+        except Exception:
+            traceback.print_exc()
+
+
+if __name__ == ""__main__"":
+    print(""\n"")
+    print(f""----------------------------------------------------------------"")
+    print(f""                                                        "")
+    print(f""                        邮件批量分发工具                    "")
+    print(f""                      ====================                  "")
+    print(f""                                                        "")
+    print(f""        版本信息：{__version__}"")
+    print(f""        开发作者：{__author__}"")
+    print(f""        问题反馈：{__email__}"")
+    print(f""                                                        "")
+    print(f""----------------------------------------------------------------"")
+    print(""\n"")
+
+    if len(sys.argv) == 2:
+        config_file = sys.argv[1]
+    else:
+        # 防止路径中包含空格报错
+        while True:
+            config_file = input(""邮件配置文件路径："").strip(""\"" \t'"")
+            if config_file:
+                break
+
+    sender = BatchEmailSender(config_file=config_file)
+    try:
+        sender.run()
+    except BatchEmailParseError as e:
+        print(e)
+    except Exception:
+        traceback.print_exc()
+        print(f""发生错误，详见日志：{Path(sender.log_file).resolve()}"")
+
+    print(""\n按任意键继续. . . "", end="""")
+    os.system(""pause > nul"")
+"
+XbhBkEMu,retrieveallappointments,xXGoziXx,JavaScript,Monday 8th of January 2024 08:22:48 AM CDT,"  const retrieveAllAppointments = async () => {
+    if (patient) {
+      const response = await axios.get(
+        ""http://localhost:8080/api/appointment/patient/id?patientId="" + patient.id
+      );
+      console.log(response.data);
+      return response.data;
+    }
+    else if (doctor) {
+      const response = await axios.get(
+        ""http://localhost:8080/api/appointment/doctor/id?doctorId="" + doctor.id
+      );
+      console.log(response.data);
+      return response.data;
+    } else {
+      const response = await axios.get(
+        ""http://localhost:8080/api/appointment/all""
+      );
+      console.log(response.data);
+      return response.data;
+    }
+  };"
+VN6sCnSf,Untitled,dllbridge,C,Monday 8th of January 2024 07:17:03 AM CDT,"#include   <stdio.h>
+
+
+int  arr0[4],
+    *pArr[3],
+     arr1[4],
+	 arr2[4]; 
+	 
+ 
+////////////////////////////////////////////////////
+void init(int *p[4])                              // 
+{
+	 
+	 printf(""Address arr0 = %d = %d = %d\n"", arr0, p[0], pArr[0]);
+	 printf(""Address arr1 = %d = %d = %d\n"", arr1, p[1], pArr[1]);	 
+	 printf(""Address arr2 = %d = %d = %d\n"", arr2, p[2], pArr[2]);	 
+	 
+	 for(int i1 = 0; i1 < 3; i1++)
+	 for(int i2 = 0; i2 < 4; i2++)	
+	 {
+			
+	     p[i1][i2] = i1*4 + i2;		
+	 } 
+}
+
+
+
+
+ 
+////////////////////////////////////////////////////
+int main()                                        // 
+{
+	
+    pArr[0] = arr0;
+    pArr[1] = arr1;
+    pArr[2] = arr2;
+	
+	init(pArr);	
+	
+	 for(int i1 = 0; i1 < 3; i1++) {
+	 for(int i2 = 0; i2 < 4; i2++)	
+	 {
+			
+	     printf(""%2d  "", pArr[i1][i2]);		
+	 }   printf(""\n""); }
+	 				 	
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+#include   <stdio.h>
+
+
+int  arr0[4],
+    *pArr[3],
+     arr1[4],
+	 arr2[4]; 
+	 
+ 
+////////////////////////////////////////////////////
+void init(int *p[4])                              // 
+{
+	 
+	 printf(""Address arr0 = %d = %d = %d  \n"", arr0, p[0], pArr[0]);
+	 printf(""Address arr1 = %d = %d = %d  \n"", arr1, p[1], pArr[1]);	 
+	 printf(""Address arr2 = %d = %d = %d\n\n"", arr2, p[2], pArr[2]);	 
+	 
+	 for(int i1 = 0; i1 < 3; i1++) {
+	 for(int i2 = 0; i2 < 4; i2++)	
+	 {
+			
+	     printf(""  pArr[%d][%d] = %d \n"", i1, i2, &p[i1][i2]);		
+	 }   printf(""\n"");             }
+}
+
+
+
+
+ 
+////////////////////////////////////////////////////
+int main()                                        // 
+{
+	
+    pArr[0] = arr0;
+    pArr[1] = arr1;
+    pArr[2] = arr2;
+	
+	init(pArr);			 	
+}
+
+
+
+
+"
+ftJGsk20,advent_of_code_2017_day_02.py,bob_f,Python,Monday 8th of January 2024 06:50:06 AM CDT,"
+def get_puzzle_input(a_file_name: str) -> list[list[int]]:
+    with open(a_file_name) as INFILE:
+        return [[int(x) for x in line.split()] for line in INFILE if not line.startswith('#')]
+
+def solve_p1(a_num_list: list[list[int]]) -> int:
+    return sum([max(line) - min(line) for line in a_num_list])
+
+def p2_line_value(a_num_list: list[int]) -> int:
+    for i in range(len(a_num_list)):
+        for j in range(len(a_num_list)):
+            if i == j:
+                continue
+
+            i_num = a_num_list[i]
+            j_num = a_num_list[j]
+
+            if i_num / j_num == i_num // j_num:
+                return max(i_num, j_num) // min (i_num, j_num)
+
+def solve_p2(a_num_list: list[list[int]]) -> int:
+    return sum([p2_line_value(line) for line in a_num_list])
+
+spreadsheet = get_puzzle_input('advent_of_code_2017_day_02.txt')
+# print(f'{spreadsheet=}')
+
+print(f'{solve_p1(spreadsheet)=}')
+print(f'{solve_p2(spreadsheet)=}')"
+XLpc30TU,K2,pan7nikt,C++,Monday 8th of January 2024 06:39:12 AM CDT,"#include <iostream>
+#include <fstream>
+#include <string>
+#include <bitset>
+
+using namespace std;
+
+struct Warzywa
+{
+    char rodzaj[30]; 
+    int jakosc;
+    float masa;
+};
+
+Warzywa** Tworzetablice(int,int);
+void zwolnij(Warzywa**, int);
+Warzywa wypelnij(Warzywa*);
+bool zapis(Warzywa* ,const int);
+bool parzystosc(int);
+
+int main()
+{
+    int kolumny, wiersze;
+    cout << ""Podaj ile chcesz miec kolumn w tablicy: "";
+    cin >> kolumny;
+    cout << ""Podaj ile chcesz miec wierszy w tablicy: "";
+    cin >> wiersze;
+    zwolnij(Tworzetablice(kolumny, wiersze), kolumny);
+    Warzywa Banan;
+    wypelnij(&Banan);
+    const int rozmiar = 2;
+    Warzywa tab[rozmiar];
+    tab[0].jakosc = 11;
+    tab[0].masa = 2.4;
+    strcpy_s(tab[0].rodzaj, ""sadasfsa fasfas"");
+    tab[1].jakosc = 11;
+    tab[1].masa = 2.4;
+    strcpy_s(tab[1].rodzaj, ""sadasfsa fasfas"");
+    if (zapis(tab, rozmiar) == true) {
+        cout << ""Zapisano"" << endl;
+    }
+    else {
+        cout << ""Nie zapisano"" << endl;
+    }
+    int liczba = 2;
+    if (parzystosc(liczba) == true) {
+        cout << ""Liczba bitow parzysta"" << endl;
+    }
+    else{
+        cout << ""Liczba bitow nieparzysta"" << endl;
+    }
+
+}
+
+Warzywa** Tworzetablice(int kolumny, int wiersze) {
+    Warzywa**tablica = new Warzywa*[kolumny];
+    for (int i = 0; i <= kolumny-1; i++) {
+        tablica[i] = new Warzywa[wiersze];
+    }
+    return tablica;
+}
+void zwolnij(Warzywa** tablica, int kolumny) {
+    for (int i = 0; i <= kolumny - 1; i++) {
+        delete[] tablica[i];
+    }
+    delete[] tablica;
+}
+Warzywa wypelnij(Warzywa* B) {
+
+    cout << ""Podaj rodzaj Warzywa rodzaj moze miec tylko 30 znakow w innym przypadku tekst zostanie przyciety: "";
+    cin.ignore();
+    cin.getline(B->rodzaj, 30);
+    cout << ""Podaj jakosc Warzywa: "";
+    do {
+        cin >> B->jakosc;
+        if (cin.fail()) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(),'\n');
+            cout << ""Podaj prawidlowa wartosc: "";
+        }
+        else {
+            break;
+        }
+    } while (true);
+    cout << ""Podaj mase Warzywa: "";
+    do {
+        cin >> B->masa;
+        if (cin.fail()) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(),'\n');
+            cout << ""Podaj prawidlowa wartosc: "";
+        }
+        else {
+            break;
+        }
+    } while (true);
+    return *B;
+}
+bool zapis(Warzywa* p, const int in) {
+    string nazwa;
+    cout << ""Podaj sciezke pliku jesli nie istnieje powstanie nowa "";  
+    cin >> nazwa;
+    ofstream plik(nazwa); //Tworzenie pliku
+    plik.close();
+    ofstream pl(nazwa, ios_base::app); //dopisywanie wartosci do pliku
+    for (int i = 0; i <= in - 1; i++) {
+        pl << p[i].rodzaj << endl;
+        pl << p[i].jakosc << endl;
+        pl << p[i].masa << endl;
+        pl << ""+++++++++++++++++"" << endl;
+    }
+    if (pl.good()) {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+bool parzystosc(int l) {
+    bitset<sizeof(int) * 8> bit(l);
+    if (bit.count() % 2 == 0) {
+        return true;
+    }
+    else {
+        return false;
+    }
+}"
+D1v7LB0y,advent_of_code_2017_day_01.py,bob_f,Python,Monday 8th of January 2024 06:13:00 AM CDT,"
+def get_puzzle_input(a_file_name: str) -> list[int]:
+    with open('advent_of_code_2017_day_01.txt') as INFILE:
+        return [int(x) for x in INFILE.readline().rstrip()]
+
+def solve_p1(a_num_list: list[int]) -> int:
+    a_l = a_num_list.copy()
+    a_l.append(a_l[0])
+    b_l: list[int] = [a_l[x] for x in range(len(a_l) - 1) if a_l[x] == a_l[x + 1]]        
+    return sum(b_l)
+
+def solve_p2(a_num_list: list[int]) -> int:
+    a_l = a_num_list.copy()
+    a_l.extend(a_l)
+    len_num_list = len(a_num_list)
+    offset: int = len_num_list // 2
+
+    b_l: list[int] = [a_l[x] for x in range(len_num_list) if a_l[x] == a_l[x + offset]]        
+    return sum(b_l)
+
+num_list = get_puzzle_input('advent_of_code_2017_day_01.txt')
+
+print(f'{solve_p1(num_list)=}')
+print(f'{solve_p2(num_list)=}')"
+n5cyhUPp,Untitled,stixx991,Lua,Monday 8th of January 2024 06:10:42 AM CDT,"loadstring(game:HttpGet(""https://raw.githubusercontent.com/PetSimX99/tradelagV3/main/tradelag""))()
+"
+wYz96hUU,data807,TestGuy1,JSON,Monday 8th of January 2024 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '843848847be696487158e9becb712f0a23e1c43110b8ffad8fe0cbcdbc42623a45418ad3d712f93246835acca960873b7dc47936db066d95550ef69d34c169ce297f0eaba933804dd587af9b5a11a4899b5dfc7c8b89a24d2998364e49b12c580f733816c6d416fe7f1229b8ff54cac57864d5ff2b39a1c10b1ca4a119c43813',
+  otherdata: [
+    'b14aabe2af6679320bf04b465563c773',
+    'bda2a4d946a3cc07cfe7366e76c7e1c2',
+    'f70984e6e1ef7bda98cb3f3d699fd3d5',
+    '61a44e6d7a32e375f1e76f1403e8dbd7',
+    '598204119867797923560a8fdfac310e',
+    '16d9933518c392b3fbdf4fd8c9196466',
+    '3dcdb1206ca017fa2c86be533ec63de1',
+    '978de80586362728cf5e4770ebfc75e9'
+  ]
+}"
+THfWcmXU,Stauffenberg.2004.Dual.Deu.ac3.Eng.eac3.1080p.h264.Subs-bp,bpmircea,BrainFuck,Monday 8th of January 2024 05:42:51 AM CDT,"Stauffenberg (Operation Valkyrie) (Jo Baier, 2004)
+aka
+Stauffenberg.2004.Dual.Deu.ac3.Eng.eac3.1080p.h264.Subs-bp
+https://www.imdb.com/title/tt0388437/
+
+http://up-4.net/d/sVTy
+https://filecrypt.cc/Container/7F628D5023.html
+https://t.me/DeuFree/1476
+
+Audio tracks: de | Subtitles: de en es pt-BR ro ru"
+0iagE0Yt,DebuggerDisplayForToString,pszczyg,C#,Monday 8th of January 2024 05:09:45 AM CDT,"[DebuggerDisplay(""{"" + nameof(ToString) +""()}"")]"
+aizmh8Gi,Add Supports Script for Woocommerce Gallery,hmbashar,PHP,Monday 8th of January 2024 05:05:39 AM CDT,"function abc_woocommerce_gallery_support() {
+    // Include the file for is_plugin_active() function
+    include_once( ABSPATH . 'wp-admin/includes/plugin.php' );
+
+    // Check if WooCommerce is active
+    if ( is_plugin_active( 'woocommerce/woocommerce.php' ) ) {
+        // Check and add theme support for each feature
+        if ( ! current_theme_supports( 'wc-product-gallery-zoom' ) ) {
+            add_theme_support( 'wc-product-gallery-zoom' );
+        }
+        if ( ! current_theme_supports( 'wc-product-gallery-slider' ) ) {
+            add_theme_support( 'wc-product-gallery-slider' );
+        }
+        if ( ! current_theme_supports( 'wc-product-gallery-lightbox' ) ) {
+            add_theme_support( 'wc-product-gallery-lightbox' );
+        }
+    }
+}
+
+add_action( 'after_setup_theme', 'abc_woocommerce_gallery_support' );"
+UykFSkrw,VerboseCollectionAssertTests,pszczyg,C#,Monday 8th of January 2024 05:04:30 AM CDT,"[TestFixture]
+internal class VerboseCollectionAssertTests
+{
+    [DebuggerDisplay(""{"" + nameof(Name) +""}"")]
+    class VerboseClass
+    {
+        public string Name { get; set; }
+
+        public override string ToString()
+        {
+            return Name;
+        }
+    }
+
+    [Test]
+    public void CompareVerboseCollections()
+    {
+        var expectedCollection = new List<VerboseClass>
+        {
+            new VerboseClass{ Name = ""ExpectedName1"" },
+            new VerboseClass{ Name = ""ExpectedName2"" },
+        };
+
+        var actualCollection = new List<VerboseClass>
+        {
+            new VerboseClass{ Name = ""ActualName1"" },
+            new VerboseClass{ Name = ""ActualName2"" },
+        };
+
+        CollectionAssert.AreEquivalent(expectedCollection, actualCollection);
+    }
+}"
+k9m6wLJJ,C#_2_name_output,Legiomax,C#,Monday 8th of January 2024 05:04:04 AM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace C_Ijun
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            char userSymbol;
+
+            string userName;
+            string stringByUserSymbol;
+
+            Console.Write(""Вывод имени.\nВведите имя: "");
+            userName = Console.ReadLine();
+
+            Console.Write(""Введите 1 символ: "");
+            userSymbol = Convert.ToChar(Console.ReadLine());
+
+            stringByUserSymbol = Convert.ToString(userSymbol);
+
+            for (int i = 0; i <= userName.Length; i++)
+            {
+                stringByUserSymbol += userSymbol;
+            }
+
+            Console.Write($""{stringByUserSymbol}\n{userSymbol}{userName}{userSymbol}\n{stringByUserSymbol}"");
+            Console.ReadLine();
+        }
+    }
+}
+
+
+"
+hDkShhgh,SimpleCollectionAssertTests,pszczyg,C#,Monday 8th of January 2024 04:53:02 AM CDT," [TestFixture]
+ internal class SimpleCollectionAssertTests
+ {
+     class SimpleClass
+     {
+         public string Name { get; set; }
+     }
+
+     [Test]
+     public void CompareSimpleCollections()
+     {
+         var expectedCollection = new List<SimpleClass>
+         {
+             new SimpleClass{ Name = ""ExpectedName1"" },
+             new SimpleClass{ Name = ""ExpectedName2"" },
+         };
+
+         var actualCollection = new List<SimpleClass>
+         {
+             new SimpleClass{ Name = ""ActualName1"" },
+             new SimpleClass{ Name = ""ActualName2"" },
+         };
+
+         CollectionAssert.AreEquivalent(expectedCollection, actualCollection);
+     }
+ }"
+jgpdy45w,SecurityConfig.java,xXGoziXx,Java,Monday 8th of January 2024 04:28:06 AM CDT,"package com.SmartHealthcare.configs;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import com.SmartHealthcare.helpers.UserDetailsServiceImpl;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Autowired
+    JwtAuthFilter jwtAuthFilter;
+
+    @Bean
+    public UserDetailsService userDetailsService() {
+        return new UserDetailsServiceImpl();
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        return http.csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                // .authorizeHttpRequests(requests -> requests
+                //         .requestMatchers(""/api/user/register"", ""/api/user/login"",
+                //                 ""/api/user/refreshToken"",
+                //                 ""/api/user/gender"", ""/api/user/roles"", ""/api/patient/**"",
+                //                 ""/api/doctor/register"")
+                //         .permitAll())
+                .authorizeHttpRequests(requests -> requests.requestMatchers(""/api/**"")
+                        .authenticated())
+                .sessionManagement(management -> management
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authenticationProvider(authenticationProvider())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class).build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider();
+        authenticationProvider.setUserDetailsService(userDetailsService());
+        authenticationProvider.setPasswordEncoder(passwordEncoder());
+        return authenticationProvider;
+
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
+    }
+
+}"
+civwsM7D,Untitled,sissou123,PHP,Monday 8th of January 2024 04:24:24 AM CDT," 2023 PHP for Beginners Part 1: every line fully explained
+PHP for Beginners: Learn to Code in PHP. Every line of code explained in detail. A true PHP for Beginners Course 2023
+ 
+Students consistently say how much they LOVE this course due to its unique delivery method and challenges which enable you to use your new skills immediately. Join over 8000 other students who have successfully learnt to code in PHP by enrolling in this course. 
+for more:https://dz-linkk.com/xbXit
+"
+g4Jaj0C2,Heh? i2c?,silver2row,Python,Monday 8th of January 2024 04:21:51 AM CDT,"#!/usr/bin/python3
+
+# from docs.beagleboard.org and the BeagleBone-Cookbook 
+
+import time
+import smbus
+
+ms = 1000
+bus = smbus.SMBus(1)
+addr = 0x28
+
+while True:
+    data = bus.read_byte_data(addr, 0)
+    print(""Gas per ______ "" + str(data))
+    time.sleep(ms/1000)"
+huVrJaFM,Untitled,sissou123,PHP,Monday 8th of January 2024 04:19:36 AM CDT,"The Complete 2023 PHP Full Stack Web Developer Bootcamp
+Learn to build websites with HTML , CSS , JAVASCRIPT , Bootstrap , PHP , MySQL , WordPress , OOP & more! 
+for more:https://dz-linkk.com/Yw6pV6
+"
+XTZRupJe,test 6 - 2022-2023 - Преброяване на области,D_L3,C++,Monday 8th of January 2024 03:53:53 AM CDT,"#include <cmath>
+#include <cstdio>
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <unordered_map>
+#include <set>
+
+using namespace std;
+
+void dfs(unordered_map<int, set<int>>& graph, vector<bool>& visited, int start){
+    visited[start] = true;
+    for(int neighbour : graph[start]){
+        if(!visited[neighbour])
+            dfs(graph, visited, neighbour);
+    }
+}
+
+int test(){
+    int x, y, a, b;
+    cin >> x >> y;
+    vector<bool> visited(x, false);
+    unordered_map<int, set<int>> graph;
+    for(int i = 0; i < y; i++){
+        cin >> a >> b;
+        graph[a].insert(b);
+        graph[b].insert(a);
+    }
+    
+    int counter = 0;
+    for(int i = 0; i < x; i++){
+        if(!visited[i]){
+            counter++;
+            dfs(graph, visited, i);
+        }
+    }
+    return counter;
+}
+
+int main() {
+    int t;
+    cin >> t;
+    for(int i = 0; i < t; i++){
+        cout << test() << "" "";
+    }
+    return 0;
+}
+"
+ExuuBj2a,Cursed C++ Undefined Behavior,Kaelygon,C++,Monday 8th of January 2024 03:51:58 AM CDT,"#include <stdio.h>
+
+struct Undef {
+public:
+	Undef(){
+		width++; //set type width. This is how much the address shifts using ++ --
+	}
+	bool* addr=0x0; //store data in form of address
+	bool* width=0x0; 
+	void inc(){
+		addr++;
+	}
+	void dec(){
+		addr--;
+	}
+	bool* operator()(){
+		return addr;
+	}
+};
+
+
+class Constants{
+public:
+	Constants(){ //set constants
+		placeholder.addr--;
+		inf=placeholder.addr;
+	}
+	Undef placeholder;
+	
+	bool* zero=0x0;
+	bool* inf=0x0;
+};
+
+
+class UndefMngr{
+public:
+	Constants vof;
+	Undef add(Undef num){
+		Undef inc=num;
+		while(inc.addr>vof.zero){
+			num.inc();
+			inc.dec();
+		}
+		return num;
+	}
+	Undef sq(Undef num){ //doubling
+		Undef inc=num;
+		while((void*)inc.addr>vof.zero){
+			num=add(num);
+			inc.dec();
+		}
+		return num;
+	}
+	Undef sq16(Undef num){ //doubling double
+		Undef inc=num;
+		while((void*)inc.addr>vof.zero){
+			num=sq(num);
+			inc.dec();
+		}
+		return num;
+	}
+	Undef sub(Undef value, Undef subtractor){ //subtract
+		Undef dec=subtractor;
+		while((void*)dec.addr>vof.zero){
+			value.dec();
+			dec.dec();
+		}
+		return value;
+	}
+};
+
+int main(){
+
+	UndefMngr math;
+	Undef num;
+
+	printf(""Zero %p\n"", (void*)math.vof.zero );
+	printf(""Infinity %p\n"", (void*)math.vof.inf );
+
+	printf(""width %p\n"", (void*)num.width );
+	num.inc();
+	printf(""num+1 %p\n"", (void*)num.addr );
+	num=math.sq(num);
+	printf(""num doubled %p\n"", (void*)num.addr );
+	Undef num2 = num;
+	num=math.sq16(num);
+	printf(""num doubled double %p\n"", (void*)num.addr );
+
+	Undef result = math.sub(num,num2);
+	printf(""subtracted %p from %p resulting in %p\n"", (void*)num.addr, (void*)num2.addr, (void*)result.addr );
+
+
+	return 0;
+}
+/*Output
+
+Zero (nil)
+Infinity 0xffffffffffffffff
+width 0x1
+num+1 0x1
+num doubled 0x2
+num doubled double 0x800
+subtracted 0x800 from 0x2 resulting in 0x7fe
+*/"
+Khjtuqfd,demo.py,ridwan100,Python,Monday 8th of January 2024 03:33:36 AM CDT,"# -*- encoding: utf-8 -*-
+import argparse
+import copy
+import json
+from pathlib import Path
+import warnings
+
+import cv2
+import numpy as np
+import torch
+import torch.nn.functional as F
+from networks.paperedge import GlobalWarper, LocalWarper, WarperUtil
+# Suppress the torch.meshgrid warning
+warnings.filterwarnings(""ignore"", category=UserWarning, module=""torch.functional"")
+cv2.setNumThreads(0)
+cv2.ocl.setUseOpenCL(False)
+
+
+def load_img(img_path):
+    im = cv2.imread(img_path).astype(np.float32) / 255.0
+    im = im[:, :, (2, 1, 0)]
+    im = cv2.resize(im, (256, 256), interpolation=cv2.INTER_AREA)
+    im = torch.from_numpy(np.transpose(im, (2, 0, 1)))
+    return im
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--Enet_ckpt', type=str,
+                        default='models/G_w_checkpoint_13820.pt')
+    parser.add_argument('--Tnet_ckpt', type=str,
+                        default='models/L_w_checkpoint_27640.pt')
+    parser.add_argument('--img_path', type=str, default='images/3.jpg')
+    parser.add_argument('--out_dir', type=str, default='output')
+    args = parser.parse_args()
+
+    img_path = args.img_path
+    dst_dir = args.out_dir
+    Path(dst_dir).mkdir(parents=True, exist_ok=True)
+
+    netG = GlobalWarper().to('cuda')
+    netG.load_state_dict(torch.load(args.Enet_ckpt)['G'])
+    netG.eval()
+
+    netL = LocalWarper().to('cuda')
+    netL.load_state_dict(torch.load(args.Tnet_ckpt)['L'])
+    netL.eval()
+
+    warpUtil = WarperUtil(64).to('cuda')
+
+    gs_d, ls_d = None, None
+    with torch.no_grad():
+        x = load_img(img_path)
+        x = x.unsqueeze(0)
+        x = x.to('cuda')
+        d = netG(x)  # d_E the edged-based deformation field
+        d = warpUtil.global_post_warp(d, 64)
+        gs_d = copy.deepcopy(d)
+
+        d = F.interpolate(d, size=256, mode='bilinear', align_corners=True)
+        y0 = F.grid_sample(x, d.permute(0, 2, 3, 1), align_corners=True)
+        ls_d = netL(y0)
+        ls_d = F.interpolate(ls_d, size=256, mode='bilinear', align_corners=True)
+        ls_d = ls_d.clamp(-1.0, 1.0)
+
+    im = cv2.imread(img_path).astype(np.float32) / 255.0
+    im = torch.from_numpy(np.transpose(im, (2, 0, 1)))
+    im = im.to('cuda').unsqueeze(0)
+
+    gs_d = F.interpolate(gs_d, (im.size(2), im.size(3)), mode='bilinear', align_corners=True)
+    gs_y = F.grid_sample(im, gs_d.permute(0, 2, 3, 1), align_corners=True).detach()
+    tmp_y = gs_y.squeeze().permute(1, 2, 0).cpu().numpy()
+    cv2.imwrite(f'{dst_dir}/result_gs.png', tmp_y * 255.)
+
+    ls_d = F.interpolate(ls_d, (im.size(2), im.size(3)), mode='bilinear', align_corners=True)
+    ls_y = F.grid_sample(gs_y, ls_d.permute(0, 2, 3, 1), align_corners=True).detach()
+    ls_y = ls_y.squeeze().permute(1, 2, 0).cpu().numpy()
+    cv2.imwrite(f'{dst_dir}/result_ls.png', ls_y * 255.)
+"
+SNArxRp3,doc3d.py,ridwan100,Python,Monday 8th of January 2024 03:32:44 AM CDT,"import cv2
+import numpy as np
+import scipy.interpolate
+import os
+import csv
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from scipy.io import loadmat
+import random
+import time
+import matplotlib.pyplot as plt
+from hdf5storage import loadmat
+
+import kornia.augmentation as KA
+import kornia.geometry.transform as KG
+os.environ[""OPENCV_IO_ENABLE_OPENEXR""] = ""1""
+class Doc3D(Dataset):
+    def __init__(self, root_dir, is_train=True, num=0):
+        super(Doc3D, self).__init__()
+        # self.is_train = is_train
+        self.num = num
+        # load the list of doc3d images
+        if is_train:
+            with open('/home/ridwan/thesis/PaperEdge/doc3d_root/doc3d_train.txt', 'r') as fid:
+                self.X = fid.read().splitlines()
+        else:
+            with open('/home/ridwan/thesis/PaperEdge/doc3d_root/doc3d_val.txt', 'r') as fid:
+                self.X = fid.read().splitlines()
+        self.X = [root_dir + '/img/' + t + '.png' for t in self.X]
+        
+        # load the background images
+        with open('bgtex.txt', 'r') as fid:
+            self.bgtex = fid.read().splitlines()        
+
+    def __len__(self):
+        if self.num:
+            return self.num
+        else:
+            return len(self.X)
+
+    def __getitem__(self, index):
+        index = index % 10
+        t = self.X[index]
+        t1 = '/home/ridwan/thesis/doc3D-renderer/tex/000752a1-1637-4256-83fd-62ce48f5f88b(1).jpg'
+        t2= '/home/ridwan/thesis/PaperEdge/output/result_ls.png'
+        print(t)
+        im = cv2.imread(t).astype(np.float32) / 255.0
+        im = im[..., ::-1]
+        plt.figure(figsize=(12, 8))
+
+        # Original Image
+        plt.subplot(2, 3, 1)
+        im = cv2.imread(t).astype(np.float32) / 255.0
+        im = im[..., ::-1]
+        plt.imshow(im)
+        plt.title('Curved Image')
+        plt.subplot(2, 3, 2)
+        im1 = cv2.imread(t1).astype(np.float32) / 255.0
+        im1 = im1[..., ::-1]
+        plt.imshow(im1)
+        plt.title('badlad image')
+
+        # Image 2
+        plt.subplot(2, 3, 3)
+        im2 = cv2.imread(t2).astype(np.float32) / 255.0
+        im2 = im2[..., ::-1]
+        plt.imshow(im2)
+        plt.title('flattend image')
+
+        t = t.replace('/img/', '/wc/')
+        t = t[:-3] + 'exr'
+        wc = cv2.imread(t, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED).astype(np.float32)
+
+        t = t.replace('/wc/', '/bm/')
+        t = t[:-3] + 'mat'
+        bm = loadmat(t)['bm']
+        plt.subplot(2, 3, 4)
+
+        x_coords = bm[:, :, 0]
+        y_coords = bm[:, :, 1]
+
+        # Flatten the coordinates to 1D arrays
+        flat_x_coords = x_coords.flatten()
+        flat_y_coords = y_coords.flatten()
+
+        # Remove NaN values (optional, depending on your requirements)
+        valid_indices = ~np.isnan(flat_x_coords)
+        flat_x_coords = flat_x_coords[valid_indices]
+        flat_y_coords = flat_y_coords[valid_indices]
+
+        # Plot using scatter plot
+        plt.scatter(flat_x_coords, flat_y_coords, s=1)  # Adjust the marker size (s) as needed
+        plt.title('Scatter Plot of Coordinates')
+        plt.xlabel('X-coordinate')
+        plt.ylabel('Y-coordinate')
+        plt.show()        # print(bm)
+        
+        # random sample a background image
+        ind = random.randint(0, len(self.bgtex) - 1)
+        bg = cv2.imread(self.bgtex[ind]).astype(np.float32) / 255.0
+        bg = cv2.resize(bg, (200, 200))
+        bg = np.tile(bg, (3, 3, 1))
+
+        im = torch.from_numpy(im.transpose((2, 0, 1)).copy())
+        wc = torch.from_numpy(wc.transpose((2, 0, 1)).copy())
+        bm = torch.from_numpy(bm.transpose((2, 0, 1)).copy())
+        bg = torch.from_numpy(bg.transpose((2, 0, 1)).copy())
+
+        return im, wc, bm, bg
+
+
+
+class Doc3DDataAug(nn.Module):
+    def __init__(self):
+        super(Doc3DDataAug, self).__init__()
+        self.cj = KA.ColorJitter(0.1, 0.1, 0.1, 0.1)
+    
+    def forward(self, img, wc, bm, bg):
+        # tight crop
+        mask = (wc[:, 0] != 0) & (wc[:, 1] != 0) & (wc[:, 2] != 0)
+        
+        B = img.size(0)
+        c = torch.randint(20, (B, 5))
+        img_list = []
+        bm_list = []
+        for ii in range(B):
+            x_img = img[ii]
+            x_bm = bm[ii]
+            x_msk = mask[ii]
+            y, x = x_msk.nonzero(as_tuple=True)
+            minx = x.min()
+            maxx = x.max()
+            miny = y.min()
+            maxy = y.max()
+            x_img = x_img[:, miny : maxy + 1, minx : maxx + 1]
+            x_msk = x_msk[None, miny : maxy + 1, minx : maxx + 1]
+
+            # padding
+            x_img = F.pad(x_img, c[ii, : 4].tolist())
+            x_msk = F.pad(x_msk, c[ii, : 4].tolist())
+
+            x_bm[0, :, :] = (x_bm[0, :, :] - minx + c[ii][0]) / x_img.size(2) * 2 - 1
+            x_bm[1, :, :] = (x_bm[1, :, :] - miny + c[ii][2]) / x_img.size(1) * 2 - 1
+
+            # replace bg
+            if c[ii][-1] > 2:
+                x_bg = bg[ii][:, :x_img.size(1), :x_img.size(2)]
+            else:
+                x_bg = torch.ones_like(x_img) * torch.rand((3, 1, 1), device=x_img.device)
+            x_msk = x_msk.float()
+            x_img = x_img * x_msk + x_bg * (1. - x_msk)
+
+            # resize
+            x_img = KG.resize(x_img[None, :], (256, 256))
+            img_list.append(x_img)
+            bm_list.append(x_bm)
+        img = torch.cat(img_list)
+        bm = torch.stack(bm_list)
+        # jitter color
+        img = self.cj(img)
+        return img, bm
+
+
+if __name__ == '__main__':
+    dt = Doc3D(root_dir='/home/ridwan/thesis/PaperEdge/doc3d_root')
+    from visdom import Visdom
+    vis = Visdom(port=8097)
+    x, xt, y, yt, t = dt[999]
+
+    vis.image(x.clamp(0, 1), opts={'caption': 'x'}, win='x')
+    vis.image(xt.clamp(0, 1), opts={'caption': 'xt'}, win='xt')
+    vis.image(y.clamp(0, 1), opts={'caption': 'y'}, win='y')
+    vis.image(yt.clamp(0, 1), opts={'caption': 'yt'}, win='yt')
+    vis.image(t, opts={'caption': 't'}, win='t')
+"
+yt93fZVG,test 6 - 2022-2023 - Цикличен граф,D_L3,C++,Monday 8th of January 2024 03:30:37 AM CDT,"#include <cmath>
+#include <cstdio>
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <unordered_map>
+
+using namespace std;
+
+bool hasCycle(unordered_map<int, vector<int>>& graph, vector<bool>& visited, vector<bool> pathVisited, int idx) {
+    if(pathVisited[idx])
+        return true;
+    pathVisited[idx] = true;
+    for(auto neighbour : graph[idx]){
+        if(hasCycle(graph, visited, pathVisited, neighbour))
+            return true;
+    }
+    pathVisited[idx] = false;
+    visited[idx] = true;
+    return false;
+    
+}
+
+bool test(){
+    int v, e, x, y, w;
+    cin >> v >> e;
+    unordered_map<int, vector<int>> graph;
+    for(int i = 0; i < e; i++){
+        cin >> x >> y >> w;
+        graph[x - 1].push_back(y - 1);
+    }
+    vector<bool> visited(v, false);
+    
+    for(int i = 0; i < v; i++) {
+        if(!visited[i]){
+            vector<bool> pathVisited(v, false);
+            if(hasCycle(graph, visited, pathVisited, i)){
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
+int main() {
+    int n;
+    cin >> n;
+    for(int i = 0; i < n; i++){
+        if(test())
+            cout << ""true"" << "" "";
+        else
+            cout << ""false"" << "" "";
+    }
+    return 0;
+}
+"
+4xqNjE1G,Untitled,aregrubb,Lua,Monday 8th of January 2024 03:07:19 AM CDT,"-- Åpne tekstfilen i skrive-modus
+local file = fs.open(""inspect.txt"", ""w"")
+ 
+-- Loop gjennom alle retningene og inspiser blokker
+for dir = 0, 3 do
+  turtle.turnRight()
+  local success, data = turtle.inspect()
+  if success then
+    local info = string.format(""Blokk i retning %d: %s"", dir, textutils.serialize(data))
+    file.writeLine(info)
+  end
+end
+ 
+-- Lukk tekstfilen
+file.close()
+ 
+-- Gi beskjed om at inspeksjonen er ferdig
+print(""Inspeksjon fullført. Data lagret i inspect.txt"")"
+rcGGy2cp,for the hacker,coinwalk,JavaScript,Monday 8th of January 2024 02:50:48 AM CDT,"var oldestbal = parseFloat(document.getElementById('pct_balance').value);
+var dived = 240; 
+var base = (oldestbal/dived).toFixed(8); 
+var bellance = oldestbal;
+var botplus = base;
+var trget = oldestbal;
+var tens = (base*10);
+var sevens = (base*6.9);
+var eights  = (base*7.9);
+var lower = 2.9;
+var upper = 6.9;
+var muck = muck = false;
+var fart = ((Math.floor(oldestbal/tens))*tens);
+var james = oldestbal 
+var betnext = ((botplus*1).toFixed(8));
+ 
+ 
+function get(){
+console.clear();
+bellance = document.getElementById('pct_balance').value;
+var good = ((bellance-oldestbal).toFixed(8));
+console.log(""profit"");
+console.log(good);
+if (bellance>(fart+(botplus*upper))) {
+    botplus = Number((botplus*2).toFixed(8));
+    upper = 4.9;
+    lower = 4.9;
+    fart = parseFloat(bellance);
+}
+if ((bellance<(fart-(botplus*lower)))&&(bellance>james)) {
+    botplus = Number((botplus*2).toFixed(8));
+    upper = 4.9;
+    lower = 4.9;
+    fart = parseFloat(bellance);
+}
+if (((base*10)>=botplus)&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))&&(bellance<=oldestbal )) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    james = parseFloat(bellance);
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+}
+if (((base*10)>=botplus)&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))&&(bellance>oldestbal )) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+}
+if (((james-(base*10))>=(bellance-(botplus*2)))&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+    james = parseFloat(bellance);
+}
+if (bellance>=(trget*24)) {
+console.log(""winner winner chicken dinner"");
+return
+}
+betnext = ((botplus*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(betnext);
+$('#a_lo').click();
+setTimeout(() => get(), 350);
+}
+get();"
+sRq6Rqnn,for the hacker,coinwalk,JavaScript,Monday 8th of January 2024 02:48:22 AM CDT,"var oldestbal = parseFloat(document.getElementById('pct_balance').value);
+var dived = 240; 
+var base = (oldestbal/dived).toFixed(8); 
+var bellance = oldestbal;
+var botplus = base;
+var trget = oldestbal;
+var tens = (base*10);
+var sevens = (base*6.9);
+var eights  = (base*7.9);
+var lower = 2.9;
+var upper = 6.9;
+var muck = muck = false;
+var fart = ((Math.floor(oldestbal/tens))*tens);
+var james = oldestbal 
+var betnext = ((botplus*1).toFixed(8));
+ 
+ 
+function get(){
+console.clear();
+bellance = document.getElementById('pct_balance').value;
+var good = ((bellance-oldestbal).toFixed(8));
+console.log(""profit"");
+console.log(good);
+if (bellance>(fart+(botplus*upper))) {
+    botplus = Number((botplus*2).toFixed(8));
+    upper = 4.9;
+    lower = 4.9;
+    fart = parseFloat(bellance);
+}
+if ((bellance<(fart-(botplus*lower)))&&(bellance>james)) {
+    botplus = Number((botplus*2).toFixed(8));
+    upper = 4.9;
+    lower = 4.9;
+    fart = parseFloat(bellance);
+}
+if (((base*10)>=botplus)&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))&&(belance<=oldestbal)) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    james = parseFloat(bellance);
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+}
+if (((base*10)>=botplus)&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))&&(belance>oldestbal)) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+}
+if (((james-(base*10))>=(bellance-(botplus*2)))&&(bellance<(((Math.floor(bellance/tens))*tens)+sevens))) {
+    botplus = base;
+    lower = 2.9;
+    upper = 6.9;
+    fart = ((Math.floor((parseFloat(bellance))/tens))*tens);
+    james = parseFloat(bellance);
+}
+if (bellance>=(trget*24)) {
+console.log(""winner winner chicken dinner"");
+return
+}
+betnext = ((botplus*1).toFixed(8));
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(betnext);
+$('#a_lo').click();
+setTimeout(() => get(), 350);
+}
+get();"
+Q8XsJY2x,Untitled,sissou123,JavaScript,Monday 8th of January 2024 02:21:06 AM CDT,"The Complete JavaScript Course 2024: From Zero to Expert!
+The modern JavaScript course for everyone! Master JavaScript with projects, challenges and theory. Many courses in one! 
+JavaScript is the most popular programming language in the world. It powers the entire modern web. It provides millions of high-paying jobs all over the world.
+
+That's why you want to learn JavaScript too. And you came to the right place 
+for more:https://cuty.io/2yq7qiFp5q
+"
