@@ -1,0 +1,5305 @@
+id,title,username,language,date,content
+E8hjf8PR,data810,TestGuy1,JSON,Thursday 11th of January 2024 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '0d9655a073bd19a5395d11b3477939e1a2a91e22a64cb5b4a34f5e913bc180bd72766753b56984d6fc644edcdf92cf68e2daf8051f5e7c3166f907f7e12d0c18302d13097ab38288d56c95696e55914b97230c3da1f9cd65d61032c25311fc8ce19ba4532dc6e5420a474141bff1d0bfc160dc41b9eb208e8a7c61afe770dcc8',
+  otherdata: [
+    '214cd4a4ff2a4bb2ad32fc4620e2cceb',
+    '46fd66df5b0ea3508b546600b5d88094',
+    '06ce7616d4d7607743b53d4e342d44f9',
+    'a75a1fb3d8f9821474be32b4689ac276',
+    '7a26240d333b18dc2c7226b2a022b770',
+    'd0e6be1497c145d45186d667e51be093',
+    '95d80bb8d3d68ef78274b27844b434ea',
+    'a767434c6088cb08a6d760d3b3d73d6b'
+  ]
+}"
+RE9yxaL7,Redirection copy paster,rex9840,PHP,Thursday 11th of January 2024 05:59:09 AM CDT,"@include 'connect.php';
+
+$errors = [];
+
+if (isset($_POST['submit'])) {
+    $username = $_POST['username'];
+    $email = $_POST['email'];
+    $password = $_POST['pwd'];
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+    // Validate other fields if needed
+
+    // Check if user already exists
+    $select = ""SELECT * FROM login_data WHERE username = '$username'"";
+    $result = mysqli_query($conn, $select);
+
+    if (mysqli_num_rows($result) > 0) {
+        $errors[] = 'User already exists!';
+    } else {
+        // Insert user data into the database with hashed password
+        $insert = ""INSERT INTO login_data (username, email, password) VALUES ('$username', '$email', '$hashedPassword')"";
+        mysqli_query($conn, $insert);
+        header('location: login.php'); // Redirect to login page after successful registration
+        exit();
+    }
+}
+?>
+"
+PzRUg4Tq,Untitled,hoz65105,HTML,Thursday 11th of January 2024 05:57:56 AM CDT,https://pastebin.com/tz8hkrgh
+XNP5iD1U,Program with unexpected ub on arm64 Mac,fivemack,Rust,Thursday 11th of January 2024 05:45:39 AM CDT,"( cargo.toml )
+[package]
+name = ""discrete""
+version = ""0.1.0""
+edition = ""2021""
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bit-set = ""0.5.3""
+clap = { version = ""4.4.14"", features = [""derive""] }
+clap_derive = { version = ""4.0.0-rc.1"" }
+itertools = ""0.12.0""
+rayon = ""1.8.0""
+
+(src/main.rs)
+use bit_set::BitSet;
+use itertools::Itertools;
+use rayon::prelude::*;
+
+use core::sync::atomic::*;
+
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command()]
+struct Args {
+    /// Number of dimensions
+    #[arg(short, long, default_value_t = 2)]
+    dimensions: usize,
+
+    /// Number of points to place
+    #[arg(long = ""pts"", default_value_t = 7)]
+    n_pts: usize,
+
+    /// Side of hypercube to place points in
+    #[arg(long = ""side"", default_value_t = 7)]
+    side: u8,
+
+    /// List or count
+    #[arg(long = ""display"", default_value_t = false)]
+    display: bool,
+}
+
+fn dist(u: &[u8], v: &[u8]) -> u16 {
+    (u.iter()
+        .zip(v.iter())
+        .map(|a| ((*a.0 as i16 - *a.1 as i16) * (*a.0 as i16 - *a.1 as i16)))
+        .sum::<i16>()) as u16
+}
+
+fn distances(u: &[Vec<u8>]) -> Vec<u16> {
+    u.iter()
+        .tuple_combinations::<(_, _)>()
+        .map(|a| dist(a.0, a.1))
+        .collect()
+}
+
+fn distance_bitset(u: &[Vec<u8>]) -> BitSet {
+    let mut bs = BitSet::new();
+    for a in distances(u) {
+        bs.insert(a as usize);
+    }
+    bs
+}
+
+fn hypercube_points(dim: usize, bound: u8) -> Vec<Vec<u8>> {
+    let jj = (1..=dim).map(|_| 0..bound);
+    jj.multi_cartesian_product().collect()
+}
+
+fn extend(v: Vec<Vec<u8>>, target_ln: usize, universe: &[Vec<u8>], actor: &dyn ResultAcceptor) {
+    if v.len() == target_ln {
+        actor.act(&v);
+        return;
+    }
+    let dd0 = distance_bitset(&v);
+    for vx in 0..(*universe).len() {
+        let np = &universe[vx];
+        let mut nds = dd0.clone();
+        let mut ok = true;
+        for w in &v {
+            let xd = dist(w, np) as usize;
+            if nds.contains(xd) {
+                ok = false;
+                break;
+            }
+            nds.insert(xd);
+        }
+        if ok {
+            let mut nv = v.clone();
+            nv.push((*np).clone());
+            extend(nv, target_ln, &universe[(1 + vx)..], actor);
+        }
+    }
+}
+
+trait ResultAcceptor {
+    fn act(&self, v: &[Vec<u8>]);
+}
+
+struct ResultCounter {
+    c: AtomicU64,
+}
+
+struct ResultPrinter {}
+
+impl ResultAcceptor for ResultPrinter {
+    fn act(&self, v: &[Vec<u8>]) {
+        let mut sds = distances(v);
+        sds.sort();
+        println!(""Found {:?} {:?}"", v, sds);
+    }
+}
+
+impl ResultAcceptor for ResultCounter {
+    fn act(&self, _v: &[Vec<u8>]) {
+        _ = self.c.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl ResultCounter {
+    fn new() -> ResultCounter {
+        ResultCounter {
+            c: AtomicU64::new(0),
+        }
+    }
+    fn get_count(&self) -> u64 {
+        self.c.load(Ordering::SeqCst)
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+
+    let pts = hypercube_points(args.dimensions, args.side);
+    let mut tasks = (0..(pts.len() - 1))
+        .tuple_combinations::<(_, _)>()
+        .collect::<Vec<(usize, usize)>>();
+    // par_iter seems to start at the end of the vector
+    // and the larger jobs are at the start
+    // so to avoid a single-threaded tail this is useful
+    tasks.reverse();
+
+    let counter = ResultCounter::new();
+    let printer = ResultPrinter {};
+    if args.display {
+        let _ = tasks
+            .par_iter()
+            .map(|a| {
+                eprint!(""  {} {}    \r"", a.0, a.1);
+                extend(
+                    vec![pts[a.0].clone(), pts[a.1].clone()],
+                    args.n_pts,
+                    &pts[(1 + a.1)..],
+                    &printer,
+                )
+            })
+            .count();
+    } else {
+        let _ = tasks
+            .par_iter()
+            .map(|a| {
+                eprint!(""  {} {}    \r"", a.0, a.1);
+                extend(
+                    vec![pts[a.0].clone(), pts[a.1].clone()],
+                    args.n_pts,
+                    &pts[(1 + a.1)..],
+                    &counter,
+                )
+            })
+            .count();
+    }
+    if !args.display {
+        println!(""\n\n  Found {} answers"", counter.get_count());
+    }
+}"
+yNWfi23C,Untitled,Shovelwarf_,JSON,Thursday 11th of January 2024 05:33:49 AM CDT,"{""HWID"": ""7FE5509806F5C1303D03E89C2536C4A5""}"
+bv3YdQfm,Untitled,kwest87,C#,Thursday 11th of January 2024 05:30:14 AM CDT,"using System;
+
+namespace ConsoleApp23
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            const string CommandSum = ""sum"";
+            const string CommandExit = ""exit"";
+
+            string userInput;
+            bool isWork = true;
+            int[] numbers = new int[0];
+
+            while (isWork)
+            {
+                Console.WriteLine($""Введите цифру ,либо {CommandSum} , либо {CommandExit} : "");
+                userInput = Console.ReadLine();
+
+                if (userInput == CommandExit)
+                {
+                    isWork = false;
+                }
+                else if (userInput == CommandSum)
+                {
+                    int sum = 0;
+
+                    for (int i = 0; i < numbers.Length; i++)
+                    {
+                        sum += numbers[i];
+                    }
+
+                    Console.WriteLine(sum);
+                }
+                else
+                {
+                    int[] temporaryNumbers = new int[numbers.Length + 1];
+
+                    for (int i = 0; i < numbers.Length; i++)
+                    {
+                        temporaryNumbers[i] = numbers[i];
+                    }
+
+                    temporaryNumbers[temporaryNumbers.Length - 1] = Convert.ToInt32(userInput);
+                    numbers = temporaryNumbers;
+                }
+            }
+        }
+    }
+}"
+esTUR5Dp,TrainingLab,MladenKarachanov,Java,Thursday 11th of January 2024 05:29:41 AM CDT,"package ProgrammingBasics2;
+
+import java.util.Scanner;
+
+public class TrainingLab {
+    public static void main(String[] args) {
+        Scanner scanner= new Scanner(System.in);
+        double lengthMeters = Double.parseDouble(scanner.nextLine());
+        double widthMeters = Double.parseDouble(scanner.nextLine());
+        double workPlace = 70*120;
+       // double corridor=100;
+        double lengthCentimeters = lengthMeters*100;
+        double widthCentimeters=widthMeters*100;
+        double corridor = 100;
+        double sumWidth= Math.floor((widthCentimeters-corridor)/70);
+        double sumLength =Math.floor(lengthCentimeters/120);
+        double sum=sumLength*sumWidth-3;
+
+        System.out.printf(""%.0f"",sum);
+
+    }
+}"
+0KnPgMx4,Untitled,35657,C++,Thursday 11th of January 2024 05:29:12 AM CDT,"
+#include <iostream>
+
+using namespace std;
+
+void Print(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		cout << arr[i] << "" "";
+	}
+	cout << endl;
+}
+
+void Fill(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		arr[i] = rand() % 10;
+	}
+}
+
+int main() {
+
+	// удаление из массива четных элементов
+
+	srand(time(NULL));
+	setlocale(LC_ALL, ""ru"");
+
+	int size;
+
+	cout << ""Введите размер массива: "";
+	cin >> size;
+	
+	int* arr = new int[size];
+
+	Fill(arr, size);
+
+	Print(arr, size);
+
+	int* temp = new int[size / 2];
+
+
+	for (int i = 0, j = 0;  i < size; i += 2, j++) {
+		temp[j] = arr[i];
+	}
+
+	delete[] arr;
+
+	arr = temp;
+	size = size / 2;
+
+	Print(arr, size);
+
+	delete[] temp;
+}
+"
+3sdPDpi5,Untitled,Salvens,C++,Thursday 11th of January 2024 05:23:29 AM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+#define int long long
+
+#define IOS ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);
+
+//#include <ext/pb_ds/assoc_container.hpp>
+//using namespace __gnu_pbds;
+//typedef tree<int, null_type, less<int>, rb_tree_tag, tree_order_statistics_node_update> ordered_set;
+std::mt19937 rnd(std::chrono::steady_clock::now().time_since_epoch().count());
+
+const int INF = 1e18 + 7;
+const double EPS = 1e-10;
+const int MOD = 1e9 + 7;
+const int MAXN = 3e6 + 100;
+
+inline void solve() {
+    int n;
+    cin >> n;
+    vector<int> a(n + 1);
+    for (int i = 1; i <= n; ++i) {
+        cin >> a[i];
+    }
+
+    map<int, int> last;
+    vector<int> b;
+    for (int i = 1; i <= n; ++i) {
+        b.emplace_back(i - last[a[i]] - 1);
+        last[a[i]] = i;
+    }
+    for (auto [x, y]:  last) {
+        b.emplace_back(n - y);
+    }
+
+    sort(b.begin(), b.end());
+    vector<int> suff(b.size() + 1, 0);
+    for (int i = b.size() - 1; i >= 0; --i) {
+        suff[i] = suff[i + 1] + b[i];
+    }
+
+    for (int len = 1; len <= n; ++len) {
+        int pos = upper_bound(b.begin(), b.end(), len - 1) - b.begin();
+        cout << suff[pos] - ((int)b.size() - pos) * (len - 1) << ' ';
+    }
+}
+
+
+int32_t main() {
+    IOS;
+    clock_t tStart = clock();
+
+    int tt = 1;
+//    cin >> tt;
+    while (tt --> 0) {
+        solve();
+    }
+//    cerr << ""Runtime is:"" << (long double) (clock() - tStart) / CLOCKS_PER_SEC << '\n';
+    return 0;
+}"
+sMvd0e65,Untitled,hoz65105,HTML,Thursday 11th of January 2024 05:20:17 AM CDT,https://pastebin.com/7ZVEnWfe
+iMBf5tT8,G2A.com Refund Exploit Jan 2024,ounnuo,GetText,Thursday 11th of January 2024 05:16:04 AM CDT,"G2A.com refund exploit updated guide 
+Any item for free on G2A.com such as Amazon, Steam, and any other gift cards.
+ 
+PDF guide here:
+https://drive.google.com/file/d/120kXNJWM5T5u3PGlkQeZCo_nLxzQIlkf/view?usp=g2a_refund_exploit_136450.pdf
+ 
+Working as of
+11 January 2024"
+vKMx1hJD,Untitled,35657,C++,Thursday 11th of January 2024 05:11:11 AM CDT,"
+#include <iostream>
+
+using namespace std;
+
+void Print(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		cout << arr[i] << "" "";
+	}
+	cout << endl;
+}
+
+void Fill(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		arr[i] = rand() % 10;
+	}
+}
+
+int main() {
+	srand(time(NULL));
+	setlocale(LC_ALL, ""ru"");
+
+	int M, N;
+
+	cout << ""Введите размер первого массива: "";
+	cin >> M;
+	cout << ""Введите размер второго массива: "";
+	cin >> N;
+	
+	int* arr1 = new int[M];
+
+	Fill(arr1, M);
+
+	Print(arr1, M);
+
+	int* arr2 = new int[N];
+
+	Fill(arr2, N);
+
+	Print(arr2, N);
+
+	int* temp = new int[M + N];
+	int count = 0;
+	bool original = 1;
+
+	for (int i = 0; i < M; i++) {
+		for (int j = 0; j < N; j++) {
+			if (arr1[i] == arr2[j]) {
+				original = 0;
+				break;
+			}
+		}
+		for (int j = 0; j < count; j++) {
+			if (arr1[i] == temp[j]) {
+				original = 0;
+				break;
+			}
+		}
+		if (original == 1) {
+			temp[count] = arr1[i];
+			count++;
+		}
+		original = 1;
+	}
+
+	int first_count = count;
+
+	for (int i = 0; i < N; i++) {
+		for (int j = 0; j < M; j++) {
+			if (arr2[i] == arr1[j]) {
+				original = 0;
+				break;
+			}
+		}
+		for (int j = first_count; j < count; j++) {
+			if (arr2[i] == temp[j]) {
+				original = 0;
+				break;
+			}
+		}
+		if (original == 1) {
+			temp[count] = arr2[i];
+			count++;
+		}
+		original = 1;
+	}
+
+	int* arr3 = new int[count];
+
+	for (int i = 0; i < count; i++) {
+		arr3[i] = temp[i];
+	}
+
+	Print(arr3, count);
+	cout << count << endl;
+
+	delete[] arr1, arr2, arr3, temp;
+}
+"
+TY85c7NN,Pet Simulator 99! 🎉 2024 AutoFarm Script (No Key),Project-WD,Lua,Thursday 11th of January 2024 04:56:28 AM CDT,"-- Pet Simulator 99! 🎉 AutoFarm Script! (Copy and Paste into Executor)
+-- 🆕 Updated (11/01/2024) (Insane Script)
+-- Auto Farm, Auto Ranks, No Egg Animation, etc...
+-- Script📝: 
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/REDzHUBz/PetSimulator99/main/redz9999.lua"" ))()"
+k1J3s9yN,Untitled,nirajs,Python,Thursday 11th of January 2024 04:50:49 AM CDT,"class Trie:
+    class TrieNode:
+        def __init__(self):
+            self.child = {}
+            self.val = -1
+    
+    def __init__(self):
+        self.root = self.TrieNode()
+    
+    def insert(self, path: List[str], val):
+        cur = self.root
+        for file in path:
+            if (file not in cur.child):
+                cur.child[file] = self.TrieNode()
+            cur = cur.child[file]
+        cur.val = val
+        return True
+
+
+    def search(self, path: List[str]) -> int:
+        cur = self.root
+        for file in path:
+            if file not in cur.child:
+                return -1
+            cur = cur.child[file]
+        return cur.val
+
+
+class FileSystem:
+
+    def __init__(self):
+        self.trie = Trie()
+
+    def createPath(self, path: str, value: int) -> bool:
+        path = path.split(""/"")
+        path = [x for x in path if x]
+        tempPath = path.copy()
+        tempPath.pop() 
+
+        if ((len(tempPath) > 0 and (self.trie.search(tempPath) == -1) or self.trie.search(path) != -1)):
+            return False
+        return self.trie.insert(path, value)
+
+    def get(self, path: str) -> int:
+        path = path.split(""/"")
+        path = [x for x in path if x]
+        val = self.trie.search(path)
+        return val
+        
+
+
+# Your FileSystem object will be instantiated and called as such:
+# obj = FileSystem()
+# param_1 = obj.createPath(path,value)
+# param_2 = obj.get(path)
+
+
+""""""
+
+
+a/b/c/d/e
+
+   /
+
+a.     b.    c. 
+
+a.    c.  
+
+"""""""
+L6BMBqC6,Mad,Unknown_No_1,PHP,Thursday 11th of January 2024 04:37:29 AM CDT,First27ModByMad
+EZt14Kar,Untitled,35657,C++,Thursday 11th of January 2024 04:37:29 AM CDT,"
+#include <iostream>
+
+using namespace std;
+
+void Print(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		cout << arr[i] << "" "";
+	}
+	cout << endl;
+}
+
+void Fill(int* arr, int size) {
+	for (int i = 0; i < size; i++) {
+		arr[i] = rand() % 10;
+	}
+}
+
+int main() {
+	srand(time(NULL));
+	setlocale(LC_ALL, ""ru"");
+
+	int M, N;
+
+	cout << ""Введите размер первого массива: "";
+	cin >> M;
+	cout << ""Введите размер второго массива: "";
+	cin >> N;
+	
+	int* arr1 = new int[M];
+
+	Fill(arr1, M);
+
+	Print(arr1, M);
+
+	int* arr2 = new int[N];
+
+	Fill(arr2, N);
+
+	Print(arr2, N);
+
+	int* temp = new int[M];
+	int count = 0;
+	bool original = 1;
+
+	for (int i = 0; i < M; i++) {
+		for (int j = 0; j < N; j++) {
+			if (arr1[i] == arr2[j]) {
+				original = 0;
+				break;
+			}
+		}
+		for (int j = 0; j < count; j++) {
+			if (arr1[i] == temp[j]) {
+				original = 0;
+				break;
+			}
+		}
+		if (original == 1) {
+			temp[count] = arr1[i];
+			count++;
+		}
+		original = 1;
+	}
+
+	int* arr3 = new int[count];
+
+	for (int i = 0; i < count; i++) {
+		arr3[i] = temp[i];
+	}
+
+	Print(arr3, count);
+	cout << count << endl;
+
+	delete[] arr1, arr2, arr3, temp;
+}
+"
+uDnzfBMg,Untitled,farry,Python,Thursday 11th of January 2024 04:34:28 AM CDT,"import tkinter as tk
+import time, cmath
+
+size, frames = 600, 100
+root = tk.Tk()
+canv = tk.Canvas(root, width=size, height=size, bg=""bisque"")
+canv.pack()
+
+blade = [4-2j, 12-3j, 22-1j, 22+1j, 12+3j, 4+2j]
+bladephases = [cmath.exp(x * cmath.pi * 2j/5) for x in range(5)]
+propellor = [p * b/45 for p in bladephases for b in blade ]
+               
+while True:
+    for angle in [x * 2/5 * cmath.pi / frames for x in range(frames)]:
+        spinprop = [p * cmath.exp(angle * 1j) for p in propellor]
+        plotline = [p for s in spinprop for p in [s.real, s.imag]]
+        sizedline = [ (p + 0.5) * size for p in plotline]
+        line = canv.create_polygon(*sizedline, fill=""black"")
+        root.update()
+        time.sleep(0.04)
+        canv.delete(line)
+"
+15Pktu2p,testTimeLogic,kayama,Java,Thursday 11th of January 2024 03:30:05 AM CDT,"import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
+import java.util.ArrayList
+import java.util.List
+ 
+var int nightStartHour = 23 // Define the night mode start hour for the test
+var int nightEndHour = 7    // Define the night mode end hour for the test
+ 
+rule ""Manual Night Mode Test""
+when
+    // This trigger is just an example. You might want to replace it with some manual trigger or a UI button.
+    Item Temperature_sensor_internal received update
+then
+    // Define your test times
+    val List<String> testTimesStrings = newArrayList(
+        ""2023-12-14T21:00:00+02:00[Europe/Kyiv]"",
+        ""2023-12-14T23:00:00+02:00[Europe/Kyiv]"",
+        ""2023-12-15T00:00:00+02:00[Europe/Kyiv]"",
+        ""2023-12-15T06:00:00+02:00[Europe/Kyiv]"",
+        ""2023-12-15T07:00:00+02:00[Europe/Kyiv]"",
+        ""2023-12-15T08:00:00+02:00[Europe/Kyiv]""
+    )
+    logInfo(""Manual Test"", ""----------------------------------------------------------"")
+
+    val nightStart = ZonedDateTime.of(nightStartHour, 0)
+    val nightEnd = ZonedDateTime.of(nightEndHour, 0)
+
+    for (testTimeString : testTimesStrings) {
+        val ZonedDateTime testTime = ZonedDateTime.parse(testTimeString)
+ 
+       var boolean isNightTime
+ 
+        if (testTime.isBefore(nightEnd)) {
+            isNightTime =  testTime.equals(nightStart) || (testTime.isAfter(nightStart) && testTime.isBefore(nightEnd))
+        } else {
+            isNightTime =  testTime.equals(nightStart) || (testTime.isAfter(nightStart) || testTime.isBefore(nightEnd))
+        }
+ 
+        logInfo(""Manual Test"", ""Testing time: "" + testTimeString)
+        logInfo(""Manual Test"", ""Calculated nightStart: "" + nightStart.toString())
+        logInfo(""Manual Test"", ""Calculated nightEnd: "" + nightEnd.toString())
+        logInfo(""Manual Test"", ""Is it night time? "" + isNightTime)
+    }
+    logInfo(""Manual Test"", ""----------------------------------------------------------"")
+end"
+bNPMKv9q,Untitled,kwest87,C#,Thursday 11th of January 2024 02:57:31 AM CDT,"using System;
+
+namespace ConsoleApp23
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            const string Sum = ""sum"";
+            const string Exit = ""exit"";
+            string userInput;
+            bool isWork = true;
+            int[] numbers = new int[0];
+
+            while (isWork)
+            {
+                Console.WriteLine($""Введите цифру ,либо {Sum} , либо {Exit} : "");
+                userInput = Console.ReadLine();
+
+                if (userInput == Exit)
+                {
+                    isWork = false;
+                }
+                else if (userInput == Sum)
+                {
+                    int sum = 0;
+
+                    for (int i = 0; i < numbers.Length; i++)
+                    {
+                        sum += numbers[i];
+                    }
+
+                    Console.WriteLine(sum);
+                }
+                else
+                {
+                    int[] temporaryNumbers = new int[numbers.Length + 1];
+
+                    for (int i = 0; i < numbers.Length; i++)
+                    {
+                        temporaryNumbers[i] = numbers[i];
+                    }
+
+                    temporaryNumbers[temporaryNumbers.Length - 1] = Convert.ToInt32(userInput);
+                    numbers = temporaryNumbers;
+                }
+            }
+        }
+    }
+}"
+xtJfm1Ka,Ender 3Pro Klipper,UrbanFreestyle,Python,Thursday 11th of January 2024 02:49:21 AM CDT,"[include mainsail.cfg]
+[include KAMP_Settings.cfg]
+#[include adxl.cfg]
+[exclude_object]
+
+# Eric the Ender, Ender 3 Pro, SKR Mini E3 V3, Sprite Pro, CR Touch, Stock LCD
+
+# This file contains common pin mappings for the BIGTREETECH SKR mini
+# E3 v3.0. To use this config, the firmware should be compiled for the
+# STM32G0B1 with a ""8KiB bootloader"" and USB communication.
+ 
+# The ""make flash"" command does not work on the SKR mini E3. Instead,
+# after running ""make"", copy the generated ""out/klipper.bin"" file to a
+# file named ""firmware.bin"" on an SD card and then restart the SKR
+# mini E3 with that SD card.
+
+[stepper_x]
+step_pin: PB13
+dir_pin: !PB12
+enable_pin: !PB14
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PC0
+position_endstop: 0
+position_max: 245
+homing_speed: 50
+ 
+[tmc2209 stepper_x]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 0
+run_current: 0.7
+stealthchop_threshold: 999999
+ 
+ 
+[stepper_y]
+step_pin: PB10
+dir_pin: !PB2
+enable_pin: !PB11
+microsteps: 16
+rotation_distance: 40
+endstop_pin: ^PC1
+position_endstop: 0
+position_min: -8
+position_max: 235
+homing_speed: 50
+ 
+[tmc2209 stepper_y]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 2
+run_current: 0.7
+stealthchop_threshold: 999999
+ 
+ 
+[stepper_z]
+step_pin: PB0
+dir_pin: PC5
+enable_pin: !PB1
+microsteps: 16
+rotation_distance: 8
+endstop_pin: probe:z_virtual_endstop
+position_min: -5
+position_max: 250
+ 
+[tmc2209 stepper_z]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 1
+run_current: 0.580
+stealthchop_threshold: 999999
+ 
+ 
+[extruder]
+step_pin: PB3
+dir_pin: !PB4
+enable_pin: !PD1
+microsteps: 16
+gear_ratio: 42:12
+rotation_distance: 26.359
+nozzle_diameter: 0.400
+filament_diameter: 1.750
+heater_pin: PC8
+sensor_type: EPCOS 100K B57560G104F
+sensor_pin: PA0
+#control: pid
+#pid_kp: 21.512
+#pid_ki: 1.353
+#pid_kd: 85.512
+min_temp: 0
+min_extrude_temp: 0
+max_temp: 300
+max_extrude_only_distance: 101
+pressure_advance: 0.018
+
+
+[tmc2209 extruder]
+uart_pin: PC11
+tx_pin: PC10
+uart_address: 3
+run_current: 0.650
+
+  
+[heater_bed]
+heater_pin: PC9
+sensor_type: ATC Semitec 104GT-2
+sensor_pin: PC4
+control: pid
+pid_Kp: 68.977
+pid_Ki: 1.389
+pid_Kd: 856.179
+min_temp: 0
+max_temp: 130
+
+
+[heater_fan heatbreak_cooling_fan]
+pin: PC7
+ 
+[heater_fan controller_fan]
+pin: PB15
+ 
+[fan]
+pin: PC6
+ 
+[mcu]
+serial: /dev/serial/by-id/usb-Klipper_stm32g0b1xx_2600130009504B5735313920-if00
+
+[input_shaper]
+shaper_freq_x: 51.4
+shaper_type_x: mzv
+shaper_freq_y: 55
+shaper_type_y: mzv
+ 
+[printer]
+kinematics: cartesian
+max_velocity: 300
+max_accel: 5000
+max_accel_to_decel: 4000
+max_z_velocity: 50
+max_z_accel: 100
+square_corner_velocity: 5.0
+
+
+#################################################################
+#   128x64 Full Graphic Creality CR10 / ENDER 3 stockdisplay    #
+#################################################################
+
+# See the sample-lcd.cfg file for definitions of common LCD displays.
+# This section is used for a Creality ""12864"" display with a single
+# ribbon cable between the display's EXP3 plug and the
+# micro-controller board's EXP1 connector.
+
+[board_pins]
+aliases:
+# EXP1 header
+  EXP1_1=PB5,  EXP1_3=PA9,   EXP1_5=PA10, EXP1_7=PB8, EXP1_9=<GND>,
+  EXP1_2=PA15, EXP1_4=<RST>, EXP1_6=PB9,  EXP1_8=PD6, EXP1_10=<5V>
+ 
+[display]
+lcd_type: st7920
+cs_pin: EXP1_7
+sclk_pin: EXP1_6
+sid_pin: EXP1_8
+encoder_pins: ^EXP1_5, ^EXP1_3
+click_pin: ^!EXP1_2
+ 
+[output_pin beeper]
+pin: EXP1_1
+
+
+
+#######################################
+#          CR-Touch Settings          #
+#######################################
+
+[bltouch]
+sensor_pin: ^PC14
+control_pin: PA1
+x_offset: -32
+y_offset: -40
+#z_offset: 3.11
+probe_with_touch_mode: true
+stow_on_each_sample: false
+
+[bed_mesh]
+speed: 250
+horizontal_move_z: 5
+mesh_min: 8.5, 8.5
+mesh_max: 209.2, 183.5 
+probe_count: 5, 5
+fade_start: 1
+fade_end: 10
+
+[safe_z_home]
+home_xy_position: 147, 154
+speed: 150
+z_hop: 20
+z_hop_speed: 5
+
+
+################################
+#            Macros            #
+################################
+
+[gcode_macro AUTO_BED_MESH]
+gcode:
+  BED_MESH_CALIBRATE
+  #G1 Y0 F20000
+
+[gcode_macro Accuracy_Test]
+gcode:
+  G90
+  G1 Y120 X120 F20000
+  PROBE_ACCURACY
+
+######################################################################
+# Filament Change
+######################################################################
+
+# M600: Filament Change. This macro will pause the printer, move the
+# tool to the change position, and retract the filament 50mm. Adjust
+# the retraction settings for your own extruder. After filament has
+# been changed, the print can be resumed from its previous position
+# with the ""RESUME"" gcode.
+
+[pause_resume]
+
+[gcode_macro M600]
+gcode:
+    {% set X = params.X|default(50)|float %}
+    {% set Y = params.Y|default(0)|float %}
+    {% set Z = params.Z|default(10)|float %}
+    SAVE_GCODE_STATE NAME=M600_state
+    PAUSE
+    G91
+    G1 E-.8 F2700
+    G1 Z{Z}
+    G90
+    G1 X{X} Y{Y} F3000
+    G91
+    G1 E-50 F1000
+    RESTORE_GCODE_STATE NAME=M600_state
+
+#*# <---------------------- SAVE_CONFIG ---------------------->
+#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.
+#*#
+#*# [bed_mesh default]
+#*# version = 1
+#*# points =
+#*# 	  -0.020000, 0.017500, 0.062500
+#*# 	  0.017500, 0.022500, 0.070000
+#*# 	  0.017500, 0.032500, 0.077500
+#*# x_count = 3
+#*# y_count = 3
+#*# mesh_x_pps = 2
+#*# mesh_y_pps = 2
+#*# algo = lagrange
+#*# tension = 0.2
+#*# min_x = 95.0
+#*# max_x = 125.0
+#*# min_y = 80.74
+#*# max_y = 139.26
+#*#
+#*# [bltouch]
+#*# z_offset = 2.465
+#*#
+#*# [extruder]
+#*# control = pid
+#*# pid_kp = 18.978
+#*# pid_ki = 0.958
+#*# pid_kd = 93.940
+"
+8at1tWLC,Dota2 No click sound QOL request,aveyo,Batch,Thursday 11th of January 2024 02:40:40 AM CDT,"/* 2>nul || @title DOTA MOD BUILDER by AveYo v10f - No click sound QOL request
+
+@set ""OVERRIDE_STEAM_PATH_IF_NEEDED=""
+@set ""OVERRIDE_DOTA2_PATH_IF_NEEDED=""
+@set ""OVERRIDE_OUTPUT_VPK_IF_NEEDED=""
+@goto :init
+
+:vpkmod_source_replacement_pairs:[
+sounds/ui/ui_general_deny.vsnd_c  sounds/ui/select_action.vsnd_c
+sounds/ui/deny_cooldown.vsnd_c    sounds/ui/select_action.vsnd_c
+sounds/ui/deny_mana.vsnd_c        sounds/ui/select_action.vsnd_c
+sounds/ui/select_action.vsnd_c    sounds/null.vsnd_c
+
+:vpkmod_source_replacement_pairs:]
+
+:: gameinfo_branchspecific.gi is a static alternative to using launch option: -language mods
+:gameinfo:[
+""GameInfo""
+{
+    //
+    // Branch-varying info, such as the game/title and app IDs, is in gameinfo_branchspecific.gi.
+    // gameinfo.gi is the non-branch-varying content and can be integrated between branches.
+    //
+
+    game         ""Dota 2""
+    title        ""Dota 2""
+
+    FileSystem
+    {
+        SteamAppId               570
+        BreakpadAppId            373300
+        BreakpadAppId_Tools      375360
+
+        // gameinfo_branchspecific.gi alternative to -language option for running mods is quite popular in China
+        // and Valve have been less enthusiastic about hindering client-side modding in non-western world, wonder why
+        SearchPaths
+        {
+            // AveYo: here is a cleaner way to add mods, without messing the cfg/ path and other auto SearchPaths
+            Game_NonTools        dota_mods
+
+            // These are optional language paths. They must be mounted first, which is why there are first in the list.
+            // *LANGUAGE* will be replaced with the actual language name. Not mounted if not running a specific language.
+            Game_Language        dota_*LANGUAGE*
+
+            // These are optional low-violence paths. They will only get mounted if you are in a low-violence mode.
+            Game_LowViolence     dota_lv
+
+            Game                 dota
+            Game                 core
+
+            Mod                  dota
+
+            Write                dota
+
+            // These are optional language paths. They must be mounted first, which is why there are first in the list.
+            // *LANGUAGE* will be replaced with the actual language name. Not mounted if not running a specific language.
+            AddonRoot_Language   dota_*LANGUAGE*_addons
+
+            AddonRoot            dota_addons
+
+            // Note: addon content is included in publiccontent by default.
+            PublicContent        dota_core
+            PublicContent        core
+        }
+        AddonsChangeDefaultWritePath 0
+        // restore original file: github.com/SteamDatabase/GameTracking-Dota2/blob/master/game/dota/gameinfo_branchspecific.gi
+    }
+}
+
+:gameinfo:]
+
+:init
+@echo off & chcp 1252 >nul & cls
+::# detect STEAM path
+for /f ""tokens=2*"" %%R in ('reg query HKCU\SOFTWARE\Valve\Steam /v SteamPath 2^>nul') do set ""steam_reg=%%S"" & set ""libfs=""
+if not exist ""%STEAM%\steamapps\libraryfolders.vdf"" for %%S in (""%steam_reg%"") do set ""STEAM=%%~fS""
+if defined OVERRIDE_STEAM_PATH_IF_NEEDED set ""STEAM=%OVERRIDE_STEAM_PATH_IF_NEEDED%""
+::# detect DOTA2 path
+for /f usebackq^ delims^=^""^ tokens^=4 %%s in (`findstr /c:"":\\"" ""%STEAM%\SteamApps\libraryfolders.vdf""`) do (
+ if exist ""%%s\steamapps\appmanifest_570.acf"" if exist ""%%s\steamapps\common\dota 2 beta\game\core\pak01_dir.vpk"" set ""libfs=%%s"")
+set ""STEAMAPPS=%STEAM%\steamapps""& if defined libfs set ""STEAMAPPS=%libfs:\\=\%\steamapps""
+set ""DOTA2=%STEAMAPPS%\common\dota 2 beta""
+if defined OVERRIDE_DOTA2_PATH_IF_NEEDED set ""DOTA2=%OVERRIDE_DOTA2_PATH_IF_NEEDED%""
+::# lean xp+ color macros by AveYo:  %<%:af "" hello ""%>>%  &  %<%:cf "" w\""or\""ld ""%>%   for single \ / "" use .%|%\  .%|%/  \""%|%\""
+for /f ""delims=:"" %%s in ('echo;prompt $h$s$h:^|cmd /d') do set ""|=%%s""&set "">>=\..\c nul&set /p s=%%s%%s%%s%%s%%s%%s%%s<nul&popd""
+set ""<=pushd ""%appdata%""&2>nul findstr /c:\ /a"" &set "">=%>>%&echo;"" &set ""|=%|:~0,1%"" &set /p s=\<nul>""%appdata%\c""
+::# is dota running?
+tasklist /fi ""imagename eq dota2.exe"" |findstr /i dota2.exe >nul 2>nul && (
+  %<%:cf "" ERROR ""%>>%  &  %<%:70 "" DOTA2 is currently running! Try again after closing it ""%>%  & timeout -1 >nul & exit
+)
+::# check required paths
+if not exist ""%STEAM%\steamapps\libraryfolders.vdf"" (
+  %<%:cf "" ERROR ""%>>%  &  %<%:70 "" STEAM not found! Set it manually in the script ""%>%  & timeout -1 >nul & exit
+)
+if not exist ""%DOTA2%\game\core\pak01_dir.vpk"" (
+  %<%:cf "" ERROR ""%>>%  &  %<%:70 "" DOTA2 not found! Set it manually in the script ""%>%  & timeout -1 >nul & exit
+)
+set resourcecompiler=""%DOTA2%\game\bin\win64\resourcecompiler.exe""
+set vpkmod=""%~dp0vpkmod.exe""
+if not exist %vpkmod% call :csc_compile_vpkmod_tool & if not exist %vpkmod% (
+  %<%:cf "" ERROR ""%>>%  &  %<%:70 "" compiling VPKMOD C# code! Needs .net framework 4.0 or VS2010+ ""%>%  & timeout -1 >nul & exit
+)
+%<%:4f "" DOTA ""%>>%  &  %<%:2f "" MOD ""%>>% &  %<%:9f "" BUILDER ""%>%
+
+:process
+set ""DIR=%DOTA2%\game\dota_mods"" & set ""FILE=pak01_dir""
+if defined OVERRIDE_OUTPUT_VPK_IF_NEEDED set ""FILE=%OVERRIDE_OUTPUT_VPK_IF_NEEDED%""
+echo  DIR  = %DIR%
+echo  FILE = %FILE%.vpk
+echo  Preparing quick file replacement mod with nothing but unaltered Valve authored files
+(mkdir ""%DIR%"" & rmdir /s/q ""%DIR%\working"" & mkdir ""%DIR%\working"") >nul 2>nul
+echo  Exporting Mod.ini source replacement pairs for VPKMOD tool exclusive feature -m
+call :export vpkmod_source_replacement_pairs > ""%DIR%\working\Mod.ini""
+%vpkmod% -i ""%DOTA2%\game\dota\pak01_dir.vpk"" -o ""%DIR%\%FILE%.vpk"" -m ""%DIR%\working\Mod.ini""
+echo  Exporting gameinfo static alternative to launch option: -language mods
+call :export gameinfo > ""%DOTA2%\game\dota\gameinfo_branchspecific.gi""
+echo  Cleanup
+rmdir /s/q ""%DIR%\working"" >nul 2>nul
+%<%:2f "" DONE ""%>%
+timeout /t -1
+exit /b
+
+:export usage: call :export NAME || Prints all text between lines starting with :NAME:[ and :NAME:] - pure batch snippet by AveYo
+setlocal enabledelayedexpansion  || can expand variables by using [/] instead of % - example: [/]systemroot[/]
+set [=&for /f ""delims=:"" %%s in ('findstr /nbrc:"":%~1:\["" /c:"":%~1:\]"" ""%~f0""')do if defined [ (set /a ]=%%s-3)else set /a [=%%s-1
+<""%~fs0"" ((for /l %%i in (0 1 %[%) do set /p =)&for /l %%i in (%[% 1 %]%) do (set txt=&set /p txt=&set var=!txt:[/]=%%!&set %%=[/]
+if ""!var!"" neq ""!txt!"" (if ""!txt!"" equ """" (echo() else call echo(!var!) else echo(!txt!)) &endlocal &exit /b
+
+:csc_compile_vpkmod_tool used to create vpk archive
+for /f ""tokens=* delims="" %%v in ('dir /b /s /a:-d /o:-n ""%SystemRoot%\Microsoft.NET\Framework\*csc.exe""') do set ""csc=%%v""
+pushd %~dp0 & ""%csc%"" /out:vpkmod.exe /target:exe /platform:anycpu /optimize /nologo ""%~f0""
+exit /b VPKMOD C# source */
+
+using System; using System.IO; using System.Collections.Generic; using System.Linq; using System.Text; using System.Net;
+using System.Diagnostics; using System.Reflection; using System.Security.Cryptography; using System.Runtime.CompilerServices;
+using SteamDB.ValvePak; [assembly:AssemblyDescriptionAttribute(""VPKMOD 2.3"")] [assembly: AssemblyTitle(""AveYo"")]
+[assembly:AssemblyVersionAttribute(""2023.01.12"")]
+
+class Program
+{
+    // VPKMOD v2.3 retains the useful v1.x legacy code based on Decompiler by SteamDB
+    // so it continues to be a generic tool to list, extract, create, filter and in-memory mod VPKs
+    // The main focus however is on supporting No-Bling DOTA mod builder functionality [stripped]
+
+    private static Options Options;
+    private static readonly object ConsoleWriterLock = new object();
+    private static Dictionary<string,uint> OldPakManifest = new Dictionary<string,uint>();
+    private static Dictionary<string,Dictionary<string,bool>> ModSrc = new Dictionary<string,Dictionary<string,bool>>();
+    private static Dictionary<string,string> SrcMod = new Dictionary<string,string>();
+    private static List<string> FileFilter = new List<string>();
+    private static List<string> ExtFilter = new List<string>();
+    private static bool ExportFilter = false;
+
+    public static void Main(string[] args)
+    {
+        Options = new Options(args);
+
+        // Legacy VPKMOD v1 functions:
+        if (String.IsNullOrEmpty(Options.Input))
+        {
+            Echo(""Missing -i input parameter!"", ConsoleColor.Red);
+            return;
+        }
+        Options.Input = SlashPath(Path.GetFullPath(Options.Input));
+
+        if (!String.IsNullOrEmpty(Options.Output)) Options.Output = SlashPath(Path.GetFullPath(Options.Output));
+
+        if (!String.IsNullOrEmpty(Options.ModList))
+        {
+            Options.ModList = SlashPath(Path.GetFullPath(Options.ModList));
+            if (File.Exists(Options.ModList))
+            {
+                var file = new StreamReader(Options.ModList);
+                string line, ext, mod, src;
+                Dictionary<string,bool> m = new Dictionary<string,bool>();
+                while ((line = file.ReadLine()) != null)
+                {
+                    //var split = line.Split(new string[] { "" ? "" }, 2, 0);
+					var split = line.IndexOf(""  "");
+                    if (split > 0)
+                    {
+                        mod = SlashPath(line.Substring(0, split).Trim());
+                        src = SlashPath(line.Substring(split + 2).Trim());
+                        FileFilter.Add(src);
+                        ext = Path.GetExtension(src);
+                        if (ext.Length > 1) ExtFilter.Add(ext.Substring(1));
+                        SrcMod[src] = mod;
+                        if (!ModSrc.ContainsKey(src)) ModSrc.Add(src, new Dictionary<string,bool> { { mod, false } });
+                        else ModSrc[src].Add(mod, false);
+                    }
+                }
+                file.Close();
+            }
+        }
+        else if (!String.IsNullOrEmpty(Options.FilterList))
+        {
+            Options.FilterList = SlashPath(Path.GetFullPath(Options.FilterList));
+            if (File.Exists(Options.FilterList))
+            {
+                var file = new StreamReader(Options.FilterList);
+                string line, ext;
+                while ((line = file.ReadLine()) != null)
+                {
+                    FileFilter.Add(SlashPath(line));
+                    ext = Path.GetExtension(line);
+                    if (ext.Length > 1) ExtFilter.Add(ext.Substring(1));
+                }
+                file.Close();
+            }
+
+            if (Options.PathFilter.Count > 0 || Options.ExtFilter.Count > 0) ExportFilter = true;
+        }
+
+        if (Options.PathFilter.Count > 0) Options.PathFilter = Options.PathFilter.ConvertAll(SlashPath);
+
+        var paths = new List<string>();
+
+        if (Directory.Exists(Options.Input))
+        {
+            if (Path.GetExtension(Options.Output).ToLower() != "".vpk"")
+            {
+                Echo(String.Format(""Input \""{0}\"" is a directory while Output \""{1}\"" is not a VPK."",
+                  Options.Input, Options.Output), ConsoleColor.Red);
+                return;
+            }
+            paths.AddRange(Directory.GetFiles(Options.Input, ""*.*"",
+              Options.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly));
+            if (paths.Count == 0)
+            {
+                Echo(String.Format(""No such file \""{0}\"" or dir is empty. Did you mean to include -r (recursive) parameter?"",
+                    Options.Input), ConsoleColor.Red);
+                return;
+            }
+            LegacyWriteVPK(paths, false); // pak directory into output.vpk
+        }
+        else if (File.Exists(Options.Input))
+        {
+            if (Path.GetExtension(Options.Input).ToLower() != "".vpk"")
+            {
+                Echo(String.Format(""Input \""{0}\"" is not a VPK."", Options.Input), ConsoleColor.Red);
+                return;
+            }
+            paths.Add(Options.Input);
+
+            if (Path.GetExtension(Options.Output).ToLower() != "".vpk"")
+                LegacyReadVPK(Options.Input); // unpak input.vpk into output dir
+            else
+                LegacyWriteVPK(paths, true); // mod input.vpk into output.vpk
+        }
+    }
+
+    private static void LegacyReadVPK(string path)
+    {
+        Echo(String.Format(""--- Listing files in package \""{0}\"""", path), ConsoleColor.Green);
+        var sw = Stopwatch.StartNew();
+        var package = new Package();
+        try
+        {
+            package.Read(path);
+        }
+        catch (Exception e)
+        {
+            Echo(e.ToString(), ConsoleColor.Yellow);
+        }
+
+        if (Options.VerifyVPKChecksums && package.Version == 2)
+        {
+            try
+            {
+                package.VerifyHashes();
+                Console.WriteLine(""VPK verification succeeded"");
+            }
+            catch (Exception)
+            {
+                Echo(""Failed to verify checksums and signature of given VPK:"", ConsoleColor.Red);
+            }
+            return;
+        }
+
+        if (!String.IsNullOrEmpty(Options.Output) && !Options.OutputVPKDir)
+        {
+            //Console.WriteLine(""--- Reading VPK files..."");
+            var manifestPath = String.Concat(path, "".manifest.txt"");
+            if (Options.CachedManifest && File.Exists(manifestPath))
+            {
+                var file = new StreamReader(manifestPath);
+                string line;
+                while ((line = file.ReadLine()) != null)
+                {
+                    var split = line.Split(new char[1] { ' ' }, 2);
+                    if (split.Length == 2) OldPakManifest.Add(split[1], uint.Parse(split[0]));
+                }
+                file.Close();
+            }
+
+            foreach (var etype in package.Entries)
+            {
+                if (ExtFilter.Count > 0 && !ExtFilter.Contains(etype.Key)) continue;
+                else if (Options.ExtFilter.Count > 0 && !Options.ExtFilter.Contains(etype.Key)) continue;
+
+                LegacyDumpVPK(package, etype.Key);
+            }
+
+            if (Options.CachedManifest)
+            {
+                using (var file = new StreamWriter(manifestPath))
+                {
+                    foreach (var hash in OldPakManifest)
+                    {
+                        if (package.FindEntry(hash.Key) == null) Console.WriteLine(""\t{0} no longer exists in VPK"", hash.Key);
+                        file.WriteLine(""{0} {1}"", hash.Value, hash.Key);
+                    }
+                }
+            }
+        }
+
+        if (Options.OutputVPKDir)
+        {
+            foreach (var etype in package.Entries)
+            {
+                foreach (var entry in etype.Value)
+                {
+                    Console.WriteLine(entry);
+                }
+            }
+        }
+
+        if (ExportFilter)
+        {
+            using (var filter = new StreamWriter(Options.FilterList))
+            {
+                foreach (var etype in package.Entries)
+                {
+                    if (Options.ExtFilter.Count > 0 && !Options.ExtFilter.Contains(etype.Key)) continue;
+
+                    foreach (var entry in etype.Value)
+                    {
+                        var ListPath = SlashPath(entry.GetFullPath());
+                        if (Options.PathFilter.Count > 0)
+                        {
+                            var found = false;
+                            foreach (string pathfilter in Options.PathFilter)
+                            {
+                                if (ListPath.StartsWith(pathfilter, StringComparison.OrdinalIgnoreCase)) found = true;
+                            }
+                            if (!found) continue;
+                        }
+                        filter.WriteLine(ListPath);
+                        if (!Options.Silent) Console.WriteLine(ListPath);
+                    }
+                }
+            }
+        }
+
+        sw.Stop();
+
+        Echo(String.Format(""--- Processed in {0}s"", sw.Elapsed.TotalSeconds), ConsoleColor.Cyan);
+    }
+
+    private static int LegacyWriteVPK(List<string> paths, bool modding)
+    {
+        if (paths.Count == 0) return 0;
+        var inputdir = Options.Input;
+        var sw = Stopwatch.StartNew();
+        var package = new Package();
+        var pak01_dir = new Package();
+
+        Echo(modding ? ""--- Modding... "" : ""--- Paking... "", ConsoleColor.Green, 0);
+        Echo(paths.Count);
+
+        if (modding)
+        {
+            try { package.Read(Options.Input); } catch (Exception e) { Echo(e.ToString(), ConsoleColor.Yellow); }
+
+            foreach (var etype in package.Entries)
+            {
+                if (ExtFilter.Count > 0 && !ExtFilter.Contains(etype.Key)) continue;
+                else if (Options.ExtFilter.Count > 0 && !Options.ExtFilter.Contains(etype.Key)) continue;
+
+                var entries = package.Entries[etype.Key];
+
+                foreach (var entry in entries)
+                {
+                    var filePath = String.Format(""{0}.{1}"", entry.FileName, entry.TypeName);
+                    if (entry.DirectoryName.Length > 0) filePath = Path.Combine(entry.DirectoryName, filePath);
+                    filePath = SlashPath(filePath);
+
+                    bool found = false;
+                    if (FileFilter.Count > 0)
+                    {
+                        foreach (string filter in FileFilter)
+                        {
+                            if (filePath == filter) found = true; // StartsWith
+                        }
+                        if (!found) continue;
+                    }
+                    else if (Options.PathFilter.Count > 0)
+                    {
+                        foreach (string filter in Options.PathFilter)
+                        {
+                            if (filePath.StartsWith(filter, StringComparison.OrdinalIgnoreCase)) found = true;
+                        }
+                        if (!found) continue;
+                    }
+
+                    var ext = entry.TypeName;
+                    if (ext == """")
+                    {
+                        ext = "" "";
+                        if (!Options.Silent) Echo(""  missing extension!"", ConsoleColor.Red);
+                        //continue;
+                    }
+                    var file = entry.FileName; //Path.GetFileNameWithoutExtension(root);
+                    if (file == """")
+                    {
+                        file = "" "";
+                        if (!Options.Silent) Echo(""  missing name!"", ConsoleColor.Red);
+                        //continue;
+                    }
+                    var dir = entry.DirectoryName; //Path.GetDirectoryName(root).Replace('\\', '/');
+
+                    byte[] output;
+                    lock (package)
+                    {
+                        package.ReadEntry(entry, out output, false);
+                    }
+
+                    if (ModSrc.ContainsKey(filePath))
+                    {
+                        if (!Options.Silent) Console.WriteLine(""--- Replacing with {0}"", filePath);
+                        foreach (var m in ModSrc[filePath])
+                        {
+                            if (!Options.Silent) Console.WriteLine(""    {0}"", m);
+                            filePath = m.Key;
+                            ext = Path.GetExtension(m.Key).TrimStart('.');
+                            file = Path.GetFileNameWithoutExtension(m.Key);
+                            dir = Path.GetDirectoryName(m.Key).Replace('\\', '/');
+                            if (dir == """") dir = "" "";
+                            pak01_dir.AddEntry(dir, file, ext, output);
+                        }
+                    }
+                    else
+                    {
+                        if (dir == """") dir = "" "";
+                        pak01_dir.AddEntry(dir, file, ext, output);
+                    }
+                }
+            }
+
+            // mod size optimization: replace res with zero-byte file if mod src pair has src=""00""
+            string nix = ""00"";
+            if (ModSrc.ContainsKey(nix))
+            {
+                if (!Options.Silent) Console.WriteLine(""--- Replacing with \""00\"" [ 0-byte data ]"");
+                foreach (var m in ModSrc[nix])
+                {
+                    if (!Options.Silent) Console.WriteLine(""    {0}"", m);
+                    var ext = Path.GetExtension(m.Key).TrimStart('.');
+                    var file = Path.GetFileNameWithoutExtension(m.Key);
+                    var dir = Path.GetDirectoryName(m.Key).Replace('\\', '/');
+                    if (dir == """") dir = "" "";
+                    pak01_dir.AddEntry(dir, file, ext, new byte[0]);
+                }
+            }
+        }
+
+        // include pak01_dir subfolder (if it exists) for manual overrides when modding
+        if (Directory.Exists(""pak01_dir"") && modding)
+        {
+            if (!Options.Silent) Console.WriteLine(""--- Including files in \""pak01_dir\"" folder"");
+            pak01_dir.AddFolder(""pak01_dir"");
+        }
+
+        if (!modding)
+        {
+            pak01_dir.AddFolder(inputdir);
+        }
+
+        pak01_dir.SaveToFile(Options.Output);
+        sw.Stop();
+        var files = pak01_dir.Entries.Values.Sum(_ => _.Count);
+        Echo(String.Format(""--- Processed {0} files in {1}s"", files, sw.Elapsed.TotalSeconds), ConsoleColor.Cyan);
+        return files;
+    }
+
+    private static void LegacyDumpVPK(Package package, string ext)
+    {
+        var entries = package.Entries[ext];
+
+        foreach (var entry in entries)
+        {
+            var filePath = String.Format(""{0}.{1}"", entry.FileName, entry.TypeName);
+            if (!String.IsNullOrEmpty(entry.DirectoryName)) filePath = Path.Combine(entry.DirectoryName, filePath);
+            filePath = SlashPath(filePath);
+
+            bool found = false;
+            if (FileFilter.Count > 0)
+            {
+                foreach (string filter in FileFilter)
+                {
+                    if (filePath.StartsWith(filter, StringComparison.OrdinalIgnoreCase)) found = true;
+                }
+                if (!found) continue;
+            }
+            else if (Options.PathFilter.Count > 0)
+            {
+                foreach (string filter in Options.PathFilter)
+                {
+                    if (filePath.StartsWith(filter, StringComparison.OrdinalIgnoreCase)) found = true;
+                }
+                if (!found) continue;
+            }
+
+            if (!String.IsNullOrEmpty(Options.Output))
+            {
+                uint oldCrc32;
+                if (Options.CachedManifest && OldPakManifest.TryGetValue(filePath, out oldCrc32) && oldCrc32 == entry.CRC32)
+                    continue;
+                OldPakManifest[filePath] = entry.CRC32;
+            }
+
+            byte[] output;
+            lock (package)
+            {
+                package.ReadEntry(entry, out output, false);
+            }
+
+            if (!String.IsNullOrEmpty(Options.Output)) LegacyDumpFile(filePath, output);
+        }
+    }
+
+    private static void LegacyDumpFile(string path, byte[] data)
+    {
+        var outputFile = SlashPath(Path.Combine(Options.Output, path));
+        Directory.CreateDirectory(Path.GetDirectoryName(outputFile));
+        File.WriteAllBytes(outputFile, data);
+        if (!Options.Silent) Console.WriteLine(""--- Written \""{0}\"""", outputFile);
+    }
+
+    public static string SlashPath(string path)
+    {
+        if (path == null) return null;
+        else if (path.Length == 1) return path;
+        else return String.Join(""/"", path.Split(new char[2] {'/', '\\'}, StringSplitOptions.None)).TrimEnd('/');
+    }
+
+    public static void Log(params object[] msg)
+    {
+        using (TextWriter errorWriter = Console.Error)
+        {
+            errorWriter.WriteLine(String.Join("" "", msg));
+        }
+    }
+
+    public static void Echo(object msg, ConsoleColor clr = ConsoleColor.Gray, int newline = 1)
+    {
+        lock (ConsoleWriterLock)
+        {
+            Console.ForegroundColor = clr;
+            Console.Write(newline == 1 ? ""{0}\n"" : ""{0}"", msg);
+            Console.ResetColor();
+        }
+    }
+}
+
+public class Options
+{
+    public string Input { get; set; }
+    public bool Recursive { get; set; }
+    public string Output { get; set; }
+    public bool OutputVPKDir { get; set; }
+    public bool CachedManifest { get; set; }
+    public bool VerifyVPKChecksums { get; set; }
+    public List<string> ExtFilter { get; set; }
+    public List<string> PathFilter { get; set; }
+    public string FilterList { get; set; }
+    public string ModList { get; set; }
+    public bool Silent { get; set; }
+    public bool Help { get; set; }
+    public bool Dialog { get { return (Environment.GetEnvironmentVariable(""NO_CHOICES_DIALOG"") == null); } }
+    public bool MONO { get { int p = (int)Environment.OSVersion.Platform; return ((p == 4) || (p == 6) || (p == 128)); } }
+    internal IDictionary<string,List<string>> Parsed { get; private set; }
+
+    public Options(string[] cmd)
+    {
+        Parsed = new Dictionary<string,List<string>>(); Parse(cmd);
+    }
+
+    internal bool Find(string key, bool novalue = false)
+    {
+        if (Parsed.ContainsKey(key))
+        {
+            if (novalue || Parsed[key].Count != 0) return true;
+            Console.WriteLine(""-"" + key + "" requires a value!"");
+        }
+        return false;
+    }
+
+    internal void Parse(string[] cmd)
+    {
+        var key = """"; List<string> values = new List<string>();
+        foreach (string item in cmd)
+        {
+            if (item[0] == '-') { if (key != """") Parsed[key] = values; key = item.Substring(1); values = new List<string>(); }
+            else if (key == """") { Parsed[item] = new List<string>(); }
+            else { values = new List<string>(item.Split(',')); }
+        }
+        if (key != """") Parsed[key] = values;
+
+        Input              = Find(""i"") ? Parsed[""i""][0] : """";
+        Recursive          = Find(""r"", true);
+        Output             = Find(""o"") ? Parsed[""o""][0] : """";
+        CachedManifest     = Find(""c"", true);
+        OutputVPKDir       = Find(""d"", true);
+        VerifyVPKChecksums = Find(""v"", true);
+        ExtFilter          = Find(""e"") ? Parsed[""e""] : new List<string>();
+        PathFilter         = Find(""p"") ? Parsed[""p""] : new List<string>();
+        FilterList         = Find(""l"") ? Parsed[""l""][0] : """";
+        ModList            = Find(""m"") ? Parsed[""m""][0] : """";
+        Silent             = Find(""s"", true);
+        Help               = Find(""h"", true) || cmd.Length == 0;
+
+        if (Silent == false)
+        {
+            Console.ForegroundColor = ConsoleColor.Black; Console.BackgroundColor = ConsoleColor.Cyan;
+            Console.Write("" VPKMOD v2.3 ""); Console.ResetColor(); Console.WriteLine(""  AveYo / SteamDB"");
+        }
+        if (Help)
+        {
+            Console.WriteLine("" -i input      Directory to create new VPK from, or File to extract VPK from"");
+            Console.WriteLine("" -o output     File to create VPK to, or Directory to extract VPK to"");
+            Console.WriteLine("" -r            Recursively include all files in Directory"");
+            Console.WriteLine("" -c            Cached VPK manifest: only changed files get extracted to disk"");
+            Console.WriteLine("" -d            Write VPK directory of files and their CRC to console"");
+            Console.WriteLine("" -v            Verify checksums and signatures: only for VPK version 2"");
+            Console.WriteLine("" -e txt,vjs_c  Extension(s) filter: only include these file extensions"");
+            Console.WriteLine("" -p cfg/,dev/  Path(s) filter: only include files from these paths"");
+            Console.WriteLine("" -l list.txt   List file to import fullpath filters from"");
+            Console.WriteLine(""               | if -e or -p are also used, export current filters instead"");
+            Console.WriteLine(""               | vpkmod -i pak01_dir.vpk -e vmdl_c -p models/heroes/mars -l mars.txt"");
+            Console.WriteLine("" -m mod.txt    Mod = Src pairs file for in-memory unpak-replace-pak quick modding"");
+            Console.WriteLine(""               | sounds/misc/soundboard/all_dead.vsnd_c?sounds/null.vsnd_c"");
+            Console.WriteLine(""               | if Src is \""00\"" set Mod file content to 0-byte"");
+            Console.WriteLine(""               | automatically imports files from a pak01_dir subfolder"");
+            Console.WriteLine("" -s            Silent"");
+            Console.WriteLine("" -h            This help screen"");
+            Console.ReadKey(); Environment.Exit(0);
+        }
+    }
+}
+
+namespace SteamDB.ValvePak
+{
+    /*
+    MIT License
+
+    Copyright (c) 2008 Rick (rick 'at' gibbed 'dot' us)
+    Copyright (c) 2016 SteamDB
+    Copyright (c) 2019 AveYo
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the ""Software""), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED ""AS IS"", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+    */
+
+    public class Package : IDisposable
+    {
+        public const int MAGIC = 0x55AA1234;
+        public const char DirectorySeparatorChar = '/';
+        private BinaryReader Reader;
+        public string FileName { get; private set; }
+        public bool IsDirVPK { get; private set; }
+        public uint Version { get; private set; }
+        public uint HeaderSize { get; private set; }
+        public uint TreeSize { get; private set; }
+        public uint FileDataSectionSize { get; private set; }
+        public uint ArchiveMD5SectionSize { get; private set; }
+        public uint OtherMD5SectionSize { get; private set; }
+        public uint SignatureSectionSize { get; private set; }
+        public byte[] TreeChecksum { get; private set; }
+        public byte[] ArchiveMD5EntriesChecksum { get; private set; }
+        public byte[] WholeFileChecksum { get; private set; }
+        public byte[] PublicKey { get; private set; }
+        public byte[] Signature { get; private set; }
+        public Dictionary<string,List<PackageEntry>> Entries { get; private set; }
+        public List<ArchiveMD5SectionEntry> ArchiveMD5Entries { get; private set; }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing && Reader != null)
+            {
+                Reader.Dispose();
+                Reader = null;
+            }
+        }
+
+        public void SetFileName(string fileName)
+        {
+            if (fileName == null)
+            {
+                throw new ArgumentNullException(""vpk fileName is null"");
+            }
+
+            if (fileName.EndsWith("".vpk"", StringComparison.OrdinalIgnoreCase))
+            {
+                fileName = fileName.Substring(0, fileName.Length - 4);
+            }
+
+            if (fileName.EndsWith(""_dir"", StringComparison.OrdinalIgnoreCase))
+            {
+                IsDirVPK = true;
+                fileName = fileName.Substring(0, fileName.Length - 4);
+            }
+
+            FileName = fileName;
+        }
+
+        public void Read(string filename)
+        {
+            SetFileName(filename);
+
+            var fs = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            //String.Format(""{0}{1}.vpk"", FileName, IsDirVPK ? ""_dir"" : """")
+
+            Read(fs);
+        }
+
+        public void Read(Stream input)
+        {
+            if (input == null)
+            {
+                throw new ArgumentNullException(""VPK stream input is null"");
+            }
+
+            if (FileName == null)
+                throw new InvalidOperationException(""You must call SetFileName() before calling Read() directly with a stream."");
+
+            Reader = new BinaryReader(input);
+
+            if (Reader.ReadUInt32() != MAGIC)
+                throw new InvalidDataException(""Given file is not a VPK."");
+
+            Version = Reader.ReadUInt32();
+            TreeSize = Reader.ReadUInt32();
+
+            if (Version == 1)
+            {
+                // Nothing else
+            }
+            else if (Version == 2)
+            {
+                FileDataSectionSize = Reader.ReadUInt32();
+                ArchiveMD5SectionSize = Reader.ReadUInt32();
+                OtherMD5SectionSize = Reader.ReadUInt32();
+                SignatureSectionSize = Reader.ReadUInt32();
+            }
+            else if (Version == 0x00030002) // Apex Legends, Titanfall
+            {
+                throw new NotSupportedException(""Respawn uses customized vpk format which this library does not support."");
+            }
+            else
+            {
+                throw new InvalidDataException(String.Format(""Bad VPK version. ({0})"", Version));
+            }
+
+            HeaderSize = (uint)input.Position;
+
+            ReadEntries();
+
+            if (Version == 2)
+            {
+                // Skip over file data, if any
+                input.Position += FileDataSectionSize;
+
+                ReadArchiveMD5Section();
+                ReadOtherMD5Section();
+                ReadSignatureSection();
+            }
+        }
+
+        public PackageEntry FindEntry(string filePath)
+        {
+            if (filePath == null)
+                throw new ArgumentNullException(""filePath"");
+
+            filePath = filePath.Replace('\\', DirectorySeparatorChar);
+
+            var lastSeparator = filePath.LastIndexOf(DirectorySeparatorChar);
+            var directory = lastSeparator > -1 ? filePath.Substring(0, lastSeparator) : string.Empty;
+            var fileName = filePath.Substring(lastSeparator + 1);
+
+            return FindEntry(directory, fileName);
+        }
+
+        public PackageEntry FindEntry(string directory, string fileName)
+        {
+            if (directory == null)
+                throw new ArgumentNullException(""directory"");
+
+            if (fileName == null)
+                throw new ArgumentNullException(""fileName"");
+
+            var dot = fileName.LastIndexOf('.');
+            string extension;
+
+            if (dot > -1)
+            {
+                extension = fileName.Substring(dot + 1);
+                fileName = fileName.Substring(0, dot);
+            }
+            else
+            {
+                // Valve uses a space for missing extensions
+                extension = "" "";
+            }
+
+            return FindEntry(directory, fileName, extension);
+        }
+
+        public PackageEntry FindEntry(string directory, string fileName, string extension)
+        {
+            if (directory == null)
+                throw new ArgumentNullException(""directory"");
+
+            if (fileName == null)
+                throw new ArgumentNullException(""fileName"");
+
+            if (extension == null)
+                throw new ArgumentNullException(""extension"");
+
+            if (!Entries.ContainsKey(extension))
+                return null;
+
+            // We normalize path separators when reading the file list
+            // And remove the trailing slash
+            directory = directory.Replace('\\', DirectorySeparatorChar).Trim(DirectorySeparatorChar);
+
+            // If the directory is empty after trimming, set it to a space to match Valve's behaviour
+            if (directory.Length == 0)
+                directory = "" "";
+
+            return Entries[extension].Find(_ => _.DirectoryName == directory && _.FileName == fileName);
+        }
+
+        public void ReadEntry(PackageEntry entry, out byte[] output, bool validateCrc = true)
+        {
+            output = new byte[entry.SmallData.Length + entry.Length];
+
+            if (entry.SmallData.Length > 0)
+                entry.SmallData.CopyTo(output, 0);
+
+            if (entry.Length > 0)
+            {
+                Stream fs = null;
+
+                try
+                {
+                    var offset = entry.Offset;
+
+                    if (entry.ArchiveIndex != 0x7FFF)
+                    {
+                        if (!IsDirVPK)
+                            throw new InvalidOperationException(""Given VPK is not _dir, but entry references external archive."");
+
+                        var fileName = String.Format(""{0}_{1:d3}.vpk"", FileName, entry.ArchiveIndex);
+                        fs = new FileStream(fileName, FileMode.Open, FileAccess.Read);
+                    }
+                    else
+                    {
+                        fs = Reader.BaseStream;
+                        offset += HeaderSize + TreeSize;
+                    }
+
+                    fs.Seek(offset, SeekOrigin.Begin);
+
+                    int length = (int)entry.Length;
+                    int readOffset = entry.SmallData.Length;
+                    int bytesRead;
+                    int totalRead = 0;
+                    while ((bytesRead = fs.Read(output, readOffset + totalRead, length - totalRead)) != 0)
+                    {
+                        totalRead += bytesRead;
+                    }
+                }
+                finally
+                {
+                    if (entry.ArchiveIndex != 0x7FFF && fs != null)
+                        fs.Close();
+                }
+            }
+
+            if (validateCrc && entry.CRC32 != Crc32.Compute(output))
+                throw new InvalidDataException(""CRC32 mismatch for read data."");
+        }
+
+        private void ReadEntries()
+        {
+            var typeEntries = new Dictionary<string, List<PackageEntry>>();
+            using (MemoryStream ms = new MemoryStream())
+
+            // Types
+            while (true)
+            {
+                var typeName = ReadNullTermUtf8String(ms);
+
+                if (string.IsNullOrEmpty(typeName))
+                {
+                    break;
+                }
+
+                var entries = new List<PackageEntry>();
+
+                // Directories
+                while (true)
+                {
+                    var directoryName = ReadNullTermUtf8String(ms);
+
+                    if (string.IsNullOrEmpty(directoryName))
+                    {
+                        break;
+                    }
+
+                    // Files
+                    while (true)
+                    {
+                        var fileName = ReadNullTermUtf8String(ms);
+
+                        if (string.IsNullOrEmpty(fileName))
+                        {
+                            break;
+                        }
+
+                        var entry = new PackageEntry
+                        {
+                            FileName = fileName,
+                            DirectoryName = directoryName,
+                            TypeName = typeName,
+                        };
+
+                        entry.CRC32 = Reader.ReadUInt32();
+                        var smallDataSize = Reader.ReadUInt16();
+                        entry.ArchiveIndex = Reader.ReadUInt16();
+                        entry.Offset = Reader.ReadUInt32();
+                        entry.Length = Reader.ReadUInt32();
+
+                        var terminator = Reader.ReadUInt16();
+
+                        if (terminator != 0xFFFF)
+                            throw new FormatException(""VPK entry with invalid terminator."");
+
+                        if (smallDataSize > 0)
+                        {
+                            entry.SmallData = new byte[smallDataSize];
+
+                            int bytesRead;
+                            int totalRead = 0;
+                            while ((bytesRead = Reader.Read(entry.SmallData, totalRead, entry.SmallData.Length - totalRead)) != 0)
+                            {
+                                totalRead += bytesRead;
+                            }
+                        }
+                        else
+                        {
+                            entry.SmallData = Array.Empty<byte>();
+                        }
+
+                        entries.Add(entry);
+                    }
+                }
+
+                typeEntries.Add(typeName, entries);
+            }
+
+            Entries = typeEntries;
+        }
+
+        public void VerifyHashes()
+        {
+            if (Version != 2)
+                throw new InvalidDataException(""Only version 2 is supported."");
+
+            using (var md5 = MD5.Create())
+            {
+                Reader.BaseStream.Position = 0;
+
+                var hash = md5.ComputeHash(
+                  Reader.ReadBytes((int)(HeaderSize + TreeSize + FileDataSectionSize + ArchiveMD5SectionSize + 32)));
+
+                if (!hash.SequenceEqual(WholeFileChecksum))
+                    throw new InvalidDataException(String.Format(""Package checksum mismatch ({0} != expected {1})"",
+                      BitConverter.ToString(hash), BitConverter.ToString(WholeFileChecksum)));
+
+                Reader.BaseStream.Position = HeaderSize;
+
+                hash = md5.ComputeHash(Reader.ReadBytes((int)TreeSize));
+
+                if (!hash.SequenceEqual(TreeChecksum))
+                    throw new InvalidDataException(String.Format(""File tree checksum mismatch ({0} != expected {1})"",
+                      BitConverter.ToString(hash), BitConverter.ToString(TreeChecksum)));
+
+                Reader.BaseStream.Position = HeaderSize + TreeSize + FileDataSectionSize;
+
+                hash = md5.ComputeHash(Reader.ReadBytes((int)ArchiveMD5SectionSize));
+
+                if (!hash.SequenceEqual(ArchiveMD5EntriesChecksum))
+                    throw new InvalidDataException(String.Format(""Archive MD5 entries checksum mismatch ({0} != expected {1})"",
+                      BitConverter.ToString(hash), BitConverter.ToString(ArchiveMD5EntriesChecksum)));
+
+                // TODO: verify archive checksums
+            }
+
+            if (PublicKey == null || Signature == null)
+                return;
+
+            if (!IsSignatureValid())
+                throw new InvalidDataException(""VPK signature is not valid."");
+        }
+
+        public bool IsSignatureValid()
+        {
+            // AveYo : just return true since RSA and AsnKeyParser are not used in VPKMOD
+            return true;
+        }
+
+        private void ReadArchiveMD5Section()
+        {
+            ArchiveMD5Entries = new List<ArchiveMD5SectionEntry>();
+
+            if (ArchiveMD5SectionSize == 0)
+            {
+                return;
+            }
+
+            var entries = ArchiveMD5SectionSize / 28; // 28 is sizeof(VPK_MD5SectionEntry), which is int + int + int + 16 chars
+
+            for (var i = 0; i < entries; i++)
+            {
+                ArchiveMD5Entries.Add(new ArchiveMD5SectionEntry
+                {
+                    ArchiveIndex = Reader.ReadUInt32(),
+                    Offset = Reader.ReadUInt32(),
+                    Length = Reader.ReadUInt32(),
+                    Checksum = Reader.ReadBytes(16)
+                });
+            }
+        }
+
+        private void ReadOtherMD5Section()
+        {
+            if (OtherMD5SectionSize != 48)
+                throw new InvalidDataException(String.Format(""Encountered OtherMD5Section with size of {0} (should be 48)"",
+                  OtherMD5SectionSize));
+
+            TreeChecksum = Reader.ReadBytes(16);
+            ArchiveMD5EntriesChecksum = Reader.ReadBytes(16);
+            WholeFileChecksum = Reader.ReadBytes(16);
+        }
+
+        private void ReadSignatureSection()
+        {
+            if (SignatureSectionSize == 0)
+            {
+                return;
+            }
+
+            var publicKeySize = Reader.ReadInt32();
+
+            if (SignatureSectionSize == 20 && publicKeySize == MAGIC)
+            {
+                // CS2 has this
+                return;
+            }
+
+            PublicKey = Reader.ReadBytes(publicKeySize);
+
+            var signatureSize = Reader.ReadInt32();
+            Signature = Reader.ReadBytes(signatureSize);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private string ReadNullTermUtf8String(MemoryStream ms)
+        {
+            while (true)
+            {
+                var b = Reader.ReadByte();
+
+                if (b == 0x00)
+                {
+                    break;
+                }
+
+                ms.WriteByte(b);
+            }
+
+            ArraySegment<byte> buffer;
+
+            ms.TryGetBuffer(out buffer);
+
+            var str = Encoding.UTF8.GetString(buffer.ToArray());
+
+            ms.SetLength(0);
+
+            return str;
+        }
+
+        // AveYo: enhanced rework of my previous stand-alone vpk writer to fit in the Package class
+        public void SaveToFile(string fn)
+        {
+            // VPKMOD23 just counts offsets for duplicate files, so the exported .vpk is generally smaller for repetitive content!
+            var sw = Stopwatch.StartNew();
+            if (Entries == null) { File.Delete(fn); return; }
+            Directory.CreateDirectory(Path.GetDirectoryName(fn));
+            using (var md5 = MD5.Create())
+            using (var sha1 = SHA1.Create())
+            using (FileStream fs = new FileStream(fn, FileMode.Create, FileAccess.Write))
+            using (MemoryStream mtree = new MemoryStream(), mdata = new MemoryStream())
+            using (BinaryWriter tree = new BinaryWriter(mtree), data = new BinaryWriter(mdata))
+            using (BinaryReader buff = new BinaryReader(mtree))
+            {
+                uint version = 2, tree_size = 0, data_size = 0, data_offset = 16, lookup_offset = 0;
+                short preload_bytes = 0, archive_index = 0x7fff, terminator = -1;
+                var seen = new Dictionary<string, uint>();
+                bool unique = true;
+                byte nul1 = 0;
+
+                data.Write(0x4d4b5056); data.Write(0x3332444f); data.Write(0x41204020); data.Write(0x4f594556); // id
+
+                tree.Write(MAGIC);                                                  // Signature             4
+                tree.Write(version);                                                // Version               4
+                tree.Write(tree_size);                                              // TreeSize (TBD)        4
+
+                tree.Write(0x00000000);                                             // FileDataSectionSize   4
+                tree.Write(0x00000000);                                             // ArchiveMD5SectionSize 4
+                tree.Write(0x00000030);                                             // OtherMD5SectionSize   4
+                tree.Write(0x00000000);                                             // SignatureSectionSize  4
+
+                foreach (string etype in Entries.Keys)
+                {
+                    tree.Write(Encoding.UTF8.GetBytes(etype));                      // TypeName              ?
+                    tree.Write(nul1);                                               // 00                    1
+                    tree_size += (uint)etype.Length + 1;
+
+                    var directories = Entries[etype].Select(_ => _.DirectoryName).Distinct();
+                    foreach (string dirname in directories)
+                    {
+                        tree.Write(Encoding.UTF8.GetBytes(dirname));                // DirectoryName         ?
+                        tree.Write(nul1);                                           // 00                    1
+                        tree_size += (uint)dirname.Length + 1;
+
+                        var files = Entries[etype].Where(_ => _.DirectoryName == dirname).Select(_ => _.FileName);
+                        foreach (string filename in files)
+                        {
+                            byte[] data_bytes;
+                            var found = Entries[etype].Find(_ => _.DirectoryName == dirname && _.FileName == filename);
+
+                            if (found != null)
+                                ReadEntry(found, out data_bytes, false); // it should always be found
+                            else
+                                data_bytes = new byte[0];
+
+                            uint data_length = (uint)data_bytes.Length;
+                            uint crc = Crc32.Compute(data_bytes);
+                            string hash = String.Join("""", sha1.ComputeHash(data_bytes));
+                            if (seen.ContainsKey(hash))
+                            {
+                                unique = false; lookup_offset = seen[hash];
+                            }
+                            else
+                            {
+                                unique = true; lookup_offset = data_offset; seen.Add(hash, data_offset);
+                            }
+                            tree.Write(Encoding.UTF8.GetBytes(filename));           // FileName              ?
+                            tree.Write(nul1);                                       // 00                    1
+                            tree.Write(crc);                                        // CheckSum              4
+                            tree.Write(preload_bytes);                              // PreloadBytes          2
+                            tree.Write(archive_index);                              // ArchiveIndex          2
+                            tree.Write(lookup_offset);                              // EntryOffset           4
+                            tree.Write(data_length);                                // EntryLength           4
+                            tree.Write(terminator);                                 // Terminator            2
+                            if (unique)
+                            {
+                                data.Write(data_bytes);                             // DataBytes written
+                                data_offset += data_length;                         // to secondary stream
+                            }
+                            tree_size += (uint)filename.Length + 19;
+                        }
+                        tree.Write(nul1);                                           // 00 Next Directory     1
+                        tree_size += 1;
+                    }
+                    tree.Write(nul1);                                               // 00 Next Type          1
+                    tree_size += 1;
+                }
+
+                tree.Write(nul1);                                                   // 00 Tree End           1
+                tree_size += 1;
+
+                mdata.Position = 0;
+                mdata.CopyTo(mtree);                                                // Data write            ?
+                data_size = (uint)mdata.Length;
+
+                mtree.Position = 8;
+                tree.Write(tree_size);                                              // TreeSize update
+                tree.Write(data_size);                                              // FileDataSectionSize update
+
+                mtree.Position = 28;
+                var tree_checksum = md5.ComputeHash(buff.ReadBytes((int)tree_size));
+                var archive000_checksum = md5.ComputeHash(new byte[0]);
+                mtree.Position = 28 + tree_size + data_size;
+                tree.Write(tree_checksum);                                          // TreeChecksum         16
+                tree.Write(archive000_checksum);                                    // Archive000Checksum   16
+
+                mtree.Position = 0;
+                var wholefile_checksum = md5.ComputeHash(buff.ReadBytes((int)(28 + tree_size + data_size + 32)));
+                mtree.Position = 28 + tree_size + data_size + 32;
+                tree.Write(wholefile_checksum);                                     // WholeFileChecksum    16
+
+                mtree.Position = 0;
+                mtree.CopyTo(fs);                                                   // File write  tree + data
+            }
+            sw.Stop();
+            Console.WriteLine(String.Format(""--- Written {0} in {1}s"", fn, sw.Elapsed.TotalSeconds));
+        }
+
+        public void AddEntry(string dir, string name, string ext, byte[] data)
+        {
+            if (Entries == null)
+                Entries = new Dictionary<string,List<PackageEntry>>();
+
+            if (!Entries.Keys.Contains(ext))
+                Entries.Add(ext, new List<PackageEntry>());
+
+            var found = Entries[ext].Find(_ => _.DirectoryName == dir && _.FileName == name);
+
+            if (found == null)
+            {
+                Entries[ext].Add(new PackageEntry {
+                  FileName = name, DirectoryName = dir, TypeName = ext,
+                  CRC32 = 0, SmallData = data, ArchiveIndex = 0, Offset = 0, Length = 0
+                });
+            }
+            else
+            {
+                found.Length = 0;
+                found.SmallData = data;
+            }
+        }
+
+        public void AddEntry(string path, byte[] data)
+        {
+            var s = path.LastIndexOf(""/"");
+            var dir = (s == -1) ? "" "" : path.Substring(0, s);
+            var file = path.Substring(s + 1);
+            s = file.LastIndexOf('.');
+            var ext = (s == -1) ? "" "" : file.Substring(s + 1);
+            var name = (s == -1) ? file : file.Substring(0, s);
+
+            if (Entries == null)
+                Entries = new Dictionary<string,List<PackageEntry>>();
+
+            if (!Entries.Keys.Contains(ext))
+                Entries.Add(ext, new List<PackageEntry>());
+
+            var found = Entries[ext].Find(_ => _.DirectoryName == dir && _.FileName == name);
+
+            if (found == null)
+            {
+                Entries[ext].Add(new PackageEntry {
+                  FileName = name, DirectoryName = dir, TypeName = ext,
+                  CRC32 = 0, SmallData = data, ArchiveIndex = 0, Offset = 0, Length = 0
+                });
+            }
+            else
+            {
+                found.Length = 0;
+                found.SmallData = data;
+            }
+        }
+
+        public void AddFolder(string inputdir)
+        {
+            // include pak01_dir subfolder (if it exists) for manual overrides when modding
+            if (!Directory.Exists(inputdir))
+                return;
+
+            var paths = new List<string>();
+            paths.AddRange(Directory.GetFiles(inputdir, ""*.*"", SearchOption.AllDirectories));
+
+            if (paths.Count == 0)
+                return;
+
+            Console.WriteLine(""--- Adding files in \""{0}\"""", inputdir);
+
+            var excluded = new List<string>() { ""zip"", ""reg"", ""rar"", ""msi"", ""exe"", ""dll"", ""com"", ""cmd"", ""bat"", ""vbs"" };
+            var iso = Encoding.GetEncoding(""ISO-8859-1"");
+            var utf = Encoding.UTF8;
+
+            foreach (var path in paths)
+            {
+                byte[] latin = Encoding.Convert(utf, iso, utf.GetBytes(path.Substring(inputdir.Length + 1)));
+                string root = iso.GetString(latin).ToLower();
+
+                var ext = Path.GetExtension(root).TrimStart('.');
+
+                if (excluded.Contains(ext))
+                    continue; // ERROR illegal extension!
+
+                if (ext == """")
+                    ext = "" ""; // WARNING missing extension
+
+                var name = Path.GetFileNameWithoutExtension(root);
+
+                if (name == """")
+                    name = "" ""; // WARNING missing filename
+
+                var dir = Path.GetDirectoryName(root).Replace('\\', '/');
+
+                if (dir == """")
+                    dir = "" ""; // WARNING missing directoryname
+
+                AddEntry(dir, name, ext, File.ReadAllBytes(path));
+            }
+        }
+
+        public void Filter(string types, string paths = null, string names = null)
+        {
+            var fTypes = String.IsNullOrEmpty(types) ? new List<string>() : types.Split(',').Select(_ => _.Trim()).ToList();
+            var fPaths = String.IsNullOrEmpty(paths) ? new List<string>() : paths.Split(',').Select(_ => _.Trim()).ToList();
+            var fNames = String.IsNullOrEmpty(names) ? new List<string>() : names.Split(',').Select(_ => _.Trim()).ToList();
+
+            foreach (string etype in Entries.Keys.ToList())
+            {
+                if (fTypes.Count > 0)
+                {
+                    if (!fTypes.Contains(etype))
+                    {
+                        Entries.Remove(etype);
+                        continue;
+                    }
+                }
+
+                if (fPaths.Count > 0)
+                    Entries[etype].RemoveAll(_ => !fPaths.Exists(_.DirectoryName.StartsWith));
+
+                if (fNames.Count > 0)
+                    Entries[etype].RemoveAll(_ => !fNames.Exists(_.FileName.Equals));
+            }
+        }
+    }
+
+    public class PackageEntry
+    {
+        public string FileName { get; set; }
+        public string DirectoryName { get; set; }
+        public string TypeName { get; set; }
+        public uint CRC32 { get; set; }
+        public uint Length { get; set; }
+        public uint Offset { get; set; }
+        public ushort ArchiveIndex { get; set; }
+        public uint TotalLength { get { return SmallData == null ? Length : Length + (uint)SmallData.Length; } }
+        public byte[] SmallData { get; set; }
+
+        public string GetFileName()
+        {
+            return TypeName == "" "" ? FileName : FileName + ""."" + TypeName;
+        }
+
+        public string GetFullPath()
+        {
+            return DirectoryName == "" "" ? GetFileName() : DirectoryName + Package.DirectorySeparatorChar + GetFileName();
+        }
+
+        public override string ToString()
+        {
+            return String.Format(""{0} crc=0x{1:x2} metadatasz={2} fnumber={3} ofs=0x{4:x2} sz={5}"",
+              GetFullPath(), CRC32, SmallData.Length, ArchiveIndex, Offset, Length);
+        }
+    }
+
+    public class ArchiveMD5SectionEntry
+    {
+        public uint ArchiveIndex { get; set; }
+        public uint Offset { get; set; }
+        public uint Length { get; set; }
+        public byte[] Checksum { get; set; }
+    }
+
+    public static class Crc32
+    {
+        // CRC polynomial 0xEDB88320.
+        private static readonly uint[] Table =
+        {
+           0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA, 0x076DC419, 0x706AF48F, 0xE963A535, 0x9E6495A3, 0x0EDB8832, 0x79DCB8A4,
+           0xE0D5E91E, 0x97D2D988, 0x09B64C2B, 0x7EB17CBD, 0xE7B82D07, 0x90BF1D91, 0x1DB71064, 0x6AB020F2, 0xF3B97148, 0x84BE41DE,
+           0x1ADAD47D, 0x6DDDE4EB, 0xF4D4B551, 0x83D385C7, 0x136C9856, 0x646BA8C0, 0xFD62F97A, 0x8A65C9EC, 0x14015C4F, 0x63066CD9,
+           0xFA0F3D63, 0x8D080DF5, 0x3B6E20C8, 0x4C69105E, 0xD56041E4, 0xA2677172, 0x3C03E4D1, 0x4B04D447, 0xD20D85FD, 0xA50AB56B,
+           0x35B5A8FA, 0x42B2986C, 0xDBBBC9D6, 0xACBCF940, 0x32D86CE3, 0x45DF5C75, 0xDCD60DCF, 0xABD13D59, 0x26D930AC, 0x51DE003A,
+           0xC8D75180, 0xBFD06116, 0x21B4F4B5, 0x56B3C423, 0xCFBA9599, 0xB8BDA50F, 0x2802B89E, 0x5F058808, 0xC60CD9B2, 0xB10BE924,
+           0x2F6F7C87, 0x58684C11, 0xC1611DAB, 0xB6662D3D, 0x76DC4190, 0x01DB7106, 0x98D220BC, 0xEFD5102A, 0x71B18589, 0x06B6B51F,
+           0x9FBFE4A5, 0xE8B8D433, 0x7807C9A2, 0x0F00F934, 0x9609A88E, 0xE10E9818, 0x7F6A0DBB, 0x086D3D2D, 0x91646C97, 0xE6635C01,
+           0x6B6B51F4, 0x1C6C6162, 0x856530D8, 0xF262004E, 0x6C0695ED, 0x1B01A57B, 0x8208F4C1, 0xF50FC457, 0x65B0D9C6, 0x12B7E950,
+           0x8BBEB8EA, 0xFCB9887C, 0x62DD1DDF, 0x15DA2D49, 0x8CD37CF3, 0xFBD44C65, 0x4DB26158, 0x3AB551CE, 0xA3BC0074, 0xD4BB30E2,
+           0x4ADFA541, 0x3DD895D7, 0xA4D1C46D, 0xD3D6F4FB, 0x4369E96A, 0x346ED9FC, 0xAD678846, 0xDA60B8D0, 0x44042D73, 0x33031DE5,
+           0xAA0A4C5F, 0xDD0D7CC9, 0x5005713C, 0x270241AA, 0xBE0B1010, 0xC90C2086, 0x5768B525, 0x206F85B3, 0xB966D409, 0xCE61E49F,
+           0x5EDEF90E, 0x29D9C998, 0xB0D09822, 0xC7D7A8B4, 0x59B33D17, 0x2EB40D81, 0xB7BD5C3B, 0xC0BA6CAD, 0xEDB88320, 0x9ABFB3B6,
+           0x03B6E20C, 0x74B1D29A, 0xEAD54739, 0x9DD277AF, 0x04DB2615, 0x73DC1683, 0xE3630B12, 0x94643B84, 0x0D6D6A3E, 0x7A6A5AA8,
+           0xE40ECF0B, 0x9309FF9D, 0x0A00AE27, 0x7D079EB1, 0xF00F9344, 0x8708A3D2, 0x1E01F268, 0x6906C2FE, 0xF762575D, 0x806567CB,
+           0x196C3671, 0x6E6B06E7, 0xFED41B76, 0x89D32BE0, 0x10DA7A5A, 0x67DD4ACC, 0xF9B9DF6F, 0x8EBEEFF9, 0x17B7BE43, 0x60B08ED5,
+           0xD6D6A3E8, 0xA1D1937E, 0x38D8C2C4, 0x4FDFF252, 0xD1BB67F1, 0xA6BC5767, 0x3FB506DD, 0x48B2364B, 0xD80D2BDA, 0xAF0A1B4C,
+           0x36034AF6, 0x41047A60, 0xDF60EFC3, 0xA867DF55, 0x316E8EEF, 0x4669BE79, 0xCB61B38C, 0xBC66831A, 0x256FD2A0, 0x5268E236,
+           0xCC0C7795, 0xBB0B4703, 0x220216B9, 0x5505262F, 0xC5BA3BBE, 0xB2BD0B28, 0x2BB45A92, 0x5CB36A04, 0xC2D7FFA7, 0xB5D0CF31,
+           0x2CD99E8B, 0x5BDEAE1D, 0x9B64C2B0, 0xEC63F226, 0x756AA39C, 0x026D930A, 0x9C0906A9, 0xEB0E363F, 0x72076785, 0x05005713,
+           0x95BF4A82, 0xE2B87A14, 0x7BB12BAE, 0x0CB61B38, 0x92D28E9B, 0xE5D5BE0D, 0x7CDCEFB7, 0x0BDBDF21, 0x86D3D2D4, 0xF1D4E242,
+           0x68DDB3F8, 0x1FDA836E, 0x81BE16CD, 0xF6B9265B, 0x6FB077E1, 0x18B74777, 0x88085AE6, 0xFF0F6A70, 0x66063BCA, 0x11010B5C,
+           0x8F659EFF, 0xF862AE69, 0x616BFFD3, 0x166CCF45, 0xA00AE278, 0xD70DD2EE, 0x4E048354, 0x3903B3C2, 0xA7672661, 0xD06016F7,
+           0x4969474D, 0x3E6E77DB, 0xAED16A4A, 0xD9D65ADC, 0x40DF0B66, 0x37D83BF0, 0xA9BCAE53, 0xDEBB9EC5, 0x47B2CF7F, 0x30B5FFE9,
+           0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605, 0xCDD70693, 0x54DE5729, 0x23D967BF, 0xB3667A2E, 0xC4614AB8,
+           0x5D681B02, 0x2A6F2B94, 0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D
+        };
+
+        public static uint Compute(byte[] buffer)
+        {
+            return ~buffer.Aggregate(0xFFFFFFFF, (current, t) => (current >> 8) ^ Table[t ^ (current & 0xff)]);
+        }
+    }
+
+}
+
+"
+8yV4cvT8,Nginx,deedspool,Nginx,Thursday 11th of January 2024 02:11:32 AM CDT,"server {
+        listen 80;
+        server_name 3kd.main;
+
+        root /Users/caocuong.tran/Desktop/SEA/3KD/3KD.main;
+
+        client_max_body_size 128M;
+        fastcgi_buffers 8 16k;
+        fastcgi_buffer_size 32k;
+        client_body_buffer_size 128k;
+        #root /Users/deeds/Desktop/Sea-Projects/html;
+        allow 127.0.0.1;
+        deny all;
+        index index.html index.php;
+
+        location ~ \.php$ {
+                try_files $uri $uri/ /index.php?q=$uri&$args;
+                fastcgi_index               index.php;
+                fastcgi_param               SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                fastcgi_read_timeout        300;
+                fastcgi_keep_conn           on;
+                include                     /opt/homebrew/etc/nginx/fastcgi_params;
+
+#               fastcgi_pass                127.0.0.1:9000;
+                fastcgi_pass                unix:/opt/homebrew/var/run/php-fpm/php82.sock;
+                index                       index.html index.php;
+        }
+
+#       location ~ ^(/wp-content/themes/bmg) {
+#                        rewrite ^/(.*)$ https://resource.blockmanmobile.com/web/Yn_event/bmg-editor/$1 last;
+#       }
+
+        location / {
+                try_files $uri $uri/ /index.php?$args;
+        }
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+                expires max;
+                access_log off;
+                log_not_found off;
+        }
+}"
+xTxCxA7n,Pneu block changer,aregrubb,Lua,Thursday 11th of January 2024 01:59:51 AM CDT,"    while true do -- IMPORTANT left or right recieve redstone to activate
+        local success, block = turtle.inspect()
+        if block.name == ""minecraft:ice"" then
+            turtle.dig()
+        else
+            turtle.select(1)
+            turtle.place()
+        end
+    end
+"
+tNYWutvc,Javascript - load script dynamically and execute it,plirof2,JavaScript,Thursday 11th of January 2024 01:57:54 AM CDT,"            // Load Javascript dynamically
+            if (autonumberlinks) {
+              var secondScript = document.createElement('script');
+              secondScript.type = 'text/javascript';
+              secondScript.src = 'test_hash.js';
+                secondScript.onload = function() {
+                // code to execute after the second script is loaded and executed
+                addHashLabels(); // function of the dynamic loaded file
+              };
+              document.head.appendChild(secondScript);
+            }                        
+"
+9igP8Yp6,Untitled,sissou123,C#,Thursday 11th of January 2024 01:55:02 AM CDT,"Advanced Topics in C#
+This course presents a collection of interesting/unusual case studies where C# is used to solve a particular problem. This course is 100% practical, and demonstrates mainly the practical applications of C# in building solutions to common problems.
+
+The main themes covered in this course are:
+
+Numerics — the specifics of how to work with numeric types in .NET, with a focus on SIMD data types and operations.
+for more:https://cuty.io/09B6uBNotD
+"
+bMypVBp1,Untitled,TheAirBlow,C++,Thursday 11th of January 2024 01:50:57 AM CDT,"#include <vector>
+#include <iostream>
+#include <queue>
+
+using namespace std;
+struct Vector2 { int x; int y; };
+
+queue<Vector2> queue1;
+vector<Vector2> from;
+vector<bool> visited;
+int srcPos, dstPos, width;
+
+void move(Vector2 pos, int x, int y) {
+    Vector2 newPos = { pos.x + x, pos.y + y };
+    if (newPos.x < 0 || newPos.x >= width || newPos.y < 0 || newPos.y >= width) return;
+    int intPos = newPos.x + newPos.y * width;
+    if (visited[intPos]) return;
+    visited[intPos] = true;
+    from[intPos] = pos;
+    if (intPos == dstPos) {
+        int count = 0;
+        while (intPos != srcPos) {
+            intPos = from[intPos].x + from[intPos].y * width;
+            count++;
+        }
+        cout << count << endl;
+        exit(0);
+    }
+
+    queue1.push(newPos);
+}
+
+int main() {
+    cin >> width;
+    visited.resize(width * width);
+    from.resize(width * width);
+
+    int x1, y1; cin >> x1 >> y1;
+    Vector2 tmp = { x1 - 1, y1 - 1 };
+    srcPos = tmp.x + tmp.y * width;
+    queue1.push(tmp);
+
+    int x2, y2; cin >> x2 >> y2;
+    dstPos = (x2 - 1) + (y2 - 1) * width;
+
+    while (!queue1.empty()) {
+        Vector2 pos = queue1.front();
+        queue1.pop();
+        move(pos, 1, 2);
+        move(pos, -1, 2);
+        move(pos, 1, -2);
+        move(pos, -1, -2);
+        move(pos, 2, 1);
+        move(pos, 2, -1);
+        move(pos, -2, 1);
+        move(pos, -2, -1);
+    }
+}"
+UMWg6jWJ,"Map, cursul 13",visoft,C,Thursday 11th of January 2024 01:44:24 AM CDT,"#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+double F1(double x)
+{
+    return x*x + 5;
+}
+
+double F2(double x){
+    return log(x);
+}
+
+double F3(double x){
+    return sin(x);
+}
+
+//map
+void calcul(double *A, double *B, int n, double (*func_crt)(double)){
+    for (int i = 0; i < n; i++){
+        B[i] = func_crt(A[i]);
+    }
+}
+
+void afisare(double*B, int n){
+    for(int i = 0; i<n;i++){
+        printf(""%f "", B[i]);
+    }
+    printf(""\n"");
+
+}
+
+int main()
+{
+    double A[] = {1,2,3,1,2};
+    double B2[5];
+
+    double (*predicate[])(double) = {F1, F2, F3};
+    double (*func_crt)(double);
+    int index;
+    printf(""Introduceti id-ul operatiei: "");
+    scanf(""%d"", &index);
+    if (index < 0 || index > 2){
+        printf(""Eroare\n"");
+        return -1;
+    }
+    func_crt = predicate[index];
+    calcul(A, B2, 5, func_crt);
+    afisare(B2, 5);
+
+    return 0;
+}
+"
+WUHMJsbj,Generate #2 hash 0-99 from a string in javascript,plirof2,JavaScript,Thursday 11th of January 2024 12:38:42 AM CDT,"Add hash prefix to href description (innerHtml) that are inside a specific div
+=================================================================
+// script.js
+function addHashLabels() {
+  const divprobesrv = document.getElementById('probeserver');	
+  //const links = document.getElementsByTagName('a');
+  const links = divprobesrv.getElementsByTagName('a');
+  const hashRange = 99 - 1 + 1; // 01 to 99
+
+  for (let i = 0; i < links.length; i++) {
+    const url = links[i].getAttribute('href');
+    const hash = getHash(url);
+
+    // Generate prefix based on hash number
+    const prefixletter=links[i].innerHTML.charAt(0); 
+    //console.log(""InnetHTML=""+prefixletter+ "" , innerHTML=""+links[i].innerHTML)
+    const prefix = prefixletter+('0' + (hash % hashRange + 1)).slice(-2);
+    
+    // Add prefix to link description
+    links[i].innerHTML = prefix + ': ' + links[i].innerHTML;
+  }
+};
+
+// Function to generate hash from URL
+function getHash(url) {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    hash = ((hash << 5) - hash) + url.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash);
+}
+"
+1wBdwm2v,Untitled,kwest87,C#,Thursday 11th of January 2024 12:23:44 AM CDT,"using System;
+
+namespace ConsoleApp22
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Random random = new Random();
+            int[] numbers = new int[30];
+            int lastIndex = numbers.Length - 1;
+            int maximumNumber = 9;
+
+            for (int i = 0; i < numbers.Length; i++)
+            {
+                numbers[i] = random.Next(maximumNumber + 1);
+            }
+
+            Console.Write(""Дан массив : "");
+
+            for (int i = 0; i < numbers.Length; i++)
+            {
+                Console.Write(numbers[i]);
+            }
+
+            Console.WriteLine();
+            Console.Write(""Локальные максимумы : "");
+
+            if (numbers[0] > numbers[0 + 1])
+            {
+                Console.Write(numbers[0]);
+            }
+
+            for (int i = 0 + 1; i < numbers.Length - 1; i++)
+            {
+                if (numbers[i] > numbers[i - 1] && numbers[i] > numbers[i + 1])
+                {
+                    Console.Write(numbers[i]);
+                }
+            }
+
+            if (numbers[numbers.Length - 1] > numbers[lastIndex - 1])
+            {
+                Console.WriteLine(numbers[numbers.Length - 1]);
+            }
+        }
+    }
+}"
+EUE2uygR,Untitled,TheAirBlow,C++,Thursday 11th of January 2024 12:15:40 AM CDT,"#include <vector>
+#include <iostream>
+#include <queue>
+#include <algorithm>
+
+using namespace std;
+
+int main() {
+    int vertexes, edges;
+    cin >> vertexes >> edges;
+
+    vector<vector<int>> graph(vertexes);
+    vector<bool> visited(vertexes, false);
+    vector<int> from(vertexes);
+
+    for (int i = 0; i < edges; i++) {
+        int a, b; cin >> a >> b;
+        graph[a - 1].push_back(b - 1);
+    }
+
+    int start, end;
+    cin >> start >> end;
+    visited[start - 1] = true;
+
+    queue<int> queue;
+    queue.push(start - 1);
+
+    while (!queue.empty()) {
+        int index = queue.front();
+        queue.pop();
+
+        for (int to : graph[index]) {
+            if (visited[to]) continue;
+            visited[to] = true;
+            from[to] = index;
+            if (to == end - 1) {
+                vector<int> path;
+                while (to != start - 1) {
+                    path.push_back(to + 1);
+                    to = from[to];
+                }
+                path.push_back(start);
+                cout << path.size() - 1 << endl;
+                for (int i = path.size() - 1; i >= 0; i--)
+                    cout << path[i] << "" "";
+                cout << endl;
+                return 0;
+            }
+
+            queue.push(to);
+        }
+    }
+
+    cout << -1 << endl;
+}"
+Sz17bUfn,Kinsey theme: disable header widget area,artemsemkin,PHP,Wednesday 10th of January 2024 11:56:56 PM CDT,"<?php
+
+// Temporarily disable header widgets
+add_filter( 'is_active_sidebar', 'custom_filter_is_active_sidebar_header', 10, 2);
+function custom_filter_is_active_sidebar_header( $is_active_sidebar, $index ) {
+  if ( $index === 'header-sidebar' ) {
+    return false;
+  }
+
+  return $is_active_sidebar;
+}
+"
+Yn3zuzmK,Roblox - Ultimate FE GUI Exploit,TheNotePad_Scripter,Lua,Wednesday 10th of January 2024 11:11:54 PM CDT,"-- currently in the works, hang in there! --
+-- leave a comment to help --"
+JXz257aZ,Untitled,seld1,C#,Wednesday 10th of January 2024 10:09:41 PM CDT,"  CalculateCommand = ReactiveCommand.Create(() =>
+           {
+               try
+               {
+                   //Суммарная стоимость материалов
+                   double materialSumm = 0;
+                   try
+                   {
+                       materialSumm = Materials.Sum(x => double.Parse(x.Summ));
+                   }
+                   catch (Exception ex)
+                   {
+                       materialSumm = 0;
+                   }
+
+                   MaterialResult = materialSumm.ToString();
+
+                   //Затраты на разработку проекта
+                   double computeSumm = double.Parse(ComputerTimePrice) * double.Parse(ComputerTime);
+
+                   //Суммарная зароботная плата
+                   double paySumm = WorkerPays.Sum(x => double.Parse(x.OZP));
+
+                   //Расчёт капитальных вложений на проектирование
+                   CapitalResult = ((1+double.Parse(WD) * (1+double.Parse(WC))  + 0.6)*paySumm  + computeSumm + materialSumm).ToString();
+               }
+               catch (Exception ex)
+               {
+                   CapitalResult = ex.Message;
+               }
+
+               try
+               {
+                   //Расчёт затрат на оборудование
+                   ResultOborud = (double.Parse(ComputerPrice) * 1 *  6 * Constants.WorkDaysOnYear /
+                                   (Constants.WorkDaysOnYear * 8)).ToString();
+                   
+                   SummDeveloperResult = (double.Parse(CapitalResult) + double.Parse(ResultOborud)).ToString();
+
+               }
+               catch (Exception ex)
+               {
+                   ResultOborud = ex.Message;
+                   SummDeveloperResult = ex.Message;
+               }
+
+               try
+               {
+
+                   
+                   //Эксплуатационные затраиты
+                   ExpluationResutl =  ( ((1 + double.Parse(WD)) * (1 + double.Parse(WC))) *
+                                         WorkerPaysExplotations.Sum(x => double.Parse(x.OZP))).ToString();
+                   ExpluationResutlAnalogue =  ( ((1 + double.Parse(WD)) * (1 + double.Parse(WC))) *
+                                                 WorkerPaysExplotationsAnalogue.Sum(x => double.Parse(x.OZP))).ToString();
+               }
+               catch (Exception ex)
+               {
+                   ExpluationResutl = ex.Message.ToString();
+                   
+               }
+
+               try
+               {
+                 double daysSumm =  WorkerPaysExplotations.Sum(x => double.Parse(x.Days));
+                 double daysSummAanalogue =  WorkerPaysExplotationsAnalogue.Sum(x => double.Parse(x.Days));
+                 //Эффективный фонд времени работы оборудования 
+                 double F = Constants.WorkDaysOnYear * 8;
+                 //tj – время работы j-гo вида оборудования, час; 
+                 double time = daysSumm * 8;
+                 double timeAnalogue = daysSummAanalogue * 8;
+                 //Амортизационные рассходы
+                 AmortizationResult =  ((double.Parse(ComputerPrice) * 0.2 * time) / F).ToString();
+                 AmortizationResultAnalogue=((double.Parse(ComputerPrice) * 0.2 * timeAnalogue) / F).ToString();
+               }
+               catch (Exception ex)
+               {
+                   AmortizationResult = ex.Message;
+                   AmortizationResultAnalogue = ex.Message;
+               }
+
+               try
+               {
+                   double daysSumm =  WorkerPaysExplotations.Sum(x => double.Parse(x.Days));
+                   //tj – время работы j-гo вида оборудования, час; 
+                   double time = daysSumm * 8;
+                   EnergionResult = (time * double.Parse(CompWT) * double.Parse(EnergyPrice)).ToString();
+                   
+                   double daysSummAnalogue =  WorkerPaysExplotationsAnalogue.Sum(x => double.Parse(x.Days));
+                   //tj – время работы j-гo вида оборудования, час; 
+                   double timeAnalogue = daysSummAnalogue * 8;
+                   EnergionResultAnalogue = (timeAnalogue * double.Parse(CompWT) * double.Parse(EnergyPrice)).ToString();
+
+               }
+               catch (Exception ex)
+               {
+                   EnergionResult = ex.Message;
+                   EnergionResultAnalogue = ex.Message;
+               }
+
+               try
+               { 
+                   double daysSumm =  WorkerPaysExplotations.Sum(x => double.Parse(x.Days));
+                   double time = daysSumm * 8;
+                   //Эффективный фонд времени работы оборудования 
+                   double F = Constants.WorkDaysOnYear * 8;
+
+                   RemResult = (0.05 * double.Parse(ComputerPrice) * time / F).ToString();
+                   
+                   double daysSummAnalogue =  WorkerPaysExplotations.Sum(x => double.Parse(x.Days));
+                   double timeAnalogue = daysSummAnalogue * 8;
+                   //Эффективный фонд времени работы оборудования 
+                  
+
+                   RemResultAnalogue = (0.05 * double.Parse(ComputerPrice) * timeAnalogue / F).ToString();
+               }
+               catch (Exception ex)
+               {
+                   RemResult = ex.Message;
+                   RemResultAnalogue = ex.Message;
+               }
+
+               try
+               {
+                   double paySumm = double.Parse(ExpluationResutl);
+                   double materialSumm = Materials.Sum(x => double.Parse(x.Summ));
+                   
+                   double amortSumm = double.Parse(AmortizationResult);
+                   double energion = double.Parse(EnergionResult);
+                   double rem = double.Parse(RemResult);
+
+                   double paySummAnalogue = double.Parse(ExpluationResutlAnalogue);
+                  
+                   
+                   double amortSummAnlaogue = double.Parse(AmortizationResultAnalogue);
+                   double energionAnalogue = double.Parse(EnergionResultAnalogue);
+                   double remAnalogue = double.Parse(RemResultAnalogue);
+
+                   NacladResult = ((paySumm + amortSumm + energion + rem + materialSumm) * 0.2).ToString();
+                   NacladResultAnalogue = ((paySummAnalogue + amortSummAnlaogue + energionAnalogue + remAnalogue + materialSumm) * 0.2).ToString();
+                   MainResult = (paySumm + amortSumm + energion + rem + materialSumm + double.Parse(NacladResult)).ToString();
+                   MainResultAnalogue = (paySummAnalogue + amortSummAnlaogue + energionAnalogue + remAnalogue + materialSumm  + double.Parse(NacladResultAnalogue)).ToString();
+
+               }
+               catch (Exception ex)
+               {
+                   NacladResult = ex.Message;
+               }
+                
+
+           });"
+Gi88bC4J,AA Project v3,Zuhairy_Harry,C++,Wednesday 10th of January 2024 09:55:03 PM CDT,"#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <iomanip>
+#include <chrono>
+
+using namespace std;
+using namespace chrono;
+
+struct Student {
+    int  age, roomFloor;
+    string id,name, state, department, fees;
+
+};
+
+// Function prototypes
+void customSwap(Student& a, Student& b, int& swapCount);
+int partition(vector<Student>& students, int low, int high, int& swapCount);
+void quickSort(vector<Student>& students, int low, int high, int& swapCount);
+void loadStudents(const string& filename, vector<Student>& students);
+int binarySearch(const vector<Student>& students, int l, int r, int x);
+int linearSearch(const vector<Student>& students, int x);
+void displayStudents(const vector<Student>& students, int displayLimit);
+void merge(vector<Student>& students, int low, int mid, int high, int& swapCount);
+void mergeSort(vector<Student>& students, int low, int high, int& swapCount);
+double calculateAverageAge(const vector<Student>& students);
+int calculateTotalDept(const vector<Student>& students);
+int calculateTotalState(const vector<Student>& students);
+
+
+string trim(const string& str);
+
+// Function implementations
+string trim(const string& str) {
+    size_t first = str.find_first_not_of("" \t\"""");
+    if (first == string::npos) return """";
+    size_t last = str.find_last_not_of("" \t\"""");
+    return str.substr(first, (last - first + 1));
+}
+
+
+int partition(vector<Student>& students, int low, int high, int& swapCount) {
+    string pivot = students[high].id;
+    int i = low - 1;
+
+    for (int j = low; j < high; j++) {
+        if (students[j].id < pivot) {
+            i++;
+            customSwap(students[i], students[j], swapCount);
+        }
+    }
+    customSwap(students[i + 1], students[high], swapCount);
+    return i + 1;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    QUICK SORT FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void quickSort(vector<Student>& students, int low, int high, int& swapCount) {
+    if (low < high) {
+        int pi = partition(students, low, high, swapCount);
+        quickSort(students, low, pi - 1, swapCount);
+        quickSort(students, pi + 1, high, swapCount);
+    }
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    LOAD FILE FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void loadStudents(const string& filename, vector<Student>& students) {
+    ifstream ip(filename);
+    if (!ip.is_open()) {
+        cerr << ""Error: File could not be opened"" << '\n';
+        return;
+    }
+
+    string line;
+    getline(ip, line); // Skip the header if present
+
+    while (getline(ip, line)) {
+        stringstream ss(line);
+        Student tempStudent;
+        string tempId, tempAge, tempRoomFloor;
+
+        getline(ss, tempId, ',');
+        getline(ss, tempStudent.name, ',');
+        getline(ss, tempAge, ',');
+        getline(ss, tempStudent.state, ',');
+        getline(ss, tempStudent.department, ',');
+        getline(ss, tempRoomFloor, ',');
+        getline(ss, tempStudent.fees, '\n');
+		
+        tempStudent.id = trim(tempId);
+        tempStudent.age = stoi(trim(tempAge));
+        tempStudent.roomFloor = stoi(trim(tempRoomFloor));
+        tempStudent.name = trim(tempStudent.name);
+        tempStudent.state = trim(tempStudent.state);
+        tempStudent.department = trim(tempStudent.department);
+        tempStudent.fees = trim(tempStudent.fees);
+
+        students.push_back(tempStudent); // Add the new student to the vector
+    }
+
+    ip.close();
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    MERGE FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void merge(vector<Student>& students, int low, int mid, int high, int& swapCount) {
+    int n1 = mid - low + 1;
+    int n2 = high - mid;
+
+    vector<Student> left(n1), right(n2);
+
+    for (int i = 0; i < n1; i++)
+        left[i] = students[low + i];
+    for (int j = 0; j < n2; j++)
+        right[j] = students[mid + 1 + j];
+
+    int i = 0, j = 0, k = low;
+
+    while (i < n1 && j < n2) {
+        if (left[i].id <= right[j].id) {
+            students[k++] = left[i++];
+        }
+        else {
+            students[k++] = right[j++];
+            swapCount += n1 - i; // Counting swaps when elements are moved from left to right
+        }
+    }
+
+    while (i < n1) {
+        students[k++] = left[i++];
+    }
+    while (j < n2) {
+        students[k++] = right[j++];
+    }
+
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    MERGE SORT FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void mergeSort(vector<Student>& students, int low, int high, int& swapCount) {
+    if (low < high) {
+        int mid = low + (high - low) / 2;
+
+        mergeSort(students, low, mid, swapCount);
+        mergeSort(students, mid + 1, high, swapCount);
+
+        merge(students, low, mid, high, swapCount);
+    }
+
+    //cout << ""Total Swaps = "" << swapCount << endl;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    CALCULATE TOTAL STUDENT FROM DEPT FUNCTION
+-----------------------------------------------------------------------------------
+*/
+int calculateTotalDept(const vector<Student>& students) {
+    if (students.empty()) {
+        return 0.0; // Return 0 if there are no students
+    }
+
+    int ftmkDept = 0;
+    int ftkekDept = 0;
+    int fpttDept = 0;
+    for (const auto& student : students) {
+        if (student.department == ""FTMK"") {
+            ftmkDept++;
+        }
+        else if (student.department == ""FTKEK"") {
+            ftkekDept++;
+        }
+        else if (student.department == ""FPTT"") {
+            fpttDept++;
+        }
+    }
+
+    cout << ""\nTotal student for FTMK department = "" << ftmkDept << endl;
+    cout << ""Total student for FTKEK department = "" << ftkekDept << endl;
+    cout << ""Total student for FPTT department = "" << fpttDept << ""\n"" << endl;
+
+    return ftmkDept, ftkekDept, fpttDept;
+}
+
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    CALCULATE TOTAL STUDENT FROM STATE FUNCTION
+-----------------------------------------------------------------------------------
+*/
+int calculateTotalState(const vector<Student>& students) {
+    if (students.empty()) {
+        return 0.0; // Return 0 if there are no students
+    }
+
+    int JohorState = 0;
+    int KedahState = 0;
+    int MalaccaState = 0;
+    int SelangorState = 0;
+    int TerengganuState = 0;
+
+
+    for (const auto& student : students) {
+        if (student.state == ""Johor"") {
+            JohorState++;
+        }
+        else if (student.state == ""Kedah"") {
+            KedahState++;
+        }
+        else if (student.state == ""Malacca"") {
+            MalaccaState++;
+        }
+        else if (student.state == ""Selangor"") {
+            SelangorState++;
+        }
+        else if (student.state == ""Terengganu"") {
+            TerengganuState++;
+        }
+    }
+
+    cout << ""\nTotal student for Johor state = "" << JohorState << endl;
+    cout << ""Total student for Kedah State = "" << KedahState << endl;
+    cout << ""Total student for Malacca State = "" << MalaccaState << endl;
+    cout << ""Total student for Selangor State = "" << SelangorState << endl;
+    cout << ""Total student for Teregganu state = "" << TerengganuState << ""\n"" << endl;
+
+    return JohorState, KedahState, MalaccaState, SelangorState, TerengganuState;
+}
+
+
+
+
+
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    CALCULATE AVERAGE AGE FUNCTION
+-----------------------------------------------------------------------------------
+*/
+double calculateAverageAge(const vector<Student>& students) {
+    if (students.empty()) {
+        return 0.0; // Return 0 if there are no students
+    }
+
+    int totalAge = 0;
+    for (const auto& student : students) {
+        totalAge += student.age;
+    }
+
+    return static_cast<double>(totalAge) / students.size();
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    BINARY SEARCH FUNCTION
+-----------------------------------------------------------------------------------
+*/
+int binarySearch(const Student students[], int l, int r, const string& x) {
+    if (r >= l) {
+        int mid = l + (r - l) / 2;
+
+        if (students[mid].id == x)
+            return mid;
+
+        if (students[mid].id > x)
+            return binarySearch(students, l, mid - 1, x);
+
+        return binarySearch(students, mid + 1, r, x);
+    }
+
+    return -1;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    LINEAR SEARCH FUNCTION
+-----------------------------------------------------------------------------------
+*/
+int linearSearch(const Student students[], int n, const string& x) {
+    for (int i = 0; i < n; i++) {
+        if (students[i].id == x) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    SWAP FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void customSwap(Student& a, Student& b, int& swapCount) {
+    swap(a, b);  // Swaps the entire Student objects
+    swapCount++;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    MERGE SWAP FUNCTION
+-----------------------------------------------------------------------------------
+*/
+int binarySearch(const vector<Student>& students, int l, int r, const string& x) {
+    while (l <= r) {
+        int mid = l + (r - l) / 2;
+        if (students[mid].id == x) {
+            return mid;
+        }
+        else if (students[mid].id < x) {
+            l = mid + 1;
+        }
+        else {
+            r = mid - 1;
+        }
+    }
+    return -1;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    LINEAR SEARCH FUNCTION
+-----------------------------------------------------------------------------------
+*/
+/*int linearSearch(const vector<Student>& students, int x) {
+    for (int i = 0; i < students.size(); ++i) {
+        if (students[i].id == x) {
+            return i;
+        }
+    }
+    return -1;
+}*/
+
+int linearSearch(const std::vector<Student>& students, const string& idToSearch) {
+    for (size_t i = 0; i < students.size(); ++i) {
+        if (students[i].id == idToSearch) {
+            return i; // Return the index if ID is found
+        }
+    }
+    return -1; // Return -1 if ID is not found
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    DISPLAY DATA FUNCTION
+-----------------------------------------------------------------------------------
+*/
+void displayStudents(const vector<Student>& students, int displayLimit) {
+
+    const int fieldWidth = 20;
+    cout << ""---------------------------------------------------------------------------------------------------------"" << endl;
+    cout << ""ID\t|Name\t\t\t|Age\t|State\t\t|Department\t|Room Floor\t|Fees\t\t|"" << endl;
+    /*cout << ""ID"" << string(fieldWidth - 2, ' ') << ""|Name"" << string(fieldWidth - 4, ' ')
+        << ""|Age"" << string(fieldWidth - 2, ' ') << ""|State"" << string(fieldWidth - 6, ' ')
+        << ""|Department"" << string(fieldWidth - 10, ' ') << ""|Room Floor"" << string(fieldWidth - 10, ' ')
+        << ""|Fees"" << string(fieldWidth - 1, ' ') << ""|"" << endl;*/
+    cout << ""---------------------------------------------------------------------------------------------------------"" << endl;
+    int count = 0;
+    for (const auto& student : students) {
+
+        if (count >= displayLimit) break;
+
+        if (student.name.length() >= 15) {
+            if (student.state.length() > 5) {
+                if (student.fees.length() > 5) {
+                    cout << student.id << ""\t|"" << student.name << ""\t|"" << student.age << ""\t|"" << student.state << ""\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t|"" << endl;
+                }
+                else {
+                    cout << student.id << ""\t|"" << student.name << ""\t|"" << student.age << ""\t|"" << student.state << ""\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t\t|"" << endl;
+                }
+
+            }
+            else {
+
+                if (student.fees.length() > 5) {
+                    cout << student.id << ""\t|"" << student.name << ""\t|"" << student.age << ""\t|"" << student.state << ""\t\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t|"" << endl;
+                }
+                else {
+                    cout << student.id << ""\t|"" << student.name << ""\t|"" << student.age << ""\t|"" << student.state << ""\t\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t\t|"" << endl;
+                }
+            }
+        }
+        else {
+            if (student.state.length() > 5) {
+
+                if (student.fees.length() > 5) {
+                    cout << student.id << ""\t|"" << student.name << ""\t\t|"" << student.age << ""\t|"" << student.state << ""\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t|"" << endl;
+                }
+                else {
+                    cout << student.id << ""\t|"" << student.name << ""\t\t|"" << student.age << ""\t|"" << student.state << ""\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t\t|"" << endl;
+                }
+            }
+            else {
+                if (student.fees.length() > 5) {
+                    cout << student.id << ""\t|"" << student.name << ""\t\t|"" << student.age << ""\t|"" << student.state << ""\t\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t|"" << endl;
+                }
+                else {
+                    cout << student.id << ""\t|"" << student.name << ""\t\t|"" << student.age << ""\t|"" << student.state << ""\t\t|"" << student.department << ""\t\t|"";
+                    cout << student.roomFloor << ""\t\t|"" << student.fees << ""\t\t|"" << endl;
+                }
+            }
+        }
+
+
+        /* cout << student.id << string(fieldWidth - to_string(student.id).length(), ' ')
+             << ""|"" << student.name << string(fieldWidth - student.name.length(), ' ')
+             << ""|"" << student.age << string(fieldWidth - to_string(student.age).length(), ' ')
+             << ""|"" << student.state << string(fieldWidth - student.state.length(), ' ')
+             << ""|"" << student.department << string(fieldWidth - student.department.length(), ' ')
+             << ""|"" << student.roomFloor << string(fieldWidth - to_string(student.roomFloor).length(), ' ')
+             << ""|"" << student.fees << string(fieldWidth - student.fees.length(), ' ') << ""|"" << endl;*/
+
+        count++;
+    }
+    cout << ""---------------------------------------------------------------------------------------------------------"" << endl;
+}
+
+
+
+
+/*
+-----------------------------------------------------------------------------------
+    MAIN FUNCTION
+-----------------------------------------------------------------------------------
+*/
+
+int main() {
+    vector<Student> students;
+    loadStudents(""output3.csv"", students);
+    int swapCount = 0;
+    int numStudents = 0;
+
+    int choice;
+    do {
+        cout << ""----------------------------------------------------------------------------------"" << endl;
+        cout << ""SATRIA MANAGEMENT SYSTEM"" << endl;
+        cout << ""1) Unsort Data"" << endl;
+        cout << ""2) Sorting"" << endl;
+        cout << ""3) Search"" << endl;
+        cout << ""4) Additional Features"" << endl;
+        cout << ""5) Exit"" << endl;
+        cout << ""----------------------------------------------------------------------------------"" << endl;
+        cout << ""\nEnter choice: "";
+        cin >> choice;
+
+        switch (choice) {
+        case 1: {
+            cout << ""Unsorted Data"" << endl;
+            displayStudents(students, min(100, static_cast<int>(students.size())));
+            main();
+            break;
+        }
+        case 2: {
+            int sortChoice = 0;
+            string sortChoiceWord = """";
+            do {
+                cout << ""----------------------------------------------------------------------------------"" << endl;
+                cout << ""Sorting Menu"" << endl;
+                cout << ""1) Quick Sort"" << endl;
+                cout << ""2) Merge Sort"" << endl;
+                cout << ""3) Back"" << endl;
+                cout << ""----------------------------------------------------------------------------------"" << endl;
+                cout << ""\nEnter choice: "";
+                cin >> sortChoice;
+
+                swapCount = 0; // Reset swap count before sorting
+                switch (sortChoice) {
+                case 1:{
+                    cout << ""\nStudents sorted using Quick Sort!"" << endl;
+                    auto startquick = high_resolution_clock::now();
+                    quickSort(students, 0, students.size() - 1, swapCount); // Pass swapCount here
+                    displayStudents(students, min(100, static_cast<int>(students.size())));
+                    auto stopquick = high_resolution_clock::now();
+                    auto durationquick = duration_cast<milliseconds>(stopquick - startquick);
+                    
+                    cout << ""Total swaps: "" << swapCount << ""\n"" << endl;
+                    cout << ""Total runtime: "" << (durationquick.count() * 0.001) << "" seconds"" << endl;
+                    main();
+                    break;}
+                case 2:{
+                	//sini
+                    cout << ""\nStudents sorted using Merge Sort!"" << endl;
+                    auto startmerge = high_resolution_clock::now();
+                    mergeSort(students, 0, students.size() - 1, swapCount);
+                    displayStudents(students, min(100, static_cast<int>(students.size())));
+                    auto stopmerge = high_resolution_clock::now();
+                    auto durationmerge = duration_cast<milliseconds>(stopmerge - startmerge);
+                    
+                    cout << ""Total swaps: "" << swapCount << ""\n"" << endl;
+                    cout << ""Total runtime: "" << (durationmerge.count() * 0.001) << "" seconds"" << endl;
+                    main();
+                    break;}
+                case 3:{
+                	main();
+					break;
+				}
+                default:
+                    if (!cin.fail()) {
+                        cout << ""Please input a valid number!"" << ""\n"" << endl;
+                        sortChoiceWord = to_string(sortChoice);
+                    }
+                    else {
+                        cin.clear();
+                        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        cout << ""Invalid input. Please enter an integer!"" << ""\n"" << endl;
+                        sortChoiceWord = to_string(sortChoice);
+                    }
+                }
+
+            } while ((sortChoiceWord != ""1"") && (sortChoiceWord != ""2"") && (sortChoiceWord != ""3""));
+
+
+        }
+        case 3: {
+            int searchChoice = 0;
+            string searchChoiceWord = """";
+            do {
+                cout << ""----------------------------------------------------------------------------------"" << endl;
+                cout << ""Search Menu"" << endl;
+                cout << ""1) Binary Search"" << endl;
+                cout << ""2) Linear Search"" << endl;
+                cout << ""3) Search Improvement"" << endl;
+                cout << ""4) Back"" << endl;
+                cout << ""----------------------------------------------------------------------------------"" << endl;
+                cout << ""Enter choice: "";
+                cin >> searchChoice;
+
+
+                int index = -1;
+                if (searchChoice == 1) {
+                    cout << ""Enter ID to search: "";
+                    string idToSearch[100];
+                    for(int x=0;x<100;x++){
+                    	cin >> idToSearch[x];
+					}
+
+                    // Make sure students are sorted before binary search
+                    quickSort(students, 0, students.size() - 1, swapCount);
+                    
+                    //sini
+                    auto startbinary = high_resolution_clock::now();
+					for(int x=0;x<100;x++){
+						index = binarySearch(students, 0, students.size() - 1, idToSearch[x]);
+						if (index != -1) {
+                        cout << ""\nStudent found."" << endl;
+                        /*cout << ""ID: "" << students[index].id << '\n';
+                        cout << ""Name: "" << students[index].name << '\n';
+                        cout << ""Age: "" << students[index].age << '\n';
+                        cout << ""Department: "" << students[index].department << ""\n"" << endl;*/
+                        // ... Print other details ...
+	                    }
+	                    else {
+	                        cout << ""\nStudent not found."" << endl;
+	                    }
+					}
+					auto stopbinary = high_resolution_clock::now();
+                    auto durationbinary = duration_cast<milliseconds>(stopbinary - startbinary);
+                    
+                    //cout << ""Total swaps: "" << swapCount << ""\n"" << endl;
+                    cout << ""Total runtime: "" << (durationbinary.count() * 0.001) << "" seconds"" << endl;
+                    //sini end
+                    main();
+                }
+                else if (searchChoice == 2) {
+                    cout << ""Enter ID to search: "";
+                    string idToSearch[100];
+                    for(int x=0; x < 100; x++){
+                    	cin >> idToSearch[x];
+					}
+					
+					auto startlinear = high_resolution_clock::now();
+					for(int x=0;x<100;x++){
+						index = linearSearch(students, idToSearch[x]);
+						
+						if (index != -1) {
+                        cout << ""\nStudent found."" << endl;
+                        /*cout << ""ID: "" << students[index].id << '\n';
+                        cout << ""Name: "" << students[index].name << '\n';
+                        cout << ""Age: "" << students[index].age << '\n';
+                        cout << ""Department: "" << students[index].department << ""\n"" << endl;*/
+                        // ... Print other details ...
+	                    }
+	                    else {
+	                        cout << ""\nStudent not found."" << endl;
+	                    }
+					}
+					
+					auto stoplinear = high_resolution_clock::now();
+                    auto durationlinear = duration_cast<milliseconds>(stoplinear - startlinear);
+                    
+                    //cout << ""Total swaps: "" << swapCount << ""\n"" << endl;
+                    cout << ""Total runtime: "" << (durationlinear.count() * 0.001) << "" seconds"" << endl;
+                    
+                    main();
+                }
+                else if (searchChoice == 3) {
+                	cout << ""Enter ID to search: "";
+			        string idToSearch[100];
+			        for (int x = 0; x < 100; x++) {
+			            cin >> idToSearch[x];
+			        }
+			
+			        auto start = high_resolution_clock::now();
+			
+			            // Binary Search
+			            quickSort(students, 0, students.size() - 1, swapCount);
+			            
+			            cout << ""\nResults:\n"";
+			            cout << ""-------------------------------------------------------------------------\n"";
+			            cout << ""| ID         | Name\t\t\t| Age\t\t| Department\t|\n"";
+			            cout << ""-------------------------------------------------------------------------\n"";
+			            for (int x = 0; x < 100; x++) {
+			                index = binarySearch(students, 0, students.size() - 1, idToSearch[x]);
+			                cout << ""| "" << idToSearch[x] << "" | "";
+			                if (index != -1) {
+			                    //Student found
+			                    if ((students[index].name.length() > 10) && (students[index].name.length() <= 15)){ 
+								 cout << students[index].name << ""       \t| "" << students[index].age << "" \t\t| "" << students[index].department << "" \t\t|\n"";
+                				} else if (students[index].name.length() > 15) {
+                					cout << students[index].name << "" \t| "" << students[index].age << "" \t\t| "" << students[index].department << "" \t\t|\n"";
+								} else {
+                				 cout << students[index].name << "" \t\t\t| "" << students[index].age << "" \t\t| "" << students[index].department << "" \t\t|\n"";
+								}
+                	
+                
+
+			                } else {
+			                    // Student not found
+			                    cout << ""Not Found\t\t| Not Found\t| Not Found\t|\n"";
+			                }
+			                
+			            }
+			            cout << ""-------------------------------------------------------------------------"" << endl ;
+			            cout << ""\n"";
+                    main();
+                }
+                else if (searchChoice == 4) {
+                    main();
+                }
+                else {
+                    if (!cin.fail()) {
+                        cout << ""Please input a valid number!"" << ""\n"" << endl;
+                        searchChoiceWord = to_string(searchChoice);
+                    }
+                    else {
+                        cin.clear();
+                        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        cout << ""Invalid input. Please enter an integer!"" << ""\n"" << endl;
+                        searchChoiceWord = to_string(searchChoice);
+                    }
+                }
+            } while ((searchChoiceWord != ""1"") && (searchChoiceWord != ""2"") && (searchChoiceWord != ""3""));
+
+
+        }
+        case 4: {
+            int searchChoice = 0;
+            string searchChoiceWord = """";
+
+            do {
+                cout << ""\n----------------------------------------------------------------------------------"" << endl;
+                cout << ""Additional Features Menu"" << endl;
+                cout << ""1) Calculate Age"" << endl;
+                cout << ""2) Total Student"" << endl;
+                cout << ""3) Back"" << endl;
+                cout << ""----------------------------------------------------------------------------------"" << endl;
+                cout << ""Enter choice: "";
+                cin >> searchChoice;
+
+                switch (searchChoice)
+                {
+                case 1: {
+                    // Inside your main function, possibly at the end or wherever you find appropriate
+                    double averageAge = calculateAverageAge(students);
+                    cout << ""\nAverage age of students: "" << averageAge << ""\n"" << endl;
+                    main();
+                    break;
+                }
+                case 2: {
+                    int totalChoice;
+					cout << ""\nChoose total you want to show"" << endl;
+					cout << ""1) Total by Department"" << endl;
+					cout << ""2) Total by State"" << endl;
+					cout << ""Enter choice: "";
+					cin >> totalChoice;
+					
+					if (totalChoice == 1) {
+					    calculateTotalDept(students);
+					}
+					else if (totalChoice == 2) {
+					    calculateTotalState(students);
+					}
+					else {
+					    cout << ""Invalid input!"" << endl;
+					}
+					
+					main();
+                    break;
+                }
+                case 3: {
+                    main();
+                }
+                default:
+                    if (!cin.fail()) {
+                        cout << ""Please input a valid number!"" << ""\n"" << endl;
+                        searchChoiceWord = to_string(searchChoice);
+                    }
+                    else {
+                        cin.clear();
+                        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        cout << ""Invalid input. Please enter an integer!"" << ""\n"" << endl;
+                        searchChoiceWord = to_string(searchChoice);
+                    }
+                }
+            } while ((searchChoiceWord != ""1"") && (searchChoiceWord != ""2"") && (searchChoiceWord != ""3""));
+
+
+        }
+        case 5: {
+        	exit(0);
+            break;
+        }
+        default:
+            if (!cin.fail()) {
+                cout << ""Please input a valid number!"" << ""\n"" << endl;
+                main();
+            }
+            else {
+                cin.clear();
+                cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                cout << ""Invalid input. Please enter an integer!"" << ""\n"" << endl;
+                main();
+            }
+
+        }
+    } while (choice == 1 || choice == 2);
+
+}"
+AhbDJHkr,turtle graphics L systems,Mangus875,Python,Wednesday 10th of January 2024 09:40:33 PM CDT,"import turtle
+t = turtle.Turtle()
+
+def Lsystem(axiom, rules, times=1):
+	result = """";
+	for i in range(times):
+		for c in axiom:
+			if c in rules:
+				result += rules[c]
+			else:
+				result += c
+		axiom = result
+		result = """"
+	return axiom
+
+def cleanPath(path, keep):
+	newPath = """"
+	for c in path:
+		if c in keep:
+			newPath += c
+	return newPath
+
+def drawPath(path, rules):
+	for c in path:
+		if c in rules:
+			rules[c][0](*rules[c][1:len(rules[c])])
+	t.tracer(1)
+
+def fd(len):
+	t.pu()
+	t.fd(len)
+	t.pd()
+
+def bk(len):
+	t.pu()
+	t.bk(len)
+	t.pd()
+
+def lt(a):
+	t.speed(speed*5)
+	t.lt(a)
+	t.speed(speed)
+
+def rt(a):
+	t.speed(speed*5)
+	t.rt(a)
+	t.speed(speed)
+
+ang = 90
+segLen = 4
+iters = 5
+speed = 1
+rate = 1
+tilt = 0
+thickness = 1
+
+#t.ht()
+t.tracer(rate)
+t.width(thickness)
+t.pu()
+t.speed(0)
+t.goto(0, 0)
+t.pd()
+t.speed(rate)
+path = Lsystem(""AFB"", {
+	'A': 'AFB+',
+	'B': 'FB'
+},iters)
+rt(tilt)
+#t.begin_fill() 
+drawPath(path, {
+	'F': [t.fd, segLen],
+	'+': [rt, ang]
+})
+#t.end_fill()"
+k2jDPX6w,Merge Sort Khai,Zuhairy_Harry,C++,Wednesday 10th of January 2024 07:32:50 PM CDT,"// Merge Sort
+void merge(Book catalog[], int left, int middle, int right) {
+    int n1 = middle - left + 1;
+    int n2 = right - middle;
+
+    // Create temporary arrays
+    Book* leftArray = new Book[n1];
+    Book* rightArray = new Book[n2];
+
+    // Copy data to temporary arrays leftArray[] and rightArray[]
+    for (int i = 0; i < n1; i++)
+        leftArray[i] = catalog[left + i];
+    for (int j = 0; j < n2; j++)
+        rightArray[j] = catalog[middle + 1 + j];
+
+    // Merge the temporary arrays back into catalog[left..right]
+    int i = 0;
+    int j = 0;
+    int k = left;
+    while (i < n1 && j < n2) {
+        if (leftArray[i].bookID <= rightArray[j].bookID) {
+            catalog[k] = leftArray[i];
+            i++;
+        }
+        else {
+            catalog[k] = rightArray[j];
+            j++;
+            // Increment the total swaps counter for Merge Sort
+            totalSwapsMergeSort++;
+        }
+        k++;
+    }
+
+    // Copy the remaining elements of leftArray[], if there are any
+    while (i < n1) {
+        catalog[k] = leftArray[i];
+        i++;
+        k++;
+    }
+
+    // Copy the remaining elements of rightArray[], if there are any
+    while (j < n2) {
+        catalog[k] = rightArray[j];
+        j++;
+        k++;
+    }
+
+    // Release allocated memory for temporary arrays
+    delete[] leftArray;
+    delete[] rightArray;
+}
+
+// Merge Sort
+void mergeSort(Book catalog[], int left, int right) {
+    if (left < right) {
+        // Same as (left + right) / 2, but avoids overflow for large left and right
+        int middle = left + (right - left) / 2;
+
+        // Sort first and second halves
+        mergeSort(catalog, left, middle);
+        mergeSort(catalog, middle + 1, right);
+
+        // Merge the sorted halves
+        merge(catalog, left, middle, right);
+    }
+}"
+CZ6pLzgi,Home Builder,tarnovsky,Lua,Wednesday 10th of January 2024 07:27:26 PM CDT,"print (""Enter length"")
+local input = read()
+local length = input
+
+print (""Enter width (right) "")
+local input = read()
+local width = input
+
+print (""Enter number of block stacks "")
+local input = read()
+local stacks = input
+
+local answer= ""y""
+print (""floor y/n"")
+local input = read()
+local turn = false
+local z = 0
+local block = 1
+if input == answer
+then
+    for x = 0,width,1
+	do
+        for y = 0,length,1
+		do
+			turtle.digDown()
+			turtle.placeDown()
+			z = z + 1
+			if z == 64
+			then
+				block = block + 1
+				if block == stacks + 1
+				then
+                    print (""Insert more blocks"")
+					local input = read()
+                    block = 1
+				end
+				turtle.select(block)
+				z = 0
+			end
+			turtle.forward()
+		end
+		if turn == false
+		then
+            turtle.turnRight()
+            turtle.forward()
+            turtle.turnRight()
+            turtle.forward()
+            turn = true
+		else
+			turtle.turnLeft()
+            turtle.forward()
+            turtle.turnLeft()
+            turtle.forward()
+            turn = false
+		end
+	end
+else
+	print(""No floor"")
+end"
+8mquW5ad,Untitled,Rofyda_Elghadban1,C++,Wednesday 10th of January 2024 07:18:50 PM CDT," #include <bits/stdc++.h> 
+ #define ll long long
+ #define ull unsigned long long
+ #define pi 3.141592654
+ #define NUM 1e18
+ #define Mod  1'000'000'007
+ #define fixed(n) fixed<<setprecision(n)
+ #define cin(v) for(auto &i:v) cin >> i ;
+ #define cout(v) for(auto &i:v) cout << i  <<"" "";
+ #define vowel(x) (x=='e'||x=='a'||x=='i'||x=='o'||x=='u')
+ #define small(x) (x>=97&&x<=122)
+ #define capital(x) (x>=65&&x<=90)
+ #define Tolower(s) transform(s.begin(),s.end(),s.begin(),::tolower);
+ #define Toupper(s) transform(s.begin(),s.end(),s.begin(),::toupper); 
+ #define sz(x) (int)(x.size())
+ #define all(v) ((v).begin()), ((v).end())
+ #define allr(v) ((v).rbegin()), ((v).rend())
+ #define updmax(a,b) a=max(a,b)
+ #define updmin(a,b) a=min(a,b)
+ #define ceil(a,b) ((a/b)+(a%b?1:0))
+ /* asc -> 1 2 3 ,des -> 3 2 1 */
+
+ /***********************************************************************************/
+ using namespace std;
+ void Rofyda_Elghadban(){
+  #ifndef ONLINE_JUDGE   
+    freopen(""input.txt"", ""r"", stdin), freopen(""output.txt"", ""w"", stdout);
+   #endif
+    ios_base::sync_with_stdio(false), cin.tie(nullptr), cout.tie(nullptr);
+ }
+ ll partial[10000001]{},partial2[10000001]{};
+ void solve(){
+  ll n,m,q,counter=0;
+  cin>>n>>m>>q;
+  vector<ll>v(n),k,p;
+  cin(v);
+  while(m--){
+    ll l,r,d;
+    cin>>l>>r>>d;
+    p.push_back(l);
+    p.push_back(r);
+    p.push_back(d);
+  }
+  map<ll,ll>mp;
+  ll qq=q;
+  while(q--){ 
+    ll x,y;
+    cin>>x>>y;
+    k.push_back(x);
+    k.push_back(y);
+    partial2[x]+=1;
+    partial2[y+1]-=1;
+  }
+  for(ll i=1;i<=qq;i++){
+    partial2[i]+=partial2[i-1];
+  }
+  for(ll i=0;i<qq;i++){
+    mp[i+1]=partial2[i+1];
+  }
+  for(ll i=0;i<p.size();i+=3){
+    counter++;
+    partial[p[i]]+=(p[i+2]*mp[counter]);
+    partial[p[i+1]+1]-=(p[i+2]*mp[counter]);
+  }
+  for(ll i=1;i<=n;i++){
+    partial[i]+=partial[i-1];
+  }
+  for(ll i=0;i<n;i++){
+    v[i]+=partial[i+1];
+  }
+  cout(v);
+  cout<<""\n"";
+ }
+
+ int main(){
+  Rofyda_Elghadban(); 
+  // int t;
+  // cin>>t;
+  // while(t--){
+  //   solve();
+  // }
+  solve();
+  return 0;
+ }
+
+"
+76SBkK3A,2024-01-10_stats.json,rdp_snitch,JSON,Wednesday 10th of January 2024 06:18:14 PM CDT,"{
+  ""ip"": {
+    ""158.220.82.163"": 468,
+    ""74.105.22.131"": 45,
+    ""45.130.83.96"": 3,
+    ""194.165.17.21"": 84,
+    ""94.26.226.188"": 3,
+    ""194.165.16.10"": 6,
+    ""165.22.35.237"": 21,
+    ""87.251.75.145"": 6,
+    ""149.34.246.34"": 6,
+    ""62.204.41.199"": 15,
+    ""45.227.254.55"": 12,
+    ""193.142.146.227"": 9,
+    ""185.196.220.41"": 9,
+    ""198.235.24.213"": 9,
+    ""43.134.66.207"": 6,
+    ""141.98.82.22"": 3,
+    ""87.251.75.64"": 3,
+    ""194.187.176.113"": 3,
+    ""167.94.138.35"": 3,
+    ""185.170.144.3"": 6,
+    ""36.91.222.100"": 3,
+    ""87.251.75.120"": 6,
+    ""179.60.147.118"": 3,
+    ""141.98.11.142"": 9,
+    ""141.98.11.138"": 9,
+    ""202.55.132.183"": 3,
+    ""205.210.31.43"": 9,
+    ""141.98.9.34"": 3,
+    ""45.93.20.204"": 18,
+    ""194.165.16.72"": 6,
+    ""103.184.47.83"": 3,
+    ""47.100.52.159"": 9,
+    ""198.74.56.135"": 3,
+    ""201.80.184.90"": 3,
+    ""152.32.153.228"": 3,
+    ""80.66.76.92"": 6,
+    ""58.218.204.183"": 9,
+    ""81.143.229.7"": 6,
+    ""205.210.31.240"": 9,
+    ""216.73.161.11"": 3,
+    ""216.73.160.245"": 3,
+    ""185.122.204.81"": 75,
+    ""196.190.117.7"": 3,
+    ""13.233.51.182"": 6,
+    ""216.73.160.236"": 3,
+    ""128.14.134.170"": 12,
+    ""83.97.73.77"": 3,
+    ""128.14.134.134"": 12,
+    ""136.144.242.177"": 6,
+    ""109.69.7.157"": 3,
+    ""194.165.16.76"": 6,
+    ""205.210.31.96"": 9,
+    ""77.90.185.2"": 9,
+    ""45.227.254.8"": 6,
+    ""179.60.147.51"": 3,
+    ""193.233.21.155"": 3
+  },
+  ""asn"": {
+    ""AS51167"": 468,
+    ""AS701"": 45,
+    ""AS206092"": 12,
+    ""AS48721"": 102,
+    ""AS49505"": 3,
+    ""AS14061"": 21,
+    ""AS208091"": 21,
+    ""AS212238"": 6,
+    ""AS59425"": 15,
+    ""AS267784"": 18,
+    ""AS208046"": 18,
+    ""AS396982"": 36,
+    ""AS132203"": 6,
+    ""AS209588"": 12,
+    ""AS208843"": 3,
+    ""AS398324"": 3,
+    ""AS197414"": 6,
+    ""AS7713"": 3,
+    ""AS209605"": 18,
+    ""AS63737"": 3,
+    ""AS57523"": 93,
+    ""AS146817"": 3,
+    ""AS37963"": 9,
+    ""AS63949"": 3,
+    ""AS28573"": 3,
+    ""AS135377"": 3,
+    ""AS4134"": 9,
+    ""AS2856"": 6,
+    ""AS24757"": 3,
+    ""AS16509"": 6,
+    ""AS21859"": 24,
+    ""AS208312"": 3,
+    ""AS20857"": 6,
+    ""AS21183"": 3,
+    ""AS198465"": 9,
+    ""AS56380"": 3
+  },
+  ""isp"": {
+    ""Contabo GmbH"": 468,
+    ""Verizon Business"": 45,
+    ""Ipxo Limited"": 12,
+    ""Flyservers S.A."": 132,
+    ""OOO \""Network of data-centers \""Selectel\"""": 3,
+    ""DigitalOcean, LLC"": 21,
+    ""Xhost Internet Solutions LP"": 27,
+    ""Datacamp Limited"": 6,
+    ""Horizon LLC"": 15,
+    ""ColocationX Ltd."": 18,
+    ""Google LLC"": 36,
+    ""Shenzhen Tencent Computer Systems Company Limited"": 6,
+    ""Alpha Strike Labs GmbH"": 3,
+    ""Censys, Inc."": 3,
+    ""PT Telekomunikasi Indonesia"": 3,
+    ""UAB Host Baltic"": 18,
+    ""Vietserver Services Technology Company Limited"": 3,
+    ""Chang Way Technologies Co. Limited"": 93,
+    ""Hubei Feixun Network Co., Ltd"": 3,
+    ""Addresses CNNIC"": 9,
+    ""Akamai Technologies, Inc."": 3,
+    ""Claro NXT Telecomunicacoes Ltda"": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Chinanet"": 9,
+    ""BT Public Internet Service"": 6,
+    ""Ethiotelecom"": 3,
+    ""Amazon Technologies Inc."": 6,
+    ""Zenlayer Inc"": 24,
+    ""Red Byte LLC"": 3,
+    ""TransIP BV"": 6,
+    ""Vodafone Network"": 3,
+    ""BtHoster LTD"": 9,
+    ""''IT FRUIT'' S.R.L."": 3
+  },
+  ""org"": {
+    ""Contabo GmbH"": 468,
+    ""Verizon Business"": 45,
+    ""External"": 3,
+    ""Flyservers S.A"": 102,
+    ""Unknown"": 39,
+    ""DigitalOcean, LLC"": 21,
+    ""Xhost Internet Solutions"": 21,
+    ""Datacamp Limited"": 6,
+    ""Horizon LLC"": 15,
+    ""UAB Host Baltic"": 18,
+    ""ColocationX Ltd"": 9,
+    ""Makut Investments"": 9,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Tencent Cloud Computing"": 6,
+    ""Vdsline"": 3,
+    ""Alpha Strike Labs GmbH"": 3,
+    ""Censys, Inc"": 3,
+    ""Xhostis"": 6,
+    ""Telekomunikasi Indonesia"": 3,
+    ""Cloud Solutions S.A"": 6,
+    ""VietServer Services technology company limited"": 3,
+    ""Alviva Holding Limited"": 3,
+    ""Starcrecium Limited"": 93,
+    ""Hubei Feixun Network Co., Ltd"": 3,
+    ""Aliyun Computing Co., LTD"": 9,
+    ""Linode"": 3,
+    ""NET Servi\u00e7os de Comunica\u00e7\u00e3o S.A."": 3,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""Chinanet JS"": 9,
+    ""Bandito Networks"": 9,
+    ""AWS EC2 (ap-south-1)"": 6,
+    ""ZENLA"": 24,
+    ""Red Byte LLC"": 3,
+    ""BtHoster LTD"": 9,
+    ""FOP Dmytro Nedilskyi"": 3
+  },
+  ""regionName"": {
+    ""England"": 474,
+    ""New Jersey"": 69,
+    ""New York"": 12,
+    ""Kaunas"": 120,
+    ""Moscow"": 114,
+    ""North Holland"": 45,
+    ""Hesse"": 6,
+    ""Vilnius"": 18,
+    ""Virginia"": 9,
+    ""California"": 60,
+    ""North West"": 6,
+    ""Provincia de Panama"": 3,
+    ""Land Berlin"": 3,
+    ""Michigan"": 3,
+    ""Jakarta"": 6,
+    ""Distrito Federal"": 6,
+    ""Da Nang"": 3,
+    ""Hubei"": 3,
+    ""Shanghai"": 9,
+    ""Minas Gerais"": 3,
+    ""Jiangsu"": 9,
+    ""Addis Ababa"": 3,
+    ""Maharashtra"": 6,
+    ""Tirana"": 3,
+    ""Bavaria"": 9,
+    ""Chi\u0219in\u0103u Municipality"": 3
+  },
+  ""country"": {
+    ""United Kingdom"": 474,
+    ""United States"": 153,
+    ""Lithuania"": 138,
+    ""Russia"": 114,
+    ""The Netherlands"": 45,
+    ""Germany"": 18,
+    ""Singapore"": 6,
+    ""Panama"": 3,
+    ""Indonesia"": 6,
+    ""Venezuela"": 6,
+    ""Vietnam"": 3,
+    ""China"": 21,
+    ""Brazil"": 3,
+    ""Ethiopia"": 3,
+    ""India"": 6,
+    ""Albania"": 3,
+    ""Moldova"": 3
+  },
+  ""account"": {
+    ""hello"": 603,
+    ""142.93.8.59"": 132,
+    ""(empty)"": 27,
+    ""Test"": 54,
+    ""Administr"": 63,
+    ""Domain"": 57,
+    ""QIlHOnwYS"": 3,
+    ""hcexpu"": 3,
+    ""IhxqqH"": 3,
+    ""user"": 6,
+    ""ViPQwTeCf"": 3,
+    ""KkWTvN"": 3,
+    ""meuLEy"": 3,
+    ""Administrator"": 3,
+    ""XZfgKQbXK"": 3,
+    ""EcLgkM"": 3,
+    ""BaTCgK"": 3,
+    ""u5axy4rv"": 12,
+    ""bwwawruv"": 12,
+    ""okFyxxMTe"": 3,
+    ""VrcRcl"": 3,
+    ""iyhDzc"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 1005
+  },
+  ""client_build"": {
+    ""Unknown"": 1005
+  },
+  ""client_name"": {
+    ""Unknown"": 1005
+  },
+  ""ip_type"": {
+    ""hosting"": 573,
+    ""Unknown"": 360,
+    ""mobile & proxy"": 12,
+    ""hosting & proxy"": 18,
+    ""mobile"": 12,
+    ""proxy"": 30
+  }
+}"
+305YBWui,2024-01-10_stats.json,rdp_snitch,JSON,Wednesday 10th of January 2024 06:16:14 PM CDT,"{
+  ""ip"": {
+    ""158.220.82.163"": 312,
+    ""74.105.22.131"": 30,
+    ""45.130.83.96"": 2,
+    ""194.165.17.21"": 56,
+    ""94.26.226.188"": 2,
+    ""194.165.16.10"": 4,
+    ""165.22.35.237"": 14,
+    ""87.251.75.145"": 4,
+    ""149.34.246.34"": 4,
+    ""62.204.41.199"": 10,
+    ""45.227.254.55"": 8,
+    ""193.142.146.227"": 6,
+    ""185.196.220.41"": 6,
+    ""198.235.24.213"": 6,
+    ""43.134.66.207"": 4,
+    ""141.98.82.22"": 2,
+    ""87.251.75.64"": 2,
+    ""194.187.176.113"": 2,
+    ""167.94.138.35"": 2,
+    ""185.170.144.3"": 4,
+    ""36.91.222.100"": 2,
+    ""87.251.75.120"": 4,
+    ""179.60.147.118"": 2,
+    ""141.98.11.142"": 6,
+    ""141.98.11.138"": 6,
+    ""202.55.132.183"": 2,
+    ""205.210.31.43"": 6,
+    ""141.98.9.34"": 2,
+    ""45.93.20.204"": 12,
+    ""194.165.16.72"": 4,
+    ""103.184.47.83"": 2,
+    ""47.100.52.159"": 6,
+    ""198.74.56.135"": 2,
+    ""201.80.184.90"": 2,
+    ""152.32.153.228"": 2,
+    ""80.66.76.92"": 4,
+    ""58.218.204.183"": 6,
+    ""81.143.229.7"": 4,
+    ""205.210.31.240"": 6,
+    ""216.73.161.11"": 2,
+    ""216.73.160.245"": 2,
+    ""185.122.204.81"": 50,
+    ""196.190.117.7"": 2,
+    ""13.233.51.182"": 4,
+    ""216.73.160.236"": 2,
+    ""128.14.134.170"": 8,
+    ""83.97.73.77"": 2,
+    ""128.14.134.134"": 8,
+    ""136.144.242.177"": 4,
+    ""109.69.7.157"": 2,
+    ""194.165.16.76"": 4,
+    ""205.210.31.96"": 6,
+    ""77.90.185.2"": 6,
+    ""45.227.254.8"": 4,
+    ""179.60.147.51"": 2,
+    ""193.233.21.155"": 2
+  },
+  ""asn"": {
+    ""AS51167"": 312,
+    ""AS701"": 30,
+    ""AS206092"": 8,
+    ""AS48721"": 68,
+    ""AS49505"": 2,
+    ""AS14061"": 14,
+    ""AS208091"": 14,
+    ""AS212238"": 4,
+    ""AS59425"": 10,
+    ""AS267784"": 12,
+    ""AS208046"": 12,
+    ""AS396982"": 24,
+    ""AS132203"": 4,
+    ""AS209588"": 8,
+    ""AS208843"": 2,
+    ""AS398324"": 2,
+    ""AS197414"": 4,
+    ""AS7713"": 2,
+    ""AS209605"": 12,
+    ""AS63737"": 2,
+    ""AS57523"": 62,
+    ""AS146817"": 2,
+    ""AS37963"": 6,
+    ""AS63949"": 2,
+    ""AS28573"": 2,
+    ""AS135377"": 2,
+    ""AS4134"": 6,
+    ""AS2856"": 4,
+    ""AS24757"": 2,
+    ""AS16509"": 4,
+    ""AS21859"": 16,
+    ""AS208312"": 2,
+    ""AS20857"": 4,
+    ""AS21183"": 2,
+    ""AS198465"": 6,
+    ""AS56380"": 2
+  },
+  ""isp"": {
+    ""Contabo GmbH"": 312,
+    ""Verizon Business"": 30,
+    ""Ipxo Limited"": 8,
+    ""Flyservers S.A."": 88,
+    ""OOO \""Network of data-centers \""Selectel\"""": 2,
+    ""DigitalOcean, LLC"": 14,
+    ""Xhost Internet Solutions LP"": 18,
+    ""Datacamp Limited"": 4,
+    ""Horizon LLC"": 10,
+    ""ColocationX Ltd."": 12,
+    ""Google LLC"": 24,
+    ""Shenzhen Tencent Computer Systems Company Limited"": 4,
+    ""Alpha Strike Labs GmbH"": 2,
+    ""Censys, Inc."": 2,
+    ""PT Telekomunikasi Indonesia"": 2,
+    ""UAB Host Baltic"": 12,
+    ""Vietserver Services Technology Company Limited"": 2,
+    ""Chang Way Technologies Co. Limited"": 62,
+    ""Hubei Feixun Network Co., Ltd"": 2,
+    ""Addresses CNNIC"": 6,
+    ""Akamai Technologies, Inc."": 2,
+    ""Claro NXT Telecomunicacoes Ltda"": 2,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Chinanet"": 6,
+    ""BT Public Internet Service"": 4,
+    ""Ethiotelecom"": 2,
+    ""Amazon Technologies Inc."": 4,
+    ""Zenlayer Inc"": 16,
+    ""Red Byte LLC"": 2,
+    ""TransIP BV"": 4,
+    ""Vodafone Network"": 2,
+    ""BtHoster LTD"": 6,
+    ""''IT FRUIT'' S.R.L."": 2
+  },
+  ""org"": {
+    ""Contabo GmbH"": 312,
+    ""Verizon Business"": 30,
+    ""External"": 2,
+    ""Flyservers S.A"": 68,
+    ""Unknown"": 26,
+    ""DigitalOcean, LLC"": 14,
+    ""Xhost Internet Solutions"": 14,
+    ""Datacamp Limited"": 4,
+    ""Horizon LLC"": 10,
+    ""UAB Host Baltic"": 12,
+    ""ColocationX Ltd"": 6,
+    ""Makut Investments"": 6,
+    ""Palo Alto Networks, Inc"": 24,
+    ""Tencent Cloud Computing"": 4,
+    ""Vdsline"": 2,
+    ""Alpha Strike Labs GmbH"": 2,
+    ""Censys, Inc"": 2,
+    ""Xhostis"": 4,
+    ""Telekomunikasi Indonesia"": 2,
+    ""Cloud Solutions S.A"": 4,
+    ""VietServer Services technology company limited"": 2,
+    ""Alviva Holding Limited"": 2,
+    ""Starcrecium Limited"": 62,
+    ""Hubei Feixun Network Co., Ltd"": 2,
+    ""Aliyun Computing Co., LTD"": 6,
+    ""Linode"": 2,
+    ""NET Servi\u00e7os de Comunica\u00e7\u00e3o S.A."": 2,
+    ""Ucloud Information Technology (hk) Limited"": 2,
+    ""Chinanet JS"": 6,
+    ""Bandito Networks"": 6,
+    ""AWS EC2 (ap-south-1)"": 4,
+    ""ZENLA"": 16,
+    ""Red Byte LLC"": 2,
+    ""BtHoster LTD"": 6,
+    ""FOP Dmytro Nedilskyi"": 2
+  },
+  ""regionName"": {
+    ""England"": 316,
+    ""New Jersey"": 46,
+    ""New York"": 8,
+    ""Kaunas"": 80,
+    ""Moscow"": 76,
+    ""North Holland"": 30,
+    ""Hesse"": 4,
+    ""Vilnius"": 12,
+    ""Virginia"": 6,
+    ""California"": 40,
+    ""North West"": 4,
+    ""Provincia de Panama"": 2,
+    ""Land Berlin"": 2,
+    ""Michigan"": 2,
+    ""Jakarta"": 4,
+    ""Distrito Federal"": 4,
+    ""Da Nang"": 2,
+    ""Hubei"": 2,
+    ""Shanghai"": 6,
+    ""Minas Gerais"": 2,
+    ""Jiangsu"": 6,
+    ""Addis Ababa"": 2,
+    ""Maharashtra"": 4,
+    ""Tirana"": 2,
+    ""Bavaria"": 6,
+    ""Chi\u0219in\u0103u Municipality"": 2
+  },
+  ""country"": {
+    ""United Kingdom"": 316,
+    ""United States"": 102,
+    ""Lithuania"": 92,
+    ""Russia"": 76,
+    ""The Netherlands"": 30,
+    ""Germany"": 12,
+    ""Singapore"": 4,
+    ""Panama"": 2,
+    ""Indonesia"": 4,
+    ""Venezuela"": 4,
+    ""Vietnam"": 2,
+    ""China"": 14,
+    ""Brazil"": 2,
+    ""Ethiopia"": 2,
+    ""India"": 4,
+    ""Albania"": 2,
+    ""Moldova"": 2
+  },
+  ""account"": {
+    ""hello"": 402,
+    ""142.93.8.59"": 88,
+    ""(empty)"": 18,
+    ""Test"": 36,
+    ""Administr"": 42,
+    ""Domain"": 38,
+    ""QIlHOnwYS"": 2,
+    ""hcexpu"": 2,
+    ""IhxqqH"": 2,
+    ""user"": 4,
+    ""ViPQwTeCf"": 2,
+    ""KkWTvN"": 2,
+    ""meuLEy"": 2,
+    ""Administrator"": 2,
+    ""XZfgKQbXK"": 2,
+    ""EcLgkM"": 2,
+    ""BaTCgK"": 2,
+    ""u5axy4rv"": 8,
+    ""bwwawruv"": 8,
+    ""okFyxxMTe"": 2,
+    ""VrcRcl"": 2,
+    ""iyhDzc"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 670
+  },
+  ""client_build"": {
+    ""Unknown"": 670
+  },
+  ""client_name"": {
+    ""Unknown"": 670
+  },
+  ""ip_type"": {
+    ""hosting"": 382,
+    ""Unknown"": 240,
+    ""mobile & proxy"": 8,
+    ""hosting & proxy"": 12,
+    ""mobile"": 8,
+    ""proxy"": 20
+  }
+}"
+Spp630LL,2024-01-10_stats.json,rdp_snitch,JSON,Wednesday 10th of January 2024 06:15:09 PM CDT,"{
+  ""ip"": {
+    ""158.220.82.163"": 156,
+    ""74.105.22.131"": 15,
+    ""45.130.83.96"": 1,
+    ""194.165.17.21"": 28,
+    ""94.26.226.188"": 1,
+    ""194.165.16.10"": 2,
+    ""165.22.35.237"": 7,
+    ""87.251.75.145"": 2,
+    ""149.34.246.34"": 2,
+    ""62.204.41.199"": 5,
+    ""45.227.254.55"": 4,
+    ""193.142.146.227"": 3,
+    ""185.196.220.41"": 3,
+    ""198.235.24.213"": 3,
+    ""43.134.66.207"": 2,
+    ""141.98.82.22"": 1,
+    ""87.251.75.64"": 1,
+    ""194.187.176.113"": 1,
+    ""167.94.138.35"": 1,
+    ""185.170.144.3"": 2,
+    ""36.91.222.100"": 1,
+    ""87.251.75.120"": 2,
+    ""179.60.147.118"": 1,
+    ""141.98.11.142"": 3,
+    ""141.98.11.138"": 3,
+    ""202.55.132.183"": 1,
+    ""205.210.31.43"": 3,
+    ""141.98.9.34"": 1,
+    ""45.93.20.204"": 6,
+    ""194.165.16.72"": 2,
+    ""103.184.47.83"": 1,
+    ""47.100.52.159"": 3,
+    ""198.74.56.135"": 1,
+    ""201.80.184.90"": 1,
+    ""152.32.153.228"": 1,
+    ""80.66.76.92"": 2,
+    ""58.218.204.183"": 3,
+    ""81.143.229.7"": 2,
+    ""205.210.31.240"": 3,
+    ""216.73.161.11"": 1,
+    ""216.73.160.245"": 1,
+    ""185.122.204.81"": 25,
+    ""196.190.117.7"": 1,
+    ""13.233.51.182"": 2,
+    ""216.73.160.236"": 1,
+    ""128.14.134.170"": 4,
+    ""83.97.73.77"": 1,
+    ""128.14.134.134"": 4,
+    ""136.144.242.177"": 2,
+    ""109.69.7.157"": 1,
+    ""194.165.16.76"": 2,
+    ""205.210.31.96"": 3,
+    ""77.90.185.2"": 3,
+    ""45.227.254.8"": 2,
+    ""179.60.147.51"": 1,
+    ""193.233.21.155"": 1
+  },
+  ""asn"": {
+    ""AS51167"": 156,
+    ""AS701"": 15,
+    ""AS206092"": 4,
+    ""AS48721"": 34,
+    ""AS49505"": 1,
+    ""AS14061"": 7,
+    ""AS208091"": 7,
+    ""AS212238"": 2,
+    ""AS59425"": 5,
+    ""AS267784"": 6,
+    ""AS208046"": 6,
+    ""AS396982"": 12,
+    ""AS132203"": 2,
+    ""AS209588"": 4,
+    ""AS208843"": 1,
+    ""AS398324"": 1,
+    ""AS197414"": 2,
+    ""AS7713"": 1,
+    ""AS209605"": 6,
+    ""AS63737"": 1,
+    ""AS57523"": 31,
+    ""AS146817"": 1,
+    ""AS37963"": 3,
+    ""AS63949"": 1,
+    ""AS28573"": 1,
+    ""AS135377"": 1,
+    ""AS4134"": 3,
+    ""AS2856"": 2,
+    ""AS24757"": 1,
+    ""AS16509"": 2,
+    ""AS21859"": 8,
+    ""AS208312"": 1,
+    ""AS20857"": 2,
+    ""AS21183"": 1,
+    ""AS198465"": 3,
+    ""AS56380"": 1
+  },
+  ""isp"": {
+    ""Contabo GmbH"": 156,
+    ""Verizon Business"": 15,
+    ""Ipxo Limited"": 4,
+    ""Flyservers S.A."": 44,
+    ""OOO \""Network of data-centers \""Selectel\"""": 1,
+    ""DigitalOcean, LLC"": 7,
+    ""Xhost Internet Solutions LP"": 9,
+    ""Datacamp Limited"": 2,
+    ""Horizon LLC"": 5,
+    ""ColocationX Ltd."": 6,
+    ""Google LLC"": 12,
+    ""Shenzhen Tencent Computer Systems Company Limited"": 2,
+    ""Alpha Strike Labs GmbH"": 1,
+    ""Censys, Inc."": 1,
+    ""PT Telekomunikasi Indonesia"": 1,
+    ""UAB Host Baltic"": 6,
+    ""Vietserver Services Technology Company Limited"": 1,
+    ""Chang Way Technologies Co. Limited"": 31,
+    ""Hubei Feixun Network Co., Ltd"": 1,
+    ""Addresses CNNIC"": 3,
+    ""Akamai Technologies, Inc."": 1,
+    ""Claro NXT Telecomunicacoes Ltda"": 1,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""Chinanet"": 3,
+    ""BT Public Internet Service"": 2,
+    ""Ethiotelecom"": 1,
+    ""Amazon Technologies Inc."": 2,
+    ""Zenlayer Inc"": 8,
+    ""Red Byte LLC"": 1,
+    ""TransIP BV"": 2,
+    ""Vodafone Network"": 1,
+    ""BtHoster LTD"": 3,
+    ""''IT FRUIT'' S.R.L."": 1
+  },
+  ""org"": {
+    ""Contabo GmbH"": 156,
+    ""Verizon Business"": 15,
+    ""External"": 1,
+    ""Flyservers S.A"": 34,
+    ""Unknown"": 13,
+    ""DigitalOcean, LLC"": 7,
+    ""Xhost Internet Solutions"": 7,
+    ""Datacamp Limited"": 2,
+    ""Horizon LLC"": 5,
+    ""UAB Host Baltic"": 6,
+    ""ColocationX Ltd"": 3,
+    ""Makut Investments"": 3,
+    ""Palo Alto Networks, Inc"": 12,
+    ""Tencent Cloud Computing"": 2,
+    ""Vdsline"": 1,
+    ""Alpha Strike Labs GmbH"": 1,
+    ""Censys, Inc"": 1,
+    ""Xhostis"": 2,
+    ""Telekomunikasi Indonesia"": 1,
+    ""Cloud Solutions S.A"": 2,
+    ""VietServer Services technology company limited"": 1,
+    ""Alviva Holding Limited"": 1,
+    ""Starcrecium Limited"": 31,
+    ""Hubei Feixun Network Co., Ltd"": 1,
+    ""Aliyun Computing Co., LTD"": 3,
+    ""Linode"": 1,
+    ""NET Servi\u00e7os de Comunica\u00e7\u00e3o S.A."": 1,
+    ""Ucloud Information Technology (hk) Limited"": 1,
+    ""Chinanet JS"": 3,
+    ""Bandito Networks"": 3,
+    ""AWS EC2 (ap-south-1)"": 2,
+    ""ZENLA"": 8,
+    ""Red Byte LLC"": 1,
+    ""BtHoster LTD"": 3,
+    ""FOP Dmytro Nedilskyi"": 1
+  },
+  ""regionName"": {
+    ""England"": 158,
+    ""New Jersey"": 23,
+    ""New York"": 4,
+    ""Kaunas"": 40,
+    ""Moscow"": 38,
+    ""North Holland"": 15,
+    ""Hesse"": 2,
+    ""Vilnius"": 6,
+    ""Virginia"": 3,
+    ""California"": 20,
+    ""North West"": 2,
+    ""Provincia de Panama"": 1,
+    ""Land Berlin"": 1,
+    ""Michigan"": 1,
+    ""Jakarta"": 2,
+    ""Distrito Federal"": 2,
+    ""Da Nang"": 1,
+    ""Hubei"": 1,
+    ""Shanghai"": 3,
+    ""Minas Gerais"": 1,
+    ""Jiangsu"": 3,
+    ""Addis Ababa"": 1,
+    ""Maharashtra"": 2,
+    ""Tirana"": 1,
+    ""Bavaria"": 3,
+    ""Chi\u0219in\u0103u Municipality"": 1
+  },
+  ""country"": {
+    ""United Kingdom"": 158,
+    ""United States"": 51,
+    ""Lithuania"": 46,
+    ""Russia"": 38,
+    ""The Netherlands"": 15,
+    ""Germany"": 6,
+    ""Singapore"": 2,
+    ""Panama"": 1,
+    ""Indonesia"": 2,
+    ""Venezuela"": 2,
+    ""Vietnam"": 1,
+    ""China"": 7,
+    ""Brazil"": 1,
+    ""Ethiopia"": 1,
+    ""India"": 2,
+    ""Albania"": 1,
+    ""Moldova"": 1
+  },
+  ""account"": {
+    ""hello"": 201,
+    ""142.93.8.59"": 44,
+    ""(empty)"": 9,
+    ""Test"": 18,
+    ""Administr"": 21,
+    ""Domain"": 19,
+    ""QIlHOnwYS"": 1,
+    ""hcexpu"": 1,
+    ""IhxqqH"": 1,
+    ""user"": 2,
+    ""ViPQwTeCf"": 1,
+    ""KkWTvN"": 1,
+    ""meuLEy"": 1,
+    ""Administrator"": 1,
+    ""XZfgKQbXK"": 1,
+    ""EcLgkM"": 1,
+    ""BaTCgK"": 1,
+    ""u5axy4rv"": 4,
+    ""bwwawruv"": 4,
+    ""okFyxxMTe"": 1,
+    ""VrcRcl"": 1,
+    ""iyhDzc"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 335
+  },
+  ""client_build"": {
+    ""Unknown"": 335
+  },
+  ""client_name"": {
+    ""Unknown"": 335
+  },
+  ""ip_type"": {
+    ""hosting"": 191,
+    ""Unknown"": 120,
+    ""mobile & proxy"": 4,
+    ""hosting & proxy"": 6,
+    ""mobile"": 4,
+    ""proxy"": 10
+  }
+}"
+uNNJcuhF,Temporary - Blinking Face Animation Script,Xane_MM,Lua,Wednesday 10th of January 2024 05:31:23 PM CDT,"-- Animated Poppy face script
+-- By Xane, written in 2023, updated in 2024
+-- ============================
+-- This script doesn't affect gameplay, only changing your character's face texture
+-- to imitate Poppy's animated, blinking face. For this version of the blinking
+-- script, please make your own composite (single images with eyes/mouth/face merged)
+-- and submit them to Roblox. If the assets get approved, enter the open then closed
+-- asset IDs in that order, and your character should blink.
+local CompositeFace		= { ""rbxassetid://15934165923"", ""rbxassetid://15934174492"" }
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local Players			= game:GetService(""Players"")
+local PlayerChar		= Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
+local PlayerHead		= PlayerChar:WaitForChild(""Head"")
+local PlayerFace		= PlayerHead:WaitForChild(""face"")
+
+-- Now that we have all of the references that we need, wait for a random
+-- length then ""blink""; It's as simple as that!
+local TimeUntilBlink	= 0.0
+game:GetService(""RunService"").RenderStepped:Connect(function(_delta)
+	TimeUntilBlink -= _delta
+
+	if TimeUntilBlink <= 0.0 then
+		TimeUntilBlink = 1.125 + math.random() * 1.5
+
+		PlayerFace.Texture = CompositeFace[2]
+		task.wait(0.0625)
+		PlayerFace.Texture = CompositeFace[1]
+	end
+end)"
+iRnBMGAN,p_sv,jacky_di,SQL,Wednesday 10th of January 2024 05:20:25 PM CDT,"WITH weekly_cohorts AS(
+	SELECT 
+		TIMESTAMP_TRUNC(timestamp, WEEK(MONDAY)) AS cohort_week
+		, timestamp
+		, player_id
+		, device_type
+	FROM installs
+	WHERE timestamp BETWEEN '2021-07-01' AND '2021-07-31'
+), retention AS(
+	SELECT 
+		wc.cohort_week
+		, wc.device_type
+		, COUNT(DISTINCT wc.player_id) AS users
+		, COUNT(DISTINCT IF(va.date <= DATE_ADD(wc.timestamp, INTERVAL 1 DAY), va.player_id, NULL)) AS retention_1d
+		, COUNT(DISTINCT IF(va.date > DATE_ADD(wc.timestamp, INTERVAL 1 DAY) and va.date <= DATE_ADD(wc.timestamp, INTERVAL 7 DAY), va.player_id, NULL)) AS retention_7d
+		, COUNT(DISTINCT IF(va.date > DATE_ADD(wc.timestamp, INTERVAL 7 DAY) and va.date <= DATE_ADD(wc.timestamp, INTERVAL 14 DAY), va.player_id, NULL)) AS retention_14d
+	FROM weekly_cohorts wc
+	LEFT JOIN visits va ON wc.player_id = va.player_id 
+	GROUP BY 
+		wc.cohort_week
+		, wc.device_type
+)
+SELECT 
+	cohort_week
+	, device_type
+	, users
+	, ROUND((retention_1d / users) * 100, 2) AS retention_rate_1d
+	, ROUND((retention_7d / users) * 100, 2) AS retention_rate_7d
+	, ROUND((retention_14d / users) * 100, 2) AS retention_rate_14d
+FROM retention
+ORDER BY 
+	cohort_week
+	, device_type;
+"
+seN9guws,Base de datos - Bermudez,Hatkat,MySQL,Wednesday 10th of January 2024 04:22:37 PM CDT,"CREATE DATABASE miInventarioZapateria;
+USE miInventarioZapateria;
+
+CREATE TABLE Color (
+    IDColor SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    nombreColor VARCHAR(25) NOT NULL
+);
+CREATE TABLE Marca (
+    IDMarca SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    NombreMarca VARCHAR(25) NOT NULL,
+    Descripcion VARCHAR(250)
+);
+CREATE TABLE Material (
+    IDMaterial SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    NombreMaterial VARCHAR(50) NOT NULL
+);
+CREATE TABLE Estilo (
+    IDEstilo SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    NombreEstilo VARCHAR(50) NOT NULL
+);
+CREATE TABLE Tipo (
+    IDTipo SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    NombreModelo VARCHAR(25) NOT NULL,
+    MaterialID SMALLINT,
+    EstiloID SMALLINT,
+    FOREIGN KEY (MaterialID) REFERENCES Material(IDMaterial),
+    FOREIGN KEY (EstiloID) REFERENCES Estilo(IDEstilo)
+);
+CREATE TABLE Zapato (
+    IDZapato SMALLINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    NumeroSerie VARCHAR(12) NOT NULL,
+    FilaZapato CHAR NOT NULL,
+    ColumnaZapato SMALLINT NOT NULL,
+    PrecioZapato FLOAT NOT NULL,
+    TallaZapato SMALLINT NOT NULL,
+    CordonZapato BOOLEAN NOT NULL,
+    MarcaID SMALLINT,
+    ColorID SMALLINT,
+    TipoID SMALLINT,
+    FOREIGN KEY (MarcaID) REFERENCES Marca(IDMarca) ON DELETE RESTRICT ON UPDATE CASCADE,
+    FOREIGN KEY (TipoID) REFERENCES Tipo(IDTipo) ON DELETE RESTRICT ON UPDATE CASCADE,
+    FOREIGN KEY (ColorID) REFERENCES Color(IDColor) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+
+INSERT INTO Material (IDMaterial, NombreMaterial) VALUES
+    (DEFAULT, 'Cuero'),
+    (DEFAULT, 'Piel Sintética'),
+    (DEFAULT, 'Lona'),
+    (DEFAULT, 'Sintético'),
+    (DEFAULT, 'Textil');
+
+INSERT INTO Estilo (IDEstilo, NombreEstilo) VALUES
+    (DEFAULT, 'Clásico'),
+    (DEFAULT, 'Moderno'),
+    (DEFAULT, 'Retro');
+
+INSERT INTO Tipo (IDTipo, NombreModelo, MaterialID, EstiloID) VALUES
+    (DEFAULT, 'Zapatilla', 3, 1),
+    (DEFAULT, 'Bota', 2, 2),
+    (DEFAULT, 'Clásico', 5, 1),
+    (DEFAULT, 'Mocasín', 1, 2),
+    (DEFAULT, 'Navigo', 4, 2);
+
+INSERT INTO Color (IDColor, nombreColor) VALUES
+    (DEFAULT, 'Gris'),
+    (DEFAULT, 'Amarillo'),
+    (DEFAULT, 'Morado'),
+    (DEFAULT, 'Rojo'),
+    (DEFAULT, 'Rosa');
+
+INSERT INTO Marca (NombreMarca, Descripcion)
+VALUES ('Nike', 'Marca líder en calzado deportivo.'),
+       ('Clarks', 'Conocida por su línea de zapatillas de moda y deportivas.'),
+       ('Vans', 'Especializada en calzado deportivo y de estilo de vida.'),
+       ('Adidas', 'Famosa por sus zapatos casuales y elegantes.'),
+       ('Puma', 'Reconocida por sus zapatillas de skate y estilo urbano.');
+
+INSERT INTO Zapato (NumeroSerie, FilaZapato, ColumnaZapato, PrecioZapato, TallaZapato, CordonZapato, MarcaID, ColorID, TipoID)
+VALUES
+    ('876530129534', 'B', 3, 35.75, 36, 1, 5, 4, 4),
+    ('204931387962', 'D', 5, 20.50, 39, 0, 2, 2, 2),
+    ('672104438741', 'A', 1, 60.00, 40, 1, 4, 3, 5),
+    ('098372612345', 'C', 2, 25.75, 41, 0, 1, 5, 3),
+    ('409856457820', 'D', 4, 50.25, 42, 1, 3, 4, 5),
+    ('768291045678', 'A', 5, 40.00, 38, 0, 2, 5, 1),
+    ('215849238765', 'B', 1, 15.25, 39, 1, 4, 3, 2),
+    ('674031098765', 'C', 4, 45.75, 40, 0, 3, 1, 4),
+    ('5A80CA314569', 'D', 3, 30.50, 41, 1, 1, 4, 5),
+    ('4B63AC564738', 'A', 2, 55.50, 42, 0, 5, 3, 4),
+    ('2C78AD987654', 'C', 4, 70.00, 38, 1, 1, 5, 3),
+    ('1A93CA453678', 'B', 2, 45.75, 39, 0, 4, 2, 1),
+    ('5D21DB012345', 'D', 3, 25.75, 40, 1, 3, 1, 5),
+    ('4B05CA078901', 'A', 1, 10.25, 41, 0, 2, 4, 2),
+    ('3A12AC034567', 'C', 5, 55.00, 36, 1, 5, 4, 3),
+    ('2C86DB030256', 'B', 2, 30.50, 38, 0, 4, 3, 1),
+    ('1D74CA096754', 'A', 4, 20.75, 39, 1, 1, 5, 2),
+    ('5B30AC012345', 'D', 5, 40.25, 40, 0, 3, 1, 2),
+    ('4A59DB078901', 'C', 1, 15.50, 41, 1, 2, 4, 5),
+    ('3C28CA034567', 'B', 3, 65.75, 42, 0, 5, 3, 4),
+    ('2A84DB030256', 'A', 4, 50.00, 38, 1, 4, 2, 4),
+    ('1B36CA096754', 'C', 5, 35.75, 39, 0, 1, 5, 3),
+    ('5D92AC012345', 'D', 3, 30.25, 40, 1, 3, 4, 2),
+    ('4C57DB078901', 'B', 2, 10.50, 41, 0, 2, 4, 2),
+    ('3A68CA034567', 'A', 1, 47.75, 36, 1, 5, 4, 4);
+
+SELECT COUNT(*) FROM Zapato
+JOIN Color ON Zapato.ColorID = Color.IDColor
+WHERE Color.nombreColor = 'Rojo' AND Zapato.TallaZapato = 36;
+
+SELECT Zapato.FilaZapato, Zapato.ColumnaZapato FROM Zapato
+JOIN Tipo ON Zapato.TipoID = Tipo.IDTipo
+WHERE Zapato.CordonZapato = 1 AND Tipo.NombreModelo = 'Mocasín' AND Zapato.PrecioZapato BETWEEN 25 AND 100;
+
+SELECT MIN(PrecioZapato)
+FROM Zapato
+WHERE ColumnaZapato = 4;
+
+SELECT PrecioZapato
+FROM Zapato
+JOIN Marca ON Zapato.MarcaID = Marca.IDMarca
+WHERE Marca.NombreMarca = 'Puma' ORDER BY PrecioZapato ASC LIMIT 5;
+
+SELECT COUNT(*)
+FROM Zapato
+JOIN Marca ON Zapato.MarcaID = Marca.IDMarca
+WHERE Marca.NombreMarca IN ('Nike', 'Adidas', 'Puma');
+
+SELECT Color.nombreColor, Tipo.NombreModelo, Zapato.FilaZapato, Zapato.ColumnaZapato FROM Zapato
+JOIN Tipo ON Zapato.TipoID = Tipo.IDTipo
+JOIN Color ON Zapato.ColorID = Color.IDColor
+WHERE Tipo.NombreModelo LIKE 'N%';
+
+SELECT Color.nombreColor, Tipo.NombreModelo, Zapato.FilaZapato, Zapato.ColumnaZapato FROM Zapato
+JOIN Tipo ON Zapato.TipoID = Tipo.IDTipo
+JOIN Color ON Zapato.ColorID = Color.IDColor
+WHERE Tipo.NombreModelo LIKE '%a' AND Zapato.PrecioZapato BETWEEN 35 AND 65;
+
+SELECT SUM(Zapato.PrecioZapato) FROM Zapato
+JOIN Tipo ON Zapato.TipoID = Tipo.IDTipo
+WHERE Zapato.FilaZapato = 'A' AND Tipo.NombreModelo = 'Bota';
+"
+R1m52ndN,# 512x512_rgb_gel_ctrl.py,here2share,Python,Wednesday 10th of January 2024 04:04:43 PM CDT,"# 512x512_rgb_gel_ctrl.py
+
+import tkinter as tk
+import random
+from PIL import Image, ImageTk, ImageFilter
+
+ww = 512
+hh = 512
+
+root = tk.Tk()
+root.title(""512x512_image_generator"")
+root.geometry(""%dx%d+%d+%d"" %(ww, hh, 10, 10))
+
+canvas = tk.Canvas(root, width=ww, height=hh)
+canvas.pack()
+
+colors = []
+t = [z for z in range(0, 256, 15)]
+for r in t:
+	for g in t:
+		for b in t:
+			colors += [(r, g, b, 255)]
+Lc = len(colors)
+
+def generate(event=None):
+	for size in layers:
+		interpolate(size)
+	draw()
+
+def interpolate(size):
+	global idx
+	img = Image.new(""RGBA"", (size, size))
+	pixels = img.load()
+	for y in range(size):
+		for x in range(size):
+			color = colors.pop(idx**3)
+			idx = (idx + 1) % 7
+			pixels[x, y] = color
+			colors.append(color)
+	img = img.resize((ww, hh))
+	layers[size] = img
+
+def draw(event=None):
+	buffer = Image.new(""RGBA"", (ww, hh), (255, 255, 255, 255))
+	for size, layer_image in layers.items():
+		if size != 4:
+			alpha = float(opacity_slider[size].get()) / 800.0
+		else:
+			alpha = 1	 
+		buffer = Image.blend(buffer, layer_image, alpha)
+		
+	buffer = buffer.point(lambda x: x // 25 * 25)
+	
+	photo = ImageTk.PhotoImage(buffer)
+	canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+	canvas.image = photo
+
+opacity_label = tk.Toplevel(root)
+opacity_title = tk.Label(opacity_label, text=""Press Spacebar To Randomize"")
+opacity_title.pack()
+opacity_slider = {}
+layers = {}
+
+idx = 0
+size = 8
+for i in (512, 512, 96):
+	opacity_slider[size] = tk.Scale(opacity_label, from_=512, to=0, orient=tk.VERTICAL, label=size, command=draw)
+	opacity_slider[size].pack(side=tk.LEFT, fill='both', expand=True)
+	opacity_slider[size].set(i)
+	interpolate(size)
+	size *= 2
+
+canvas.update()
+t = opacity_label.winfo_width()
+opacity_label.geometry(""%dx300+%d+%d"" %(t, 50, 50))
+for t in (root, opacity_label):
+	t.bind(""<space>"", generate)
+opacity_label.wm_transient(root)
+
+draw()
+root.mainloop()"
+YeGmgzNE,Serviço para Desmontar o Docker,HorselessName,Bash,Wednesday 10th of January 2024 03:30:43 PM CDT,"[Unit]
+Description=Clean up Docker volumes and processes
+DefaultDependencies=no
+Before=shutdown.target reboot.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/bin/sh /var/lock/subsys/umountdocker stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target"
+GQf4jJYN,Untitled,Nenogzar,Python,Wednesday 10th of January 2024 03:29:40 PM CDT,"
+# symbols = {
+#     ""a"": ""·-"", ""b"": ""-···"", ""c"": ""-·-·"", ""d"": ""-··"", ""e"": ""·"", ""f"": ""··-·"", ""g"": ""--·"", ""h"": ""····"", ""i"": ""··"",
+#     ""j"": ""·---"", ""k"": ""-·-"", ""l"": ""·-··"", ""m"": ""--"", ""n"": ""-·"", ""o"": ""---"", ""p"": ""·--·"", ""q"": ""--·-"", ""r"": ""·-·"",
+#     ""s"": ""···"", ""t"": ""-"", ""u"": ""··-"", ""v"": ""···-"", ""w"": ""·--"", ""x"": ""-··-"", ""y"": ""-·--"", ""z"": ""--··"",
+#     ""0"": ""-----"", ""1"": ""·----"", ""2"": ""··---"", ""3"": ""···--"", ""4"": ""····-"",
+#     ""5"": ""·····"", ""6"": ""-····"", ""7"": ""--···"", ""8"": ""---··"", ""9"": ""----·"",
+#     ""."": ""·-·-·-"", "","": ""--··--"", ""?"": ""··--··"", """": ""·----·"", ""!"": ""-·-·--"",
+#     ""/"": ""-··-·"", ""("": ""-·--·"", "")"": ""-·--·-"", ""§"": ""· ···"", "":"": ""---···"",
+#     "";"": ""-·-·-·"", ""["": ""-···-"", "".."": ""-··-·"", ""-"": ""-····-"", ""_"": ""··-- ·-"",
+#     ""$"": ""···-··-"", ""@"": ""·--·-·"", "" "": "".""
+# }
+#
+# # Taking input from a user
+# data = input(""Enter text: "").lower()
+#
+#
+# length = len(data)
+#
+# # Convert to Morse code in list comprehension
+# output = [symbols.get(data[i]) for i in range(length) if data[i] in symbols.keys()]
+#
+# print(' '.join(output))
+#
+
+
+
+#
+MORSE_CODE_DICT = {
+    ""·-"": ""a"", ""-···"": ""b"", ""-·-·"": ""c"", ""-··"": ""d"", ""·"": ""e"", ""··-·"": ""f"", ""--·"": ""g"", ""····"": ""h"",
+    ""··"": ""i"", ""·---"": ""j"", ""-·-"": ""k"", ""·-··"": ""l"", ""--"": ""m"", ""-·"": ""n"", ""---"": ""o"", ""·--·"": ""p"",
+    ""--·-"": ""q"", ""·-·"": ""r"", ""···"": ""s"", ""-"": ""t"", ""··-"": ""u"", ""···-"": ""v"", ""·--"": ""w"", ""-··-"": ""x"",
+    ""-·--"": ""y"", ""--··"": ""z"", ""-----"": ""0"", ""·----"": ""1"", ""··---"": ""2"", ""···--"": ""3"", ""····-"": ""4"",
+    ""·····"": ""5"", ""-····"": ""6"", ""--···"": ""7"", ""---··"": ""8"", ""----·"": ""9"", ""·-·-·-"": ""."", ""--··--"": "","",
+    ""··--··"": ""?"", ""·----·"": """", ""-·-·--"": ""!"", ""-··-·"": ""/"", ""-·--·"": ""("", ""-·--·-"": "")"", ""· ···"": ""§"",
+    ""---···"": "":"", ""-·-·-·"": "";"", ""-···-"": ""["", ""-··-·"": "".."", ""-····-"": ""-"", ""··-- ·-"": ""_"",
+    ""···-··-"": ""$"", ""·--·-·"": ""@"", ""."": "" "",
+
+
+}
+
+def morse_to_text(morse):
+
+    text = """"
+    symbols = morse.split()
+
+    for symbol in symbols:
+        if symbol in MORSE_CODE_DICT:
+            text += MORSE_CODE_DICT[symbol]
+        else:
+            print(""Невалиден символ на Морз: "" + symbol)
+            return
+    return text
+
+morse = input(""Въведете текст на Морз, който искате да преведете: "")
+
+text = morse_to_text(morse)
+
+if text:
+    print(""Преведеният текст е: "" + text)
+"
+KNM8jxcF,Untitled,Nenogzar,Python,Wednesday 10th of January 2024 03:15:17 PM CDT,"div = int(input())
+bound = int(input())
+
+for num in range(bound, div - 1, -1):
+    if num % div == 0:
+        break
+print(num)"
+YPV2G1B7,"Corrigir o Erro ""Fail to Umount /var/lib/docker/volumes""",HorselessName,Bash,Wednesday 10th of January 2024 03:13:42 PM CDT,"#!/bin/sh
+
+case ""$1"" in
+    start)
+        # Comandos a serem executados no início do serviço (se necessário)
+        echo ""Iniciando o serviço de limpeza do Docker...""
+        ;;
+    stop)
+        echo ""Parando os processos do Docker...""
+        pkill -f ""docker*""
+        echo ""Desmontando volumes do Docker...""
+        umount -lf /var/lib/docker/volumes
+        echo ""Limpeza do Docker concluída.""
+        ;;
+    *)
+        echo ""Uso: $0 {start|stop}""
+        exit 1
+        ;;
+esac
+
+exit 0
+"
+Yen3YpKh,host_summation.sh,Paraphraser,Bash,Wednesday 10th of January 2024 03:12:05 PM CDT,"#!/usr/bin/env bash
+
+# the name of this script
+SCRIPT=$(basename ""$0"")
+
+# which kernel is running
+UNIX=$(uname -s)
+
+# vector on kernel
+case ""${UNIX}"" in
+
+	""Darwin"" )
+		RAM_UNIT=""GB""
+		RAM_SIZE=$(($(sysctl -n hw.memsize) / 1073741824))
+		NCPU=$(sysctl -n hw.ncpu)
+		MACHINE=$(sysctl -n machdep.cpu.brand_string)
+		MODEL=$(sysctl -n hw.model)
+		OSVER=$(sysctl -n kern.osproductversion)
+		ARCH=$(uname -m)
+		KVER=$(uname -r)
+		echo ""${RAM_SIZE}${RAM_UNIT} ${MACHINE}, ${NCPU} ${ARCH} CPUs, running ${UNIX} ${KVER} (macOS ${OSVER}), model ${MODEL}""
+		;;
+
+	""Linux"" )
+		if which vcgencmd >/dev/null ; then
+			RAM_UNIT=""MB ""
+			RAM_SIZE=$(vcgencmd get_config total_mem | cut -d ""="" -f 2)
+			if [ $RAM_SIZE -ge 1024 ] ; then
+				RAM_UNIT=""GB ""
+				RAM_SIZE=$(($RAM_SIZE/1024))
+			fi
+		fi
+		MODEL=""unknown platform""
+		if [ -e ""/proc/device-tree/model"" ] ; then
+			MODEL=$(tr -d '\0' < /proc/device-tree/model)
+		else
+			CANDIDATE=$(grep ""^model name"" /proc/cpuinfo | head -1 | cut -d "":"" -f 2)
+			if [ -n ""$CANDIDATE"" ] ; then
+				MODEL=${CANDIDATE## }
+			fi
+		fi
+		if [ -e ""/etc/os-release"" ] ; then
+			. /etc/os-release 
+			if [ $(lscpu | grep -c ""CPU op-mode(s): *32-bit, 64-bit"") -gt 0 ] ; then
+				RUN_MODE=""full 64-bit OS""
+			else
+				if [ ""$(uname -m)"" == ""aarch64"" ] ; then
+					RUN_MODE=""32-bit OS with 64-bit kernel""
+				else
+					RUN_MODE=""32-bit OS with 32-bit kernel""
+				fi
+			fi
+			echo ""${RAM_SIZE}${RAM_UNIT}${MODEL} running ${PRETTY_NAME} as ${RUN_MODE}""
+		else
+			echo ""Unable to identify - $(uname -a)""
+		fi
+		;;
+
+	*)
+		echo ""Kernel ${UNIX} is unknown to ${SCRIPT}""
+		;;
+
+esac
+"
