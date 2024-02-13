@@ -1,0 +1,5349 @@
+id,title,username,language,date,content
+LLp5fwKj,data839,TestGuy1,JSON,Tuesday 13th of February 2024 06:00:06 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '21e0e8b04ecf4a8cd0e82fbfb4890478421add5ed0378222f65189b48c02eb9922b7ac8caed50e477611d004e369cd0620d3f684bfd840850183f145e52f05b58a449907c4a3133ec39380b6775671c1dfddf3a419c6546ff5e19bdd99278a1dc43064d86eec50d231189cf1a755e61af4bbb41490a5a0e999f98461a23707d8',
+  otherdata: [
+    '1b62fe75a8b9798013f4f8c44dcb84be',
+    'c41630db49298cb14d1d5d2bffb20bcc',
+    '14ae73a3ee1e5c77c0f120a4b2b843c0',
+    'fcc2df5a8532d64eace60cdcef2effea',
+    '82c4e38d0018b927a23996e85cc68e02',
+    '8c315b269a93ab11933b5d48eea467bb',
+    'f3411641dafadbb3be763640e90f7505',
+    'dc038387e1c7f064374f48250af02b25'
+  ]
+}"
+N9rQFPEZ,Untitled,Olga_Shishkova,C++,Tuesday 13th of February 2024 05:54:19 AM CDT,"#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace std;
+
+const int MAX_RESULT_DOCUMENT_COUNT = 5;
+const double EPSILON = 1e-6;
+
+string ReadLine() {
+    string s;
+    getline(cin, s);
+    return s;
+}
+
+int ReadLineWithNumber() {
+    int result;
+    cin >> result;
+    ReadLine();
+    return result;
+}
+
+vector<string> SplitIntoWords(const string& text) {
+    vector<string> words;
+    string word;
+    for (const char c : text) {
+        if (c == ' ') {
+            if (!word.empty()) {
+                words.push_back(word);
+                word.clear();
+            }
+        }
+        else {
+            word += c;
+        }
+    }
+    if (!word.empty()) {
+        words.push_back(word);
+    }
+
+    return words;
+}
+
+struct Document {
+    Document() = default;
+
+    Document(int id, double relevance, int rating)
+        : id(id)
+        , relevance(relevance)
+        , rating(rating) {
+    }
+
+    int id = 0;
+    double relevance = 0.0;
+    int rating = 0;
+};
+
+template <typename StringContainer>
+set<string> MakeUniqueNonEmptyStrings(const StringContainer& strings) {
+    set<string> non_empty_strings;
+    for (const string& str : strings) {
+        if (!str.empty()) {
+            non_empty_strings.insert(str);
+        }
+    }
+    return non_empty_strings;
+}
+
+enum class DocumentStatus {
+    ACTUAL,
+    IRRELEVANT,
+    BANNED,
+    REMOVED,
+};
+
+class SearchServer {
+public:
+
+    inline static constexpr int INVALID_DOCUMENT_ID = -1;
+
+    template <typename StringContainer>
+    explicit SearchServer(const StringContainer& stop_words)
+        : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
+    }
+
+    explicit SearchServer(const string& stop_words_text)
+        : SearchServer(
+            SplitIntoWords(stop_words_text))  // Invoke delegating constructor from string container
+    {
+    }
+
+    bool AddDocument(int document_id, const string& document, DocumentStatus status,
+        const vector<int>& ratings) {
+        if (document_id < 0 || documents_.count(document_id)) {
+            return false;
+        }
+
+        const vector<string> words = SplitIntoWordsNoStop(document);
+
+        const double inv_word_count = 1.0 / words.size();
+        for (const string& word : words) {
+            if (!IsValidWord(word)) {
+                return false;
+            }
+            word_to_document_freqs_[word][document_id] += inv_word_count;
+        }
+        documents_.emplace(document_id, DocumentData{ ComputeAverageRating(ratings), status });
+        document_ids_.push_back(document_id);
+        return true;
+    }
+
+    template <typename DocumentPredicate>
+    optional<vector<Document>> FindTopDocuments(const string& raw_query,
+        DocumentPredicate document_predicate) const {
+
+        if (const auto query = ParseQuery(raw_query)) {
+
+            auto matched_documents = FindAllDocuments(*query, document_predicate);
+
+            sort(matched_documents.begin(), matched_documents.end(),
+                [](const Document& lhs, const Document& rhs) {
+                    if (abs(lhs.relevance - rhs.relevance) < EPSILON) {
+                        return lhs.rating > rhs.rating;
+                    }
+                    else {
+                        return lhs.relevance > rhs.relevance;
+                    }
+                });
+            if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
+                matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
+            }
+            return matched_documents;
+        }
+        else {
+            return nullopt;
+        }
+    }
+
+    optional<vector<Document>> FindTopDocuments(const string& raw_query, 
+        DocumentStatus status) const {
+        return FindTopDocuments(
+            raw_query, [status](int document_id, DocumentStatus document_status, int rating) {
+                return document_status == status;
+            });
+    }
+
+    optional<vector<Document>> FindTopDocuments(const string& raw_query) const {
+        return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
+    }
+
+    optional<tuple<vector<string>, DocumentStatus>> MatchDocument(const string& raw_query,
+        int document_id) const {
+
+        if (const auto query = ParseQuery(raw_query)) {
+            vector<string> matched_words;
+            for (const string& word : query->plus_words) {
+                if (word_to_document_freqs_.count(word) == 0) {
+                    continue;
+                }
+                if (word_to_document_freqs_.at(word).count(document_id)) {
+                    matched_words.push_back(word);
+                }
+            }
+            for (const string& word : query->minus_words) {
+                if (word_to_document_freqs_.count(word) == 0) {
+                    continue;
+                }
+                if (word_to_document_freqs_.at(word).count(document_id)) {
+                    matched_words.clear();
+                    break;
+                }
+            }
+            return tuple{ matched_words, documents_.at(document_id).status };
+        }
+        else {
+            return nullopt;
+        }
+    }
+
+    int GetDocumentCount() const {
+        return documents_.size();
+    }
+
+    int GetDocumentId(int index) const {
+        if (index < 0 || index > GetDocumentCount()) {
+            return INVALID_DOCUMENT_ID;
+        }
+        return document_ids_.at(index);
+    }
+
+private:
+    struct DocumentData {
+        int rating;
+        DocumentStatus status;
+    };
+    const set<string> stop_words_;
+    map<string, map<int, double>> word_to_document_freqs_;
+    map<int, DocumentData> documents_;
+    vector<int> document_ids_;
+
+    bool IsStopWord(const string& word) const {
+        return stop_words_.count(word) > 0;
+    }
+
+    vector<string> SplitIntoWordsNoStop(const string& text) const {
+        vector<string> words;
+        for (const string& word : SplitIntoWords(text)) {
+            if (!IsStopWord(word)) {
+                words.push_back(word);
+            }
+        }
+        return words;
+    }
+
+    static int ComputeAverageRating(const vector<int>& ratings) {
+        if (ratings.empty()) {
+            return 0;
+        }
+        int rating_sum = 0;
+        for (const int rating : ratings) {
+            rating_sum += rating;
+        }
+        return rating_sum / static_cast<int>(ratings.size());
+    }
+
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
+
+    optional<QueryWord>  ParseQueryWord(string text) const {
+        bool is_minus = false;
+        // Word shouldn't be empty
+        if (text[0] == '-') {
+            text = text.substr(1);
+            if (text.empty() || text[0] == '-') {
+                return nullopt;
+            }
+            is_minus = true;
+        }
+        if (!IsValidWord(text)) {
+            return nullopt;
+        }
+        return QueryWord{ text, is_minus, IsStopWord(text) };
+    }
+
+    struct Query {
+        set<string> plus_words;
+        set<string> minus_words;
+    };
+
+    optional<Query> ParseQuery(const string& text) const {
+        Query query;
+        for (const string& word : SplitIntoWords(text)) {
+            if (const auto query_word = ParseQueryWord(word)) {
+                if (!query_word->is_stop) {
+                    if (query_word->is_minus) {
+                        query.minus_words.insert(query_word->data);
+                    }
+                    else {
+                        query.plus_words.insert(query_word->data);
+                    }
+                }
+            }
+            else {
+                return nullopt;
+            }
+        }
+        return query;
+    }
+
+    // Existence required
+    double ComputeWordInverseDocumentFreq(const string& word) const {
+        return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
+    }
+
+    template <typename DocumentPredicate>
+    vector<Document> FindAllDocuments(const Query& query,
+        DocumentPredicate document_predicate) const {
+        map<int, double> document_to_relevance;
+        for (const string& word : query.plus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
+            for (const auto& [document_id, term_freq] : word_to_document_freqs_.at(word)) {
+                const auto& document_data = documents_.at(document_id);
+                if (document_predicate(document_id, document_data.status, document_data.rating)) {
+                    document_to_relevance[document_id] += term_freq * inverse_document_freq;
+                }
+            }
+        }
+
+        for (const string& word : query.minus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            for (const auto& [document_id, _] : word_to_document_freqs_.at(word)) {
+                document_to_relevance.erase(document_id);
+            }
+        }
+
+        vector<Document> matched_documents;
+        for (const auto& [document_id, relevance] : document_to_relevance) {
+            matched_documents.push_back(
+                { document_id, relevance, documents_.at(document_id).rating });
+        }
+        return matched_documents;
+    }
+
+    static bool IsValidWord(const string& word) {
+        // A valid word must not contain special characters
+        return none_of(word.begin(), word.end(), [](char c) {
+            return c >= '\0' && c < ' ';
+            });
+    }
+};
+
+// ==================== для примера =========================
+
+void PrintDocument(const Document& document) {
+    cout << ""{ ""s
+        << ""document_id = ""s << document.id << "", ""s
+        << ""relevance = ""s << document.relevance << "", ""s
+        << ""rating = ""s << document.rating << "" }""s << endl;
+}
+
+int main() {
+    SearchServer search_server(""и в на""s);
+    // Явно игнорируем результат метода AddDocument, чтобы избежать предупреждения
+    // о неиспользуемом результате его вызова
+    (void)search_server.AddDocument(1, ""пушистый кот пушистый хвост""s, DocumentStatus::ACTUAL, { 7, 2, 7 });
+    if (!search_server.AddDocument(1, ""пушистый пёс и модный ошейник""s, DocumentStatus::ACTUAL, { 1, 2 })) {
+        cout << ""Документ не был добавлен, так как его id совпадает с уже имеющимся""s << endl;
+    }
+    if (!search_server.AddDocument(-1, ""пушистый пёс и модный ошейник""s, DocumentStatus::ACTUAL, { 1, 2 })) {
+        cout << ""Документ не был добавлен, так как его id отрицательный""s << endl;
+    }
+    if (!search_server.AddDocument(3, ""большой пёс скво\x12рец""s, DocumentStatus::ACTUAL, { 1, 3, 2 })) {
+        cout << ""Документ не был добавлен, так как содержит спецсимволы""s << endl;
+    }
+    vector<Document> documents;
+    if (search_server.FindTopDocuments(""--пушистый""s, documents)) {
+        for (const Document& document : documents) {
+            PrintDocument(document);
+        }
+    }
+    else {
+        cout << ""Ошибка в поисковом запросе""s << endl;
+    }
+}"
+KkP0fsPw,BadDomain,cepxuozab,C++,Tuesday 13th of February 2024 05:50:34 AM CDT,"10
+aa.aaaa.a.a.a.aaaa.a
+aa
+a.aa.aaaa.a.a.a.aaaa.a
+a.aa
+a.aa.aaaa.aa.a.aa
+aaaa.a.a.aaaa.a
+aa
+aaaa.a.a.a.aaaa.a
+aa.aaaa.a.a.a.aaaa.a
+aaaa.aa.aaa.aaaa.a
+100
+a.aa.aaaa.a.a.a.aaaa.a
+aa.aa.aaa.aa.aaaa.aa.aaa.aaaa.a
+aaa.aa.aa.aaaa.a.a.a.aaaa.a
+aa
+aaaa.a.a.a.aaaa.a
+aa.aaaa.aaaa.aaa.aaaa.a.aa
+a.aaa.aaaa.aaa.a.aa.aa.aa
+aaaa.aa.aaaa.a.a.a.aaaa.a
+aaaa.aaaa.aa.aa
+aaaa.aaa.aa.a.aaaa.a.a.a.aaaa.a
+aaaa.aaaa.a.a.a.aaaa.a
+aaa.aaaa
+aaa
+aaaa.a.a.aaaa.a
+aaa.aa.a.aa.a.aaaa.a.a.aaaa.a
+a.aaa.aaaa.a.a.a.aaaa.a
+aa.aa.aa.a.aa
+aaa.aaa.aaaa.aaa.aa.a.aaaa.aa.aa
+aa.a.aa.aaaa.aa.a.aa
+a.aa.a.aa.aaaa.a.a.a.aaaa.a
+aaa.a.aaa.aaaa.a.a.aaaa.a
+aaaa.a.aa.aaaa.a.a.a.aaaa.a
+aa.aaa.a.aa.aaaa.a.a.a.aaaa.a
+a.aaaa
+aa.aa.aaa.aaaa.aa.aaa.aaaa.a
+aa.aaaa.a.a.a.aaaa.a
+aaaa.aa.aaa.aa.aaaa.a.a.a.aaaa.a
+aaaa.aaaa.a.aaaa.a.a.aaaa.a
+aa.a.aaa.aaaa.aa.aaa.a.aaa.a.aa
+aaa.aa.a.aaa.aaaa.a.aaaa.a
+aa.a.aaa.a.a.a.aaaa.a
+aaa.aaa.aa.aaaa.a.a.a.aaaa.a
+a.aa.aaaa.aa.aaaa.a.a.a.aaaa.a
+aaaa.a.a.a.aaaa.a
+aaa.a.aa.aaaa.a.a.a.aaaa.a
+aaa.aa.a.aaa.aaaa.a.a.a.aaaa.a
+a.aa
+aaaa.a.a.a.aaaa.a
+aa.aaa.aaa.aa.aaa.a.a.a.a.aa
+aa.aa.aa.aa.aaaa.aa.aaa.aaaa.a
+aaaa.a.aa.aaaa.a.a.a.aaaa.a
+aaaa.aaaa.a.aaaa.aaa.aaa.aaaa.aaa.aa
+aaaa.a.aaa.aaa.aaaa.a.a.aa
+aaaa.aa
+aaaa.a.a.aa.aaaa.a.a.a.aaaa.a
+a.aaaa.a.aaa.aaaa.a.a.a.aaaa.a
+aa.a.aa.aaaa.a.a.a.aaaa.a
+aaaa.a.aa.aaaa.a.a.a.aaaa.a
+aa.aaaa.a.a.a.aaaa.a
+a.a.aa.aaaa.aaaa.a.aa.a.aaaa.aa
+a.a.a.aaaa.a
+a.aaa.aaaa.aaaa.a.a.a.aaaa.a
+aaaa.aaa.aaa.aa
+aaaa.aaa.aa.aa.aaaa.a.a.a.aaaa.a
+aa.aaa.aaa.aa.aaaa.a.a.a.aaaa.a
+aa.a.aa.aaa.aaaa.aa.aaa.aaa
+a.aaa.aaa.aaaa.a.aa.aaaa.aa.a.aa
+aaa.aa.aaa.a.aa
+a.aaaa.aa.a.aaaa.aaaa.a
+aaa.aa.aaaa.a.a.a.aaaa.a
+aa.aaa.aaaa.aaa.aa.aaa
+aa.a.aaa.aa.aaaa.aaaa
+aa.aaa.aa.aaaa.a.a.a.aaaa.a
+aa.aa.aaaa.aaa.aa.aaaa.a.a.aaaa.a
+aaaa.a.a.aa
+a.aa.aaaa.a.a.a.aaaa.a
+aaaa.aa.aaaa.aa.aaaa.a.a.a.aaaa.a
+aaaa.aa.aaaa.aa.aaa.aaaa.a
+aaaa.aaaa.aaa.a.aa
+aaaa.a.a.a.aaaa.a
+aaa.aaaa.aa.aaaa.a.a.a.aaaa.a
+aa.aa.aa.aa.aaa.aaaa.a.aaaa.aaaa.a
+a.aaa.aaaa.aaaa.a.a.a.aaaa.a
+aaaa.aa.aaa.aa
+aaa.aaaa.a.aaa.a.aaaa.a.a.aaaa.a
+aa.a.aaaa.aaa.aa.a.aa.aaaa.aaa.aa
+aaaa.a.a.aa.aaaa.aaa.aaaa.aaaa.aaaa.aa
+aaaa.a.a.aaaa.a
+aa.aa.aaaa.a.a.a.aaaa.a
+a.a.aaa.aaa.aa
+aaaa.a.a.a.aaaa.a
+a.aaa.aaaa.aa.aaaa.a.a.a.aaaa.a
+a.aaaa.a.aa
+a.aaaa.a
+aaaa.a.aaaa.aaaa.a.a.aa.aaaa
+aaaa.aaa.aaaa.aa.aaa.a.a.aaaa.a
+a.aaaa.aa.aa.a.aaaa.aa.aaa.aaaa.a
+a.aa.aaaa.a.a.aaaa.a
+aaa.aa
+aaaa.a.a.aa.aaaa.a.a.a.aaaa.a
+aaa.a.a
+aa.aaaa.a.a.a.aaaa.a
+aa.a.aa.aaaa.a.a.a.aaaa.a
+aaaa.a.a.a.aaaa.a
+aaa.aaaa.aaaa.aa.aa.aaa.aaa.a.aa
+a.aaaa.a
+aaaa.aa.aaaa.a.a.a.aaaa.a
+a.aa.a.aaa.aaaa.a.aa
+aaa.aa.aaaa.aaa.aaaa.a.a.aaaa.a
+aa.aaaa.a.a.a.aaaa.a
+
+
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Good
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Good
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Good
+Bad
+Good
+Good
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Bad
+Good
+Good
+Good
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Bad
+Bad
+Good
+Bad
+Bad
+Bad
+Bad"
+CnZJwL4N,Untitled,madhu_fresh,C++,Tuesday 13th of February 2024 05:50:16 AM CDT,"#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace std;
+
+const int MAX_RESULT_DOCUMENT_COUNT = 5;
+
+string ReadLine() {
+    string s;
+    getline(cin, s);
+    return s;
+}
+
+int ReadLineWithNumber() {
+    int result;
+    cin >> result;
+    ReadLine();
+    return result;
+}
+
+vector<string> SplitIntoWords(const string& text) {
+    vector<string> words;
+    string word;
+    for (const char c : text) {
+        if (c == ' ') {
+            if (!word.empty()) {
+                words.push_back(word);
+                word.clear();
+            }
+        }
+        else {
+            word += c;
+        }
+    }
+    if (!word.empty()) {
+        words.push_back(word);
+    }
+
+    return words;
+}
+
+struct Document {
+    int id;
+    double relevance;
+    int rating;
+};
+
+enum class DocumentStatus {
+    ACTUAL,
+    IRRELEVANT,
+    BANNED,
+    REMOVED,
+};
+
+class SearchServer {
+public:
+
+    int GetDocumentCount() {
+        return static_cast<int>(documents_.size());
+    }
+
+    tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
+
+        vector<string> answer;
+
+        auto x = ParseQuery(raw_query).plus_words;
+
+        for (string plus_word : ParseQuery(raw_query).plus_words)
+        {
+            
+            if (word_to_document_freqs_.at(plus_word).find(document_id) != word_to_document_freqs_.at(plus_word).end() &&
+                word_to_document_freqs_.at(plus_word).at(document_id) > 0)
+            {
+                answer.push_back(plus_word);
+            }
+
+        }
+
+
+        for (string minus_word : ParseQuery(raw_query).minus_words)
+        {
+            if (word_to_document_freqs_.at(minus_word).find(document_id) != word_to_document_freqs_.at(minus_word).end() &&
+                word_to_document_freqs_.at(minus_word).at(document_id) > 0)
+            {
+                return {};
+            }
+        }
+
+        return tuple(answer, documents_.at(document_id).status);
+
+    }
+
+    void SetStopWords(const string& text) {
+        for (const string& word : SplitIntoWords(text)) {
+            stop_words_.insert(word);
+        }
+    }
+
+    void AddDocument(int document_id, const string& document, DocumentStatus status,
+        const vector<int>& ratings) {
+        const vector<string> words = SplitIntoWordsNoStop(document);
+        const double inv_word_count = 1.0 / words.size();
+        for (const string& word : words) {
+            word_to_document_freqs_[word][document_id] += inv_word_count;
+        }
+        documents_.emplace(document_id, DocumentData{ ComputeAverageRating(ratings), status });
+    }
+
+    vector<Document> FindTopDocuments(const string& raw_query,
+        DocumentStatus status = DocumentStatus::ACTUAL) const {
+        const Query query = ParseQuery(raw_query);
+        auto matched_documents = FindAllDocuments(query, status);
+
+        sort(matched_documents.begin(), matched_documents.end(),
+            [](const Document& lhs, const Document& rhs) {
+                return lhs.relevance > rhs.relevance;
+            });
+        if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
+            matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
+        }
+        return matched_documents;
+    }
+
+private:
+    struct DocumentData {
+        int rating;
+        DocumentStatus status;
+    };
+
+    set<string> stop_words_;
+    map<string, map<int, double>> word_to_document_freqs_;
+    map<int, DocumentData> documents_;
+
+    bool IsStopWord(const string& word) const {
+        return stop_words_.count(word) > 0;
+    }
+
+    vector<string> SplitIntoWordsNoStop(const string& text) const {
+        vector<string> words;
+        for (const string& word : SplitIntoWords(text)) {
+            if (!IsStopWord(word)) {
+                words.push_back(word);
+            }
+        }
+        return words;
+    }
+
+    static int ComputeAverageRating(const vector<int>& ratings) {
+        if (ratings.empty()) {
+            return 0;
+        }
+        int rating_sum = 0;
+        for (const int rating : ratings) {
+            rating_sum += rating;
+        }
+        return rating_sum / static_cast<int>(ratings.size());
+    }
+
+    struct QueryWord {
+        string data;
+        bool is_minus;
+        bool is_stop;
+    };
+
+    QueryWord ParseQueryWord(string text) const {
+        bool is_minus = false;
+        // Word shouldn't be empty
+        if (text[0] == '-') {
+            is_minus = true;
+            text = text.substr(1);
+        }
+        return { text, is_minus, IsStopWord(text) };
+    }
+
+    struct Query {
+        set<string> plus_words;
+        set<string> minus_words;
+    };
+
+    Query ParseQuery(const string& text) const {
+        Query query;
+        for (const string& word : SplitIntoWords(text)) {
+            const QueryWord query_word = ParseQueryWord(word);
+            if (!query_word.is_stop) {
+                if (query_word.is_minus) {
+                    query.minus_words.insert(query_word.data);
+                }
+                else {
+                    query.plus_words.insert(query_word.data);
+                }
+            }
+        }
+        return query;
+    }
+
+    // Existence required
+    double ComputeWordInverseDocumentFreq(const string& word) const {
+        return log(documents_.size() * 1.0 / word_to_document_freqs_.at(word).size());
+    }
+
+    vector<Document> FindAllDocuments(const Query& query, DocumentStatus status) const {
+        map<int, double> document_to_relevance;
+        for (const string& word : query.plus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
+            for (const auto& [document_id, term_freq] : word_to_document_freqs_.at(word)) {
+                if (documents_.at(document_id).status == status) {
+                    document_to_relevance[document_id] += term_freq * inverse_document_freq;
+                }
+            }
+        }
+
+        for (const string& word : query.minus_words) {
+            if (word_to_document_freqs_.count(word) == 0) {
+                continue;
+            }
+            for (const auto& [document_id, _] : word_to_document_freqs_.at(word)) {
+                document_to_relevance.erase(document_id);
+            }
+        }
+
+        vector<Document> matched_documents;
+        for (const auto& [document_id, relevance] : document_to_relevance) {
+            matched_documents.push_back(
+                { document_id, relevance, documents_.at(document_id).rating });
+        }
+        return matched_documents;
+    }
+};
+
+void PrintMatchDocumentResult(int document_id, const vector<string>& words, DocumentStatus status) {
+    cout << ""{ ""s
+        << ""document_id = ""s << document_id << "", ""s
+        << ""status = ""s << static_cast<int>(status) << "", ""s
+        << ""words =""s;
+    for (const string& word : words) {
+        cout << ' ' << word;
+    }
+    cout << ""}""s << endl;
+}
+int main() {
+    setlocale(LC_ALL, ""RU"");
+    SearchServer search_server;
+
+    search_server.SetStopWords(""и в на"");
+
+    search_server.AddDocument(0, ""белый кот и модный ошейник"", DocumentStatus::ACTUAL, { 1 });
+    search_server.AddDocument(1, ""пушистый кот пушистый хвост"", DocumentStatus::ACTUAL, { 2 });
+    search_server.AddDocument(2, ""ухоженный пёс выразительные глаза"", DocumentStatus::ACTUAL,
+        { 3 });
+
+
+    const std::string query = ""пушистый ухоженный кот -ошейник"";
+
+    std::cout << ""Documents' statuses:""s << std::endl;
+    const int document_count = search_server.GetDocumentCount();
+    for (int document_id = 0; document_id < document_count; ++document_id) {
+        const auto [words, status] = search_server.MatchDocument(query, document_id);
+        cout << ""id = ""s << document_id << "", words =""s;
+        for (const std::string& word : words) {
+            std::cout << ' ' << word;
+        }
+        cout << endl;
+    }
+}"
+BeURuNwM,G2A.com Free Gift Card Guide Feb 2024,ounnuo,GetText,Tuesday 13th of February 2024 05:39:09 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+PDF guide here:
+https://drive.google.com/file/d/120kXNJWM5T5u3PGlkQeZCo_nLxzQIlkf/view?usp=g2a_refund_exploit_154334.pdf
+ 
+Working as of
+13 February 2024"
+0P0C696D,Untitled,35657,C++,Tuesday 13th of February 2024 05:37:29 AM CDT,"#include <iostream>
+#include <vector>
+
+
+using namespace std;
+
+class Vector {
+
+public:
+	Vector() {
+		arr_ = new int[4];
+		size_ = 0;
+		capacity_ = 4;
+	}
+
+	Vector(const int capacity) {
+		arr_ = new int[capacity];
+		size_ = 0;
+		capacity_ = capacity;
+	}
+
+	void push_back(const int value) {
+		check_capacity();
+		arr_[size_] = value;
+		size_++;
+	}
+
+	void insert(const int index, const int value) {
+		if (index < 0 || index > size_) {
+			cout << ""Некорректный индекс"" << endl;
+			return;
+		}
+		check_capacity();
+		for (int i = size_; i > index; i--) {
+			arr_[i] = arr_[i - 1];
+		}
+		arr_[index] = value;
+		size_++;
+	}
+
+	void erase(const int index) {
+		// удаление элемента по указанному индексу
+	}
+
+	void set_value(const int index, const int value) {
+		// изменяет значение элемента по указанному индексу на value
+	}
+
+	int get_value(const int index) {
+		// возвращает значение элемента по указанному индексу
+	}
+
+	void pop_back() {
+		if (size_ > 0) {
+			size_--;
+		}
+	}
+
+	void print() {
+		for (int i = 0; i < size_; i++) {
+			cout << arr_[i] << "" "";
+		}
+		cout << endl;
+	}
+
+private:
+
+	void check_capacity() {
+		if (size_ == capacity_) {
+			int* temp = new int[capacity_ * 2];
+			for (int i = 0; i < size_; i++) {
+				temp[i] = arr_[i];
+			}
+			delete[] arr_;
+			arr_ = temp;
+			capacity_ *= 2;
+		}
+	}
+
+	int* arr_; // хранилище
+	int size_; // текущее количество элементов
+	int capacity_; // емкость хранилища
+};
+
+int main() {
+	setlocale(LC_ALL, ""ru"");
+
+	Vector vec1;
+	
+	vec1.push_back(10);
+	vec1.push_back(15);
+	vec1.push_back(20);
+	vec1.push_back(25);
+
+	vec1.print();
+
+	vec1.pop_back();
+	vec1.print();
+
+	vec1.insert(2, 44);
+	vec1.print();
+
+}
+"
+bvTKDr5S,Application for Senior PHP Developer,primoashbee,PHP,Tuesday 13th of February 2024 05:36:28 AM CDT,"<?php
+
+    function reverseStringToHireAshbee(string $string)
+    {
+        $length = strlen($string);
+        $reversedString = """";
+        for($x = $length - 1; $x >= 0; $x--)
+        {
+            $reversedString.=$string[$x];
+        }
+        return $reversedString;
+    }
+
+    echo reverseStringToHireAshbee('reverse');
+
+?>"
+LQSp7P9x,Untitled,35657,C++,Tuesday 13th of February 2024 05:03:58 AM CDT,"#include <iostream>
+#include <vector>
+
+
+using namespace std;
+
+class Vector {
+
+public:
+	Vector() {
+		arr_ = new int[4];
+		size_ = 0;
+		capacity_ = 4;
+	}
+
+	Vector(const int capacity) {
+		arr_ = new int[capacity];
+		size_ = 0;
+		capacity_ = capacity;
+	}
+
+	void push_back(const int value) {
+		if (size_ == capacity_) {
+			int* temp = new int[capacity_ * 2];
+			for (int i = 0; i < size_; i++) {
+				temp[i] = arr_[i];
+			}
+			delete[] arr_;
+			arr_ = temp;
+			capacity_ *= 2;
+		}
+		arr_[size_] = value;
+		size_++;
+	}
+
+	void insert(const int index, const int value) {
+
+	}
+
+	void pop_back() {
+		if (size_ > 0) {
+			size_--;
+		}
+	}
+
+	void print() {
+		for (int i = 0; i < size_; i++) {
+			cout << arr_[i] << "" "";
+		}
+		cout << endl;
+	}
+
+private:
+	int* arr_; // хранилище
+	int size_; // текущее количество элементов
+	int capacity_; // емкость хранилища
+};
+
+int main() {
+	setlocale(LC_ALL, ""ru"");
+
+	Vector vec1;
+	
+	vec1.push_back(10);
+	vec1.push_back(15);
+	vec1.push_back(20);
+	vec1.push_back(25);
+
+	vec1.print();
+
+	vec1.pop_back();
+	vec1.print();
+}
+"
+xCWDQPfH,oauth adsf,pashalvov,Python,Tuesday 13th of February 2024 04:41:40 AM CDT,"################ Файл superset_config.py
+from custom_sso_security_manager import CustomSsoSecurityManager
+
+CUSTOM_SECURITY_MANAGER = CustomSsoSecurityManager
+
+###### OAUTH AUTH
+
+AUTH_TYPE = AUTH_OAUTH
+AUTH_USER_REGISTRATION = True
+AUTH_USER_REGISTRATION_ROLE = ""ReportViewOnly""
+AUTH_ROLES_SYNC_AT_LOGIN = True
+
+AUTH_ROLES_MAPPING = {
+    ""Users"": [""ReportViewOnly""],
+    ""Admins"": [""Admin""],
+    ""Gamma"": [""Gamma""],
+}
+
+OAUTH_PROVIDERS = [
+{
+   'name': 'adfs',
+        'icon': 'fa-key',
+        'token_key': 'access_token',
+        'remote_app': {
+            'client_id': 'client_id',
+            'client_secret': 'client_secret',
+            'api_base_url': 'https://ouath/',
+            'client_kwargs':{
+              'scope': 'profile'
+            },
+            'request_token_url': None,
+            'access_token_url': 'https://ouath/adfs/oauth2/token',
+            'authorize_url': 'https://ouath/adfs/oauth2/authorize'
+   }
+}]
+
+################ Файл custom_sso_security_manager.py там же где и superset_config.py
+import logging
+import requests
+import jwt
+from superset.security import SupersetSecurityManager
+
+
+class CustomSsoSecurityManager(SupersetSecurityManager):
+    def oauth_user_info(self, provider, response=None):
+        logging.debug(""Oauth2 provider: {0}."".format(provider))
+        if provider == ""adfs"":
+            access_token = response[""access_token""]
+            # logging.debug(""АААааа! Токен: {0}"".format(access_token))
+            decoded = jwt.decode(access_token, options={""verify_signature"": False})
+            # decoded = jwt.decode(access_token, verify=False)
+            logging.debug(""Свойства AD: {0}"".format(decoded))
+            return {
+                ""email"": decoded[""email""],
+                # ""id"": user_data[""login""],
+                ""username"": decoded[""login""],
+                ""first_name"": decoded[""firstName""],
+                ""last_name"": decoded[""lastName""],
+                ""role_keys"": decoded[""roles""],
+            }"
+c1RLWU2f,# tk_alias_line_draw.py,here2share,Python,Tuesday 13th of February 2024 04:27:25 AM CDT,"# tk_alias_line_draw.py
+
+import tkinter as tk
+
+def draw_line(point_a, point_b):
+    num_squares = max(abs(point_b[0] - point_a[0]), abs(point_b[1] - point_a[1]))
+    square_size = 5
+
+    # Draw the line using squares
+    for i in range(0, num_squares + 1, square_size):
+        x = point_a[0] + i * (point_b[0] - point_a[0]) / num_squares
+        y = point_a[1] + i * (point_b[1] - point_a[1]) / num_squares
+
+        canvas.create_rectangle(x, y, x + square_size - 1, y + square_size - 1, outline="""", fill=""black"")
+
+# Example of usage
+root = tk.Tk()
+canvas = tk.Canvas(root, width=300, height=300)
+canvas.pack()
+
+point_a = (100, 50)
+point_b = (250, 200)
+
+draw_line(point_a, point_b)
+
+root.mainloop()"
+KTsBPSSH,Untitled,35657,C++,Tuesday 13th of February 2024 04:16:11 AM CDT,"#include <iostream>
+
+
+using namespace std;
+
+struct client {
+	char name[20]; // имя клиента
+	char phone_number[20]; // номер телефона
+	int client_id; // id клиента
+	int personal_discount; // размер скидки
+	bool regular_customer; // постоянный покупатель (да / нет)
+};
+
+class client_base {
+
+public:
+
+	client_base() {
+		clients_number = 0;
+		clients_base_size = 5;
+		clients = new client[clients_base_size];
+	}
+
+	client_base(const int base_size) {
+		clients_number = 0;
+		clients_base_size = base_size;
+		clients = new client[base_size];
+	}
+
+	void new_client(const char* name, const char* phone_number, const int client_id, const int personal_discount, const bool regular_customer) {
+		if (clients_number == clients_base_size) {
+			client* temp = new client[clients_base_size * 2];
+			for (int i = 0; i < clients_number; i++) {
+				temp[i] = clients[i];
+			}
+			delete[] clients;
+			clients = temp;
+			clients_base_size *= 2;
+		}
+		strcpy(clients[clients_number].name, name);
+		strcpy(clients[clients_number].phone_number, phone_number);
+		clients[clients_number].client_id = client_id;
+		clients[clients_number].personal_discount = personal_discount;
+		clients[clients_number].regular_customer = regular_customer;
+		clients_number++;
+	}
+
+	void del_client(const char* name) {
+		for (int i = 0; i < clients_number; i++) {
+			if (!strcmp(clients[i].name, name)) {
+				for (int j = i; j < clients_number - 1; j++) {
+					clients[j] = clients[j + 1];
+				}
+				clients_number--;
+				i--; // если подряд идут два клиента с одинаковым именем
+			}
+		}
+	}
+
+
+	void find_client_name(const char* name) {
+		for (int i = 0; i < clients_number; i++) {
+			if (!strcmp(clients[i].name, name)) {
+				print_client(i);
+			}
+		}
+		cout << endl;
+	}
+
+	void find_client_number(const char* number) {
+		for (int i = 0; i < clients_number; i++) {
+			if (!strcmp(clients[i].phone_number, number)) {
+				print_client(i);
+			}
+		}
+		cout << endl;
+	}
+
+	void show_all_clients() {
+		for (int i = 0; i < clients_number; i++) {
+			print_client(i);
+		}
+		cout << endl;
+	}
+
+	void show_regular_clients() {
+		for (int i = 0; i < clients_number; i++) {
+			if (clients[i].regular_customer) {
+				print_client(i);
+			}
+		}
+		cout << endl;
+	}
+
+	~client_base() {
+		delete[] clients;
+	}
+
+private:
+
+	void print_client(const int i) {
+		cout << clients[i].name << "", номер - "" << clients[i].phone_number << "", id - "" << clients[i].client_id << "", скидка - "" << clients[i].personal_discount << "" %"";
+		if (clients[i].regular_customer) {
+			cout << "". Постоянный покупатель."";
+		}
+		cout << endl;
+	}
+
+	client* clients; // динамический массив клиентов
+	int clients_number; // количество клиентов
+	int clients_base_size; // текущий максимальный размер базы
+};
+
+int main() {
+	setlocale(LC_ALL, ""ru"");
+
+	client_base my_base(20);
+
+	my_base.new_client(""Иван"", ""+79111111111"", 1212, 10, true);
+	my_base.new_client(""Вася"", ""+79111112222"", 1213, 5, false);
+	my_base.new_client(""Галя"", ""+79111113333"", 1214, 15, true);
+	my_base.new_client(""Маша"", ""+79111114444"", 1215, 10, true);
+
+	my_base.show_all_clients();
+
+	my_base.del_client(""Маша"");
+
+	my_base.show_all_clients();
+
+	my_base.find_client_name(""Иван"");
+
+	my_base.show_regular_clients();
+}
+"
+vthiiPHg,AxyomGG,Happypea,ECMAScript,Tuesday 13th of February 2024 04:11:17 AM CDT,"[
+    [
+        ""Gabby"",
+        ""Geographic"",
+        ""Globular"",
+        ""Grateful"",
+        ""Groaning"",
+        ""Gainful"",
+        ""Geologic"",
+        ""Gloomy"",
+        ""Gratified"",
+        ""Groggy"",
+        ""Gallant"",
+        ""Geometric"",
+        ""Glorious"",
+        ""Gratifying"",
+        ""Groomed"",
+        ""Galling"",
+        ""Geriatric"",
+        ""Glossy"",
+        ""Grating"",
+        ""Groovy"",
+        ""Game"",
+        ""Ghastly"",
+        ""Glowing"",
+        ""Gratis"",
+        ""Gross"",
+        ""Gangly"",
+        ""Ghostly"",
+        ""Gluey"",
+        ""Gratuitous"",
+        ""Grotesque"",
+        ""Gaping"",
+        ""Ghoulish"",
+        ""Glum"",
+        ""Grave"",
+        ""Grouchy"",
+        ""Garbled"",
+        ""Giant"",
+        ""Gluttonous"",
+        ""Gray"",
+        ""Growling"",
+        ""Gargantuan"",
+        ""Giddy"",
+        ""Gnarly"",
+        ""Greasy"",
+        ""Grown-up"",
+        ""Garish"",
+        ""Gifted"",
+        ""Gold"",
+        ""Great"",
+        ""Grubby"",
+        ""Garrulous"",
+        ""Gigantic"",
+        ""Golden"",
+        ""Greatest"",
+        ""Grueling"",
+        ""Gaseous"",
+        ""Giggling"",
+        ""Good"",
+        ""Greedy"",
+        ""Gruesome"",
+        ""Gasping"",
+        ""Gilded"",
+        ""Good-looking"",
+        ""Green"",
+        ""Gruff"",
+        ""Gaudy"",
+        ""Giving"",
+        ""Good-natured"",
+        ""Gregarious"",
+        ""Grumbling"",
+        ""Gaunt"",
+        ""Glad"",
+        ""Gooey"",
+        ""Grey"",
+        ""Grumpy"",
+        ""Gauzy"",
+        ""Glamorous"",
+        ""Goofy"",
+        ""Grieving"",
+        ""Guaranteed"",
+        ""Gawky"",
+        ""Glaring"",
+        ""Gorgeous"",
+        ""Grim"",
+        ""Guarded"",
+        ""General"",
+        ""Glass"",
+        ""Graceful"",
+        ""Grimacing"",
+        ""Guiltless"",
+        ""Generative"",
+        ""Glassy"",
+        ""Gracious"",
+        ""Grimy"",
+        ""Guilt-ridden"",
+        ""Generic"",
+        ""Gleaming"",
+        ""Gradual"",
+        ""Grinding"",
+        ""Guilty"",
+        ""Generous"",
+        ""Glib"",
+        ""Grainy"",
+        ""Grinning"",
+        ""Gullible"",
+        ""Genial"",
+        ""Glistening"",
+        ""Grand"",
+        ""Gripping"",
+        ""Gurgling"",
+        ""Gentle"",
+        ""Glittering"",
+        ""Grandiose"",
+        ""Gritty"",
+        ""Gushing"",
+        ""Genuine"",
+        ""Global"",
+        ""Graphic"",
+        ""Grizzled"",
+        ""Gushy"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay""
+    ],
+    [
+        ""Gullet"",
+        ""Guinea"",
+        ""Gush"",
+        ""Gather"",
+        ""Gladiator"",
+        ""Gab"",
+        ""Goat"",
+        ""Garbage"",
+        ""Gut"",
+        ""Grasp"",
+        ""Gorgeousness"",
+        ""Giggle"",
+        ""Gauntlet"",
+        ""Gentile"",
+        ""Granddaughter"",
+        ""Gunfire"",
+        ""Groan"",
+        ""Gentility"",
+        ""Gazer"",
+        ""Golfer"",
+        ""Grin"",
+        ""Gust"",
+        ""Glen"",
+        ""Godhead"",
+        ""Gob"",
+        ""Gunplay"",
+        ""Gnomon"",
+        ""Gasser"",
+        ""Gentle"",
+        ""Glycerine"",
+        ""Gadget"",
+        ""Grillework"",
+        ""Granary"",
+        ""Grad"",
+        ""Goal"",
+        ""Germ"",
+        ""Gulf"",
+        ""Glaze"",
+        ""Glare"",
+        ""Glade"",
+        ""Groove"",
+        ""Grotesque"",
+        ""Glaucoma"",
+        ""Guitar"",
+        ""Guest"",
+        ""Goiter"",
+        ""Generation"",
+        ""Grubstake"",
+        ""Glance"",
+        ""Gasp"",
+        ""Glum"",
+        ""Grievance"",
+        ""Glycerin"",
+        ""Grimace"",
+        ""Guardian"",
+        ""Greensward"",
+        ""Guitarist"",
+        ""Grantor"",
+        ""Gunk"",
+        ""Ginkgo"",
+        ""Glee"",
+        ""Gallant"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gay"",
+        ""Gentry"",
+        ""Goodwill"",
+        ""Grassfire"",
+        ""Giant"",
+        ""Grove"",
+        ""Genii"",
+        ""Grain"",
+        ""Gusher"",
+        ""Guild"",
+        ""Gray"",
+        ""Green"",
+        ""Gorge"",
+        ""Geocentricism"",
+        ""Goldsmith"",
+        ""Graduation"",
+        ""Grandmother"",
+        ""Gleam"",
+        ""Glue"",
+        ""Gospel"",
+        ""Gibbet"",
+        ""Generator"",
+        ""Globulin"",
+        ""Giveaway"",
+        ""Ghoul"",
+        ""Gauge"",
+        ""Gabble"",
+        ""Grandma"",
+        ""Geography"",
+        ""Gravy"",
+        ""Graveyard"",
+        ""Gunslinger"",
+        ""Gloss"",
+        ""Good"",
+        ""Gesticulation"",
+        ""Generalist"",
+        ""Gallstone"",
+        ""Gap"",
+        ""Gangster"",
+        ""Gal"",
+        ""Geochemistry"",
+        ""Grower"",
+        ""Generosity"",
+        ""Gas"",
+        ""Girl"",
+        ""Goldfish"",
+        ""Grief"",
+        ""Generalization"",
+        ""Garb"",
+        ""Gig"",
+        ""Gear"",
+        ""Galahad"",
+        ""Gallery"",
+        ""Guerrilla"",
+        ""God"",
+        ""Greatcoat"",
+        ""Glottochronology"",
+        ""Glass"",
+        ""Gurgle"",
+        ""Garnish"",
+        ""Gown"",
+        ""Gamma"",
+        ""Gobbledygook"",
+        ""Gastronome"",
+        ""Gullibility"",
+        ""Gauze"",
+        ""Garlic"",
+        ""Grab"",
+        ""Group"",
+        ""Gold"",
+        ""Grandfather"",
+        ""Globetrotter"",
+        ""Genie"",
+        ""Graphite"",
+        ""Graciousness"",
+        ""Giver"",
+        ""Grudge"",
+        ""Glycol"",
+        ""Gratification"",
+        ""Grave"",
+        ""Goddess"",
+        ""Growth"",
+        ""Gyro"",
+        ""Germanium"",
+        ""Gist"",
+        ""Grapefruit"",
+        ""Gland"",
+        ""Gunbarrel"",
+        ""Getaway"",
+        ""Grade"",
+        ""Garret"",
+        ""Glissade"",
+        ""Grill"",
+        ""Gunman"",
+        ""Gem"",
+        ""Gangway"",
+        ""Glamor"",
+        ""Greed"",
+        ""Gain"",
+        ""Gravity"",
+        ""Grip"",
+        ""Great"",
+        ""Glitter"",
+        ""Gap"",
+        ""Godparent"",
+        ""Grease"",
+        ""Gasket"",
+        ""Gaze"",
+        ""Grandstand"",
+        ""Gee"",
+        ""Gentlewoman"",
+        ""Gardener"",
+        ""Gash"",
+        ""Garland"",
+        ""Graham"",
+        ""Gambol"",
+        ""Grantee"",
+        ""Gentian"",
+        ""Gaffe"",
+        ""Gag"",
+        ""Ghost"",
+        ""Grey"",
+        ""Gift"",
+        ""Godsend"",
+        ""Gnome"",
+        ""Glover"",
+        ""Ground"",
+        ""Guerilla"",
+        ""Gratitude"",
+        ""Gypsy"",
+        ""Geneticist"",
+        ""Gargle"",
+        ""Guise"",
+        ""Glint"",
+        ""Galaxy"",
+        ""Goodbye"",
+        ""Guy"",
+        ""Galvanism"",
+        ""Gingham"",
+        ""Glove"",
+        ""Gamut"",
+        ""Grace"",
+        ""Gin"",
+        ""Gamble"",
+        ""Grass"",
+        ""Goad"",
+        ""Glorification"",
+        ""Grounder"",
+        ""Gradient"",
+        ""Gate"",
+        ""Gel"",
+        ""Grillwork"",
+        ""Guanidine"",
+        ""Gallop"",
+        ""Grandee"",
+        ""Gynecologist"",
+        ""Guidance"",
+        ""Glimmer"",
+        ""Gamebird"",
+        ""Glacier"",
+        ""Glitch"",
+        ""Gambit"",
+        ""Genius"",
+        ""Gable"",
+        ""Gymnast"",
+        ""Garage"",
+        ""Garnet"",
+        ""Grocer"",
+        ""Glisten"",
+        ""Glimpse"",
+        ""Gull"",
+        ""Gypsum"",
+        ""Geologist"",
+        ""Goody"",
+        ""Ginger"",
+        ""Gutter"",
+        ""Gradualist"",
+        ""General"",
+        ""Grit"",
+        ""Grate"",
+        ""Gunflint"",
+        ""Grandmaster"",
+        ""Grandchildren"",
+        ""Gunmen"",
+        ""Gadfly"",
+        ""Grader"",
+        ""Guarantee"",
+        ""Grazer"",
+        ""Glycerol"",
+        ""Gravestone"",
+        ""Game"",
+        ""Government"",
+        ""Greenware"",
+        ""Geology"",
+        ""Gentlefolk"",
+        ""Gaucherie"",
+        ""Gourd"",
+        ""Geniality"",
+        ""Granite"",
+        ""Groundwave"",
+        ""Glamour"",
+        ""Guaranty"",
+        ""Graft"",
+        ""Grenade"",
+        ""Garrison"",
+        ""Give"",
+        ""Gun"",
+        ""Gyration"",
+        ""Guile"",
+        ""Ginmill"",
+        ""Gale"",
+        ""Guide"",
+        ""Grocery"",
+        ""Grunt"",
+        ""Grandeur"",
+        ""Grub"",
+        ""Graduate"",
+        ""Girth"",
+        ""Glut"",
+        ""Goose"",
+        ""Glitz"",
+        ""Gristmill"",
+        ""Glow"",
+        ""Ghetto"",
+        ""Gasoline"",
+        ""Groundwork"",
+        ""Goodness"",
+        ""Golf"",
+        ""Gentlemen"",
+        ""Glad-Hand"",
+        ""Grape"",
+        ""Gourmet"",
+        ""Groom"",
+        ""Guilt"",
+        ""Glossary"",
+        ""Gaggle"",
+        ""Gang"",
+        ""Geese"",
+        ""Graffiti"",
+        ""Gagline"",
+        ""Gunpowder"",
+        ""Graph"",
+        ""Gaiety"",
+        ""Greatness"",
+        ""Guidebook"",
+        ""Gallium"",
+        ""Guru"",
+        ""Greenhorn"",
+        ""Grille"",
+        ""Genesis"",
+        ""Grist"",
+        ""Gall"",
+        ""Gallon"",
+        ""Gangplank"",
+        ""Gymnastic"",
+        ""Gage"",
+        ""Gardenia"",
+        ""Gop"",
+        ""Giblet"",
+        ""Galley"",
+        ""Gulp"",
+        ""Gravel"",
+        ""Goitrogen"",
+        ""Gallantry"",
+        ""Glitterati"",
+        ""Guess"",
+        ""Grandson"",
+        ""Guarantor"",
+        ""Gainer"",
+        ""Gossamer"",
+        ""Gum"",
+        ""Gunfighter"",
+        ""Grid"",
+        ""Garment"",
+        ""Guar"",
+        ""Grapevine"",
+        ""Graybeard"",
+        ""Grassland"",
+        ""Grammar"",
+        ""Gilt"",
+        ""Gentleman"",
+        ""Gout"",
+        ""Gram"",
+        ""Genre"",
+        ""Gantlet"",
+        ""Governor"",
+        ""Gracility"",
+        ""Greenhouse"",
+        ""Guardhouse"",
+        ""Gesture"",
+        ""Globe"",
+        ""Garrote"",
+        ""Grindstone"",
+        ""Girlfriend"",
+        ""Gazelle"",
+        ""Gadgetry"",
+        ""Genera"",
+        ""Glory"",
+        ""Groomsmen"",
+        ""Gusto"",
+        ""Garter"",
+        ""Gibberish"",
+        ""Gulley"",
+        ""Guffaw"",
+        ""Gallonage"",
+        ""Girdle"",
+        ""Garden"",
+        ""Gibe"",
+        ""Glister"",
+        ""Gully"",
+        ""Gossip"",
+        ""Gratefulness"",
+        ""Gender"",
+        ""Go-Getter"",
+        ""Groin"",
+        ""Glossy"",
+        ""Guard"",
+        ""Gateway"",
+        ""Golconda"",
+        ""Girlie"",
+        ""Gastronomy"",
+        ""Grizzly"",
+        ""Gallbladder"",
+        ""Geometry"",
+        ""Gravitation"",
+        ""Gym"",
+        ""Growl"",
+        ""Gala"",
+        ""Gangland"",
+        ""Gumption"",
+        ""Gloom"",
+        ""Gabardine"",
+        ""Generativity"",
+        ""Gunner"",
+        ""Generality"",
+        ""Grant"",
+        ""Gait"",
+        ""Grumble""
+    ]
+]"
+JWEbUJ2f,Soccer Prediction Betting Tips 13022024,livebetpro,PHP,Tuesday 13th of February 2024 04:00:40 AM CDT,https://www.livebetpro.com/soccer-prediction-betting-tips-13022024/
+UN8Xwaa7,Smart Factory - tracking products HTML code,zhexo,HTML,Tuesday 13th of February 2024 03:23:48 AM CDT,"<!DOCTYPE html>
+<html>
+<head>
+    <script src=""//code.jquery.com/jquery-3.3.1.min.js""></script>
+    <script type=""text/javascript"" src=""//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.6/socket.io.min.js""></script>
+    <script src=""/static/js/application.js""></script>
+    <link rel=""stylesheet"" href=""//maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"">
+    <style>
+        * { 
+            box-sizing: border-box;
+        }
+        .column { 
+            float: left;
+            width: 50%;
+            padding: 10px;
+            height: 400px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class=""container"">
+        <div class=""jumbotron"">
+            <h1>Stock Monitoring in Smart Factory Warehouse</h1>
+        </div>
+    </div>
+
+    <div class=""container"" id=""content"">
+        <div class=""row"">
+            <div class=""row"">
+                <div class=""column"" style=""background-color:#aaa;"">
+                    <h2>Weight:</h2>
+                    <div id=""val""></div>
+                </div>
+                <div class=""column"" style=""background-color:#bbb;"">
+                    <h2>Number of product:</h2>
+                    <div id=""noo""></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+"
+Yzn7zFF1,minetest_start_web,main_spirit,Lua,Tuesday 13th of February 2024 03:19:55 AM CDT,"111
+222
+333
+444
+555"
+hVDy3fnK,Was gibt es im März neues auf Grand RP?,Shpindlier,HTML,Tuesday 13th of February 2024 03:08:29 AM CDT,"<html><head><meta http-equiv=""content-type"" content=""text/html; charset=utf-8""><title></title></head><body>
+	<div>
+		<table style=""box-sizing: border-box; background: #ffffff; width: 600px; margin-left: auto; margin-right: auto; border-spacing: 0;"">
+			<tbody>
+				<tr>
+					<td align=""center""><img src=""https://i.imgur.com/ogpK0xV.png"" alt=""Logo"" caption=""false""></td>
+				</tr>
+				<tr>
+					<td>
+						<p style=""color: #2e2e2e; font-family: 'Arial'; font-size: 17px; letter-spacing: 0.01em; line-height: 24px; text-decoration: none; padding: 15px 34px;"">Ich freue mich euch einige aufregende Neuigkeiten zum Grand RP-Server mitteilen zu können! Heute wurde zur Feier des Valentinstags ein <strong>Mini-Update</strong> veröffentlicht.</p>
+					</td>
+				</tr>
+				<tr>
+					<td>
+						<p style=""color: #2e2e2e; font-family: 'Arial'; font-size: 17px; letter-spacing: 0.01em; line-height: 24px; text-decoration: none; padding: 15px 34px;"">Unsere Entwickler arbeiten bereits intensiv an einem Update zum Geburtstag des Projekts, das am <strong>1. März</strong> veröffentlicht werden soll. Ihr könnt euch darauf verlassen, dass es für uns alle ein unvergessliches Erlebnis wird. Markiere den 1. März in deinem Kalender und mach dich bereit für fantastisches Gameplay bei Grand RP.</p>
+					</td>
+				</tr>
+				<tr>
+					<td align=""center""><a rel=""noopener noreferrer"" href=""https://www.youtube.com/@GTA5RPGrandRolePlay""><img src=""https://i.imgur.com/PmgOJEs.png"" alt=""YouTube Grand GTA 5""></a> <a rel=""noopener noreferrer"" href=""https://gta5grand.com/wiki/""><img src=""https://i.imgur.com/ovgczCH.png"" alt=""Wikipedia GTA 5 Grand""></a></td>
+				</tr>
+				<tr>
+					<td><a rel=""noopener noreferrer"" style=""color: #2e2e2e; font-family: 'Arial'; font-size: 16px; width: 178px; letter-spacing: 0.01em; text-decoration-line: underline; padding: 15px 40px 13px 40px;"" href=""{{unsubscribe_url}}"">If you are not interested</a></td>
+				</tr>
+				<tr>
+					<td>
+						<div style=""padding-top: 0px; box-sizing: border-box;"">
+							<p style=""color: #afafaf; font-family: 'Arial'; font-size: 16px; letter-spacing: 0.01em; padding: 15px 34px 0px 40px;"">By the way, I decided to let you know because you play on Grand Rp and registered there. If you're not interested, just let me know.</p>
+							<div align=""center""><img src=""https://i.imgur.com/bfG4Fy3.png"" alt=""logo2""></div>
+						</div>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+	</div>
+	</body></html>"
+4NaMKBZ4,Untitled,alex91ckua,PHP,Tuesday 13th of February 2024 03:01:32 AM CDT,"// Modify Int phone country names
+add_action('wp_footer', 'modify_int_phone_countries');
+
+function modify_int_phone_countries() {
+
+		$current_laguage = apply_filters( 'wpml_current_language', NULL );
+
+		if ( $current_laguage === 'hu' ) :
+			echo <<<EOD
+	<script>
+		jQuery(function() {
+			const newCountriesData = {
+				'Afghanistan': 'Afganisztán',
+				'Albania': 'Albánia',
+				'Algeria': 'Algéria',
+				'American Samoa': 'Amerikai Szamoa',
+				'Andorra': 'Andorra',
+				'Angola': 'Angola',
+				'Anguilla': 'Anguilla',
+				'Antigua & Barbuda': 'Antigua és Barbuda',
+				'Argentina': 'Argentína',
+				'Armenia': 'Örményország',
+				'Aruba': 'Aruba',
+				'Ascension Island': 'Ascension-sziget',
+				'Australia': 'Ausztrália',
+				'Austria': 'Ausztria',
+				'Azerbaijan': 'Azerbajdzsán',
+				'Bahamas': 'Bahamák',
+				'Bahrain': 'Bahrein',
+				'Bangladesh': 'Banglades',
+				'Barbados': 'Barbados',
+				'Belarus': 'Fehéroroszország',
+				'Belgium': 'Belgium',
+				'Belize': 'Belize',
+				'Benin': 'Benin',
+				'Bermuda': 'Bermuda',
+				'Bhutan': 'Bhután',
+				'Bolivia': 'Bolívia',
+				'Bosnia & Herzegovina': 'Bosznia és Hercegovina',
+				'Botswana': 'Botswana',
+				'Brazil': 'Brazília',
+				'British Indian Ocean Territory': 'Brit Indiai-óceáni Terület',
+				'British Virgin Islands': 'Brit Virgin szigetek',
+				'Brunei': 'Brunei',
+				'Bulgaria': 'Bulgária',
+				'Burkina Faso': 'Burkina Faso',
+				'Burundi': 'Burundi',
+				'Cambodia': 'Kambodzsa',
+				'Cameroon': 'Kamerun',
+				'Canada': 'Kanada',
+				'Cape Verde': 'zöld-fok',
+				'Caribbean Netherlands': 'karibi Hollandia',
+				'Cayman Islands': 'Kajmán-szigetek',
+				'Central African Republic': 'Közép-Afrikai Köztársaság',
+				'Chad': 'Csád',
+				'Chile': 'Chile',
+				'China': 'Kína',
+				'Christmas Island': 'Karácsony-sziget',
+				'Cocos (Keeling) Islands': 'Kókusz (Keeling)-szigetek',
+				'Colombia': 'Colombia',
+				'Comoros': 'Comore-szigetek',
+				'Congo - Brazzaville': 'Kongó – Brazzaville',
+				'Congo - Kinshasa': 'Kongó – Kinshasa',
+				'Cook Islands': 'Cook-szigetek',
+				'Costa Rica': 'Costa Rica',
+				'Côte d’Ivoire': 'Elefántcsontpart',
+				'Croatia': 'Horvátország',
+				'Cuba': 'Kuba',
+				'Curaçao': 'Curaçao',
+				'Cyprus': 'Ciprus',
+				'Czech Republic': 'Cseh Köztársaság',
+				'Denmark': 'Dánia',
+				'Djibouti': 'Dzsibuti',
+				'Dominica': 'Dominika',
+				'Dominican Republic': 'Dominikai Köztársaság',
+				'Ecuador': 'Ecuador',
+				'Egypt': 'Egyiptom',
+				'El Salvador': 'El Salvador',
+				'Equatorial Guinea': 'Egyenlítői-Guinea',
+				'Eritrea': 'Eritrea',
+				'Estonia': 'Észtország',
+				'Eswatini': 'Eswatini',
+				'Ethiopia': 'Etiópia',
+				'Falkland Islands': 'Falkland-szigetek',
+				'Faroe Islands': 'Faroe Szigetek',
+				'Fiji': 'Fidzsi-szigetek',
+				'Finland': 'Finnország',
+				'France': 'Franciaország',
+				'French Guiana': 'Francia Guyana',
+				'French Polynesia': 'Francia Polinézia',
+				'Gabon': 'Gabon',
+				'Gambia': 'Gambia',
+				'Georgia': 'Grúzia',
+				'Germany': 'Németország',
+				'Ghana': 'Ghána',
+				'Gibraltar': 'Gibraltár',
+				'Greece': 'Görögország',
+				'Greenland': 'Grönland',
+				'Grenada': 'Grenada',
+				'Guadeloupe': 'Guadeloupe',
+				'Guam': 'Guam',
+				'Guatemala': 'Guatemala',
+				'Guernsey': 'Guernsey',
+				'Guinea': 'Guinea',
+				'Guinea-Bissau': 'Bissau-Guinea',
+				'Guyana': 'Guyana',
+				'Haiti': 'Haiti',
+				'Honduras': 'Honduras',
+				'Hong Kong': 'Hong Kong',
+				'Hungary': 'Magyarország',
+				'Iceland': 'Izland',
+				'India': 'India',
+				'Indonesia': 'Indonézia',
+				'Iran': 'Irán',
+				'Iraq': 'Irak',
+				'Ireland': 'Írország',
+				'Isle of Man': 'Man-sziget',
+				'Israel': 'Izrael',
+				'Italy': 'Olaszország',
+				'Jamaica': 'Jamaica',
+				'Japan': 'Japán',
+				'Jersey': 'Jersey',
+				'Jordan': 'Jordánia',
+				'Kazakhstan': 'Kazahsztán',
+				'Kenya': 'Kenya',
+				'Kiribati': 'Kiribati',
+				'Kosovo': 'Koszovó',
+				'Kuwait': 'Kuvait',
+				'Kyrgyzstan': 'Kirgizisztán',
+				'Laos': 'Laosz',
+				'Latvia': 'Lettország',
+				'Lebanon': 'Libanon',
+				'Lesotho': 'Lesotho',
+				'Liberia': 'Libéria',
+				'Libya': 'Líbia',
+				'Liechtenstein': 'Liechtenstein',
+				'Lithuania': 'Litvánia',
+				'Luxembourg': 'Luxemburg',
+				'Macau': 'Makaó',
+				'Madagascar': 'Madagaszkár',
+				'Malawi': 'Malawi',
+				'Malaysia': 'Malaysia',
+				'Maldives': 'Maldív-szigetek',
+				'Mali': 'Mali',
+				'Malta': 'Málta',
+				'Marshall Islands': 'Marshall-szigetek',
+				'Martinique': 'Martinique',
+				'Mauritania': 'Mauritánia',
+				'Mauritius': 'Mauritius',
+				'Mayotte': 'Mayotte',
+				'Mexico': 'Mexikó',
+				'Micronesia': 'Mikronézia',
+				'Moldova': 'Moldova',
+				'Monaco': 'Monaco',
+				'Mongolia': 'Mongólia',
+				'Montenegro': 'Montenegró',
+				'Montserrat': 'Montserrat',
+				'Morocco': 'Marokkó',
+				'Mozambique': 'Mozambik',
+				'Myanmar (Burma)': 'Mianmar (Burma)',
+				'Namibia': 'Namíbia',
+				'Nauru': 'Nauru',
+				'Nepal': 'Nepál',
+				'Netherlands': 'Hollandia',
+				'New Caledonia': 'Új-Kaledónia',
+				'New Zealand': 'Új Zéland',
+				'Nicaragua': 'Nicaragua',
+				'Niger': 'Niger',
+				'Nigeria': 'Nigéria',
+				'Niue': 'Niue',
+				'Norfolk Island': 'Norfolk-sziget',
+				'North Korea': 'Észak Kórea',
+				'North Macedonia': 'Észak-Macedónia',
+				'Northern Mariana Islands': 'Észak Mariana szigetek',
+				'Norway': 'Norvégia',
+				'Oman': 'Omán',
+				'Pakistan': 'Pakisztán',
+				'Palau': 'Palau',
+				'Palestine': 'Palesztina',
+				'Panama': 'Panama',
+				'Papua New Guinea': 'Pápua Új-Guinea',
+				'Paraguay': 'Paraguay',
+				'Peru': 'Peru',
+				'Philippines': 'Fülöp-szigetek',
+				'Poland': 'Lengyelország',
+				'Portugal': 'Portugália',
+				'Puerto Rico': 'Puerto Rico',
+				'Qatar': 'Katar',
+				'Réunion': 'Réunion',
+				'Romania': 'Románia',
+				'Russia': 'Oroszország',
+				'Rwanda': 'Ruanda',
+				'Samoa': 'Szamoa',
+				'San Marino': 'San Marino',
+				'São Tomé & Príncipe': 'São Tomé és Príncipe',
+				'Saudi Arabia': 'Szaud-Arábia',
+				'Senegal': 'Szenegál',
+				'Serbia': 'Szerbia',
+				'Seychelles': 'Seychelle-szigetek',
+				'Sierra Leone': 'Sierra Leone',
+				'Singapore': 'Szingapúr',
+				'Sint Maarten': 'Sint Maarten',
+				'Slovakia': 'Szlovákia',
+				'Slovenia': 'Szlovénia',
+				'Solomon Islands': 'Salamon-szigetek',
+				'Somalia': 'Szomália',
+				'South Africa': 'Dél-Afrika',
+				'South Korea': 'Dél-Korea',
+				'South Sudan': 'Dél Szudán',
+				'Spain': 'Spanyolország',
+				'Sri Lanka': 'Sri Lanka',
+				'St Barthélemy': 'Szent Barthélemy',
+				'St Helena': 'Szent Heléna',
+				'St Kitts & Nevis': 'St Kitts és Nevis',
+				'St Lucia': 'Szent Lucia',
+				'St Martin': 'Szent Márton',
+				'St Pierre & Miquelon': 'St Pierre és Miquelon',
+				'St Vincent & Grenadines': 'St Vincent és Grenadine-szigetek',
+				'Sudan': 'Szudán',
+				'Suriname': 'Suriname',
+				'Svalbard & Jan Mayen': 'Svalbard és Jan Mayen',
+				'Sweden': 'Svédország',
+				'Switzerland': 'Svájc',
+				'Syria': 'Szíria',
+				'Taiwan': 'Tajvan',
+				'Tajikistan': 'Tádzsikisztán',
+				'Tanzania': 'Tanzánia',
+				'Thailand': 'Thaiföld',
+				'Timor-Leste': 'Kelet-Timor',
+				'Togo': 'Menni',
+				'Tokelau': 'Tokelau',
+				'Tonga': 'Tonga',
+				'Trinidad & Tobago': 'Trinidad és Tobago',
+				'Tunisia': 'Tunézia',
+				'Turkey': 'pulyka',
+				'Turkmenistan': 'Türkmenisztán',
+				'Turks & Caicos Islands': 'Turks és Caicos-szigetek',
+				'Tuvalu': 'Tuvalu',
+				'Uganda': 'Uganda',
+				'Ukraine': 'Ukrajna',
+				'United Arab Emirates': 'Egyesült Arab Emírségek',
+				'United Kingdom': 'Egyesült Királyság',
+				'United States': 'Egyesült Államok',
+				'Uruguay': 'Uruguay',
+				'US Virgin Islands': 'Amerikai Virgin-szigetek',
+				'Uzbekistan': 'Üzbegisztán',
+				'Vanuatu': 'Vanuatu',
+				'Vatican City': 'Vatikán város',
+				'Venezuela': 'Venezuela',
+				'Vietnam': 'Vietnam',
+				'Wallis & Futuna': 'Wallis és Futuna',
+				'Western Sahara': 'nyugat-Szahara',
+				'Yemen': 'Jemen',
+				'Zambia': 'Zambia',
+				'Zimbabwe': 'Zimbabwe',
+				'Åland Islands': 'Åland-szigetek',
+			};
+
+			setTimeout(() => {
+				jQuery('.iti__country-name').each( function() {
+				  const countryName = jQuery(this).text();
+				  jQuery(this).text(newCountriesData[countryName]);
+				});
+			}, 3000);
+		});
+	</script>
+	EOD;
+		endif;
+}"
+HbpNFxhe,Ski lift,Pijomir,JavaScript,Tuesday 13th of February 2024 02:55:36 AM CDT,"function solve() {
+    let firstNameElement = document.getElementById('first-name');
+    let lastNameElement = document.getElementById('last-name');
+    let peopleCountElement = document.getElementById('people-count');
+    let fromDateElement = document.getElementById('from-date');
+    let daysCountElement = document.getElementById('days-count');
+    let nextButtonElement = document.getElementById('next-btn');
+    let ticketInfoList = document.querySelector('.ticket-info-list');
+    let confirmTicketList = document.querySelector('.confirm-ticket');
+
+    nextButtonElement.addEventListener('click', onNextBtnClick);
+
+    function createElements(typeOfEl, content) {
+        if (!content) {
+            return document.createElement(typeOfEl);
+        } else {
+            let element = document.createElement(typeOfEl);
+            element.textContent = content;
+            return element;
+        }
+    }
+
+    function onNextBtnClick(e) {
+        e.preventDefault();
+        let firstName = firstNameElement.value;
+        let lastName = lastNameElement.value;
+        let peopleCount = Number(peopleCountElement.value);
+        let fromDate = fromDateElement.value;
+        let daysCount = Number(daysCountElement.value);
+        if (!firstName || !lastName || !peopleCount || !fromDate || !daysCount) {
+            return;
+        }
+
+        let liElement = createElements('li');
+        liElement.className = 'ticket';
+        let articleElement = createElements('article');
+        articleElement.appendChild(createElements('h3', `Name: ${firstName} ${lastName}`));
+        articleElement.appendChild(createElements('p', `From date: ${fromDate}`));
+        articleElement.appendChild(createElements('p', `For ${daysCount} days`));
+        articleElement.appendChild(createElements('p', `For ${peopleCount} people`));
+        liElement.appendChild(articleElement);
+
+        let editButtonElement = createElements('button', 'Edit');
+        editButtonElement.className = 'edit-btn';
+        editButtonElement.addEventListener('click', () => onEditBtnClick(firstName, lastName, peopleCount, fromDate, daysCount));
+
+        let continueButtonElement = createElements('button', 'Continue');
+        continueButtonElement.className = 'continue-btn';
+        continueButtonElement.addEventListener('click', () => onContinueBtnClick(firstName, lastName, peopleCount, fromDate, daysCount));
+
+        liElement.appendChild(editButtonElement);
+        liElement.appendChild(continueButtonElement);
+
+        ticketInfoList.appendChild(liElement);
+
+        nextButtonElement.parentElement.reset();
+        nextButtonElement.disabled = true;
+    }
+
+    function onEditBtnClick(firstName, lastName, peopleCount, fromDate, daysCount) {
+        firstNameElement.value = firstName;
+        lastNameElement.value = lastName;
+        peopleCountElement.value = peopleCount;
+        fromDateElement.value = fromDate;
+        daysCountElement.value = daysCount;
+
+        ticketInfoList.textContent = '';
+        nextButtonElement.disabled = false;
+    }
+
+    function onContinueBtnClick(firstName, lastName, peopleCount, fromDate, daysCount) {
+        let liElement = createElements('li');
+        liElement.className = 'ticket';
+        let articleElement = createElements('article');
+        articleElement.appendChild(createElements('h3', `Name: ${firstName} ${lastName}`));
+        articleElement.appendChild(createElements('p', `From date: ${fromDate}`));
+        articleElement.appendChild(createElements('p', `For ${daysCount} days`));
+        articleElement.appendChild(createElements('p', `For ${peopleCount} people`));
+        liElement.appendChild(articleElement);
+
+        let confirmButtonElement = createElements('button', 'Confirm');
+        confirmButtonElement.className = 'confirm-btn';
+        confirmButtonElement.addEventListener('click', onConfirmBtnClick);
+
+        let cancelButtonElement = createElements('button', 'Cancel');
+        cancelButtonElement.className = 'cancel-btn';
+        cancelButtonElement.addEventListener('click', onCancelBtnClick);
+
+        liElement.appendChild(confirmButtonElement);
+        liElement.appendChild(cancelButtonElement);
+
+        confirmTicketList.appendChild(liElement);
+
+        ticketInfoList.textContent = '';
+    }
+
+    function onConfirmBtnClick() {
+        document.getElementById('main').remove();
+
+        let h1Element = document.createElement('h1');
+        h1Element.id = 'thank-you';
+        h1Element.textContent = 'Thank you, have a nice day!';
+
+        let backButtonElement = document.createElement('button');
+        backButtonElement.id = 'back-btn';
+        backButtonElement.textContent = 'Back';
+        backButtonElement.addEventListener('click', () => {
+            location.reload()
+        });
+
+        document.getElementById('body').appendChild(h1Element);
+        document.getElementById('body').appendChild(backButtonElement);
+    }
+
+    function onCancelBtnClick() {
+        confirmTicketList.textContent = '';
+        nextButtonElement.disabled = false;
+    }
+}"
+RsCSRF8Q,python lab (13/02/2024),brandblox,Python,Tuesday 13th of February 2024 02:54:37 AM CDT,"* 
+* * 
+* * * 
+* * * * 
+* * * * * 
+
+rows = 5
+for i in range(0, rows):    
+    for j in range(0, i + 1):        
+        print(""*"", end=' ')    
+    print()
+
+1 
+2 2 
+3 3 3 
+4 4 4 4 
+5 5 5 5 5 
+
+rows = 6
+for i in range(rows):    
+    for j in range(i):        
+        print(i, end=' ')    
+    print('')
+
+1 
+1 2 
+1 2 3 
+1 2 3 4 
+1 2 3 4 5 
+
+rows = 5
+for i in range(1, rows + 1):
+    for j in range(1, i + 1):
+        print(j, end=' ')
+    print('')
+
+1 
+2 3 
+4 5 6 
+7 8 9 10 
+11 12 13 14 15
+
+rows = 5
+counter = 1
+for i in range(1, rows + 1):
+    for j in range(1, i + 1):
+        print(counter, end=' ')
+        counter += 1
+    print('')
+
+        *   
+       *  *   
+      *  *  *   
+     *  *  *  *   
+    *  *  *  *  *  
+
+size = 5
+m = (2 * size) - 2
+for i in range(0, size):
+    for j in range(0, m):
+        print(end="" "")    
+    m = m - 1
+    for j in range(0, i + 1):
+        print(""* "", end=' ')
+    print("" "")
+
+''' OR
+n = 5
+for i in range(n):
+    print(' '*(n-i-1) + '* ' * (i))
+print()
+'''
+
+*  *  *  *  *   
+ *  *  *  *   
+  *  *  *   
+   *  *   
+    *
+
+size = 5
+m = 0
+for i in range(size, 0, -1):
+    for j in range(0, m):
+        print(end="" "")
+    m = m + 1
+    for j in range(0, i):
+        print(""* "", end=' ')
+    print("" "")
+
+''' OR
+n = 5
+for i in range(n-1,-1,-1):
+    print(' ' * (n - i - 1) + '* ' * (i))
+'''
+
+    * 
+   * * 
+  * * * 
+ * * * * 
+  * * * 
+   * * 
+    * 
+
+rows = 3
+k = 2 * rows - 2
+for i in range(0, rows):
+    for j in range(0, k):
+        print(end="" "")
+    k = k - 1
+    for j in range(0, i + 1):
+        print(""* "", end="""")
+    print("""")
+    
+k = rows - 2
+
+for i in range(rows, -1, -1):
+    for j in range(k, 0, -1):
+        print(end="" "")
+    k = k + 1
+    for j in range(0, i + 1):
+        print(""* "", end="""")
+    print("""")
+    
+    
+'''OR    
+    
+n = 3
+for i  in range(n):
+    print(' '*(n-i-1) + '*' * (2*i+1))
+for i in range(n-2,-1,-1):
+    print(' ' * (n - i - 1) + '*' * (2 * i + 1))'''"
+P80vXRtd,StudentsAndGrades,PIBogdanov,C,Tuesday 13th of February 2024 02:45:00 AM CDT,"#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
+#include <Windows.h>
+#include <conio.h>
+
+#pragma warning(disable : 4996)
+
+#define minStudetsPerGroup 2
+#define maxStudentsPerGroup 20
+
+#define maxAllowedCharacters 40
+
+#define minSubjectCount 1
+#define maxSubjectsCount 20
+
+#define minGrade 2
+#define maxGrade 6
+
+#define tolerance 0.0001
+
+unsigned short inputTheStudentsInTheGroupCount();
+
+unsigned short inputTheSubjectsCount();
+
+void inputStudentNames(char[][maxAllowedCharacters], unsigned short);
+
+void inputNamesForTheSubjects(char[][maxAllowedCharacters], unsigned short);
+
+void removeNewlineCharacterIfItExists(char[]);
+
+void inputGrades(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+bool isValidGrade(float);
+
+void printAllStudentInfo(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+void mainMenu(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+void searchForAStudent(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+void inputAStudentName(char[][maxAllowedCharacters], char[maxAllowedCharacters], unsigned short);
+
+bool isTheStudentNameInTheGroup(char[][maxAllowedCharacters], char[], unsigned short);
+
+void printStudentInfo(char[][maxAllowedCharacters], char[maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+void searchForAGrade(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], unsigned short, unsigned short);
+
+float inputAGrade(float[][maxSubjectsCount], unsigned short, unsigned short);
+
+bool checkTheStudentsIfTheyHaveTheInputtedGradeForASearch(float[][maxSubjectsCount], float, unsigned short, unsigned short);
+
+void printInformationAboutTheFoundedGrade(float[][maxSubjectsCount], float, unsigned short, unsigned short);
+
+unsigned short targetedGradeCount(float[][maxSubjectsCount], float, unsigned short, unsigned short);
+
+unsigned short studentsWithTheTargetedGradeCount(float[][maxSubjectsCount], float, unsigned short, unsigned short);
+
+void printStudentsInfoWithTheTargetedGrade(char[][maxAllowedCharacters], char[][maxAllowedCharacters], float[][maxSubjectsCount], float, unsigned short, unsigned short);
+
+void pressTheEnterKeyToContinue();
+
+void isCursorVisible(bool);
+
+void clearTheInputBuffer();
+
+int main()
+{
+	isCursorVisible(false);
+
+	unsigned short studentsInTheGroupCount = inputTheStudentsInTheGroupCount();
+
+	printf(""\n\n"");
+
+	unsigned short subjectsCount = inputTheSubjectsCount();
+
+	clearTheInputBuffer();
+
+	printf(""\n\n"");
+
+	char studentNames[maxStudentsPerGroup][maxAllowedCharacters];
+
+	printf(""Input names for the students:\n\n"");
+
+	inputStudentNames(studentNames, studentsInTheGroupCount);
+
+	printf(""\n\n"");
+
+	char subjectNames[maxSubjectsCount][maxAllowedCharacters];
+
+	printf(""Input names for the subjects:\n\n"");
+
+	inputNamesForTheSubjects(subjectNames, subjectsCount);
+
+	printf(""\n\n"");
+
+	float grades[maxStudentsPerGroup][maxSubjectsCount];
+
+	printf(""Input grades for each subject for the students:\n\n"");
+
+	inputGrades(studentNames, subjectNames, grades, studentsInTheGroupCount, subjectsCount);
+
+	system(""cls"");
+
+	// For debugging
+	/*
+		printAllStudentInfo(studentNames, subjectNames, grades, studentsInTheGroupCount, subjectsCount);
+
+		pressTheEnterKeyToContinue();
+	*/
+
+	clearTheInputBuffer();
+
+	mainMenu(studentNames, subjectNames, grades, studentsInTheGroupCount, subjectsCount);
+
+	return 0;
+}
+
+// Function, which asks for an input for the students count and returns the value
+
+unsigned short inputTheStudentsInTheGroupCount()
+{
+	unsigned short studentsInTheGroupCount;
+
+	studentsInTheGroupCountInput:
+	printf(""How many students does the group have? [%d : %d]\n"", minStudetsPerGroup, maxStudentsPerGroup);
+	printf(""The students count is: "");
+	scanf(""%hu"", &studentsInTheGroupCount);
+
+	if ( (studentsInTheGroupCount < minStudetsPerGroup) || (studentsInTheGroupCount > maxStudentsPerGroup) )
+	{
+		printf(""\n\nInvalid input!\n\n"");
+
+		goto studentsInTheGroupCountInput;
+	}
+
+	return studentsInTheGroupCount;
+}
+
+// Function, which asks for an input for the subjects count and returns the value
+
+unsigned short inputTheSubjectsCount()
+{
+	unsigned short subjectsCount;
+
+	subjectsCountInput:
+	printf(""How many subjects does the group have? [%d : %d]\n"", minSubjectCount, maxSubjectsCount);
+	printf(""The subjects count is: "");
+	scanf(""%hu"", &subjectsCount);
+
+	if ( (subjectsCount < minSubjectCount) || (subjectsCount > maxSubjectsCount) )
+	{
+		printf(""\n\nInvalid input!\n\n"");
+
+		goto subjectsCountInput;
+	}
+
+	return subjectsCount;
+}
+
+// Function, which asks for inputs for the names of the students 
+
+void inputStudentNames(char studentNames[][maxAllowedCharacters], unsigned short studentsInTheGroupCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount;)
+	{
+		printf(""Student %s%hu: "", ((i + 1) < 10) ? "" "" : """", i + 1);
+
+		if (fgets(studentNames[i], maxAllowedCharacters, stdin) != NULL)
+		{
+			removeNewlineCharacterIfItExists(studentNames[i]);
+
+			i++;
+		}
+
+		else
+		{
+			printf(""\n\nToo many inputted characters! The max value of characters is %hu. Input a new name.\n\n"", maxAllowedCharacters);
+		}
+	}
+}
+
+// Function, which asks for inputs for the names of the subjects 
+
+void inputNamesForTheSubjects(char subjectNames[][maxAllowedCharacters], unsigned short subjectsCount)
+{
+	for (unsigned short i = 0; i < subjectsCount;)
+	{
+		printf(""Subject %s%hu: "", ((i + 1) < 10) ? "" "" : """", i + 1);
+
+		if (fgets(subjectNames[i], maxAllowedCharacters, stdin) != NULL)
+		{
+			removeNewlineCharacterIfItExists(subjectNames[i]);
+
+			i++;
+		}
+
+		else
+		{
+			printf(""\n\nToo many inputted characters! The max value of characters is %hu. Input a new name.\n\n"", maxAllowedCharacters);
+		}
+	}
+}
+
+/*
+	Function, which checks the given string, if it contains a newline character on its last element, 
+	which in most cases does, because the fgets() function adds it when the user presses the ""ENTER / RETURN"" key, 
+	and changes it to the NULL terminator
+*/
+
+void removeNewlineCharacterIfItExists(char currentName[])
+{
+	size_t nameLength = strlen(currentName);
+
+	if ( (nameLength > 0) && (currentName[nameLength - 1] == '\n') )
+	{
+		currentName[nameLength - 1] = '\0';
+	}
+}
+
+// Function, which asks for inputs for the grades on each subject and every grade is being checked with a helping function
+
+void inputGrades(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		printf(""%s's grades:\n\n"", studentNames[i]);
+
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			do
+			{
+				printf(""%s: "", subjectNames[j]);
+				scanf(""%f"", &grades[i][j]);
+
+				if (!isValidGrade(grades[i][j]))
+				{
+					printf(""\n\nInvalid grade! Input a new grade!\n\n"");
+				}
+			} while (!isValidGrade(grades[i][j]));
+		}
+
+		printf(""\n\n"");
+	}
+}
+
+// Function, which returns either ""True / 1"" or ""False / 0"", depending on, if the grade is in a specific range
+
+bool isValidGrade(float grade)
+{
+	return (grade >= minGrade) && (grade <= maxGrade);
+}
+
+// Function, which prints the student's number, their name and each subject's name with the grade the student has
+
+void printAllStudentInfo(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		printf(""Student %s%hu: %s\n\n"", ((i + 1) < 10) ? "" "" : """", i + 1, studentNames[i]);
+
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			printf(""%s: %.2f\n"", subjectNames[j], grades[i][j]);
+		}
+
+		if (i < (studentsInTheGroupCount - 1))
+		{
+			printf(""\n\n"");
+		}
+	}
+}
+
+// Function, which gives a few options, which can be chosen by the user. That's the Main Menu.
+
+void mainMenu(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	bool exit = false;
+
+	char choice;
+
+	while (!exit)
+	{
+		system(""cls"");
+
+		printf(""Main Menu:\n\n\n"");
+
+		printf(""1. Search a student\n\n"");
+		printf(""2. Search a grade\n\n"");
+		printf(""3. Exit\n\n\n"");
+
+		printf(""Your choice is: "");
+		scanf(""%c"", &choice);
+
+		switch (choice)
+		{
+			case '1': searchForAStudent(studentNames, subjectNames, grades, studentsInTheGroupCount, subjectsCount); break;
+
+			case '2': searchForAGrade(studentNames, subjectNames, grades, studentsInTheGroupCount, subjectsCount); break;
+
+			case '3': exit = true;
+		}
+	}
+}
+
+// Function, which searches for a student in the group by inputting a name by a helping function and prints their grades by a helping function
+
+void searchForAStudent(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	system(""cls"");
+
+	clearTheInputBuffer();
+
+	char studentName[maxAllowedCharacters];
+
+	inputAStudentName(studentNames, studentName, studentsInTheGroupCount);
+
+	printStudentInfo(studentNames, studentName, subjectNames, grades, studentsInTheGroupCount, subjectsCount);
+
+	pressTheEnterKeyToContinue();
+}
+
+/*
+	Function, which asks for an input for the name of the student to be searched for and is being checked,
+	if it has a newline character to be changed with a NULL terminator character by a helping function 
+	and if there's a name in the students' group
+*/
+
+void inputAStudentName(char studentNames[][maxAllowedCharacters], char studentName[maxAllowedCharacters], unsigned short studentsInTheGroupCount)
+{
+	bool isFound = false;
+
+	while (!isFound)
+	{
+		printf(""Input the name of the student you want to search: "");
+
+		if (fgets(studentName, maxAllowedCharacters, stdin) != NULL)
+		{
+			removeNewlineCharacterIfItExists(studentName);
+
+			if (!isTheStudentNameInTheGroup(studentNames, studentName, studentsInTheGroupCount))
+			{
+				printf(""\n\nA student with this name hasn't been found. Please input a different name.\n\n\n"");
+			}
+
+			else
+			{
+				printf(""\n\nA student with this name has been found. Here's their information:\n\n\n"");
+
+				isFound = true;
+			}
+		}
+
+		else
+		{
+			printf(""\n\nToo many inputted characters! The max value of characters is %hu. Input a new name.\n\n\n"", maxAllowedCharacters);
+		}
+	}
+}
+
+// Function, which checks and returns either ""True / 1"" or ""False / 0"", if the given name for searching is present in the students' group
+
+bool isTheStudentNameInTheGroup(char studentNames[][maxAllowedCharacters], char studentName[], unsigned short studentsInTheGroupCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		if (!strcmp(studentNames[i], studentName))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// Function, which prints information about a specific student
+
+void printStudentInfo(char studentNames[][maxAllowedCharacters], char studentName[maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		if (!strcmp(studentNames[i], studentName))
+		{
+			printf(""Student %s%hu: %s\n\n"", ((i + 1) < 10) ? "" "" : """", i + 1, studentNames[i]);
+
+			for (unsigned short j = 0; j < subjectsCount; j++)
+			{
+				printf(""%s: %.2f\n"", subjectNames[j], grades[i][j]);
+			}
+
+			break;
+		}
+	}
+}
+
+// Function, which searches for students with a specific grade by a helping function and prints their information by a helping function
+
+void searchForAGrade(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	system(""cls"");
+
+	clearTheInputBuffer();
+
+	float targetGrade = inputAGrade(grades, studentsInTheGroupCount, subjectsCount);
+
+	printStudentsInfoWithTheTargetedGrade(studentNames, subjectNames, grades, targetGrade, studentsInTheGroupCount, subjectsCount);
+
+	pressTheEnterKeyToContinue();
+}
+
+/*
+	Function, which asks for an input for the grade to be searched for and is being checked,
+	if it is valid by a helping function and if there's a student who has it in the students' group
+*/
+
+float inputAGrade(float grades[][maxSubjectsCount], unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	float targetGrade = 0.0f;
+
+	bool isFound = false;
+
+	while ( (!isFound) && (!isValidGrade(targetGrade)) )
+	{
+		printf(""Input a grade you want to search: "");
+		scanf(""%f"", &targetGrade);
+
+		if (!isValidGrade(targetGrade))
+		{
+			printf(""\n\nIvalid input! Input a new grade.\n\n\n"");
+		}
+
+		else
+		{
+			if (!checkTheStudentsIfTheyHaveTheInputtedGradeForASearch(grades, targetGrade, studentsInTheGroupCount, subjectsCount))
+			{
+				printf(""\n\nThere's no student with this grade. Please input a different grade.\n\n\n"");
+			}
+
+			else
+			{
+				printInformationAboutTheFoundedGrade(grades, targetGrade, studentsInTheGroupCount, subjectsCount);
+
+				isFound = true;
+			}
+		}
+	}
+
+	return targetGrade;
+}
+
+// Function, which checks, if a student has the targeted grade, and returns either ""True / 1"" or ""False / 0""
+
+bool checkTheStudentsIfTheyHaveTheInputtedGradeForASearch(float grades[][maxSubjectsCount], float targetGrade, unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			if (fabs(grades[i][j] - targetGrade) < tolerance)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+/*
+	Function, which prints information for the count of the grades, matching the targeted one, by a helping function
+	and the count of the students, having the targeted grade, by a helping function
+*/
+
+void printInformationAboutTheFoundedGrade(float grades[][maxSubjectsCount], float targetGrade, unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	unsigned short targetedGradeCounter = targetedGradeCount(grades, targetGrade, studentsInTheGroupCount, subjectsCount);
+
+	unsigned short studentsWithTheTargetedGradeCounter = studentsWithTheTargetedGradeCount(grades, targetGrade, studentsInTheGroupCount, subjectsCount);
+
+	printf(""\n\nThere %s %hu grade%s matching the targeted grade (%.2f), %hu of the students %s at least one grade on a subject which matches the targeted one."",
+		(targetedGradeCounter == 1) ? ""is"" : ""are"",
+		targetedGradeCounter,
+		(targetedGradeCounter == 1) ? """" : ""s"",
+		targetGrade,
+		studentsWithTheTargetedGradeCounter,
+		(targetedGradeCounter == 1) ? ""has"" : ""have"");
+	printf("" Here %s their information:\n\n\n"", (targetedGradeCounter == 1) ? ""is"" : ""are"");
+}
+
+// Function, which returns the count of the grades, matching the targeted one
+
+unsigned short targetedGradeCount(float grades[][maxSubjectsCount], float targetGrade, unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	unsigned short targetedGradeCounter = 0;
+
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			if (fabs(grades[i][j] - targetGrade) < tolerance)
+			{
+				targetedGradeCounter++;
+			}
+		}
+	}
+
+	return targetedGradeCounter;
+}
+
+// Function, which returns the count of the students, having the targeted grade
+
+unsigned short studentsWithTheTargetedGradeCount(float grades[][maxSubjectsCount], float targetGrade, unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	unsigned short studentsWithTheTargetedGradeCounter = 0;
+
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			if (fabs(grades[i][j] - targetGrade) < tolerance)
+			{
+				studentsWithTheTargetedGradeCounter++;
+
+				break;
+			}
+		}
+	}
+
+	return studentsWithTheTargetedGradeCounter;
+}
+
+// Function, which prints information for the students, who have a matching grade on a specific subject
+
+void printStudentsInfoWithTheTargetedGrade(char studentNames[][maxAllowedCharacters], char subjectNames[][maxAllowedCharacters], float grades[][maxSubjectsCount], float targetGrade, unsigned short studentsInTheGroupCount, unsigned short subjectsCount)
+{
+	bool hasTargetedGrade;
+
+	for (unsigned short i = 0; i < studentsInTheGroupCount; i++)
+	{
+		hasTargetedGrade = false;
+
+		for (unsigned short j = 0; j < subjectsCount; j++)
+		{
+			if (fabs(grades[i][j] - targetGrade) < tolerance)
+			{
+				if (!hasTargetedGrade)
+				{
+					printf(""Student %s%hu: %s\n"", ((i + 1) < 10) ? "" "" : """", i + 1, studentNames[i]);
+
+					hasTargetedGrade = true;
+				}
+
+				printf(""%s: %.2f\n"", subjectNames[j], grades[i][j]);
+			}
+		}
+
+		if (hasTargetedGrade)
+		{
+			printf(""\n"");
+		}
+	}
+}
+
+// Function, which waits the user to press the ""ENTER / RETURN"" key
+
+void pressTheEnterKeyToContinue()
+{
+	printf(""\n\n\nPress \""ENTER\"" to go back to the Main Menu"");
+
+	while (_getch() != 13); // ""\r"" - The ""ENTER / RETURN"" key
+}
+
+// Function, which decides to either turn on or turn off the cursor by giving a bool value either ""true / 1"" or ""false / 0""
+
+void isCursorVisible(bool isVisible)
+{
+	HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	CONSOLE_CURSOR_INFO cursorInfo;
+	GetConsoleCursorInfo(consoleHandle, &cursorInfo);
+
+	cursorInfo.bVisible = isVisible;
+	SetConsoleCursorInfo(consoleHandle, &cursorInfo);
+}
+
+// Function, which clears the input buffer from the newline character
+
+void clearTheInputBuffer()
+{
+	char character = getchar();
+
+	while ( (character != '\n') && (character != EOF) );
+}"
+KypDAhn8,Find First Palindromic String in the Array,mantha_raghava,Java,Tuesday 13th of February 2024 02:33:36 AM CDT,"class Solution {
+    public boolean checkPalindrome(String s){
+        int p1=0, p2=s.length()-1;
+        while(p1<p2){
+            if(s.charAt(p1)!=s.charAt(p2)){
+                return false;
+            }
+            p1++;
+            p2--;
+        }
+        return true;
+    }
+    public String firstPalindrome(String[] words) {
+        for(String i:words){
+            boolean flag = checkPalindrome(i);
+            if(flag){
+                return i;
+            }
+        }
+        return """";        
+    }
+}"
+ufGfGKZn,Untitled,KoctrX,JavaScript,Tuesday 13th of February 2024 01:29:13 AM CDT,"subject_headline: Cultivating a Year-Round Garden of Color and Fragrance
+meta_description: Discover expert gardening tips for maintaining a lush garden with blossoms throughout the year, no matter the climate.
+page_title: Masterful Gardening: Achieving Year-Round Blossoms
+image_title: A Garden for All Seasons - Year-Round Blooming Tips
+predictive_performance_analytics: Assess potential garden performance with seasonal planting analytics.
+ai-powered_topic_discovery: Utilize AI to find trending gardening topics and plant varieties.
+ethical_seo_practices: Implement ethical SEO strategies to boost garden-related content visibility.
+competitor_seo_spy: Analyze competitors' garden content strategy to stay ahead in SEO rankings.
+schema_genie: Use Schema Markup for clearer indexing of garden blog content by search engines.
+content_structure_optimizer: Organize your gardening content for better readability and SEO performance.
+keyword_density_checker: Maintain ideal keyword density in garden articles for SEO without keyword stuffing.
+backlink_opportunities: Explore quality backlink opportunities from popular gardening websites and forums.
+image_seo_enhancer: Optimize garden imagery with descriptive alt tags and file names for better SEO.
+video_seo_toolkit: Enhance your gardening video content for search engines with tailored SEO strategies.
+seo_audit_&_action_plan: Conduct regular SEO audits of the gardening blog and implement an action plan for improvements.
+content_creation_apps: Use content creation apps to design engaging garden visuals and informative infographics.
+social_media_analytics_platforms: Analyze your social media impact on your gardening blog through analytics platforms.
+social_media_advertising_extensions: Extend your reach with social media ads targeting gardening enthusiasts.
+keyword_research_tools_for_ppc: Leverage keyword research tools to optimize PPC campaigns for gardening products.
+ad_performance_analytics_tools: Monitor and analyze your ad campaigns' performance in the gardening niche.
+ad_blocker_detection_and_management: Detect and manage ad blockers to ensure your gardening ads reach the audience."
+bGdA8e2m,Untitled,KoctrX,JavaScript,Tuesday 13th of February 2024 01:27:52 AM CDT,"Use blog to generate 1 addition to it:
+blog title: Masterful Gardening: Tips for Year-Round Blossoms
+blog content: <div><h1>Masterful Gardening: Tips for Year-Round Blossoms</h1><p>Gardening can transform your outdoor space into a haven of beauty and tranquility. With the right approach, you can cultivate a garden that will gift you with year-round blossoms. It's not only about what you plant, but how you nurture your garden that makes all the difference. Here, we will empower you with tips that can ensure your garden remains in full bloom no matter the season.</p><h2>Understand Your Garden's Climate</h2><p>Every garden will flourish when we understand the climate it resides in. You can select plants that are best suited to your region's weather patterns. Research and invest in plants that can withstand the lowest and highest temperatures in your area to ensure enduring growth.</p><h2>Choose a Variety of Plants</h2><p>Selecting a diverse array of plants will give you an advantage. You can include annuals, perennials, bulbs, and shrubs that bloom at different times of the year. Intermix your selections so that as one plant's season comes to an end, another starts to bloom, guaranteeing a continuous display of color and life.</p><h2>Soil Quality is Key</h2><p>Healthy soil is the foundation of a successful garden. You can enhance your soil's quality by incorporating compost or organic matter. This will provide essential nutrients and improve soil structure, encouraging robust plant growth and vibrant blooms.</p><h2>Implement Strategic Planting</h2><p>When planting your garden, consider the specific needs of each plant. Some might require more sunlight, while others will thrive in shaded areas. You can place thirsty plants together to make watering more efficient. This strategy ensures that every plant has the opportunity to thrive.</p><h2>Maintain Regular Care and Pruning</h2><p>A garden requires ongoing attention. You can set a regular schedule for watering, feeding, and pruning. Deadheading spent flowers will encourage new blooms, and cutting back overgrowth can invigorate plants. You will find that consistent care rewards you with a more vibrant and dynamic garden.</p><h2>Prepare for Seasonal Shifts</h2><p>As seasons change, so should your garden care routine. You will protect your plants by mulching in the fall, protecting them from cold, and preserving moisture. As spring approaches, you can prepare your garden beds, clear out any debris, and begin planting anew.</p><h2>Use Empowering and Positive Language</h2><p>Your attitude towards gardening can affect its outcome. Embrace empowering and positive language when approaching your gardening tasks. Tell yourself you can tackle garden challenges and you will see them through to success. This mindset can lead to a flourishing garden that reflects your dedication and emotional investment.</p><h2>Connect with Other Gardeners</h2><p>A community of gardeners can be a fountain of knowledge. You can connect with local or online gardening communities. Sharing your experiences and learning from others will enhance your abilities and provide new strategies for keeping your garden in bloom all year round.</p><p>Remember, every decision you make in your garden is a step towards an awe-inspiring display of blossoms year-round. With the proper knowledge, care, and a can-do attitude, you can look forward to a garden that not only survives but thrives in every season.</p></div>
+Generate addons just use this format as: 
+the answer should be of the type key:value (the key to use which I write without changing)
+Use the “key” addition as a minimalistic description of what content it should have, no need to describe what it is, make additions for the content above based on the keys
+subject_headline: plain text
+meta_description: plain text
+page_title: plain text
+image_title: plain text
+predictive_performance_analytics: plain text
+ai-powered_topic_discovery: plain text
+ethical_seo_practices: plain text
+competitor_seo_spy: plain text
+schema_genie: plain text
+content_structure_optimizer: plain text
+keyword_density_checker: plain text
+backlink_opportunities: plain text
+image_seo_enhancer: plain text
+video_seo_toolkit: plain text
+seo_audit_&_action_plan: plain text
+content_creation_apps: plain text
+social_media_analytics_platforms: plain text
+social_media_advertising_extensions: plain text
+keyword_research_tools_for_ppc: plain text
+ad_performance_analytics_tools: plain text
+ad_blocker_detection_and_management: plain text"
+wpVzP7KB,candytag motd,Yobanzda,Lua,Tuesday 13th of February 2024 12:28:57 AM CDT,WELCOME TO PROJECT CANDY REBORN! WE HAVE AN CUSTOM SEASONAL CALLED SPACE! GO AHEAD AND GO TO CITY AND GET SOME COOL COSMETICS. YOU CAN GO TO SECOND FLOOR AND BUY YOUR SOME MORE COSMETICS SUCH AS PRIME BOTTLE AND MORE! SEE YA LATA
+FpP0sU3v,Nigerian scammers [13-2-1/2024],bombaires,AIMMS,Tuesday 13th of February 2024 12:07:32 AM CDT,"<a href=""mailto:QunticBank@qualityservice.com"">QunticBank@qualityservice.com</a>
+<a href=""mailto:michael.tanzi@accountant.com"">michael.tanzi@accountant.com</a>
+<a href=""mailto:mr.guterres@secretary.net"">mr.guterres@secretary.net</a>
+<a href=""mailto:drpirzadamhassan@gmail.com"">drpirzadamhassan@gmail.com</a>
+<a href=""mailto:drpi.rzada.m.h.a.s.s.an@gmail.com"">drpi.rzada.m.h.a.s.s.an@gmail.com</a>
+<a href=""mailto:d.rp.irza.d.a.m.hass.a.n@gmail.com"">d.rp.irza.d.a.m.hass.a.n@gmail.com</a>
+<a href=""mailto:drp.ir.z.ada.mhass.an@gmail.com"">drp.ir.z.ada.mhass.an@gmail.com</a>
+<a href=""mailto:d.rp.irz.ad.a.mha.ss.an@gmail.com"">d.rp.irz.ad.a.mha.ss.an@gmail.com</a>
+<a href=""mailto:d.rp.irz.ada.mhassan@gmail.com"">d.rp.irz.ada.mhassan@gmail.com</a>
+<a href=""mailto:d.r.p.irzad.am.ha.s.san@gmail.com"">d.r.p.irzad.am.ha.s.san@gmail.com</a>
+<a href=""mailto:dr.p.i.rzad.am.ha.ss.a.n@gmail.com"">dr.p.i.rzad.am.ha.ss.a.n@gmail.com</a>
+<a href=""mailto:drp.irz.ad.a.m.h.a.s.sa.n@gmail.com"">drp.irz.ad.a.m.h.a.s.sa.n@gmail.com</a>
+<a href=""mailto:drp.i.rza.da.m.h.a.ssa.n@gmail.com"">drp.i.rza.da.m.h.a.ssa.n@gmail.com</a>
+<a href=""mailto:dr.p.irza.d.am.h.a.ss.a.n@gmail.com"">dr.p.irza.d.am.h.a.ss.a.n@gmail.com</a>
+<a href=""mailto:d.r.pi.rzad.a.m.ha.s.san@gmail.com"">d.r.pi.rzad.a.m.ha.s.san@gmail.com</a>
+<a href=""mailto:d.r.p.i.rza.d.a.m.has.s.an@gmail.com"">d.r.p.i.rza.d.a.m.has.s.an@gmail.com</a>
+<a href=""mailto:dr.p.i.r.z.a.d.am.h.ass.a.n@gmail.com"">dr.p.i.r.z.a.d.am.h.ass.a.n@gmail.com</a>
+<a href=""mailto:d.r.p.irzadamh.a.ss.a.n@gmail.com"">d.r.p.irzadamh.a.ss.a.n@gmail.com</a>
+<a href=""mailto:drpir.zad.a.mha.ss.a.n@gmail.com"">drpir.zad.a.mha.ss.a.n@gmail.com</a>
+<a href=""mailto:d.rp.i.rzad.a.mh.a.s.sa.n@gmail.com"">d.rp.i.rzad.a.mh.a.s.sa.n@gmail.com</a>
+<a href=""mailto:d.r.p.i.rza.da.m.h.a.s.s.a.n@gmail.com"">d.r.p.i.rza.da.m.h.a.s.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pi.rz.a.da.m.ha.s.s.a.n@gmail.com"">d.r.pi.rz.a.da.m.ha.s.s.a.n@gmail.com</a>
+<a href=""mailto:dr.p.i.r.za.d.am.h.as.san@gmail.com"">dr.p.i.r.za.d.am.h.as.san@gmail.com</a>
+<a href=""mailto:drpi.r.zadam.hass.a.n@gmail.com"">drpi.r.zadam.hass.a.n@gmail.com</a>
+<a href=""mailto:dr.pi.r.za.d.a.mha.ssan@gmail.com"">dr.pi.r.za.d.a.mha.ssan@gmail.com</a>
+<a href=""mailto:drpirza.d.a.mh.a.ss.an@gmail.com"">drpirza.d.a.mh.a.ss.an@gmail.com</a>
+<a href=""mailto:drp.i.rz.adamhass.a.n@gmail.com"">drp.i.rz.adamhass.a.n@gmail.com</a>
+<a href=""mailto:d.r.pir.zad.a.m.ha.s.sa.n@gmail.com"">d.r.pir.zad.a.m.ha.s.sa.n@gmail.com</a>
+<a href=""mailto:dr.p.i.rzadam.has.s.an@gmail.com"">dr.p.i.rzadam.has.s.an@gmail.com</a>
+<a href=""mailto:drpirzad.amh.a.s.s.an@gmail.com"">drpirzad.amh.a.s.s.an@gmail.com</a>
+<a href=""mailto:d.r.pi.r.za.da.mhas.s.an@gmail.com"">d.r.pi.r.za.da.mhas.s.an@gmail.com</a>
+<a href=""mailto:dr.p.i.rza.da.m.ha.s.sa.n@gmail.com"">dr.p.i.rza.da.m.ha.s.sa.n@gmail.com</a>
+<a href=""mailto:drp.i.rza.d.a.mh.a.ss.a.n@gmail.com"">drp.i.rza.d.a.mh.a.ss.a.n@gmail.com</a>
+<a href=""mailto:d.r.p.i.r.zadamh.a.s.sa.n@gmail.com"">d.r.p.i.r.zadamh.a.s.sa.n@gmail.com</a>
+<a href=""mailto:d.rp.i.r.z.ada.mha.s.sa.n@gmail.com"">d.rp.i.r.z.ada.mha.s.sa.n@gmail.com</a>
+<a href=""mailto:dr.p.i.rz.ada.mh.as.s.a.n@gmail.com"">dr.p.i.rz.ada.mh.as.s.a.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.ad.amh.a.ssa.n@gmail.com"">drp.i.rz.ad.amh.a.ssa.n@gmail.com</a>
+<a href=""mailto:drp.i.r.z.ad.a.m.h.a.ss.an@gmail.com"">drp.i.r.z.ad.a.m.h.a.ss.an@gmail.com</a>
+<a href=""mailto:d.r.pi.r.za.da.mh.a.ssan@gmail.com"">d.r.pi.r.za.da.mh.a.ssan@gmail.com</a>
+<a href=""mailto:d.r.p.ir.za.da.m.h.as.san@gmail.com"">d.r.p.ir.za.da.m.h.as.san@gmail.com</a>
+<a href=""mailto:drp.i.r.za.d.am.h.a.ss.an@gmail.com"">drp.i.r.za.d.am.h.a.ss.an@gmail.com</a>
+<a href=""mailto:d.rpi.r.z.ad.amhas.s.a.n@gmail.com"">d.rpi.r.z.ad.amhas.s.a.n@gmail.com</a>
+<a href=""mailto:d.rp.irzada.mh.assa.n@gmail.com"">d.rp.irzada.mh.assa.n@gmail.com</a>
+<a href=""mailto:drpi.r.za.d.a.m.has.s.an@gmail.com"">drpi.r.za.d.a.m.has.s.an@gmail.com</a>
+<a href=""mailto:d.rp.i.rza.da.m.ha.s.sa.n@gmail.com"">d.rp.i.rza.da.m.ha.s.sa.n@gmail.com</a>
+<a href=""mailto:dr.p.irz.adamha.s.san@gmail.com"">dr.p.irz.adamha.s.san@gmail.com</a>
+<a href=""mailto:d.r.p.i.rzada.mh.as.sa.n@gmail.com"">d.r.p.i.rzada.mh.as.sa.n@gmail.com</a>
+<a href=""mailto:d.r.p.ir.zad.amh.a.ss.a.n@gmail.com"">d.r.p.ir.zad.amh.a.ss.a.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.dam.h.ass.a.n@gmail.com"">drp.i.rz.a.dam.h.ass.a.n@gmail.com</a>
+<a href=""mailto:dr.p.ir.z.a.d.amhas.s.an@gmail.com"">dr.p.ir.z.a.d.amhas.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.rz.a.da.mha.ssan@gmail.com"">dr.pi.rz.a.da.mha.ssan@gmail.com</a>
+<a href=""mailto:drp.ir.za.da.mha.ssan@gmail.com"">drp.ir.za.da.mha.ssan@gmail.com</a>
+<a href=""mailto:d.rpir.z.a.dam.h.as.san@gmail.com"">d.rpir.z.a.dam.h.as.san@gmail.com</a>
+<a href=""mailto:drpirzada.m.h.a.ssa.n@gmail.com"">drpirzada.m.h.a.ssa.n@gmail.com</a>
+<a href=""mailto:d.rpirz.ad.am.h.a.s.san@gmail.com"">d.rpirz.ad.am.h.a.s.san@gmail.com</a>
+<a href=""mailto:d.rpi.r.zad.a.m.h.as.san@gmail.com"">d.rpi.r.zad.a.m.h.as.san@gmail.com</a>
+<a href=""mailto:d.r.pi.rzadam.ha.s.s.a.n@gmail.com"">d.r.pi.rzadam.ha.s.s.a.n@gmail.com</a>
+<a href=""mailto:dr.pi.r.za.dam.h.as.s.an@gmail.com"">dr.pi.r.za.dam.h.as.s.an@gmail.com</a>
+<a href=""mailto:dr.pirzad.a.mha.ss.a.n@gmail.com"">dr.pirzad.a.mha.ss.a.n@gmail.com</a>
+<a href=""mailto:drp.ir.zad.am.ha.s.s.an@gmail.com"">drp.ir.zad.am.ha.s.s.an@gmail.com</a>
+<a href=""mailto:d.r.p.i.r.zad.a.mh.a.s.s.an@gmail.com"">d.r.p.i.r.zad.a.mh.a.s.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.rz.adamh.a.ssan@gmail.com"">dr.pi.rz.adamh.a.ssan@gmail.com</a>
+<a href=""mailto:d.r.pirza.damh.a.s.sa.n@gmail.com"">d.r.pirza.damh.a.s.sa.n@gmail.com</a>
+<a href=""mailto:drpir.z.a.damha.s.s.a.n@gmail.com"">drpir.z.a.damha.s.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pir.z.a.d.a.m.h.assa.n@gmail.com"">d.r.pir.z.a.d.a.m.h.assa.n@gmail.com</a>
+<a href=""mailto:dr.pi.r.zad.amhass.a.n@gmail.com"">dr.pi.r.zad.amhass.a.n@gmail.com</a>
+<a href=""mailto:drpir.z.ada.mhas.s.an@gmail.com"">drpir.z.ada.mhas.s.an@gmail.com</a>
+<a href=""mailto:d.rpi.rz.a.da.m.ha.ssa.n@gmail.com"">d.rpi.rz.a.da.m.ha.ssa.n@gmail.com</a>
+<a href=""mailto:dr.pi.r.zada.mhassa.n@gmail.com"">dr.pi.r.zada.mhassa.n@gmail.com</a>
+<a href=""mailto:dr.p.ir.z.a.d.a.m.has.s.a.n@gmail.com"">dr.p.ir.z.a.d.a.m.has.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pi.r.z.a.d.a.mha.s.sa.n@gmail.com"">d.r.pi.r.z.a.d.a.mha.s.sa.n@gmail.com</a>
+<a href=""mailto:d.rp.ir.z.a.da.mhassa.n@gmail.com"">d.rp.ir.z.a.da.mhassa.n@gmail.com</a>
+<a href=""mailto:d.r.p.irza.damh.a.ssa.n@gmail.com"">d.r.p.irza.damh.a.ssa.n@gmail.com</a>
+<a href=""mailto:drpi.rz.a.d.a.m.has.sa.n@gmail.com"">drpi.rz.a.d.a.m.has.sa.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.ad.a.mha.ss.an@gmail.com"">drp.i.rz.ad.a.mha.ss.an@gmail.com</a>
+<a href=""mailto:d.rpi.r.z.a.d.a.mh.as.san@gmail.com"">d.rpi.r.z.a.d.a.mh.as.san@gmail.com</a>
+<a href=""mailto:d.r.pi.r.za.damh.a.ss.an@gmail.com"">d.r.pi.r.za.damh.a.ss.an@gmail.com</a>
+<a href=""mailto:dr.pirza.damh.as.s.an@gmail.com"">dr.pirza.damh.as.s.an@gmail.com</a>
+<a href=""mailto:d.rpirza.d.a.mh.as.san@gmail.com"">d.rpirza.d.a.mh.as.san@gmail.com</a>
+<a href=""mailto:d.r.p.ir.z.a.da.m.h.as.san@gmail.com"">d.r.p.ir.z.a.da.m.h.as.san@gmail.com</a>
+<a href=""mailto:d.rp.i.r.z.ad.am.has.s.an@gmail.com"">d.rp.i.r.z.ad.am.has.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.rz.a.da.mh.as.san@gmail.com"">dr.pi.rz.a.da.mh.as.san@gmail.com</a>
+<a href=""mailto:d.r.pi.r.z.ad.am.h.a.s.sa.n@gmail.com"">d.r.pi.r.z.ad.am.h.a.s.sa.n@gmail.com</a>
+<a href=""mailto:dr.p.i.r.zad.amhas.s.a.n@gmail.com"">dr.p.i.r.zad.amhas.s.a.n@gmail.com</a>
+<a href=""mailto:drp.irz.a.da.mhas.s.a.n@gmail.com"">drp.irz.a.da.mhas.s.a.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.adamh.a.ss.an@gmail.com"">drp.i.rz.adamh.a.ss.an@gmail.com</a>
+<a href=""mailto:drp.i.r.zad.amhas.s.a.n@gmail.com"">drp.i.r.zad.amhas.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pirzadamhas.san@gmail.com"">d.r.pirzadamhas.san@gmail.com</a>
+<a href=""mailto:dr.p.i.rzad.am.ha.ss.an@gmail.com"">dr.p.i.rzad.am.ha.ss.an@gmail.com</a>
+<a href=""mailto:d.rp.i.rza.d.a.mh.a.ssan@gmail.com"">d.rp.i.rza.d.a.mh.a.ssan@gmail.com</a>
+<a href=""mailto:d.rpi.r.z.adam.has.san@gmail.com"">d.rpi.r.z.adam.has.san@gmail.com</a>
+<a href=""mailto:dr.pirz.a.da.mha.ss.an@gmail.com"">dr.pirz.a.da.mha.ss.an@gmail.com</a>
+<a href=""mailto:d.r.pi.rza.d.a.m.ha.ssan@gmail.com"">d.r.pi.rza.d.a.m.ha.ssan@gmail.com</a>
+<a href=""mailto:dr.pirz.ad.a.mh.a.ss.a.n@gmail.com"">dr.pirz.ad.a.mh.a.ss.a.n@gmail.com</a>
+<a href=""mailto:d.r.p.irzad.am.h.assan@gmail.com"">d.r.p.irzad.am.h.assan@gmail.com</a>
+<a href=""mailto:d.rp.ir.zad.a.m.h.a.ssa.n@gmail.com"">d.rp.ir.zad.a.m.h.a.ssa.n@gmail.com</a>
+<a href=""mailto:dr.pi.rza.d.amh.assa.n@gmail.com"">dr.pi.rza.d.amh.assa.n@gmail.com</a>
+<a href=""mailto:d.rp.i.r.z.a.dam.h.a.s.s.an@gmail.com"">d.rp.i.r.z.a.dam.h.a.s.s.an@gmail.com</a>
+<a href=""mailto:drp.irz.ad.amh.assa.n@gmail.com"">drp.irz.ad.amh.assa.n@gmail.com</a>
+<a href=""mailto:dr.pir.za.d.a.mh.a.ss.an@gmail.com"">dr.pir.za.d.a.mh.a.ss.an@gmail.com</a>
+<a href=""mailto:drpi.r.zad.am.h.assa.n@gmail.com"">drpi.r.zad.am.h.assa.n@gmail.com</a>
+<a href=""mailto:drpir.za.d.a.m.ha.ss.an@gmail.com"">drpir.za.d.a.m.ha.ss.an@gmail.com</a>
+<a href=""mailto:dr.pi.r.z.ad.a.mhassan@gmail.com"">dr.pi.r.z.ad.a.mhassan@gmail.com</a>
+<a href=""mailto:dr.p.i.r.z.ad.amha.ssan@gmail.com"">dr.p.i.r.z.ad.amha.ssan@gmail.com</a>
+<a href=""mailto:d.r.pi.r.z.ada.mh.a.s.s.an@gmail.com"">d.r.pi.r.z.ada.mh.a.s.s.an@gmail.com</a>
+<a href=""mailto:dr.p.irzada.m.h.ass.a.n@gmail.com"">dr.p.irzada.m.h.ass.a.n@gmail.com</a>
+<a href=""mailto:d.rp.i.r.za.dam.ha.ssan@gmail.com"">d.rp.i.r.za.dam.ha.ssan@gmail.com</a>
+<a href=""mailto:drp.ir.zada.m.ha.s.sa.n@gmail.com"">drp.ir.zada.m.ha.s.sa.n@gmail.com</a>
+<a href=""mailto:d.r.pirz.a.da.mh.a.ssan@gmail.com"">d.r.pirz.a.da.mh.a.ssan@gmail.com</a>
+<a href=""mailto:d.r.p.i.r.z.adam.h.as.sa.n@gmail.com"">d.r.p.i.r.z.adam.h.as.sa.n@gmail.com</a>
+<a href=""mailto:dr.p.i.r.z.ada.mhas.s.a.n@gmail.com"">dr.p.i.r.z.ada.mhas.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pirza.d.a.mhassan@gmail.com"">d.r.pirza.d.a.mhassan@gmail.com</a>
+<a href=""mailto:drp.irzad.a.m.h.ass.an@gmail.com"">drp.irzad.a.m.h.ass.an@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.d.a.m.h.a.s.s.an@gmail.com"">drp.i.rz.a.d.a.m.h.a.s.s.an@gmail.com</a>
+<a href=""mailto:drpi.rz.adamhas.sa.n@gmail.com"">drpi.rz.adamhas.sa.n@gmail.com</a>
+<a href=""mailto:d.r.pir.z.ad.am.ha.s.sa.n@gmail.com"">d.r.pir.z.ad.am.ha.s.sa.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.d.amhass.a.n@gmail.com"">drp.i.rz.a.d.amhass.a.n@gmail.com</a>
+<a href=""mailto:dr.pirza.d.am.hassa.n@gmail.com"">dr.pirza.d.am.hassa.n@gmail.com</a>
+<a href=""mailto:d.rp.irz.ad.am.h.a.ss.an@gmail.com"">d.rp.irz.ad.am.h.a.ss.an@gmail.com</a>
+<a href=""mailto:d.rp.i.rz.ad.amh.as.s.an@gmail.com"">d.rp.i.rz.ad.amh.as.s.an@gmail.com</a>
+<a href=""mailto:dr.pir.zad.a.m.h.ass.an@gmail.com"">dr.pir.zad.a.m.h.ass.an@gmail.com</a>
+<a href=""mailto:d.r.pirzadam.hass.a.n@gmail.com"">d.r.pirzadam.hass.a.n@gmail.com</a>
+<a href=""mailto:d.rpir.z.adam.has.s.a.n@gmail.com"">d.rpir.z.adam.has.s.a.n@gmail.com</a>
+<a href=""mailto:dr.pi.r.za.damha.ssa.n@gmail.com"">dr.pi.r.za.damha.ssa.n@gmail.com</a>
+<a href=""mailto:dr.pir.z.ad.amhassa.n@gmail.com"">dr.pir.z.ad.amhassa.n@gmail.com</a>
+<a href=""mailto:drpirzadam.ha.ssa.n@gmail.com"">drpirzadam.ha.ssa.n@gmail.com</a>
+<a href=""mailto:dr.p.i.rzada.mh.ass.an@gmail.com"">dr.p.i.rzada.mh.ass.an@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.da.m.ha.ssan@gmail.com"">drp.i.rz.a.da.m.ha.ssan@gmail.com</a>
+<a href=""mailto:dr.p.i.rz.adamhas.s.a.n@gmail.com"">dr.p.i.rz.adamhas.s.a.n@gmail.com</a>
+<a href=""mailto:drpi.r.zad.a.mhas.s.a.n@gmail.com"">drpi.r.zad.a.mhas.s.a.n@gmail.com</a>
+<a href=""mailto:dr.p.irz.ad.am.hassan@gmail.com"">dr.p.irz.ad.am.hassan@gmail.com</a>
+<a href=""mailto:d.rp.i.r.za.dam.h.a.s.s.a.n@gmail.com"">d.rp.i.r.za.dam.h.a.s.s.a.n@gmail.com</a>
+<a href=""mailto:d.rp.irz.ada.mh.as.s.an@gmail.com"">d.rp.irz.ada.mh.as.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.rz.ada.m.ha.ss.a.n@gmail.com"">dr.pi.rz.ada.m.ha.ss.a.n@gmail.com</a>
+<a href=""mailto:d.rpi.r.z.a.dam.h.ass.a.n@gmail.com"">d.rpi.r.z.a.dam.h.ass.a.n@gmail.com</a>
+<a href=""mailto:d.rp.i.r.zad.amhas.sa.n@gmail.com"">d.rp.i.r.zad.amhas.sa.n@gmail.com</a>
+<a href=""mailto:dr.pir.z.a.da.m.h.a.ssan@gmail.com"">dr.pir.z.a.da.m.h.a.ssan@gmail.com</a>
+<a href=""mailto:d.r.pi.r.zadamhassa.n@gmail.com"">d.r.pi.r.zadamhassa.n@gmail.com</a>
+<a href=""mailto:dr.pi.rzada.m.h.a.ss.an@gmail.com"">dr.pi.rzada.m.h.a.ss.an@gmail.com</a>
+<a href=""mailto:dr.p.irz.a.da.m.ha.ss.a.n@gmail.com"">dr.p.irz.a.da.m.ha.ss.a.n@gmail.com</a>
+<a href=""mailto:d.r.pi.rz.a.d.am.hass.a.n@gmail.com"">d.r.pi.rz.a.d.am.hass.a.n@gmail.com</a>
+<a href=""mailto:d.r.p.ir.zad.a.mh.a.s.sa.n@gmail.com"">d.r.p.ir.zad.a.mh.a.s.sa.n@gmail.com</a>
+<a href=""mailto:d.r.pirz.ad.a.m.hass.an@gmail.com"">d.r.pirz.ad.a.m.hass.an@gmail.com</a>
+<a href=""mailto:d.r.p.i.rzadam.hassan@gmail.com"">d.r.p.i.rzadam.hassan@gmail.com</a>
+<a href=""mailto:drp.irz.a.da.m.h.assa.n@gmail.com"">drp.irz.a.da.m.h.assa.n@gmail.com</a>
+<a href=""mailto:drp.i.r.z.adam.h.a.ssa.n@gmail.com"">drp.i.r.z.adam.h.a.ssa.n@gmail.com</a>
+<a href=""mailto:dr.p.irza.damhassan@gmail.com"">dr.p.irza.damhassan@gmail.com</a>
+<a href=""mailto:d.r.p.ir.z.a.da.m.h.a.ss.a.n@gmail.com"">d.r.p.ir.z.a.da.m.h.a.ss.a.n@gmail.com</a>
+<a href=""mailto:dr.pir.zadam.h.a.s.s.an@gmail.com"">dr.pir.zadam.h.a.s.s.an@gmail.com</a>
+<a href=""mailto:drp.ir.zada.m.h.ass.an@gmail.com"">drp.ir.zada.m.h.ass.an@gmail.com</a>
+<a href=""mailto:d.r.p.i.rzada.m.has.s.an@gmail.com"">d.r.p.i.rzada.m.has.s.an@gmail.com</a>
+<a href=""mailto:d.rpi.rza.damh.a.s.s.an@gmail.com"">d.rpi.rza.damh.a.s.s.an@gmail.com</a>
+<a href=""mailto:dr.p.ir.za.d.a.mha.ss.a.n@gmail.com"">dr.p.ir.za.d.a.mha.ss.a.n@gmail.com</a>
+<a href=""mailto:dr.p.i.r.zad.amhas.s.an@gmail.com"">dr.p.i.r.zad.amhas.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.r.z.ad.a.m.h.ass.an@gmail.com"">dr.pi.r.z.ad.a.m.h.ass.an@gmail.com</a>
+<a href=""mailto:dr.p.irza.d.am.h.a.ssan@gmail.com"">dr.p.irza.d.am.h.a.ssan@gmail.com</a>
+<a href=""mailto:drp.i.r.zada.mha.ssa.n@gmail.com"">drp.i.r.zada.mha.ssa.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.d.amhas.sa.n@gmail.com"">drp.i.rz.a.d.amhas.sa.n@gmail.com</a>
+<a href=""mailto:drp.ir.z.adam.ha.ss.an@gmail.com"">drp.ir.z.adam.ha.ss.an@gmail.com</a>
+<a href=""mailto:d.rpir.zadam.h.a.ssan@gmail.com"">d.rpir.zadam.h.a.ssan@gmail.com</a>
+<a href=""mailto:dr.p.i.rzad.a.m.h.a.s.s.a.n@gmail.com"">dr.p.i.rzad.a.m.h.a.s.s.a.n@gmail.com</a>
+<a href=""mailto:d.r.pir.z.a.dam.h.a.ss.a.n@gmail.com"">d.r.pir.z.a.dam.h.a.ss.a.n@gmail.com</a>
+<a href=""mailto:d.r.p.i.r.z.ad.amh.as.san@gmail.com"">d.r.p.i.r.z.ad.amh.as.san@gmail.com</a>
+<a href=""mailto:dr.p.ir.za.da.m.hassan@gmail.com"">dr.p.ir.za.da.m.hassan@gmail.com</a>
+<a href=""mailto:drp.i.r.z.a.da.m.h.ass.an@gmail.com"">drp.i.r.z.a.da.m.h.ass.an@gmail.com</a>
+<a href=""mailto:drpir.z.ad.am.hassa.n@gmail.com"">drpir.z.ad.am.hassa.n@gmail.com</a>
+<a href=""mailto:dr.pirz.ad.amh.a.ssan@gmail.com"">dr.pirz.ad.amh.a.ssan@gmail.com</a>
+<a href=""mailto:drp.irz.ada.mha.s.s.an@gmail.com"">drp.irz.ada.mha.s.s.an@gmail.com</a>
+<a href=""mailto:drp.irz.a.d.am.h.as.san@gmail.com"">drp.irz.a.d.am.h.as.san@gmail.com</a>
+<a href=""mailto:d.r.pirz.a.d.a.m.h.a.ss.an@gmail.com"">d.r.pirz.a.d.a.m.h.a.ss.an@gmail.com</a>
+<a href=""mailto:dr.pi.rzadamh.ass.a.n@gmail.com"">dr.pi.rzadamh.ass.a.n@gmail.com</a>
+<a href=""mailto:dr.pi.rz.ada.m.h.a.ssan@gmail.com"">dr.pi.rz.ada.m.h.a.ssan@gmail.com</a>
+<a href=""mailto:drp.i.rz.adamhas.s.an@gmail.com"">drp.i.rz.adamhas.s.an@gmail.com</a>
+<a href=""mailto:dr.pi.r.z.a.da.mhassa.n@gmail.com"">dr.pi.r.z.a.da.mhassa.n@gmail.com</a>
+<a href=""mailto:dr.pirz.a.d.am.h.as.s.an@gmail.com"">dr.pirz.a.d.am.h.as.s.an@gmail.com</a>
+<a href=""mailto:dr.p.irz.a.damh.as.s.an@gmail.com"">dr.p.irz.a.damh.as.s.an@gmail.com</a>
+<a href=""mailto:drpi.rzada.m.h.as.s.an@gmail.com"">drpi.rzada.m.h.as.s.an@gmail.com</a>
+<a href=""mailto:drpir.z.adam.has.san@gmail.com"">drpir.z.adam.has.san@gmail.com</a>
+<a href=""mailto:drpirz.ad.amhass.a.n@gmail.com"">drpirz.ad.amhass.a.n@gmail.com</a>
+<a href=""mailto:drp.irza.damha.s.san@gmail.com"">drp.irza.damha.s.san@gmail.com</a>
+<a href=""mailto:d.r.p.ir.za.d.am.h.as.san@gmail.com"">d.r.p.ir.za.d.am.h.as.san@gmail.com</a>
+<a href=""mailto:drpi.rzad.a.m.hassan@gmail.com"">drpi.rzad.a.m.hassan@gmail.com</a>
+<a href=""mailto:dr.pi.r.z.adamha.ss.an@gmail.com"">dr.pi.r.z.adamha.ss.an@gmail.com</a>
+<a href=""mailto:d.rp.irzad.a.mh.as.s.a.n@gmail.com"">d.rp.irzad.a.mh.as.s.a.n@gmail.com</a>
+<a href=""mailto:drp.i.r.za.da.mh.assa.n@gmail.com"">drp.i.r.za.da.mh.assa.n@gmail.com</a>
+<a href=""mailto:dr.pir.zad.a.mh.as.s.a.n@gmail.com"">dr.pir.zad.a.mh.as.s.a.n@gmail.com</a>
+<a href=""mailto:d.rp.irz.a.d.a.mha.ssan@gmail.com"">d.rp.irz.a.d.a.mha.ssan@gmail.com</a>
+<a href=""mailto:d.rp.ir.z.a.damh.as.san@gmail.com"">d.rp.ir.z.a.damh.as.san@gmail.com</a>
+<a href=""mailto:drp.irz.a.dam.h.assa.n@gmail.com"">drp.irz.a.dam.h.assa.n@gmail.com</a>
+<a href=""mailto:drp.i.rz.a.d.amha.s.s.an@gmail.com"">drp.i.rz.a.d.amha.s.s.an@gmail.com</a>
+<a href=""mailto:d.rp.i.r.za.d.am.hass.an@gmail.com"">d.rp.i.r.za.d.am.hass.an@gmail.com</a>
+<a href=""mailto:drp.i.rz.ad.amh.a.s.s.an@gmail.com"">drp.i.rz.ad.amh.a.s.s.an@gmail.com</a>
+<a href=""mailto:d.r.p.ir.z.ad.am.ha.s.san@gmail.com"">d.r.p.ir.z.ad.am.ha.s.san@gmail.com</a>
+<a href=""mailto:dr.p.ir.za.d.amhassa.n@gmail.com"">dr.p.ir.za.d.amhassa.n@gmail.com</a>
+<a href=""mailto:d.rp.ir.z.a.da.mha.s.s.an@gmail.com"">d.rp.ir.z.a.da.mha.s.s.an@gmail.com</a>
+<a href=""mailto:dr.pir.zad.amh.a.ss.an@gmail.com"">dr.pir.zad.amh.a.ss.an@gmail.com</a>
+<a href=""mailto:dr.p.i.rz.ad.am.hassan@gmail.com"">dr.p.i.rz.ad.am.hassan@gmail.com</a>
+<a href=""mailto:d.r.pirz.adamh.a.s.s.an@gmail.com"">d.r.pirz.adamh.a.s.s.an@gmail.com</a>
+<a href=""mailto:d.r.p.i.r.za.da.m.h.ass.a.n@gmail.com"">d.r.p.i.r.za.da.m.h.ass.a.n@gmail.com</a>
+<a href=""mailto:drp.i.r.za.d.a.m.ha.ssa.n@gmail.com"">drp.i.r.za.d.a.m.ha.ssa.n@gmail.com</a>
+<a href=""mailto:d.rpirz.a.da.mh.a.ss.an@gmail.com"">d.rpirz.a.da.mh.a.ss.an@gmail.com</a>
+<a href=""mailto:drpi.rza.d.amhas.s.a.n@gmail.com"">drpi.rza.d.amhas.s.a.n@gmail.com</a>
+<a href=""mailto:dr.p.ir.z.ad.amhas.s.an@gmail.com"">dr.p.ir.z.ad.amhas.s.an@gmail.com</a>
+<a href=""mailto:d.r.p.i.rzad.am.ha.ss.a.n@gmail.com"">d.r.p.i.rzad.am.ha.ss.a.n@gmail.com</a>"
+xagL2uTE,News Feb12 24,Newscaster_Ned,Email,Monday 12th of February 2024 11:52:17 PM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+A‎l‎r‎i‎g‎h‎t‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎t‎e‎l‎l‎ ‎y‎o‎u‎ ‎t‎h‎e‎ ‎t‎r‎u‎t‎h‎ ‎a‎b‎o‎u‎t‎ ‎S‎p‎o‎r‎t‎s‎c‎a‎s‎t‎e‎r‎ ‎S‎p‎e‎d‎.‎ ‎H‎e‎ ‎w‎a‎s‎ ‎d‎r‎o‎p‎p‎e‎d‎ ‎o‎n‎ ‎t‎h‎e‎ ‎h‎e‎a‎d‎ ‎a‎s‎ ‎a‎ ‎b‎a‎b‎y‎.‎ ‎
+
+S‎e‎n‎s‎.‎ ‎V‎a‎n‎c‎e‎,‎ ‎L‎e‎e‎,‎ ‎a‎n‎d‎ ‎J‎o‎h‎n‎s‎o‎n‎ ‎J‎o‎i‎n‎ ‎E‎l‎o‎n‎ ‎a‎n‎d‎ ‎V‎i‎v‎e‎k‎ ‎t‎o‎ ‎S‎l‎a‎m‎ ‎‘‎E‎n‎d‎l‎e‎s‎s‎ ‎F‎u‎n‎d‎i‎n‎g‎’‎ ‎f‎o‎r‎ ‎U‎k‎r‎a‎i‎n‎e‎
+U‎k‎r‎a‎i‎n‎e‎
+S‎e‎n‎s‎.‎ ‎J‎.‎D‎.‎ ‎V‎a‎n‎c‎e‎,‎ ‎M‎i‎k‎e‎ ‎L‎e‎e‎,‎ ‎a‎n‎d‎ ‎R‎o‎n‎ ‎J‎o‎h‎n‎s‎o‎n‎ ‎j‎o‎i‎n‎e‎d‎ ‎V‎i‎v‎e‎k‎ ‎R‎a‎m‎a‎s‎w‎a‎m‎y‎ ‎a‎n‎d‎ ‎E‎l‎o‎n‎ ‎M‎u‎s‎k‎ ‎i‎n‎ ‎s‎l‎a‎m‎m‎i‎n‎g‎ ‎e‎f‎f‎o‎r‎t‎s‎ ‎t‎o‎ ‎r‎u‎s‎h‎ ‎a‎d‎d‎i‎t‎i‎o‎n‎a‎l‎ ‎f‎u‎n‎d‎i‎n‎g‎ ‎t‎o‎ ‎U‎k‎r‎a‎i‎n‎e‎.‎
+
+N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎:‎ ‎‘‎I‎ ‎A‎m‎ ‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎B‎e‎a‎t‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎T‎r‎u‎m‎p‎’‎
+N‎i‎k‎k‎i‎ ‎H‎a‎l‎e‎y‎:‎ ‎'‎I‎ ‎A‎m‎ ‎G‎o‎i‎n‎g‎ ‎t‎o‎ ‎B‎e‎a‎t‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎T‎r‎u‎m‎p‎'‎
+1‎,‎7‎2‎4‎
+C‎a‎r‎v‎i‎l‎l‎e‎:‎ ‎B‎i‎d‎e‎n‎ ‎S‎k‎i‎p‎p‎i‎n‎g‎ ‎S‎u‎p‎e‎r‎ ‎B‎o‎w‎l‎ ‎I‎n‎t‎e‎r‎v‎i‎e‎w‎ ‎‘‎S‎i‎g‎n‎’‎ ‎S‎t‎a‎f‎f‎ ‎D‎o‎e‎s‎n‎’‎t‎ ‎H‎a‎v‎e‎ ‎C‎o‎n‎f‎i‎d‎e‎n‎c‎e‎
+C‎a‎r‎v‎i‎l‎l‎e‎:‎ ‎B‎i‎d‎e‎n‎ ‎S‎k‎i‎p‎p‎i‎n‎g‎ ‎S‎u‎p‎e‎r‎ ‎B‎o‎w‎l‎ ‎I‎n‎t‎e‎r‎v‎i‎e‎w‎ ‎S‎i‎g‎n‎ ‎S‎t‎a‎f‎f‎ ‎N‎o‎t‎ ‎C‎o‎n‎f‎i‎d‎a‎n‎t‎
+4‎,‎1‎8‎7‎
+W‎A‎T‎C‎H‎:‎ ‎A‎n‎ ‎E‎n‎r‎a‎g‎e‎d‎ ‎T‎r‎a‎v‎i‎s‎ ‎K‎e‎l‎c‎e‎ ‎S‎l‎a‎m‎s‎ ‎I‎n‎t‎o‎ ‎A‎n‎d‎y‎ ‎R‎e‎i‎d‎ ‎A‎f‎t‎e‎r‎ ‎T‎u‎r‎n‎o‎v‎e‎r‎
+W‎A‎T‎C‎H‎:‎ ‎A‎n‎ ‎E‎n‎r‎a‎g‎e‎d‎ ‎T‎r‎a‎v‎i‎s‎ ‎K‎e‎l‎c‎e‎ ‎S‎h‎o‎v‎e‎s‎ ‎A‎n‎d‎y‎ ‎R‎e‎i‎d‎ ‎A‎f‎t‎e‎r‎ ‎T‎u‎r‎n‎o‎v‎e‎r‎
+5‎,‎3‎0‎7‎
+R‎e‎p‎o‎r‎t‎:‎ ‎F‎e‎m‎a‎l‎e‎ ‎C‎h‎u‎r‎c‎h‎ ‎S‎h‎o‎o‎t‎e‎r‎ ‎F‎o‎r‎m‎e‎r‎l‎y‎ ‎I‎d‎e‎n‎t‎i‎f‎i‎e‎d‎ ‎a‎s‎ ‎‘‎J‎e‎f‎f‎e‎r‎y‎’‎
+R‎e‎p‎o‎r‎t‎:‎ ‎F‎e‎m‎a‎l‎e‎ ‎C‎h‎u‎r‎c‎h‎ ‎S‎h‎o‎o‎t‎e‎r‎ ‎F‎o‎r‎m‎e‎r‎l‎y‎ ‎I‎d‎e‎n‎t‎i‎f‎i‎e‎d‎ ‎a‎s‎ ‎'‎J‎e‎f‎f‎e‎r‎y‎'‎
+2‎,‎2‎6‎6‎
+P‎e‎l‎o‎s‎i‎:‎ ‎B‎i‎d‎e‎n‎’‎s‎ ‎Y‎o‎u‎n‎g‎e‎r‎ ‎t‎h‎a‎n‎ ‎M‎e‎ ‎a‎n‎d‎ ‎P‎e‎o‎p‎l‎e‎ ‎S‎a‎y‎ ‎T‎h‎e‎y‎ ‎D‎o‎n‎’‎t‎ ‎K‎n‎o‎w‎ ‎i‎n‎ ‎D‎e‎p‎o‎s‎i‎t‎i‎o‎n‎s‎
+P‎e‎l‎o‎s‎i‎:‎ ‎B‎i‎d‎e‎n‎'‎s‎ ‎Y‎o‎u‎n‎g‎e‎r‎ ‎t‎h‎a‎n‎ ‎M‎e‎,‎ ‎P‎e‎o‎p‎l‎e‎ ‎S‎a‎y‎ ‎T‎h‎e‎y‎ ‎D‎o‎n‎'‎t‎ ‎K‎n‎o‎w‎ ‎i‎n‎ ‎D‎e‎p‎o‎s‎i‎t‎i‎o‎n‎s‎
+9‎9‎
+E‎u‎r‎o‎p‎e‎a‎n‎ ‎L‎e‎a‎d‎e‎r‎s‎ ‎T‎a‎k‎e‎ ‎T‎r‎u‎m‎p‎ ‎N‎A‎T‎O‎ ‎C‎o‎m‎m‎e‎n‎t‎s‎ ‎‘‎S‎e‎r‎i‎o‎u‎s‎l‎y‎ ‎B‎u‎t‎ ‎N‎o‎t‎ ‎L‎i‎t‎e‎r‎a‎l‎l‎y‎’‎:‎ ‎T‎i‎m‎e‎s‎ ‎o‎f‎ ‎L‎o‎n‎d‎o‎
+T‎i‎m‎e‎s‎:‎ ‎E‎u‎r‎o‎p‎e‎ ‎T‎a‎k‎e‎s‎ ‎T‎r‎u‎m‎p‎ ‎N‎A‎T‎O‎ ‎T‎a‎l‎k‎ ‎'‎S‎e‎r‎i‎o‎u‎s‎l‎y‎ ‎B‎u‎t‎ ‎N‎o‎t‎ ‎L‎i‎t‎e‎r‎a‎l‎l‎y‎'‎
+3‎,‎0‎5‎9‎
+D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎E‎n‎d‎o‎r‎s‎e‎s‎ ‎M‎i‎c‎h‎a‎e‎l‎ ‎W‎h‎a‎t‎l‎e‎y‎ ‎f‎o‎r‎ ‎R‎N‎C‎ ‎C‎h‎a‎i‎r‎,‎ ‎L‎a‎r‎a‎ ‎T‎r‎u‎m‎p‎ ‎f‎o‎r‎ ‎C‎o‎-‎C‎h‎a‎i‎r‎
+T‎r‎u‎m‎p‎ ‎E‎n‎d‎o‎r‎s‎e‎s‎ ‎M‎i‎c‎h‎a‎e‎l‎ ‎W‎h‎a‎t‎l‎e‎y‎ ‎f‎o‎r‎ ‎R‎N‎C‎ ‎C‎h‎a‎i‎r‎,‎ ‎L‎a‎r‎a‎ ‎T‎r‎u‎m‎p‎ ‎f‎o‎r‎ ‎C‎o‎-‎C‎h‎a‎i‎r‎
+4‎3‎7‎
+J‎.‎D‎.‎ ‎V‎a‎n‎c‎e‎ ‎F‎i‎n‎d‎s‎ ‎‘‎I‎m‎p‎e‎a‎c‎h‎m‎e‎n‎t‎ ‎T‎i‎m‎e‎ ‎B‎o‎m‎b‎’‎ ‎A‎i‎m‎e‎d‎ ‎a‎t‎ ‎T‎r‎u‎m‎p‎ ‎i‎n‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎A‎i‎d‎ ‎B‎i‎l‎l‎
+J‎.‎D‎.‎ ‎V‎a‎n‎c‎e‎ ‎F‎i‎n‎d‎s‎ ‎'‎I‎m‎p‎e‎a‎c‎h‎m‎e‎n‎t‎ ‎T‎i‎m‎e‎ ‎B‎o‎m‎b‎'‎ ‎A‎i‎m‎e‎d‎ ‎a‎t‎ ‎T‎r‎u‎m‎p‎ ‎i‎n‎ ‎U‎k‎r‎a‎i‎n‎e‎ ‎A‎i‎d‎ ‎B‎i‎l‎l‎
+4‎,‎6‎0‎6‎
+S‎p‎e‎a‎k‎e‎r‎ ‎M‎i‎k‎e‎ ‎J‎o‎h‎n‎s‎o‎n‎ ‎T‎o‎r‎c‎h‎e‎s‎ ‎F‎o‎r‎e‎i‎g‎n‎ ‎A‎i‎d‎ ‎B‎i‎l‎l‎:‎ ‎B‎o‎r‎d‎e‎r‎ ‎M‎u‎s‎t‎ ‎C‎o‎m‎e‎ ‎F‎i‎r‎s‎t‎
+S‎p‎e‎a‎k‎e‎r‎ ‎M‎i‎k‎e‎ ‎J‎o‎h‎n‎s‎o‎n‎ ‎T‎o‎r‎c‎h‎e‎s‎ ‎F‎o‎r‎e‎i‎g‎n‎ ‎A‎i‎d‎ ‎B‎i‎l‎l‎:‎ ‎B‎o‎r‎d‎e‎r‎ ‎M‎u‎s‎t‎ ‎C‎o‎m‎e‎ ‎F‎i‎r‎s‎t‎
+2‎4‎5‎
+S‎c‎h‎i‎f‎f‎:‎ ‎S‎p‎e‎c‎i‎a‎l‎ ‎C‎o‎u‎n‎s‎e‎l‎ ‎H‎u‎r‎’‎s‎ ‎R‎e‎p‎o‎r‎t‎ ‎W‎a‎s‎ ‎‘‎P‎o‎l‎i‎t‎i‎c‎a‎l‎’‎ ‎—‎ ‎H‎e‎ ‎I‎s‎ ‎a‎ ‎‘‎H‎a‎c‎k‎&‎#‎8‎2‎1‎
+S‎c‎h‎i‎f‎f‎:‎ ‎S‎p‎e‎c‎i‎a‎l‎ ‎C‎o‎u‎n‎s‎e‎l‎ ‎H‎u‎r‎'‎s‎ ‎R‎e‎p‎o‎r‎t‎ ‎W‎a‎s‎ ‎'‎P‎o‎l‎i‎t‎i‎c‎a‎l‎,‎'‎ ‎H‎e‎ ‎I‎s‎ ‎a‎ ‎'‎H‎a‎c‎k‎'‎
+
+N‎e‎g‎r‎o‎ ‎A‎t‎l‎a‎n‎t‎i‎c‎ ‎C‎i‎t‎y‎ ‎M‎a‎y‎o‎r‎ ‎U‎n‎d‎e‎r‎ ‎I‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎ ‎A‎f‎t‎e‎r‎ ‎B‎e‎i‎n‎g‎ ‎C‎a‎u‎g‎h‎t‎ ‎A‎r‎g‎u‎i‎n‎g‎ ‎a‎t‎ ‎C‎a‎s‎i‎n‎o‎.‎
+
+U‎s‎u‎a‎l‎l‎y‎ ‎N‎e‎g‎r‎o‎e‎s‎ ‎b‎l‎o‎w‎ ‎a‎l‎l‎ ‎t‎h‎e‎i‎r‎ ‎m‎o‎n‎e‎y‎ ‎o‎n‎ ‎K‎F‎C‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎R‎a‎p‎i‎n‎g‎ ‎W‎o‎m‎a‎n‎ ‎a‎t‎ ‎T‎h‎e‎e‎ ‎D‎o‎l‎l‎H‎o‎u‎s‎e‎.‎
+
+
+C‎o‎l‎u‎m‎b‎i‎a‎:‎ ‎N‎e‎g‎r‎o‎i‎d‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎S‎t‎a‎r‎v‎i‎n‎g‎ ‎H‎i‎s‎ ‎P‎i‎t‎b‎u‎l‎l‎.‎
+
+
+S‎p‎i‎c‎ ‎C‎h‎a‎i‎r‎m‎a‎n‎ ‎S‎e‎n‎.‎ ‎G‎u‎s‎t‎a‎v‎o‎ ‎R‎i‎v‎e‎r‎a‎ ‎G‎o‎e‎s‎ ‎o‎n‎ ‎F‎a‎c‎e‎b‎o‎o‎k‎ ‎a‎n‎d‎ ‎S‎a‎y‎s‎,‎ ‎""‎“‎I‎m‎’‎a‎ ‎b‎e‎ ‎a‎ ‎m‎u‎t‎h‎f‎a‎f‎u‎c‎k‎i‎n‎ ‎c‎h‎a‎i‎r‎m‎a‎n‎ ‎.‎ ‎.‎ ‎.‎ ‎d‎a‎t‎ ‎i‎z‎ ‎a‎l‎l‎ ‎f‎o‎r‎ ‎n‎o‎w‎ ‎.‎ ‎.‎ ‎.‎”‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+S‎u‎n‎n‎y‎
+6‎1‎°‎
+/‎3‎5‎°‎
+1‎%‎
+N‎W‎ ‎1‎5‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎2‎ ‎|‎ ‎D‎a‎y‎
+6‎1‎°‎
+1‎%‎
+N‎W‎
+1‎5‎
+m‎p‎h‎
+S‎u‎n‎n‎y‎.‎ ‎H‎i‎g‎h‎ ‎6‎1‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎N‎W‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎2‎0‎ ‎m‎p‎h‎.‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+4‎3‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+5‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎1‎3‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+6‎:‎1‎6‎ ‎p‎m‎
+M‎o‎n‎ ‎1‎2‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+3‎5‎°‎
+5‎%‎
+N‎
+3‎
+m‎p‎h‎
+C‎l‎e‎a‎r‎ ‎s‎k‎i‎e‎s‎.‎ ‎L‎o‎w‎ ‎a‎r‎o‎u‎n‎d‎ ‎3‎5‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎l‎i‎g‎h‎t‎ ‎a‎n‎d‎ ‎v‎a‎r‎i‎a‎b‎l‎e‎.‎
+H‎u‎m‎i‎d‎i‎t‎y‎
+7‎8‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+9‎:‎1‎0‎ ‎a‎m‎
+W‎a‎x‎i‎n‎g‎ ‎C‎r‎e‎s‎c‎e‎n‎t‎
+M‎o‎o‎n‎s‎e‎t‎
+9‎:‎3‎8‎ ‎p‎m‎
+T‎u‎e‎ ‎1‎3‎
+S‎u‎n‎n‎y‎
+6‎7‎°‎
+/‎4‎1‎°‎
+5‎%‎
+S‎ ‎6‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎4‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎7‎°‎
+/‎5‎3‎°‎
+8‎%‎
+S‎S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎5‎
+C‎l‎o‎u‎d‎y‎
+7‎3‎°‎
+/‎5‎9‎°‎
+9‎%‎
+S‎ ‎5‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎6‎
+R‎a‎i‎n‎
+6‎7‎°‎
+/‎4‎5‎°‎
+6‎4‎%‎
+S‎S‎W‎ ‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎7‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+5‎5‎°‎
+/‎3‎4‎°‎
+1‎1‎%‎
+N‎ ‎1‎9‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎8‎
+S‎u‎n‎n‎y‎
+6‎2‎°‎
+/‎3‎9‎°‎
+2‎%‎
+S‎S‎E‎ ‎7‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎9‎
+S‎u‎n‎n‎y‎
+7‎0‎°‎
+/‎5‎0‎°‎
+6‎%‎
+S‎S‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎2‎0‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎5‎°‎
+/‎5‎5‎°‎
+8‎%‎
+S‎ ‎1‎2‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎2‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎8‎°‎
+/‎5‎8‎°‎
+1‎7‎%‎
+S‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎2‎2‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎4‎°‎
+/‎5‎0‎°‎
+2‎4‎%‎
+S‎W‎ ‎1‎2‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎2‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎8‎°‎
+/‎4‎4‎°‎
+1‎7‎%‎
+N‎ ‎1‎3‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎2‎4‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎7‎°‎
+/‎4‎8‎°‎
+8‎%‎
+E‎N‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎2‎5‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎3‎°‎
+/‎5‎2‎°‎
+2‎3‎%‎
+S‎S‎W‎ ‎1‎1‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎2‎6‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎5‎°‎
+/‎5‎4‎°‎
+1‎8‎%‎
+S‎S‎W‎ ‎1‎1‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎R‎a‎c‎i‎s‎m‎.‎ ‎👦🏼🧑🏿‍🦲
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+P‎e‎d‎o‎p‎h‎i‎l‎i‎a‎
+P‎e‎d‎o‎p‎h‎i‎l‎i‎a‎ ‎(‎o‎r‎ ‎p‎ ‎æ‎ ‎d‎o‎p‎h‎i‎l‎i‎a‎)‎ ‎i‎s‎ ‎a‎ ‎w‎o‎r‎d‎ ‎w‎h‎i‎c‎h‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎s‎ ‎c‎a‎n‎'‎t‎ ‎s‎a‎y‎ ‎r‎i‎g‎h‎t‎.‎ ‎I‎t‎ ‎i‎s‎ ‎a‎l‎s‎o‎ ‎a‎ ‎b‎r‎a‎i‎n‎ ‎p‎r‎o‎b‎l‎e‎m‎ ‎w‎h‎e‎r‎e‎ ‎t‎h‎e‎ ‎s‎u‎b‎j‎e‎c‎t‎ ‎i‎s‎ ‎s‎e‎x‎u‎a‎l‎l‎y‎ ‎t‎u‎r‎n‎e‎d‎ ‎o‎n‎ ‎b‎y‎ ‎t‎h‎e‎ ‎d‎a‎m‎n‎ ‎f‎u‎c‎k‎i‎n‎g‎ ‎y‎o‎u‎n‎g‎ ‎(‎3‎ ‎t‎o‎ ‎1‎3‎ ‎y‎e‎a‎r‎s‎ ‎o‎l‎d‎)‎,‎ ‎b‎u‎t‎ ‎m‎o‎s‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎p‎e‎o‎p‎l‎e‎ ‎b‎u‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎k‎i‎d‎d‎y‎f‎i‎d‎d‎l‎i‎n‎g‎ ‎a‎r‎e‎ ‎b‎u‎s‎t‎e‎d‎ ‎a‎s‎ ‎a‎ ‎f‎i‎r‎s‎t‎ ‎o‎f‎f‎e‎n‎s‎e‎ ‎f‎o‎r‎ ‎g‎o‎i‎n‎g‎ ‎a‎f‎t‎e‎r‎ ‎1‎3‎-‎1‎7‎,‎ ‎w‎h‎e‎r‎e‎a‎s‎ ‎t‎h‎e‎ ‎o‎n‎e‎s‎ ‎g‎o‎i‎n‎g‎ ‎a‎f‎t‎e‎r‎ ‎u‎n‎d‎e‎r‎ ‎1‎3‎ ‎u‎s‎u‎a‎l‎l‎y‎ ‎g‎e‎t‎ ‎a‎w‎a‎y‎ ‎w‎i‎t‎h‎ ‎i‎t‎ ‎f‎o‎r‎ ‎a‎ ‎l‎o‎n‎g‎ ‎t‎i‎m‎e‎ ‎u‎n‎t‎i‎l‎ ‎t‎h‎e‎y‎ ‎s‎t‎a‎r‎t‎ ‎t‎o‎ ‎o‎b‎s‎e‎s‎s‎ ‎o‎v‎e‎r‎ ‎t‎h‎e‎ ‎i‎n‎f‎a‎m‎o‎u‎s‎ ‎b‎a‎b‎y‎ ‎f‎u‎c‎k‎.‎ ‎A‎l‎l‎ ‎p‎e‎d‎o‎p‎h‎i‎l‎e‎s‎ ‎a‎r‎e‎ ‎u‎n‎i‎v‎e‎r‎s‎a‎l‎l‎y‎ ‎h‎a‎t‎e‎d‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎t‎h‎e‎y‎ ‎a‎r‎e‎ ‎a‎l‎l‎ ‎f‎u‎c‎k‎i‎n‎g‎ ‎i‎m‎m‎a‎t‎u‎r‎e‎ ‎a‎s‎s‎h‎o‎l‎e‎s‎.‎
+
+
+(‎(‎ ‎I‎ ‎J‎U‎S‎T‎ ‎W‎A‎N‎T‎E‎D‎ ‎T‎H‎E‎ ‎(‎U‎N‎D‎E‎R‎A‎G‎E‎)‎ ‎U‎S‎E‎R‎'‎S‎ ‎D‎I‎C‎K‎ ‎S‎O‎ ‎I‎ ‎C‎O‎U‎L‎D‎ ‎G‎E‎T‎ ‎H‎I‎M‎ ‎B‎A‎N‎N‎E‎D‎,‎ ‎O‎F‎F‎I‎C‎E‎R‎!‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+T‎h‎e‎ ‎D‎a‎l‎e‎ ‎C‎r‎e‎e‎k‎ ‎C‎r‎o‎s‎s‎i‎n‎g‎ ‎w‎a‎s‎ ‎a‎ ‎6‎5‎0‎-‎f‎o‎o‎t‎ ‎(‎2‎0‎0‎ ‎m‎)‎ ‎b‎r‎i‎d‎g‎e‎ ‎i‎n‎ ‎t‎h‎e‎ ‎s‎o‎u‎t‎h‎e‎a‎s‎t‎e‎r‎n‎ ‎W‎y‎o‎m‎i‎n‎g‎ ‎T‎e‎r‎r‎i‎t‎o‎r‎y‎,‎ ‎U‎n‎i‎t‎e‎d‎ ‎S‎t‎a‎t‎e‎s‎,‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎d‎ ‎i‎n‎ ‎1‎8‎6‎8‎.‎ ‎I‎t‎ ‎w‎a‎s‎ ‎c‎o‎n‎s‎t‎r‎u‎c‎t‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎U‎n‎i‎o‎n‎ ‎P‎a‎c‎i‎f‎i‎c‎ ‎R‎a‎i‎l‎r‎o‎a‎d‎ ‎a‎s‎ ‎p‎a‎r‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎t‎r‎a‎n‎s‎c‎o‎n‎t‎i‎n‎e‎n‎t‎a‎l‎ ‎r‎a‎i‎l‎r‎o‎a‎d‎.‎ ‎W‎i‎t‎h‎ ‎a‎ ‎m‎a‎x‎i‎m‎u‎m‎ ‎h‎e‎i‎g‎h‎t‎ ‎o‎f‎ ‎1‎5‎0‎ ‎f‎e‎e‎t‎ ‎(‎4‎6‎ ‎m‎)‎ ‎a‎n‎d‎ ‎w‎i‎t‎h‎ ‎a‎ ‎n‎e‎c‎e‎s‎s‎i‎t‎y‎ ‎o‎f‎ ‎c‎u‎t‎t‎i‎n‎g‎ ‎t‎h‎r‎o‎u‎g‎h‎ ‎s‎o‎l‎i‎d‎ ‎r‎o‎c‎k‎ ‎o‎n‎ ‎b‎o‎t‎h‎ ‎s‎i‎d‎e‎s‎,‎ ‎i‎t‎ ‎w‎a‎s‎ ‎o‎n‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎m‎o‎s‎t‎ ‎d‎i‎f‎f‎i‎c‎u‎l‎t‎ ‎p‎a‎r‎t‎s‎ ‎o‎f‎ ‎t‎h‎e‎ ‎l‎i‎n‎e‎ ‎t‎o‎ ‎b‎u‎i‎l‎d‎.‎ ‎T‎h‎e‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎ ‎b‎r‎i‎d‎g‎e‎ ‎w‎a‎s‎ ‎b‎u‎i‎l‎t‎ ‎o‎f‎ ‎w‎o‎o‎d‎,‎ ‎a‎n‎d‎ ‎i‎t‎s‎ ‎t‎r‎e‎s‎t‎l‎e‎s‎ ‎b‎e‎g‎a‎n‎ ‎s‎w‎a‎y‎i‎n‎g‎ ‎i‎n‎ ‎t‎h‎e‎ ‎w‎i‎n‎d‎ ‎f‎r‎o‎m‎ ‎t‎h‎e‎ ‎o‎p‎e‎n‎i‎n‎g‎ ‎d‎a‎y‎.‎ ‎T‎h‎e‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎ ‎b‎r‎i‎d‎g‎e‎ ‎w‎a‎s‎ ‎r‎e‎p‎l‎a‎c‎e‎d‎ ‎o‎n‎ ‎t‎h‎e‎ ‎1‎8‎6‎8‎ ‎p‎i‎e‎r‎s‎ ‎i‎n‎ ‎1‎8‎7‎6‎ ‎b‎y‎ ‎a‎n‎ ‎i‎r‎o‎n‎ ‎b‎r‎i‎d‎g‎e‎,‎ ‎m‎a‎n‎u‎f‎a‎c‎t‎u‎r‎e‎d‎ ‎b‎y‎ ‎t‎h‎e‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎ ‎B‎r‎i‎d‎g‎e‎ ‎C‎o‎m‎p‎a‎n‎y‎,‎ ‎a‎n‎d‎ ‎t‎h‎i‎s‎ ‎w‎a‎s‎ ‎d‎i‎s‎m‎a‎n‎t‎l‎e‎d‎ ‎e‎n‎t‎i‎r‎e‎l‎y‎ ‎i‎n‎ ‎1‎9‎0‎1‎ ‎w‎h‎e‎n‎ ‎t‎h‎e‎ ‎U‎n‎i‎o‎n‎ ‎P‎a‎c‎i‎f‎i‎c‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎d‎ ‎c‎o‎n‎s‎t‎r‎u‎c‎t‎i‎o‎n‎ ‎o‎f‎ ‎a‎ ‎n‎e‎w‎ ‎a‎l‎i‎g‎n‎m‎e‎n‎t‎ ‎o‎v‎e‎r‎ ‎S‎h‎e‎r‎m‎a‎n‎ ‎H‎i‎l‎l‎ ‎a‎s‎ ‎p‎a‎r‎t‎ ‎o‎f‎ ‎a‎ ‎r‎e‎c‎o‎n‎s‎t‎r‎u‎c‎t‎i‎o‎n‎ ‎p‎r‎o‎j‎e‎c‎t‎ ‎w‎h‎i‎c‎h‎ ‎s‎h‎o‎r‎t‎e‎n‎e‎d‎ ‎t‎h‎e‎ ‎O‎v‎e‎r‎l‎a‎n‎d‎ ‎R‎o‎u‎t‎e‎.‎ ‎T‎h‎i‎s‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎o‎f‎ ‎t‎h‎e‎ ‎D‎a‎l‎e‎ ‎C‎r‎e‎e‎k‎ ‎C‎r‎o‎s‎s‎i‎n‎g‎ ‎w‎a‎s‎ ‎t‎a‎k‎e‎n‎ ‎d‎u‎r‎i‎n‎g‎ ‎c‎o‎n‎s‎t‎r‎u‎c‎t‎i‎o‎n‎ ‎i‎n‎ ‎1‎8‎6‎8‎ ‎b‎y‎ ‎t‎h‎e‎ ‎p‎r‎o‎j‎e‎c‎t‎'‎s‎ ‎o‎f‎f‎i‎c‎i‎a‎l‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎r‎,‎ ‎A‎n‎d‎r‎e‎w‎ ‎J‎.‎ ‎R‎u‎s‎s‎e‎l‎l‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎A‎n‎d‎r‎e‎w‎ ‎J‎.‎ ‎R‎u‎s‎s‎e‎l‎l‎;‎ ‎r‎e‎s‎t‎o‎r‎e‎d‎ ‎b‎y‎ ‎A‎d‎a‎m‎ ‎C‎u‎e‎r‎d‎e‎n‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎h‎e‎l‎p‎ ‎m‎a‎k‎e‎ ‎A‎n‎d‎r‎e‎w‎ ‎A‎n‎g‎l‎i‎n‎ ‎t‎a‎l‎l‎e‎r‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎h‎a‎t‎?‎ ‎N‎o‎t‎ ‎g‎r‎a‎p‎h‎i‎c‎ ‎e‎n‎o‎u‎g‎h‎.‎.‎.‎.‎.‎ ‎F‎i‎n‎e‎.‎.‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎f‎i‎s‎t‎ ‎a‎n‎ ‎1‎1‎ ‎y‎e‎a‎r‎ ‎o‎l‎d‎ ‎g‎i‎r‎l‎,‎ ‎t‎h‎e‎n‎ ‎r‎a‎p‎e‎ ‎a‎ ‎s‎q‎u‎i‎r‎r‎e‎l‎ ‎w‎h‎i‎l‎e‎ ‎e‎a‎t‎i‎n‎g‎ ‎o‎u‎t‎ ‎J‎o‎y‎ ‎B‎e‎h‎a‎r‎.‎"
+we6k3npJ,Maximum path sum in matrix,jayati,C++,Monday 12th of February 2024 11:20:52 PM CDT,"//{ Driver Code Starts
+// Initial Template for C++
+
+#include <bits/stdc++.h>
+using namespace std;
+
+// } Driver Code Ends
+// User function Template for C++
+
+class Solution{
+public:
+    int maximumPath(int N, vector<vector<int>> Matrix)
+    {
+        // code here
+        int n=N;
+        for(int i=1;i<n;i++)
+        {
+            for(int j=0;j<n;j++)
+            {
+                if(j>0 && j<n-1)
+                {
+                    Matrix[i][j]+=max({Matrix[i-1][j],Matrix[i-1][j-1],Matrix[i-1][j+1]});
+                }
+                else if(j>0)
+                {
+                    Matrix[i][j]+=max(Matrix[i-1][j],Matrix[i-1][j-1]);
+                }
+                else if(j<n-1)
+                {
+                    Matrix[i][j]+=max(Matrix[i-1][j],Matrix[i-1][j+1]);
+                }
+            }
+        }
+        int ans=0;
+        for(int j=0;j<n;j++)
+        {
+            ans = max(Matrix[n-1][j],ans);
+        }
+        return ans;
+    }
+};
+
+//{ Driver Code Starts.
+
+int main(){
+    int t;
+    cin>>t;
+    while(t--){
+        int N;
+        cin>>N;
+        vector<vector<int>> Matrix(N, vector<int>(N, 0));
+        for(int i = 0;i < N*N;i++)
+            cin>>Matrix[(i/N)][i%N];
+        
+        Solution ob;
+        cout<<ob.maximumPath(N, Matrix)<<""\n"";
+    }
+    return 0;
+}
+// } Driver Code Ends"
+VHyFMmb3,Segment tree with struct and push,Aslanov01,C++,Monday 12th of February 2024 11:13:32 PM CDT,"struct node {
+    int x, y, z;//можно называть любым способом
+};
+node t[4 * N], upd[4 * N];
+node merge(node a, node b) {
+    node res;
+    res.x = //???
+    res.y = //???
+    res.z = //??? зависит от задачи
+    return res;
+}
+void build(int v, int tl, int tr) {
+    if (tl == tr) {
+        t[v] = {?, ?, ?};
+        return;
+    }
+    int mid = (tl + tr) / 2;
+    build(v * 2, tl, mid), build(v * 2 + 1, mid + 1, tr);
+    t[v] = merge(t[v * 2], t[v * 2 + 1]);
+}
+void push(int v, int tl, int tr) {
+    if (upd[v] == inf)return;
+    t[v] = //???
+    if (tl != tr)upd[v] -> upd[v * 2], upd[v] -> upd[v * 2 + 1];
+    upd[v] = inf;
+}
+void update(int v, int tl, int tr, int l, int r, int x) {
+    push(v, tl, tr);
+    if (tr < l || tl > r)return;
+    if (tl >= l && tr <= r) {
+        x -> upd[v];
+        push(v, tl, tr);
+        return;
+    }
+    int mid = (tl + tr) / 2;
+    update(v * 2, tl, mid, l, r, x), update(v * 2 + 1, mid + 1, tr, l, r, x);
+    t[v] = merge(t[v * 2], t[v * 2 + 1]);
+}
+node get(int v, int tl, int tr, int pos) {
+    push(v, tl, tr);
+    if (tl == tr)return t[v];
+    int mid = (tl + tr) / 2;
+    if (pos <= mid)return get(v * 2, tl, mid, pos);
+    return get(v * 2 + 1, mid + 1, tr, pos);
+}"
+BAVGVPCi,Mad,Unknown_No_1,PHP,Monday 12th of February 2024 11:09:30 PM CDT,AshrafalBadruAlaina
+Y7EP79Te,GENERATE-AI-IMAGES-WITH-STEGNO.py,Najeebsk,Python,Monday 12th of February 2024 10:12:35 PM CDT,"import subprocess
+import tkinter as tk
+
+def hide_images():
+    original_file = original_entry.get()
+    hide_file = hide_entry.get()
+    save_file = save_entry.get()
+    subprocess.run(['Stegano', '-e', '-i', f'DEEPFAKE/{original_file}.jpg', '-f', f'DEEPFAKE/{hide_file}.jpg', '-o', f'DATA/{save_file}'])
+
+def unhide_images():
+    original_file = original_entry.get()
+    save_file = save_entry.get()
+    subprocess.run(['Stegano', '-d', '-i', f'DATA/{original_file}.png', '-f', f'DATA/{save_file}.jpg'])
+
+
+root = tk.Tk()
+root.title(""Najeeb Generate AI Images"")
+
+# Labels
+tk.Label(root, text=""Original File:"").grid(row=0, column=0)
+tk.Label(root, text=""Hide File:"").grid(row=1, column=0)
+tk.Label(root, text=""Save File:"").grid(row=2, column=0)
+
+# Entry fields
+original_entry = tk.Entry(root)
+hide_entry = tk.Entry(root)
+save_entry = tk.Entry(root)
+
+original_entry.grid(row=0, column=1)
+hide_entry.grid(row=1, column=1)
+save_entry.grid(row=2, column=1)
+
+# Buttons
+hide_button = tk.Button(root, text=""Hide"", command=hide_images)
+unhide_button = tk.Button(root, text=""Unhide"", command=unhide_images)
+
+hide_button.grid(row=3, column=0)
+unhide_button.grid(row=3, column=1)
+
+
+root.mainloop()
+"
+xxm1VHD7,IMAGE-STEGANOGRAPHY.py,Najeebsk,Python,Monday 12th of February 2024 10:08:46 PM CDT,"import os
+import numpy as np
+from imageio import imread, imwrite
+
+import argparse
+
+max_value = 255 # max uint value per pixel per channel
+header_len = 4*8 # uint32 bit length
+
+def read_image(img_path):
+    """"""
+        Reads an image from file and flattens it.
+        Args:
+            img_path    path to the image
+        Returns:
+            ndarray     numpy array containing the image in a flat shape
+            ndarray     shape of the read image before flattening
+    """"""
+    img = np.array(imread(img_path), dtype=np.uint8)
+    orig_shape = img.shape
+    return img.flatten(), orig_shape
+
+def write_image(img_path, img_data, shape):
+    """"""
+        Writes an image to a path from a flat numpy array, usig the shape provided.
+        Args:
+            img_path    path were to save the image
+            img_data    numpy array containing the image (flat)
+            shape       shape of the image to be saved
+    """"""
+    img_data = np.reshape(img_data, shape)
+    imwrite(img_path, img_data)
+
+def bytes2array(byte_data):
+    """"""
+        Converts byte data to a bit array (numpy array, dtype=np.uint8).
+        Args:
+            byte_data   the byte data
+        Returns:
+            ndarray     a numpy array of the single bits that composed the byte data
+    """"""
+    byte_array = np.frombuffer(byte_data, dtype=np.uint8)
+    return np.unpackbits(byte_array)
+
+def array2bytes(bit_array):
+    """"""
+        Converts a bit array (numpy array, dtype=np.uint8) to byte data.
+        Args:
+            bit_array   the bit array
+        Returns:
+            bytes       the byte data
+    """"""
+    byte_array = np.packbits(bit_array)
+    return byte_array.tobytes()
+
+def read_file(file_path):
+    """"""
+        Reads a file as a bit array (numpy array, dtype=np.uint8)
+        Args:
+            file_path   path to the file
+        Returns:
+            ndarray     the bit array
+    """"""
+    file_bytes = open(file_path, ""rb"").read()
+    return bytes2array(file_bytes)
+
+def write_file(file_path, file_bit_array):
+    """"""
+        Writes a file to a path from a bit array (numpy array, dtype=np.uint8).
+        Args:
+            file_path       path to the file
+            file_bit_array  the bit array of the file
+    """"""
+    bytes_data = array2bytes(file_bit_array)
+    f = open(file_path, 'wb')
+    f.write(bytes_data)
+    f.close()
+
+def encode_data(image, file_data):
+    """"""
+        Encodes the file data onto the image
+        Args:
+            image       the original image numpy array (flat)
+            file_data   the file data (bit array)
+        Returns:
+            ndarray     the encoded image as a numpy array
+    """"""
+    or_mask = file_data
+    and_mask = np.zeros_like(or_mask)
+    and_mask = (and_mask + max_value - 1) + or_mask 
+    res = np.bitwise_or(image, or_mask)
+    res = np.bitwise_and(res, and_mask)
+    return res
+
+def decode_data(encoded_data):
+    """"""
+        Decodes the data from an image
+        Args:
+            encoded_data    the encoded image as numpy array
+        Returns:
+            ndarray         the bit array containig the file bits
+    """"""
+    out_mask = np.ones_like(encoded_data)
+    output = np.bitwise_and(encoded_data, out_mask)
+    return output
+
+def _main(args):
+    """"""Main fuction of the script""""""
+    if args.image is not None and args.file is not None:
+        if args.encode:
+            img_path = args.image
+            file_path = args.file
+            if not os.path.isfile(img_path):
+                print(""Image file does not exist"")
+                return
+            if not os.path.isfile(file_path):
+                print(""File does not exist"")
+                return
+
+            output_path = args.output
+            extension = os.path.splitext(output_path)[1][1:]
+            if extension == '':  # if no extension, append png
+                output_path = output_path + '.png'
+            elif extension != 'png':  # replace the wrong extension with png
+                li = output_path.rsplit(extension, 1)
+                output_path = 'png'.join(li)
+
+            image, shape_orig = read_image(img_path)
+            file = read_file(file_path)
+            file_len = file.shape[0]
+            len_array = np.array([file_len], dtype=np.uint32).view(np.uint8)
+            len_array = np.unpackbits(len_array)
+            img_len = image.shape[0]
+
+            if file_len >= img_len - header_len:  # 4 bytes are used to store file length
+                print(""File too big, error"")
+                return
+            else:  #  Insert padding. Using random padding, otherwise values would all be even if padding with zeros (could be noticed in histogram).
+                tmp = file
+                file = np.random.randint(2, size=img_len, dtype=np.uint8)
+                file[header_len:header_len+file_len] = tmp
+                # file = np.pad(file, (header_len,img_len - file_len - header_len), 'constant', constant_values=(0, 0))
+
+            file[:header_len] = len_array
+            encoded_data = encode_data(image, file)
+
+            write_image(output_path, encoded_data, shape_orig)
+            print(""Image encoded"")
+            return
+
+        if args.decode:
+            img_path = args.image
+            if not os.path.isfile(img_path):
+                print(""Image file does not exist"")
+                return
+            file_path = args.file
+            encoded_data, shape_orig = read_image(img_path)
+            data = decode_data(encoded_data)
+            el_array = np.packbits(data[:header_len])
+            extracted_len = el_array.view(np.uint32)[0]
+            data = data[header_len:extracted_len+header_len]
+            write_file(file_path, data)
+            print(""Image decoded"")
+            return
+
+        print(""Error, no action specified!"")
+        return
+
+    print(""Error, image or file not specified"")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Conceal small files inside a PNG image and extract them back')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        '-e',
+        '--encode',
+        help='If present the script will conceal the file in the image and produce a new encoded image',
+        action=""store_true"")
+    group.add_argument(
+        '-d',
+        '--decode',
+        help='If present the script will decode the concealed data in the image and produce a new file with this data',
+        action=""store_true"")
+    parser.add_argument(
+        '-i',
+        '--image',
+        help='Path to an image to use for concealing or file extraction')
+    parser.add_argument(
+        '-f',
+        '--file',
+        help='Path to the file to conceal or to extract')
+    parser.add_argument(
+        '-o',
+        '--output',
+        help='Path where to save the encoded image. Specify only the file name, or use .png extension; png extension will be added automatically',
+        default='encoded.png')
+
+    _main(parser.parse_args())
+"
+552chrqb,treeturtle,Reskatron,Lua,Monday 12th of February 2024 09:05:28 PM CDT,"-- Function to cut down a tree
+function cutTree()
+    turtle.dig()  -- Dig the block in front
+    turtle.forward()  -- Move forward
+    while turtle.detectUp() do
+        turtle.digUp()  -- Dig the block above if it exists
+        turtle.up()  -- Move up
+    end
+    while not turtle.detectDown() do
+        turtle.down()  -- Move down until reaching the ground
+    end
+    turtle.back()  -- Move back to the starting position
+end
+
+-- Function to plant an oak sapling
+function plantSapling()
+    turtle.select(1)  -- Select the slot with oak saplings
+    turtle.place()  -- Place the sapling on the ground
+end
+
+-- Main program
+turtle.select(1)  -- Select the slot with oak saplings (assuming it's in slot 1)
+while true do
+    -- Check if there's a tree in front
+    while turtle.detect() do
+        cutTree()  -- Cut down the tree
+    end
+
+    -- Plant a sapling and wait for it to grow
+    plantSapling()  -- Plant an oak sapling
+    print(""Waiting for the sapling to grow..."")
+    os.sleep(600)  -- Wait for 10 minutes (adjust as needed)
+end
+"
+T8Ea2e58,chatgoto2,Reskatron,Lua,Monday 12th of February 2024 07:50:41 PM CDT,"-- Function to get the current GPS coordinates
+local function getCurrentCoordinates()
+    local x, y, z = gps.locate()
+    return x, y, z
+end
+
+-- Function to move the turtle to the specified GPS coordinates
+local function moveToCoordinates(targetX, targetY, targetZ)
+    local currentX, currentY, currentZ = getCurrentCoordinates()
+
+    if not currentX then
+        print(""GPS signal not found. Please ensure that the turtle has a clear view of the sky."")
+        return
+    end
+
+    -- Calculate the difference in coordinates
+    local deltaX = targetX - currentX
+    local deltaY = targetY - currentY
+    local deltaZ = targetZ - currentZ
+
+    -- Move the turtle to the target coordinates
+    moveAlongPath(deltaX, deltaY, deltaZ)
+end
+
+-- Function to move the turtle along the calculated path
+local function moveAlongPath(deltaX, deltaY, deltaZ)
+    -- Move the turtle to the target X coordinate
+    moveToAxis(""x"", deltaX)
+
+    -- Move the turtle to the target Y coordinate
+    moveToAxis(""y"", deltaY)
+
+    -- Move the turtle to the target Z coordinate
+    moveToAxis(""z"", deltaZ)
+end
+
+-- Function to move the turtle along a specific axis
+local function moveToAxis(axis, distance)
+    local moveFunction = {
+        x = turtle.forward,
+        y = distance > 0 and turtle.up or turtle.down,
+        z = distance > 0 and turtle.forward or turtle.back,
+    }
+
+    local turnFunction = {
+        x = turtle.turnRight,
+        y = turtle.turnUp,
+        z = turtle.turnRight,
+    }
+
+    local moveDirection = distance > 0 and 1 or -1
+
+    for _ = 1, math.abs(distance) do
+        moveFunction[axis]()
+    end
+
+    turnFunction[axis]()
+end
+
+-- Prompt the user for target GPS coordinates
+print(""Enter the target GPS coordinates:"")
+print(""X: "")
+local targetX = tonumber(read())
+print(""Y: "")
+local targetY = tonumber(read())
+print(""Z: "")
+local targetZ = tonumber(read())
+
+-- Call the function to move the turtle to the target coordinates
+if targetX and targetY and targetZ then
+    moveToCoordinates(targetX, targetY, targetZ)
+else
+    print(""Invalid coordinates. Please enter numerical values."")
+end
+"
+Qk2cCV3D,Untitled,JanisPlayer,Bash,Monday 12th of February 2024 07:15:50 PM CDT,"#Für alle, die Speicher sparen wollen:
+for file in *.png; do
+    cwebp -lossless ""$file"" -o ""${file%.png}.webp"" -metadata all -q 100 && touch -r ""$file"" ""${file%.png}.webp"" && [ -e ""${file%.png}.webp"" ] && [ ""$(stat -c%s ""${file%.png}.webp"")"" -gt 0 ] && rm ""$file""
+done
+
+#Nur wenn kleiner lossless:
+for file in *.png; do
+    cwebp -lossless ""$file"" -o ""${file%.png}.webp"" -metadata all -q 100 -z 9 && touch -r ""$file"" ""${file%.png}.webp""
+    
+    if [ -e ""${file%.png}.webp"" ] && [ ""$(stat -c%s ""${file%.png}.webp"")"" -gt 0 ] && [ ""$(stat -c%s ""$file"")"" -gt ""$(stat -c%s ""${file%.png}.webp"")"" ]; then
+        rm ""$file""
+    else
+        rm ""${file%.png}.webp""
+    fi
+done
+
+#Für JPEG 100% Qualität:
+for file in *.jpg; do
+    cwebp ""$file"" -o ""${file%.jpg}.webp"" -metadata all -q 100 -z 9 && touch -r ""$file"" ""${file%.jpg}.webp""
+    
+    if [ -e ""${file%.jpg}.webp"" ] && [ ""$(stat -c%s ""${file%.jpg}.webp"")"" -gt 0 ] && [ ""$(stat -c%s ""$file"")"" -gt ""$(stat -c%s ""${file%.jpg}.webp"")"" ]; then
+        rm ""$file""
+    else
+        rm ""${file%.jpg}.webp""
+    fi
+done
+
+#Für JPEG als AVIF mit QL 18:
+for file in *.jpg; do
+    avifenc ""$file"" -o ""${file%.jpg}.avif"" --min 0 --max 18 -s 1 -j 8 && touch -r ""$file"" ""${file%.jpg}.avif""
+    
+    if [ -e ""${file%.jpg}.avif"" ] && [ ""$(stat -c%s ""${file%.jpg}.avif"")"" -gt 0 ] && [ ""$(stat -c%s ""$file"")"" -gt ""$(stat -c%s ""${file%.jpg}.avif"")"" ]; then
+        rm ""$file""
+    else
+        rm ""${file%.jpg}.avif""
+    fi
+done
+
+#Für fast verlustfreies AVIF:
+for file in *.jpg; do
+    avifenc ""$file"" -o ""${file%.jpg}.avif"" --min 0 --max 0 -s 1 && touch -r ""$file"" ""${file%.jpg}.avif""
+    
+    if [ -e ""${file%.jpg}.avif"" ] && [ ""$(stat -c%s ""${file%.jpg}.avif"")"" -gt 0 ] && [ ""$(stat -c%s ""$file"")"" -gt ""$(stat -c%s ""${file%.jpg}.avif"")"" ]; then
+        rm ""$file""
+    else
+        rm ""${file%.jpg}.avif""
+    fi
+done"
+ukUmkMeE,Day 11 Cipher,HarrJ,Java,Monday 12th of February 2024 07:00:10 PM CDT,"public class Day11A {
+    public static void main(String[] args) {
+        CaesarCipher callCipher = new CaesarCipher();
+        String refTxt = ""Joysis B8"";
+        String resultTxt;
+        callCipher.setTxtIn(refTxt);
+        callCipher.setIsEncrypt(true);
+        resultTxt = callCipher.getTxtOut();
+        System.out.println(""reference: "" + refTxt);
+        System.out.println(""result: "" + resultTxt);
+    }
+}
+
+class CaesarCipher {
+    private String txtIn;
+    private String txtOut;
+    private boolean isEncrypt;
+
+    /**
+     * @param txtIn the txtIn to set
+     */
+    public void setTxtIn(String txtIn) {
+        this.txtIn = txtIn;
+    }
+
+    /**
+     * @return the txtOut
+     */
+    public String getTxtOut() {
+        if (isEncrypt) {
+            encode();
+        }
+        return txtOut;
+    }
+
+    /**
+     * @param isEncrypt the isEncrypt to set
+     */
+    public void setIsEncrypt(boolean isEncrypt) {
+        this.isEncrypt = isEncrypt;
+    }
+    
+    private void encode() {
+        int direction = -3;
+        char[] txtArray = txtIn.toCharArray();
+        for (int i = 0; i < txtArray.length; i++) {
+            if ( (____ && _____) || (_____ && ______)) { // D~Z d~z
+                txtArray[i] += direction;
+            } else if ((____ && _____) || (_____ && ______)) { // ABC abc
+                txtArray[i] += 23;
+            }
+        }
+        txtOut = new String(txtArray);
+    }
+}
+
+//--------------------------------------------
+public class Day11C {
+    public static void main(String[] args) {
+        int num1 = 12, num2 = 0, numRes;
+        //String test = ""123.66"";
+        //System.out.println(test + "" : "" + NumberUtils.isCreatable(test));
+        //test = ""-123.66"";
+        //System.out.println(test + "" : "" + NumberUtils.isCreatable(test));
+        //test = ""123.66a"";
+        //System.out.println(test + "" : "" + NumberUtils.isCreatable(test));
+        
+        try {
+            numRes = num1 + num2;
+            System.out.println(""result +: "" + numRes);
+            numRes = num1 / num2;
+            System.out.println(""result /: "" + numRes);
+            numRes = num1 - num2;
+            System.out.println(""result -: "" + numRes);
+        } catch (Exception e) {
+            System.out.println(""ay may mali"");
+            System.out.println(e);
+        }
+    }
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+package week2;
+
+public class Day11D {
+    public static void main(String[] args) {
+        String[] numList = {""12"", ""42"" ,""3E"", ""55"", ""twelve"", ""88""};
+        int currNum, total = 0;
+        for (int i = 0; i <= numList.length; i++) {
+            try {
+                currNum = Integer.parseInt(numList[i]);
+                total += currNum;
+                System.out.print(currNum + (i < numList.length ? "" + "" : "" = ""));
+            } catch (Exception e) {
+                System.out.println("">> "" + e.toString());
+            }
+        }
+        
+        System.out.println(""Total: "" + total);
+    }
+}
+"
+5Kx42xHS,Untitled,smj007,Python,Monday 12th of February 2024 06:45:54 PM CDT,"class Solution:
+    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:
+
+        # DP with memoization
+        # state: 0 - unvisited
+        # state: 1 - visited but not finished
+        # state: 2 - visited and finished
+        visit = [0]*numCourses
+        from collections import defaultdict
+        mapping = defaultdict(list)
+        for (crs, prereq) in prerequisites:
+            mapping[crs].append(prereq)
+
+        def dfs(course):
+            if visit[course] == 1:
+                return False
+
+            if visit[course] == 2:
+                return True
+
+            visit[course] = 1
+
+            for neighbour in mapping[course]:
+                run = dfs(neighbour)
+                if run is False:
+                    return False
+
+            visit[course] = 2
+            return True
+
+        for crs in range(numCourses):
+            run = dfs(crs)
+            if run is False:
+                return False
+
+        return True"
+VsA2BKAP,2024-02-12_stats.json,rdp_snitch,JSON,Monday 12th of February 2024 06:18:29 PM CDT,"{
+  ""ip"": {
+    ""172.105.117.9"": 12,
+    ""87.251.75.145"": 9,
+    ""205.210.31.83"": 9,
+    ""185.196.220.41"": 9,
+    ""139.59.185.252"": 6,
+    ""193.142.146.227"": 9,
+    ""87.251.75.64"": 3,
+    ""45.227.254.55"": 6,
+    ""45.227.254.48"": 12,
+    ""212.70.149.142"": 12,
+    ""185.161.248.148"": 3,
+    ""87.251.75.120"": 6,
+    ""185.170.144.3"": 6,
+    ""45.135.201.151"": 3,
+    ""205.210.31.86"": 9,
+    ""190.124.32.18"": 6,
+    ""39.98.127.243"": 9,
+    ""101.200.195.82"": 3,
+    ""123.212.240.162"": 3,
+    ""185.122.204.98"": 9,
+    ""62.204.41.107"": 6,
+    ""45.131.195.236"": 3,
+    ""185.36.81.28"": 3,
+    ""85.209.11.111"": 15,
+    ""118.194.236.137"": 3,
+    ""177.159.133.9"": 3,
+    ""179.60.147.47"": 21,
+    ""193.233.132.144"": 3,
+    ""205.210.31.72"": 9,
+    ""194.165.16.76"": 6,
+    ""173.239.214.97"": 3,
+    ""192.3.159.135"": 6,
+    ""193.233.21.155"": 3,
+    ""45.93.20.204"": 9,
+    ""198.235.24.176"": 9,
+    ""60.205.220.177"": 3
+  },
+  ""asn"": {
+    ""AS63949"": 12,
+    ""AS208091"": 18,
+    ""AS396982"": 36,
+    ""AS208046"": 18,
+    ""AS14061"": 6,
+    ""AS267784"": 18,
+    ""AS204428"": 12,
+    ""AS49202"": 3,
+    ""AS197414"": 6,
+    ""AS44486"": 3,
+    ""AS27742"": 6,
+    ""AS37963"": 15,
+    ""AS9318"": 3,
+    ""AS57523"": 33,
+    ""AS59425"": 6,
+    ""AS62240"": 6,
+    ""AS209605"": 3,
+    ""AS135377"": 3,
+    ""AS18881"": 3,
+    ""AS209588"": 21,
+    ""AS216319"": 3,
+    ""AS48721"": 6,
+    ""AS36352"": 6,
+    ""AS56380"": 3
+  },
+  ""isp"": {
+    ""Akamai Technologies"": 12,
+    ""Xhost Internet Solutions LP"": 24,
+    ""Google LLC"": 36,
+    ""ColocationX Ltd."": 18,
+    ""DIGITALOCEAN"": 6,
+    ""Flyservers S.A."": 45,
+    ""SS-Net"": 12,
+    ""Kisara LLC"": 3,
+    ""LIVINGBOTS"": 3,
+    ""Amnet Telecomunicaciones S.A."": 6,
+    ""Hangzhou Alibaba Advertising Co"": 15,
+    ""SK Broadband Co Ltd"": 3,
+    ""Chang Way Technologies Co. Limited"": 33,
+    ""Horizon LLC"": 6,
+    ""VPN"": 3,
+    ""SERVEROFFER LT"": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""TELEF\u00d4NICA BRASIL S.A"": 3,
+    ""Chromis IT LTD"": 3,
+    ""LogicWeb Inc."": 3,
+    ""HostPapa"": 6,
+    ""''IT FRUIT'' S.R.L."": 3
+  },
+  ""org"": {
+    ""Linode"": 12,
+    ""Xhost Internet Solutions"": 18,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Makut Investments"": 9,
+    ""DigitalOcean, LLC"": 6,
+    ""ColocationX Ltd"": 9,
+    ""UAB Host Baltic"": 18,
+    ""4Media Ltd"": 12,
+    ""Kisara LLC"": 3,
+    ""Xhostis"": 6,
+    ""Unknown"": 6,
+    ""Navega.com Nicaragua"": 6,
+    ""Aliyun Computing Co., LTD"": 15,
+    ""broadNnet"": 3,
+    ""Starcrecium Limited"": 18,
+    ""Horizon LLC"": 6,
+    ""VPN-Consumer-US"": 3,
+    ""Chang Way Technologies Co. Limited"": 15,
+    ""Ucloud Information Technology"": 3,
+    ""Global Village Telecom"": 3,
+    ""Cloud Solutions S.A"": 21,
+    ""1337 Hosting LTD"": 3,
+    ""Flyservers S.A"": 6,
+    ""NSQ-VENTURE"": 3,
+    ""RackNerd LLC"": 6,
+    ""FOP Dmytro Nedilskyi"": 3
+  },
+  ""regionName"": {
+    ""North West"": 12,
+    ""North Holland"": 33,
+    ""California"": 36,
+    ""Virginia"": 9,
+    ""England"": 9,
+    ""Vilnius"": 18,
+    ""Plovdiv"": 12,
+    ""Moscow"": 42,
+    ""Bremen"": 3,
+    ""Managua Department"": 6,
+    ""Beijing"": 15,
+    ""Gyeonggi-do"": 3,
+    ""New Jersey"": 6,
+    ""Kaunas"": 9,
+    ""Tokyo"": 3,
+    ""Goias"": 3,
+    ""Distrito Federal"": 21,
+    ""Texas"": 6,
+    ""Chi\u0219in\u0103u Municipality"": 3
+  },
+  ""country"": {
+    ""Singapore"": 12,
+    ""The Netherlands"": 33,
+    ""United States"": 57,
+    ""United Kingdom"": 9,
+    ""Lithuania"": 27,
+    ""Bulgaria"": 12,
+    ""Russia"": 42,
+    ""Germany"": 3,
+    ""Nicaragua"": 6,
+    ""China"": 15,
+    ""South Korea"": 3,
+    ""Japan"": 3,
+    ""Brazil"": 3,
+    ""Venezuela"": 21,
+    ""Moldova"": 3
+  },
+  ""account"": {
+    ""hello"": 36,
+    ""Administr"": 81,
+    ""dfosWaSAC"": 3,
+    ""kkbLJY"": 3,
+    ""ItiKVl"": 3,
+    ""Domain"": 42,
+    ""Test"": 36,
+    ""GxepTgSsc"": 3,
+    ""hrvEdd"": 3,
+    ""hznohn"": 3,
+    ""(empty)"": 9,
+    ""Administrator"": 3,
+    ""a"": 3,
+    ""WsDXMTz"": 3,
+    ""amDPsdhPC"": 3,
+    ""ITInFD"": 3,
+    ""fBJRHi"": 3,
+    ""SxOBUBdif"": 3,
+    ""QIbrZA"": 3,
+    ""yaEhLZ"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 249
+  },
+  ""client_build"": {
+    ""Unknown"": 249
+  },
+  ""client_name"": {
+    ""Unknown"": 249
+  },
+  ""ip_type"": {
+    ""hosting"": 78,
+    ""Unknown"": 123,
+    ""mobile"": 9,
+    ""proxy"": 33,
+    ""hosting & proxy"": 6
+  }
+}"
+7UtK50M6,2024-02-12_stats.json,rdp_snitch,JSON,Monday 12th of February 2024 06:16:13 PM CDT,"{
+  ""ip"": {
+    ""172.105.117.9"": 8,
+    ""87.251.75.145"": 6,
+    ""205.210.31.83"": 6,
+    ""185.196.220.41"": 6,
+    ""139.59.185.252"": 4,
+    ""193.142.146.227"": 6,
+    ""87.251.75.64"": 2,
+    ""45.227.254.55"": 4,
+    ""45.227.254.48"": 8,
+    ""212.70.149.142"": 8,
+    ""185.161.248.148"": 2,
+    ""87.251.75.120"": 4,
+    ""185.170.144.3"": 4,
+    ""45.135.201.151"": 2,
+    ""205.210.31.86"": 6,
+    ""190.124.32.18"": 4,
+    ""39.98.127.243"": 6,
+    ""101.200.195.82"": 2,
+    ""123.212.240.162"": 2,
+    ""185.122.204.98"": 6,
+    ""62.204.41.107"": 4,
+    ""45.131.195.236"": 2,
+    ""185.36.81.28"": 2,
+    ""85.209.11.111"": 10,
+    ""118.194.236.137"": 2,
+    ""177.159.133.9"": 2,
+    ""179.60.147.47"": 14,
+    ""193.233.132.144"": 2,
+    ""205.210.31.72"": 6,
+    ""194.165.16.76"": 4,
+    ""173.239.214.97"": 2,
+    ""192.3.159.135"": 4,
+    ""193.233.21.155"": 2,
+    ""45.93.20.204"": 6,
+    ""198.235.24.176"": 6,
+    ""60.205.220.177"": 2
+  },
+  ""asn"": {
+    ""AS63949"": 8,
+    ""AS208091"": 12,
+    ""AS396982"": 24,
+    ""AS208046"": 12,
+    ""AS14061"": 4,
+    ""AS267784"": 12,
+    ""AS204428"": 8,
+    ""AS49202"": 2,
+    ""AS197414"": 4,
+    ""AS44486"": 2,
+    ""AS27742"": 4,
+    ""AS37963"": 10,
+    ""AS9318"": 2,
+    ""AS57523"": 22,
+    ""AS59425"": 4,
+    ""AS62240"": 4,
+    ""AS209605"": 2,
+    ""AS135377"": 2,
+    ""AS18881"": 2,
+    ""AS209588"": 14,
+    ""AS216319"": 2,
+    ""AS48721"": 4,
+    ""AS36352"": 4,
+    ""AS56380"": 2
+  },
+  ""isp"": {
+    ""Akamai Technologies"": 8,
+    ""Xhost Internet Solutions LP"": 16,
+    ""Google LLC"": 24,
+    ""ColocationX Ltd."": 12,
+    ""DIGITALOCEAN"": 4,
+    ""Flyservers S.A."": 30,
+    ""SS-Net"": 8,
+    ""Kisara LLC"": 2,
+    ""LIVINGBOTS"": 2,
+    ""Amnet Telecomunicaciones S.A."": 4,
+    ""Hangzhou Alibaba Advertising Co"": 10,
+    ""SK Broadband Co Ltd"": 2,
+    ""Chang Way Technologies Co. Limited"": 22,
+    ""Horizon LLC"": 4,
+    ""VPN"": 2,
+    ""SERVEROFFER LT"": 2,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""TELEF\u00d4NICA BRASIL S.A"": 2,
+    ""Chromis IT LTD"": 2,
+    ""LogicWeb Inc."": 2,
+    ""HostPapa"": 4,
+    ""''IT FRUIT'' S.R.L."": 2
+  },
+  ""org"": {
+    ""Linode"": 8,
+    ""Xhost Internet Solutions"": 12,
+    ""Palo Alto Networks, Inc"": 24,
+    ""Makut Investments"": 6,
+    ""DigitalOcean, LLC"": 4,
+    ""ColocationX Ltd"": 6,
+    ""UAB Host Baltic"": 12,
+    ""4Media Ltd"": 8,
+    ""Kisara LLC"": 2,
+    ""Xhostis"": 4,
+    ""Unknown"": 4,
+    ""Navega.com Nicaragua"": 4,
+    ""Aliyun Computing Co., LTD"": 10,
+    ""broadNnet"": 2,
+    ""Starcrecium Limited"": 12,
+    ""Horizon LLC"": 4,
+    ""VPN-Consumer-US"": 2,
+    ""Chang Way Technologies Co. Limited"": 10,
+    ""Ucloud Information Technology"": 2,
+    ""Global Village Telecom"": 2,
+    ""Cloud Solutions S.A"": 14,
+    ""1337 Hosting LTD"": 2,
+    ""Flyservers S.A"": 4,
+    ""NSQ-VENTURE"": 2,
+    ""RackNerd LLC"": 4,
+    ""FOP Dmytro Nedilskyi"": 2
+  },
+  ""regionName"": {
+    ""North West"": 8,
+    ""North Holland"": 22,
+    ""California"": 24,
+    ""Virginia"": 6,
+    ""England"": 6,
+    ""Vilnius"": 12,
+    ""Plovdiv"": 8,
+    ""Moscow"": 28,
+    ""Bremen"": 2,
+    ""Managua Department"": 4,
+    ""Beijing"": 10,
+    ""Gyeonggi-do"": 2,
+    ""New Jersey"": 4,
+    ""Kaunas"": 6,
+    ""Tokyo"": 2,
+    ""Goias"": 2,
+    ""Distrito Federal"": 14,
+    ""Texas"": 4,
+    ""Chi\u0219in\u0103u Municipality"": 2
+  },
+  ""country"": {
+    ""Singapore"": 8,
+    ""The Netherlands"": 22,
+    ""United States"": 38,
+    ""United Kingdom"": 6,
+    ""Lithuania"": 18,
+    ""Bulgaria"": 8,
+    ""Russia"": 28,
+    ""Germany"": 2,
+    ""Nicaragua"": 4,
+    ""China"": 10,
+    ""South Korea"": 2,
+    ""Japan"": 2,
+    ""Brazil"": 2,
+    ""Venezuela"": 14,
+    ""Moldova"": 2
+  },
+  ""account"": {
+    ""hello"": 24,
+    ""Administr"": 54,
+    ""dfosWaSAC"": 2,
+    ""kkbLJY"": 2,
+    ""ItiKVl"": 2,
+    ""Domain"": 28,
+    ""Test"": 24,
+    ""GxepTgSsc"": 2,
+    ""hrvEdd"": 2,
+    ""hznohn"": 2,
+    ""(empty)"": 6,
+    ""Administrator"": 2,
+    ""a"": 2,
+    ""WsDXMTz"": 2,
+    ""amDPsdhPC"": 2,
+    ""ITInFD"": 2,
+    ""fBJRHi"": 2,
+    ""SxOBUBdif"": 2,
+    ""QIbrZA"": 2,
+    ""yaEhLZ"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 166
+  },
+  ""client_build"": {
+    ""Unknown"": 166
+  },
+  ""client_name"": {
+    ""Unknown"": 166
+  },
+  ""ip_type"": {
+    ""hosting"": 52,
+    ""Unknown"": 82,
+    ""mobile"": 6,
+    ""proxy"": 22,
+    ""hosting & proxy"": 4
+  }
+}"
+1vP5LvEb,2024-02-12_stats.json,rdp_snitch,JSON,Monday 12th of February 2024 06:15:09 PM CDT,"{
+  ""ip"": {
+    ""172.105.117.9"": 4,
+    ""87.251.75.145"": 3,
+    ""205.210.31.83"": 3,
+    ""185.196.220.41"": 3,
+    ""139.59.185.252"": 2,
+    ""193.142.146.227"": 3,
+    ""87.251.75.64"": 1,
+    ""45.227.254.55"": 2,
+    ""45.227.254.48"": 4,
+    ""212.70.149.142"": 4,
+    ""185.161.248.148"": 1,
+    ""87.251.75.120"": 2,
+    ""185.170.144.3"": 2,
+    ""45.135.201.151"": 1,
+    ""205.210.31.86"": 3,
+    ""190.124.32.18"": 2,
+    ""39.98.127.243"": 3,
+    ""101.200.195.82"": 1,
+    ""123.212.240.162"": 1,
+    ""185.122.204.98"": 3,
+    ""62.204.41.107"": 2,
+    ""45.131.195.236"": 1,
+    ""185.36.81.28"": 1,
+    ""85.209.11.111"": 5,
+    ""118.194.236.137"": 1,
+    ""177.159.133.9"": 1,
+    ""179.60.147.47"": 7,
+    ""193.233.132.144"": 1,
+    ""205.210.31.72"": 3,
+    ""194.165.16.76"": 2,
+    ""173.239.214.97"": 1,
+    ""192.3.159.135"": 2,
+    ""193.233.21.155"": 1,
+    ""45.93.20.204"": 3,
+    ""198.235.24.176"": 3,
+    ""60.205.220.177"": 1
+  },
+  ""asn"": {
+    ""AS63949"": 4,
+    ""AS208091"": 6,
+    ""AS396982"": 12,
+    ""AS208046"": 6,
+    ""AS14061"": 2,
+    ""AS267784"": 6,
+    ""AS204428"": 4,
+    ""AS49202"": 1,
+    ""AS197414"": 2,
+    ""AS44486"": 1,
+    ""AS27742"": 2,
+    ""AS37963"": 5,
+    ""AS9318"": 1,
+    ""AS57523"": 11,
+    ""AS59425"": 2,
+    ""AS62240"": 2,
+    ""AS209605"": 1,
+    ""AS135377"": 1,
+    ""AS18881"": 1,
+    ""AS209588"": 7,
+    ""AS216319"": 1,
+    ""AS48721"": 2,
+    ""AS36352"": 2,
+    ""AS56380"": 1
+  },
+  ""isp"": {
+    ""Akamai Technologies"": 4,
+    ""Xhost Internet Solutions LP"": 8,
+    ""Google LLC"": 12,
+    ""ColocationX Ltd."": 6,
+    ""DIGITALOCEAN"": 2,
+    ""Flyservers S.A."": 15,
+    ""SS-Net"": 4,
+    ""Kisara LLC"": 1,
+    ""LIVINGBOTS"": 1,
+    ""Amnet Telecomunicaciones S.A."": 2,
+    ""Hangzhou Alibaba Advertising Co"": 5,
+    ""SK Broadband Co Ltd"": 1,
+    ""Chang Way Technologies Co. Limited"": 11,
+    ""Horizon LLC"": 2,
+    ""VPN"": 1,
+    ""SERVEROFFER LT"": 1,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""TELEF\u00d4NICA BRASIL S.A"": 1,
+    ""Chromis IT LTD"": 1,
+    ""LogicWeb Inc."": 1,
+    ""HostPapa"": 2,
+    ""''IT FRUIT'' S.R.L."": 1
+  },
+  ""org"": {
+    ""Linode"": 4,
+    ""Xhost Internet Solutions"": 6,
+    ""Palo Alto Networks, Inc"": 12,
+    ""Makut Investments"": 3,
+    ""DigitalOcean, LLC"": 2,
+    ""ColocationX Ltd"": 3,
+    ""UAB Host Baltic"": 6,
+    ""4Media Ltd"": 4,
+    ""Kisara LLC"": 1,
+    ""Xhostis"": 2,
+    ""Unknown"": 2,
+    ""Navega.com Nicaragua"": 2,
+    ""Aliyun Computing Co., LTD"": 5,
+    ""broadNnet"": 1,
+    ""Starcrecium Limited"": 6,
+    ""Horizon LLC"": 2,
+    ""VPN-Consumer-US"": 1,
+    ""Chang Way Technologies Co. Limited"": 5,
+    ""Ucloud Information Technology"": 1,
+    ""Global Village Telecom"": 1,
+    ""Cloud Solutions S.A"": 7,
+    ""1337 Hosting LTD"": 1,
+    ""Flyservers S.A"": 2,
+    ""NSQ-VENTURE"": 1,
+    ""RackNerd LLC"": 2,
+    ""FOP Dmytro Nedilskyi"": 1
+  },
+  ""regionName"": {
+    ""North West"": 4,
+    ""North Holland"": 11,
+    ""California"": 12,
+    ""Virginia"": 3,
+    ""England"": 3,
+    ""Vilnius"": 6,
+    ""Plovdiv"": 4,
+    ""Moscow"": 14,
+    ""Bremen"": 1,
+    ""Managua Department"": 2,
+    ""Beijing"": 5,
+    ""Gyeonggi-do"": 1,
+    ""New Jersey"": 2,
+    ""Kaunas"": 3,
+    ""Tokyo"": 1,
+    ""Goias"": 1,
+    ""Distrito Federal"": 7,
+    ""Texas"": 2,
+    ""Chi\u0219in\u0103u Municipality"": 1
+  },
+  ""country"": {
+    ""Singapore"": 4,
+    ""The Netherlands"": 11,
+    ""United States"": 19,
+    ""United Kingdom"": 3,
+    ""Lithuania"": 9,
+    ""Bulgaria"": 4,
+    ""Russia"": 14,
+    ""Germany"": 1,
+    ""Nicaragua"": 2,
+    ""China"": 5,
+    ""South Korea"": 1,
+    ""Japan"": 1,
+    ""Brazil"": 1,
+    ""Venezuela"": 7,
+    ""Moldova"": 1
+  },
+  ""account"": {
+    ""hello"": 12,
+    ""Administr"": 27,
+    ""dfosWaSAC"": 1,
+    ""kkbLJY"": 1,
+    ""ItiKVl"": 1,
+    ""Domain"": 14,
+    ""Test"": 12,
+    ""GxepTgSsc"": 1,
+    ""hrvEdd"": 1,
+    ""hznohn"": 1,
+    ""(empty)"": 3,
+    ""Administrator"": 1,
+    ""a"": 1,
+    ""WsDXMTz"": 1,
+    ""amDPsdhPC"": 1,
+    ""ITInFD"": 1,
+    ""fBJRHi"": 1,
+    ""SxOBUBdif"": 1,
+    ""QIbrZA"": 1,
+    ""yaEhLZ"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 83
+  },
+  ""client_build"": {
+    ""Unknown"": 83
+  },
+  ""client_name"": {
+    ""Unknown"": 83
+  },
+  ""ip_type"": {
+    ""hosting"": 26,
+    ""Unknown"": 41,
+    ""mobile"": 3,
+    ""proxy"": 11,
+    ""hosting & proxy"": 2
+  }
+}"
+xBeyAY9D,Untitled,Happypea,ECMAScript,Monday 12th of February 2024 04:39:05 PM CDT,"[
+    ""Congratulations you are viewer 69.696.969, please DM Falken to receive a used cake sock"",
+    ""Is not always about cake"",
+	""Cake may be AFK at the moment, they will reply in 1-7 days"",
+	""Miss Cakey if you are nasty"",
+	""Lord Cake, ruler of the bloons, brb aficionado"",
+	""I'm not cake"",
+	""cakekaCake""
+]"
+dfNTeVnX,Untitled,smj007,Python,Monday 12th of February 2024 04:37:31 PM CDT,"# mine
+class Solution:
+    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:
+        
+        wordList.append(beginWord)
+        from collections import defaultdict
+        mapping = defaultdict(list) 
+
+        for word in wordList:
+            for j in range(len(word)):
+                pattern = word[:j] + ""*"" + word[j+1:]
+                mapping[pattern].append(word)
+
+        
+        from collections import deque
+        q = deque()
+        visited = set()
+        q.append(word)
+        visited.add(word)
+        res = 1
+
+        while q:
+            if endWord in q:
+                return res
+
+            for i in range(len(q)):
+                word = q.popleft()
+
+                for j in range(len(word)):
+                    pattern = word[:j] + ""*"" + word[j+1:]
+                    for neighbour in mapping[pattern]:
+                        if neighbour not in visited:
+                            q.append(neighbour)
+                            visited.add(neighbour)
+            res += 1
+
+        return 0
+
+
+# neetcode
+class Solution:
+    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:
+        if endWord not in wordList:
+            return 0
+
+        nei = collections.defaultdict(list)
+        wordList.append(beginWord)
+        for word in wordList:
+            for j in range(len(word)):
+                pattern = word[:j] + ""*"" + word[j + 1 :]
+                nei[pattern].append(word)
+
+        visit = set([beginWord])
+        q = deque([beginWord])
+        res = 1
+        while q:
+            for i in range(len(q)):
+                word = q.popleft()
+                if word == endWord:
+                    return res
+                for j in range(len(word)):
+                    pattern = word[:j] + ""*"" + word[j + 1 :]
+                    for neiWord in nei[pattern]:
+                        if neiWord not in visit:
+                            visit.add(neiWord)
+                            q.append(neiWord)
+            res += 1
+        return 0"
+PXQEvuZE,Untitled,Nenogzar,Python,Monday 12th of February 2024 03:55:49 PM CDT,"# Функция за намиране на началната позиция на ""k"" в лабиринта
+def find_position(maze):
+    position = []
+    for row in range(len(maze)):
+        for el in maze[row]:
+            if el == 'k':
+                position.append(row)
+                position.append(maze[row].find('k'))
+                return position
+
+# Функция за намиране на свободните позиции (' ') в лабиринта
+def next_free_spot(maze):
+    free_spots = []
+
+    for row in range(len(maze)):
+        for el in range(len(maze[row])):
+            tmp = []
+            if maze[row][el] == ' ':
+                tmp.append(row)
+                tmp.append(el)
+                free_spots.append(tmp)
+
+    return free_spots
+
+# Функция за намиране на пътя в лабиринта
+def find_path(position, next_free, maze):
+    moves = 0
+
+    while next_free:
+        x1, x2 = next_free.pop(0)
+
+        # Проверка за движение наляво
+        if position[0] == x1 and position[1] - x2 == 1:
+            position = [x1, x2]
+            moves += 1
+        # Проверка за движение надясно
+        elif position[0] == x1 and x2 - position[1] == 1:
+            position = [x1, x2]
+            moves += 1
+        # Проверка за движение надолу
+        elif x1 - position[0] == 1 and position[1] == x2:
+            position = [x1, x2]
+            moves += 1
+        # Проверка за движение нагоре
+        elif position[0] - x1 == 1 and position[1] == x2:
+            position = [x1, x2]
+            moves += 1
+
+    # Проверка за излизане от лабиринта
+    if position[0] == 0 or position[0] == (len(maze) - 1) or position[1] == 0 or position[1] == len(maze[0]):
+        return f'Kate got out in {moves + 1} moves'
+    
+    return 'Kate cannot get out'
+
+
+m_rows = int(input())
+maze = []
+moves = 0
+free_space = True
+
+
+for row in range(m_rows):
+    maze.append(input())
+
+
+position = find_position(maze)
+next_free = next_free_spot(maze)
+movement = find_path(position, next_free, maze)
+print(movement)
+"
+9jEmYrbh,weirdly sized sprites,CreativeMasterBonin,Java,Monday 12th of February 2024 02:47:05 PM CDT,"package net.rk.thingamajigs.gui;
+
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
+
+public class TrafficSignalBEScreen extends AbstractContainerScreen<TrafficSignalBEMenu> {
+    private static final ResourceLocation TRAFFIC_SIGNAL_BG = new ResourceLocation(""thingamajigs:textures/gui/traffic_signal.png"");
+    private static final ResourceLocation RED_LIGHT =
+            new ResourceLocation(""thingamajigs:textures/gui/sprites/container/traffic_signal/red_light.png"");
+    private static final ResourceLocation YELLOW_LIGHT =
+            new ResourceLocation(""thingamajigs:textures/gui/sprites/container/traffic_signal/yellow_light.png"");
+    private static final ResourceLocation GREEN_LIGHT =
+            new ResourceLocation(""thingamajigs:textures/gui/sprites/container/traffic_signal/green_light.png"");
+    private static final ResourceLocation ARROW =
+            new ResourceLocation(""thingamajigs:textures/gui/sprites/container/traffic_signal/arrow.png"");
+    private static final ResourceLocation FLASHER =
+            new ResourceLocation(""thingamajigs:textures/gui/sprites/container/traffic_signal/flasher.png"");
+
+    private static final int fakeItemSpriteY = 20;
+
+    public TrafficSignalBEScreen(TrafficSignalBEMenu tsbemenu, Inventory inv1, Component comp) {
+        super(tsbemenu, inv1, comp);
+        this.imageHeight = 133;
+        this.inventoryLabelX = 8;
+        this.inventoryLabelY = this.imageHeight - 94;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+    }
+
+    @Override
+    public void render(GuiGraphics guiGraphics, int i1, int i2, float f1) {
+        super.render(guiGraphics, i1, i2, f1);
+        this.renderTooltip(guiGraphics, i1, i2);
+        guiGraphics.blit(RED_LIGHT, 44, fakeItemSpriteY, 0, 0, this.imageWidth, this.imageHeight);
+        guiGraphics.blit(YELLOW_LIGHT, 62, fakeItemSpriteY, 0, 0, this.imageWidth, this.imageHeight);
+        guiGraphics.blit(GREEN_LIGHT, 80, fakeItemSpriteY, 0, 0, this.imageWidth, this.imageHeight);
+        guiGraphics.blit(ARROW, 98, fakeItemSpriteY, 0, 0, this.imageWidth, this.imageHeight);
+        guiGraphics.blit(FLASHER, 116, fakeItemSpriteY, 0, 0, this.imageWidth, this.imageHeight);
+    }
+
+    @Override
+    protected void renderBg(GuiGraphics guiGraphics2, float f2, int i3, int i4) {
+        int i = (this.width - this.imageWidth) / 2;
+        int j = (this.height - this.imageHeight) / 2;
+        guiGraphics2.blit(TRAFFIC_SIGNAL_BG, i, j, 0, 0, this.imageWidth, this.imageHeight);
+    }
+}
+"
+r2vUxbhx,Untitled,Josif_tepe,C++,Monday 12th of February 2024 02:05:07 PM CDT,"#include <iostream>
+//#include <bits/stdc++.h>
+
+using namespace std;
+long long sleden_deliv_so_5(long long x) {
+    while(x % 5 != 0) {
+        x++;
+    }
+    return x;
+}
+long long prethoden_deliv_so_5(long long x) {
+    while(x % 5 != 0) {
+        x--;
+    }
+    return x;
+}
+int main() {
+    long long x, y;
+    cin >> x >> y;
+    
+    long long minimum = ceil(20.0 * x / 19.0);
+    long long maksimum = floor(10.0 * x / 9.0);
+    
+    if(maksimum > y) {
+        maksimum = y;
+    }
+    
+    if(minimum % 5 != 0){
+        minimum = sleden_deliv_so_5(minimum);
+    }
+    if(maksimum % 5 != 0) {
+        maksimum = prethoden_deliv_so_5(maksimum);
+    }
+    
+    if(minimum > maksimum) {
+        cout << 0 << endl;
+    }
+    else {
+        cout << (maksimum - minimum) / 5 + 1 << endl;
+    }
+    
+  
+}
+"
+sMGvnBBK,Interview Task,sanya5791,JSON,Monday 12th of February 2024 01:33:13 PM CDT,"{
+  ""status"": ""OK"",
+  ""copyright"": ""Copyright (c) 2022 The New York Times Company.  All Rights Reserved."",
+  ""num_results"": 59,
+  ""results"": [
+      {
+      ""list_name"": ""Young Adult"",
+      ""display_name"": ""Young Adult"",
+      ""list_name_encoded"": ""young-adult"",
+      ""oldest_published_date"": ""2012-12-16"",
+      ""newest_published_date"": ""2015-08-23"",
+      ""updated"": ""WEEKLY""
+    },
+    {
+      ""list_name"": ""Young Adult E-Book"",
+      ""display_name"": ""Young Adult E-Book"",
+      ""list_name_encoded"": ""young-adult-e-book"",
+      ""oldest_published_date"": ""2015-08-30"",
+      ""newest_published_date"": ""2017-01-29"",
+      ""updated"": ""WEEKLY""
+    },
+    {
+      ""list_name"": ""Young Adult Hardcover"",
+      ""display_name"": ""Young Adult Hardcover"",
+      ""list_name_encoded"": ""young-adult-hardcover"",
+      ""oldest_published_date"": ""2015-08-30"",
+      ""newest_published_date"": ""2022-10-23"",
+      ""updated"": ""WEEKLY""
+    },
+    {
+      ""list_name"": ""Young Adult Paperback"",
+      ""display_name"": ""Young Adult Paperback"",
+      ""list_name_encoded"": ""young-adult-paperback"",
+      ""oldest_published_date"": ""2015-08-30"",
+      ""newest_published_date"": ""2017-01-29"",
+      ""updated"": ""WEEKLY""
+    },
+    {
+      ""list_name"": ""Animals"",
+      ""display_name"": ""Animals"",
+      ""list_name_encoded"": ""animals"",
+      ""oldest_published_date"": ""2014-09-07"",
+      ""newest_published_date"": ""2017-01-15"",
+      ""updated"": ""MONTHLY""
+    },
+    {
+      ""list_name"": ""Audio Fiction"",
+      ""display_name"": ""Audio Fiction"",
+      ""list_name_encoded"": ""audio-fiction"",
+      ""oldest_published_date"": ""2018-03-11"",
+      ""newest_published_date"": ""2022-10-16"",
+      ""updated"": ""MONTHLY""
+    },
+    {
+      ""list_name"": ""Audio Nonfiction"",
+      ""display_name"": ""Audio Nonfiction"",
+      ""list_name_encoded"": ""audio-nonfiction"",
+      ""oldest_published_date"": ""2018-03-11"",
+      ""newest_published_date"": ""2022-10-16"",
+      ""updated"": ""MONTHLY""
+    }
+  ]
+}
+"
+ULvpsP5Q,endgame,max2201111,Python,Monday 12th of February 2024 01:28:46 PM CDT,"import chess
+import time
+
+def ddfs(board, depth, is_white_turn):
+    if board.is_checkmate():
+        return True, []
+    if depth == 0 or board.is_game_over():
+        return False, []
+    legal_moves = list(board.legal_moves)
+    for move in legal_moves:
+        board.push(move)
+        found_mate, mate_path = ddfs(board, depth - 1, not is_white_turn)
+        board.pop()
+        if found_mate:
+            return True, [move] + mate_path
+    return False, []
+
+def iterative_deepening_dfs(board):
+    depth = 0
+    while True:
+        found_mate, mate_sequence = ddfs(board.copy(), depth, board.turn == chess.WHITE)
+        if found_mate:
+            return depth, mate_sequence
+        depth += 1
+
+def print_move_sequence(board, move_sequence):
+    print(""Initial board state:"")
+    print(board, ""\n"")
+    for move in move_sequence:
+        if board.is_legal(move):
+            board.push(move)
+            print(f""Move {board.san(move)}:"")
+            print(board, ""\n"")
+        else:
+            print(""An illegal move found in the sequence, which should not happen."")
+            break
+
+def main():
+    initial_fen = ""6k1/8/5K2/2Q5/8/8/8/8 w - - 0 1""
+    board = chess.Board(initial_fen)
+
+    start_time = time.time()
+    mate_depth, mate_sequence = iterative_deepening_dfs(board)
+    elapsed_time = time.time() - start_time
+
+    if mate_depth is not None:
+        print(f""Mate found in {mate_depth} move(s), time taken: {elapsed_time:.2f} seconds."")
+        board.reset()
+        board.set_fen(initial_fen)  # Reset the board to initial state
+        print_move_sequence(board, mate_sequence)
+    else:
+        print(""No mate found."")
+
+if __name__ == ""__main__"":
+    main()"
+uYm47mwu,Untitled,Josif_tepe,C++,Monday 12th of February 2024 01:27:20 PM CDT,"#include <iostream>
+#include <vector>
+using namespace std;
+
+int main() {
+    int n;
+    cin >> n;
+    
+    int rodendni[13][32];
+    for(int i = 1; i <= 12; i++) {
+        for(int j = 1; j <= 31; j++) {
+            rodendni[i][j] = 0;
+        }
+    }
+    for(int i = 0; i < n; i++) {
+        int x, y;
+        cin >> x >> y;
+        rodendni[y][x] = 1;
+    }
+    int max_brojac = 0;
+    vector<int> meseci;
+    for(int mesec = 1; mesec <= 12; mesec++) {
+        int brojac = 0;
+        for(int den = 1; den <= 31; den++) {
+            if(rodendni[mesec][den] == 1) {
+                brojac++;
+            }
+        }
+        if(brojac > max_brojac) {
+            max_brojac = brojac;
+            meseci.clear();
+            meseci.push_back(mesec);
+        }
+        else if(brojac == max_brojac) {
+            meseci.push_back(mesec);
+        }
+    }
+    for(int i = 0; i < meseci.size(); i++) {
+        cout << meseci[i] << endl;
+    }
+ 
+    
+    return 0;
+}
+"
+Gprg2xBj,Untitled,Josif_tepe,C++,Monday 12th of February 2024 01:23:31 PM CDT,"#include <iostream>
+#include <vector>
+using namespace std;
+
+int main() {
+    int n;
+    cin >> n;
+    
+    int rodendni[13][32];
+    for(int i = 1; i <= 12; i++) {
+        for(int j = 1; j <= 31; j++) {
+            rodendni[i][j] = 0;
+        }
+    }
+    for(int i = 0; i < n; i++) {
+        int x, y;
+        cin >> x >> y;
+        rodendni[y][x] = 1;
+    }
+    int max_brojac = 0;
+    for(int mesec = 1; mesec <= 12; mesec++) {
+        int brojac = 0;
+        for(int den = 1; den <= 31; den++) {
+            if(rodendni[mesec][den] == 1) {
+                brojac++;
+            }
+        }
+        max_brojac = max(max_brojac, brojac);
+    }
+    for(int mesec = 1; mesec <= 12; mesec++) {
+        int brojac = 0;
+        for(int den = 1; den <= 31; den++) {
+            if(rodendni[mesec][den] == 1) {
+                brojac++;
+            }
+        }
+        
+        if(max_brojac == brojac) {
+            cout << mesec << endl;
+        }
+    }
+    
+    return 0;
+}
+"
+ubTaF7Uv,Untitled,Nenogzar,Python,Monday 12th of February 2024 01:05:48 PM CDT,"numbers = [int(n) for n in input().split("", "")]
+check_numbers = list()
+
+for number in range(1, 10 + 1):
+    check_numbers.clear()
+    if len(numbers) != 0:
+        for num in numbers:
+            if int(num) <= number * 10:
+                check_numbers.append(num)
+        for d in check_numbers:
+            numbers.remove(d)
+
+        print(f""Group of {number * 10}'s: {check_numbers}"")"
+srkswb5j,miriLawnMawer,VladNitu,C++,Monday 12th of February 2024 12:48:01 PM CDT,"#include <cstdio>
+#include <algorithm>
+#include <vector>
+#include <string>
+#include <cstring>
+
+using namespace std;
+
+const int maxn = 2000;
+
+int a[maxn + 5][maxn + 5];
+int b[maxn + 5][maxn + 5];
+long long sums[maxn + 5];
+long long spLin[maxn + 5][maxn + 5];
+long long spCol[maxn + 5][maxn + 5];
+
+void rotateMatrix(int n, int m) {
+    for (int i = 1; i <= n; ++i)
+        for (int j = 1; j <= m; ++j)
+            b[j][i] = a[i][j];
+    for (int i = 1; i <= m; ++i)
+        for (int j = 1; j <= n; ++j)
+            a[i][j] = b[i][j];
+}
+
+
+int solve(int n, int m, int k) {
+    memset(spLin, 0, sizeof(spLin));
+    memset(spCol, 0, sizeof(spCol));
+    for (int i = 1; i <= n; ++i) {
+        for (int j = 1; j <= m; ++j) {
+            spLin[i][j] = spLin[i][j - 1] + a[i][j];
+            spCol[i][j] = spCol[i - 1][j] + a[i][j];
+        }
+    }
+    int best_ans = n * m;
+    for (int max_rem_left = 0; max_rem_left < m; ++max_rem_left) {
+        int up = 0, down = 0, left = 0, right = 0;
+        int ans = 0;
+        while (up + down < n) {
+            if (spLin[up + 1][m - right] - spLin[up + 1][left] <= k) {
+                up++;
+                ans++;
+            } else if (spLin[n - down][m - right] - spLin[n - down][left] <= k) {
+                down++;
+                ans++;
+            } else if (spCol[n - down][left + 1] - spCol[up][left + 1] <= k && left < max_rem_left) {
+                left++;
+                ans++;
+            } else if (spCol[n - down][m - right] - spCol[up][m - right] <= k) {
+                right++;
+                ans++;
+            } else {
+                break;
+            }
+        }
+        if (up + down == n)
+            best_ans = min(best_ans, ans);
+    }
+    return best_ans;
+}
+
+int main() {
+//    freopen(""date.in"", ""r"", stdin);
+    int k, m, n;
+    scanf(""%d%d%d"", &k, &m, &n);
+    for (int i = 1; i <= n; ++i)
+        for (int j = 1; j <= m; ++j)
+            scanf(""%d"", &a[i][j]);
+
+    int ans = solve(n, m, k);
+    rotateMatrix(n, m);
+    ans = min(ans, solve(m, n, k));
+
+    printf(""%d\n"", ans);
+
+    return 0;
+}
+"
