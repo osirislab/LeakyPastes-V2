@@ -1,0 +1,4175 @@
+id,title,username,language,date,content
+GT2Ex119,Review ATC Brokers,fxvnpro,PHP,Friday 22nd of March 2024 12:57:56 PM CDT,https://www.fxvnpro.com/review-atc-brokers/
+wx36AWqc,Review ATC Brokers,reviewbrokers,PHP,Friday 22nd of March 2024 12:57:23 PM CDT,https://www.reviewbrokers.net/review-atc-brokers/
+xbN0MtMx,Untitled,yasi04,Python,Friday 22nd of March 2024 12:46:29 PM CDT,"import os
+from dotenv import load_dotenv
+import disnake
+import asyncio
+import sqlite3
+from disnake.ext import commands
+
+load_dotenv()
+
+bot = commands.Bot(command_prefix=""!"", help_command=None, intents=disnake.Intents.all())
+
+conn = sqlite3.connect('filters.db')
+c = conn.cursor()
+
+c.execute('''CREATE TABLE IF NOT EXISTS text_filters 
+             (channel_id INTEGER PRIMARY KEY, filters TEXT)''')
+
+c.execute('''CREATE TABLE IF NOT EXISTS link_filters 
+             (channel_id INTEGER PRIMARY KEY, filters TEXT)''')
+
+conn.commit()
+
+
+@bot.event
+async def on_ready():
+    print(f""Bot {bot.user} is ready to work!"")
+
+
+@bot.event
+async def on_message(message):
+    if message.author == message.guild.owner:
+        return
+    if message.author == bot.user:
+        await asyncio.sleep(120)
+        await message.delete()
+        return
+
+    c.execute(""SELECT filters FROM link_filters WHERE channel_id = ?"", (message.channel.id,))
+    row = c.fetchone()
+    if row:
+        filters = row[0].split(';')
+        if message.content.startswith(""http://"") or message.content.startswith(""https://""):
+            flag = True
+            for word in filters:
+                if word == message.content.split('/')[2]:
+                    flag = False
+                    return
+            if flag:
+                await message.delete()
+                await message.channel.send(f""*В этом канале доступны только* `{filters}`, *Другое не разрешено XD*"")
+                return
+
+    c.execute(""SELECT filters FROM text_filters WHERE channel_id = ?"", (message.channel.id,))
+    row = c.fetchone()
+    if row:
+        text_filters = row[0].split(';')
+        flag = True
+        if message.content.split(' ')[0] in text_filters:
+            flag = False
+            return
+        if flag:
+            await message.delete()
+            await message.channel.send(f""*В этом канале доступны только* `{text_filters}`, *Другое не разрешено XD*"")
+            return
+
+    await bot.process_commands(message)
+
+
+@bot.slash_command(description=""добавить текстовый фильтр"")
+async def add_text_filter(ctx, channel_id: str, filter_text: str):
+    channel_id = int(channel_id)
+
+    if ctx.author != ctx.guild.owner:
+        await ctx.send('Команда только для создателя')
+        return
+
+    c.execute(""SELECT filters FROM text_filters WHERE channel_id = ?"", (channel_id,))
+    row = c.fetchone()
+    if row:
+        old_filters = row[0]
+        new_filters = old_filters + "";"" + filter_text
+        c.execute(""UPDATE text_filters SET filters = ? WHERE channel_id = ?"", (new_filters, channel_id))
+        conn.commit()
+        await ctx.send('Готово')
+    else:
+        c.execute(""INSERT INTO text_filters (channel_id, filters) VALUES (?, ?)"", (channel_id, filter_text))
+        conn.commit()
+        await ctx.send('Готово')
+
+
+@bot.slash_command(description=""добавить ссылку в фильтр"")
+async def add_link_filter(ctx, channel_id: str, filter_link: str):
+    channel_id = int(channel_id)
+
+    if ctx.author != ctx.guild.owner:
+        await ctx.send('Команда только для создателя')
+        return
+
+    c.execute(""SELECT filters FROM link_filters WHERE channel_id = ?"", (channel_id,))
+    row = c.fetchone()
+    if row:
+        old_filters = row[0]
+        new_filters = old_filters + "";"" + filter_link
+        c.execute(""UPDATE link_filters SET filters = ? WHERE channel_id = ?"", (new_filters, channel_id))
+        conn.commit()
+        await ctx.send('Готово')
+    else:
+        c.execute(""INSERT INTO link_filters (channel_id, filters) VALUES (?, ?)"", (channel_id, filter_link))
+        conn.commit()
+        await ctx.send('Готово')
+
+
+@bot.slash_command(description=""удалить текстовый фильтр (выбор)"")
+async def delete_filter(ctx, channel_id: str, filters: str):
+    channel_id = int(channel_id)
+
+    if ctx.author != ctx.guild.owner:
+        await ctx.send('Команда только для создателя')
+        return
+
+    c.execute(""SELECT filters FROM text_filters WHERE channel_id = ?"", (channel_id,))
+    row = c.fetchone()
+    if row:
+        text_filters = row[0].split(';')
+        new_text_filters = [filter_word for filter_word in text_filters if filter_word not in filters.split(';')]
+        new_text_filters_str = ';'.join(new_text_filters)
+        c.execute(""UPDATE text_filters SET filters = ? WHERE channel_id = ?"", (new_text_filters_str, channel_id))
+        conn.commit()
+
+        await ctx.send('Готово')
+    else:
+        await ctx.send('Фильтров для этого канала и не было')
+
+
+@bot.slash_command(description=""удалить фильтр ссылок (выбор)"")
+async def delete_link_filter(ctx, channel_id: str, filters: str):
+    channel_id = int(channel_id)
+
+    if ctx.author != ctx.guild.owner:
+        await ctx.send('Команда только для создателя')
+        return
+
+    c.execute(""SELECT filters FROM link_filters WHERE channel_id = ?"", (channel_id,))
+    row = c.fetchone()
+    if row:
+        link_filters = row[0].split(';')
+        new_link_filters = [filter_link for filter_link in link_filters if filter_link not in filters.split(';')]
+        new_link_filters_str = ';'.join(new_link_filters)
+        c.execute(""UPDATE link_filters SET filters = ? WHERE channel_id = ?"", (new_link_filters_str, channel_id))
+        conn.commit()
+
+        await ctx.send('Готово')
+    else:
+        await ctx.send('Фильтров для этого канала и не было')
+
+
+@bot.slash_command(description=""удалить все фильтры для канала"")
+async def delete_all_filters(ctx, channel_id: str):
+    channel_id = int(channel_id)
+
+    if ctx.author != ctx.guild.owner:
+        await ctx.send('Команда только для создателя')
+        return
+
+    c.execute(""DELETE FROM text_filters WHERE channel_id = ?"", (channel_id,))
+    c.execute(""DELETE FROM link_filters WHERE channel_id = ?"", (channel_id,))
+    conn.commit()
+
+    await ctx.send('Готово')
+
+
+bot.run(os.getenv('TOKEN'))
+"
+5PMRSjFx,🤑 G2A.com Free Gift Card Guide Mar 2024 FIX 🤑,ounnuo,GetText,Friday 22nd of March 2024 12:23:25 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+If you use this make sure to use the English version of G2A.com otherwise this will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_484037.pdf
+
+Working as of:
+22 March 2024
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"
+1NyqEXNm,🤑 G2A.com Free Gift Card Guide Mar 2024 FIX 🤑,PASUSW,GetText,Friday 22nd of March 2024 12:22:21 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+If you use this make sure to use the English version of G2A.com otherwise this will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view?usp=sharing
+ 
+Working as of:
+22 March 2024"
+a2DcAmjQ,1.5c,Shiko5303,Lua,Friday 22nd of March 2024 12:20:26 PM CDT,gg.sleep(10)
+kzGz3fuj,G2A.com Free Gift Card Guide Mar 2024 FIX,HastyBasher0,GetText,Friday 22nd of March 2024 12:08:43 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+IMPORTANT: If you use this make sure to use the English version of G2A.com otherwise this will not work!
+
+You can buy gift cards directly with it or you can buy popular games then put them on fresh steam accounts and then sell those accounts.
+ 
+PDF guide here:
+https://smallpdf.com/file#s=cea149fd-ead1-4939-94cf-d10a8ce7936a
+ 
+Working as of:
+22 March 2024
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"
+2XKrbKsb,DSRBTDRMNDRY,gadungw71,PHP,Friday 22nd of March 2024 12:00:28 PM CDT,"•	https://www.senscritique.com/liste/xem_phim_qu_cu_2024_1080_full__vietsub/3798914
+•	https://www.senscritique.com/liste/xem_phim_hd_qu_cu_2024_vietsub_phimmoi/3798922
+•	https://www.senscritique.com/liste/Xem_Phim_Quy_Cau_Thuyet_Minh_2023_Vietsub/3798928
+•	https://www.senscritique.com/liste/xem_phim_exhuma_qut_m_trung_ma_2024_1080_full__vietsub/3798951
+•	https://www.senscritique.com/liste/Xemphim_Exhuma_Quat_Mo_Trung_Ma_2024_Full_HD/3798958
+•	https://www.senscritique.com/liste/gh_Xem_Phim_Exhuma_Quat_Mo_Trung_Ma_2024_Vietsub_FULL4K/3798960
+•	https://www.senscritique.com/liste/Xem_phim_Kung_Fu_Panda_4_20241080_FULL_Vietsub/3798964
+•	https://www.senscritique.com/liste/xem_phim_kung_fu_panda_4_2024_full__vietsub/3798967
+•	https://www.senscritique.com/liste/xem_phim_kung_fu_panda_4_2024_vietsub_full_4k/3798972
+•	https://www.senscritique.com/liste/FULL_HD_Xem_Phim_Mai_2024_Vietsub_Thuyet_Minh/3798975
+•	https://www.senscritique.com/liste/phim_mai_2024_hd_vietsub_thuyt_minh/3798982
+•	https://scribehow.com/page/FULL_HD__Xem_Phim_Mai_2024_Vietsub__Thuyet_Minh4K__SdSaJgXjQLOAIinpg5BJZg
+•	https://scribehow.com/page/Full_HD_Xem_Phim_Mai_2024_Vietsub_high_quality__RcuTfRj7Sf2O_p3149gSpg
+•	https://www.senscritique.com/liste/2024_exhuma_____hd/3799010
+•	https://www.senscritique.com/liste/exhuma___korean___hd_2024/3799025
+•	https://www.senscritique.com/liste/Exhuma_2024_ZOOMhd/3799032
+•	https://scribehow.com/page/_Exhuma2024_____HD1080P__eLtaLIh8Tn-tarwVxuYU_Q
+•	https://scribehow.com/page/___Exhuma_2024-HD____full4k__2xyxBMX-RkunN9DY5GN5FQ
+•	https://wandering.flarum.cloud/d/50870-jagjagwaringhas
+•	https://click4r.com/posts/g/15693452/sutdownnight
+•	https://hiuderyy.hashnode.dev/warobay
+•	https://www.onfeetnation.com/profiles/blogs/phim-viet-nam-hd-4k
+•	https://medium.com/@kusimagasri/%E8%A2%AB%E6%88%91%E5%BC%84%E4%B8%A2%E7%9A%84%E4%BD%A0-i-miss-you-%E5%AE%8C%E6%95%B4%E7%89%88%E6%9C%AC%E5%AE%8C%E6%95%B4%E7%94%B5%E5%BD%B1-hd-1080p-0150f032ea54
+•	https://open.firstory.me/user/clu2vmgfu003i01vybyp9fgqy
+•	https://open.firstory.me/story/clu2vpyqr1hpm01w14dl4bi6b
+•	https://telegra.ph/SIMABDI-03-22
+•	https://paste.ee/p/Pzyjw
+•	https://start.me/w/qQ57MA
+•	https://hackmd.io/@rerewilli6/BJzv7NsRa
+•	https://rentry.co/cebf97o2
+•	https://muckrack.com/doeden-berthth/bio
+•	https://www.bitsdujour.com/profiles/UPvkUg
+•	http://aldenfamilydentistry.com/UserProfile/tabid/57/userId/715605/Default.aspx
+•	https://profile.hatena.ne.jp/zexixuqutab6/
+•	https://www.fitlynk.com/3e0684b04
+•	https://www.artstation.com/artwork/aowBy0
+"
+aHkLZQvj,Comments,bAngelov,JavaScript,Friday 22nd of March 2024 11:43:18 AM CDT,"//Passing all tests already
+
+function solve(data) {
+    const userList = []
+    const articlesList = []
+    const info = {}
+    const postsOn = []
+
+    const splitConditions = {
+        user: value => [value.split(""user "")[1]],
+        article: value => [value.split(""article "")[1]],
+        ""posts on"": value => {
+            let [first, second] = value.split("": "")
+            first = first.split("" posts on "")
+            second = second.split("", "")
+            return [...first,...second]
+        },
+    }
+    const actions ={
+        user: value => userList.push(value),
+        article: value => articlesList.push(value),
+        'posts on':(userName,article,commentTitle, commentContent)=>{
+            if (userList.includes(userName) && articlesList.includes(article)){
+                if(!info.hasOwnProperty(article)) info[article] = {}
+                if(!info[article].hasOwnProperty(userName)) info[article][userName] = {}
+                info[article][userName][commentTitle] = commentContent
+            }
+        },
+    }
+
+    for (let command of data){
+        for(let action of Object.keys(actions)){
+            if (command.includes(action) && action !== ""posts on""){
+                command = splitConditions[action](command)
+                actions[action](...command)
+                break
+            }else if(command.includes(action) && action === ""posts on""){
+                postsOn.push(command)
+                break
+            }
+        }
+    }
+    for (let command of postsOn){
+        command = splitConditions[""posts on""](command)
+        actions[""posts on""](...command)
+    }
+    // My sort
+    Object.entries(info)
+        .sort(([name,data],[nameB,dataB])=>
+            Object.entries(dataB).reduce((a,b)=>
+                Number(a) + Object.keys(Object.values(b)).length,0) -
+            Object.entries(data).reduce((a,b)=>
+                Number(a) + Object.keys(Object.values(b)).length,0))
+        .forEach(([article,users])=>{
+            console.log(`Comments on ${article}`)
+            Object.entries(users)
+                .sort(([username,comments],[usernameB,commentsB])=>username.localeCompare(usernameB))
+                .forEach(([username,comment])=>{
+                    Object.entries(comment).forEach(currentComment=> {
+                        console.log(`--- From user ${username}: ${currentComment.join(' - ')}`)
+                    })
+                })
+        })
+}"
+ZRTDbj8P,Pow Loop,Flammrock,Batch,Friday 22nd of March 2024 11:42:30 AM CDT,"@echo off
+setlocal enabledelayedexpansion
+
+set ""pow=(b1=a,b2=b,b3=(b2&1)*b1,b4=1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*=(1-((b3|(~b3+1))>>31)&1)+b3,b2>>=1,b1*=b1,b3=(b2&1)*b1,b4*(1-((b3|(~b3+1))>>31)&1)+b3)""
+
+for /l %%i in (1,1,6) do (
+  set /a ""a=!random! %% 10""
+  set /a ""b=!random! %% 10""
+  set /a ""c=%pow%""
+  echo;!a! ** !b! = !c!
+)
+
+pause>nul&exit
+"
+MfXcNDbN,Untitled,Ilya_Bykonya,C++ (with Qt extensions),Friday 22nd of March 2024 11:29:29 AM CDT,"
+class CustomKeyCatcher: public QThread {
+public:
+    explicit CustomKeyCatcher(QObject* parent = nullptr)
+        :QThread{ parent } {}
+    void interruptAndWait() {
+        requestInterruption();
+        wait();
+    }
+protected:
+    virtual void run() override {
+        while(not isInterruptionRequested()) {
+            const auto symbol = getchar();
+            std::cout << ""Key pressed: "" << symbol << std::endl;
+        }
+    }
+};
+
+int main(int argc, char** argv) {
+    QCoreApplication app{ argc, argv };
+
+    auto catcher = new CustomKeyCatcher{ &app };
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, catcher, &CustomKeyCatcher::interruptAndWait);
+    catcher->start(QThread::Priority::LowestPriority);
+
+    return app.exec();
+}
+
+"
+DPmtKDP7,Untitled,sissou123,C++,Friday 22nd of March 2024 11:23:47 AM CDT,"Beginning C++ Programming - From Beginner to Beyond
+Obtain Modern C++ Object-Oriented Programming (OOP) and STL skills. C++14 and C++17 covered. C++20 info see below. 
+What you'll learn
+Learn to program with one of the most powerful programming languages that exists today, C++.
+Obtain the key concepts of programming that will also apply to other programming languages 
+for more:https://cuty.io/0drVyg9QYkqd
+"
+sxkLR3P0,versions,ab_random,HTML,Friday 22nd of March 2024 10:51:59 AM CDT,"<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <title>System version</title>
+
+    <style>
+        table {
+            width: 100%;
+
+            border-collapse: collapse;
+            margin: 25px 0;
+            font-size: 0.9em;
+            font-family: sans-serif;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+        }
+
+        thead {
+            background-color: #4c545c;
+            color: #ffffff;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 12px 15px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #dddddd;
+        }
+
+        tbody tr:nth-of-type(even) {
+            background-color: #f3f3f3;
+        }
+
+        tbody tr:last-of-type {
+            border-bottom: 2px solid #4c545c;
+        }
+
+        tbody tr:hover {
+            color: #428aca;
+        }
+
+        a {
+            color: #428aca;
+        }
+
+        [data-tooltip]:hover::after {
+            display: block;
+            position: absolute;
+            content: attr(data-tooltip);
+            /*border: 1px solid #4c545c;*/
+            background: #ffffff;
+            padding: .25em;
+            color: black;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+        }
+
+        th:nth-child(2), th:nth-child(3), th:nth-child(8) {
+            width: 0.1%;
+            white-space: nowrap;
+        }
+
+        td {
+            text-overflow: ellipsis;
+        }
+
+        #failed {
+            summary {
+                color: red;
+                font-weight: bold;
+            }
+
+            .taskName {
+                font-weight: bold;
+            }
+
+            li {
+                padding: 12px 15px;
+            }
+
+            font-size: 0.9em;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+<table>
+    <thead>
+    <tr>
+        <th>Service</th>
+        <th>IP</th>
+
+        <th>Commit</th>
+
+        <th>Committed</th>
+        <th>By</th>
+        <th>Message</th>
+        <th>Branch</th>
+
+        <th>Version</th>
+        <th>Built</th>
+        <th>At</th>
+    </tr>
+    </thead>
+
+    <tbody id=""services"">
+        <!-- Dynamic -->
+    </tbody>
+</table>
+
+<div id=""failed"" style=""display: none"">
+    <br/>
+    <details>
+        <summary>Failed tasks</summary>
+        <ul>
+            <!-- Dynamic -->
+        </ul>
+    </details>
+</div>
+
+</body>
+
+<script>
+    let url = './versions/raw';
+
+    function addService(row, name, service) {
+        // Service
+        let cell = row.insertCell();
+        cell.innerHTML = name.replace(/__.*/, '');
+
+        // IP
+        let host = name.replace(/^.*__/, '');
+        row.insertCell().innerHTML = (host === name ? '' : host);
+
+        const git = service.git;
+
+        // https://git.intermb.ru/asupr/asupr-all/-/commit/e969130f1681c3da79fd345e1c4f4696210eeb99
+        // ssh://git@git.intermb.ru:2224/asupr/asupr-all/-/commit/11e5d88353a7a098e09ea71406f6d89dd5a36d5c
+
+        // Commit
+        let a = document.createElement('a');
+        a.appendChild(document.createTextNode(`#${git.commit.id.abbrev}`));
+        a.href = `${git.remote.origin.url.replace(/^ssh:\/\/git@git\.intermb.ru:\d{2,5}/, 'https://git.intermb.ru')
+            .replace('.git', '')}/-/commit/${git.commit.id.full}`;
+        row.insertCell().appendChild(a)
+
+        // Committed
+        row.insertCell().innerHTML = git.commit.time;
+
+        // By
+        {
+            let cell = row.insertCell();
+            cell.innerHTML = git.commit.user.name;
+            cell.setAttribute('data-tooltip', git.commit.user.email)
+        }
+
+        // Message
+        row.insertCell().innerHTML = git.commit.message.full;
+
+        // Branch
+        row.insertCell().innerHTML = git.branch;
+
+        // Version
+        row.insertCell().innerHTML = git.build.version;
+
+        // Built
+        if (git.build.pipeline) {
+            let remGit;
+            if (git.build.gitlab.includes('git.mos.ru')) remGit = ' (DIT)'
+            else if (git.build.gitlab.includes('git.intermb.ru')) remGit = ' (IM)'
+            else remGit = ''
+
+            let a = document.createElement('a');
+            a.appendChild(document.createTextNode(`#${git.build.pipeline}${remGit}`));
+            a.href = `${git.build.gitlab}/-/pipelines/${git.build.pipeline}`;
+            row.insertCell().appendChild(a);
+
+        } else {
+            let cell = row.insertCell();
+            cell.innerHTML = 'Local';
+            cell.setAttribute('data-tooltip', git.build.host)
+        }
+
+        // At
+        row.insertCell().innerHTML = git.build.time;
+    }
+
+    function addFaileds(failed) {
+        const failedList = document.getElementById('failed')
+        failedList.style.display = 'block'
+
+        const list = failedList.getElementsByTagName('ul')[0]
+        failed.forEach(problem => {
+            const task = /^tasks.asupr_([\w_\-]+)/
+
+            const taskName = document.createElement('span')
+            taskName.className = 'taskName'
+            taskName.appendChild(document.createTextNode(problem.match(task)[1]))
+
+            const li = document.createElement('li');
+            li.appendChild(taskName)
+            li.appendChild(document.createTextNode(problem.replace(task, '')))
+
+            list.appendChild(li)
+        })
+    }
+
+    fetch(url)
+        .then(res => res.json())
+        .then(services => {
+
+            let table = document.getElementById('services');
+
+            Object.keys(services).sort().forEach(name => {
+                if (name === 'lookup_problems') {
+                    addFaileds(services[name])
+                    return;
+                }
+
+                let service = services[name];
+                let row = table.insertRow();
+
+                addService(row, name, service);
+            });
+        })
+</script>
+</html>"
+is0Ya7cK,Untitled,Martin_Toseski,C++,Friday 22nd of March 2024 10:49:09 AM CDT,"#include <bits/stdc++.h>
+#define ll long long
+ 
+using namespace std;
+ 
+int main()
+{
+    ll X, N, q = 1;
+    cin >> X >> N;
+ 
+    for (ll i=0; i < N; i++){
+        for (ll j=1; j*j <= X; j++){
+            if (X%j == 0){
+                if (X/j > q){
+                    if (j != 1)
+                        q = X/j;
+                }
+                else
+                    break;
+            }
+        }
+ 
+        X += q;
+    }
+ 
+    cout << X;
+ 
+    return 0;
+}"
+z3tuZkJE,Component,JustDimy,HTML 5,Friday 22nd of March 2024 10:19:48 AM CDT,"<label for=""story"">Tell us your story:</label>
+
+<textarea id=""story"" name=""story"" rows=""5"" cols=""33"">
+It was a dark and stormy night...
+</textarea>"
+zD0Ehp1J,Untitled,baconmanthelegend,JavaScript,Friday 22nd of March 2024 09:31:13 AM CDT,"function language_selector() {
+    const regex = new RegExp(`${window.location.host}(/pt-br|/de|/es|/id)*`);
+    const onlyCurrentLangRegex = /\/(en|pt-br|de|es|id)\//;
+
+    // fetch current lang from local storage
+    let currentLang = localStorage.getItem('lang');
+    //console.log(currentLang)
+
+    // changes language
+    const languageLinks = document.getElementsByClassName('language-select-link');
+    for (const link of languageLinks) {
+        if (link instanceof HTMLAnchorElement) {
+            if (link.hreflang !== 'en') {
+                link.href = window.location.href.replace(regex, window.location.host + '/' + link.hreflang);
+            } else {
+                // if the language is english, don't append /en/ to url
+                link.href = window.location.href.replace(regex, window.location.host);
+            }
+        }
+    }
+
+    // matches the language from the url into an array
+    // ex: learnjapanese.moe/es/kanji/ will return ['/es/', 'es'];
+    let currentUrlLang = onlyCurrentLangRegex.exec(window.location.href);
+    //console.log(currentUrlLang)
+
+    // only update local storage when language changes
+    if (currentUrlLang && window.location.href.includes(currentUrlLang[0]) && currentLang !== currentUrlLang[1]) {
+        localStorage.setItem('lang', currentUrlLang[1]);
+    } else if (!currentUrlLang && window.location.href !== window.location.origin) {
+        localStorage.setItem('lang', 'en');
+    }
+
+    // select all anchor labels inside the left navbar
+    const leftNavAnchors = document.querySelectorAll('.md-nav.md-nav--primary a');
+    // select specific top nav links + logo
+    const topNavLogoLink = document.querySelector('.md-header__button.md-logo')
+    const topNavDiscordLink = document.querySelector('a[href*=""/join""]')
+    const topNavDonateLink = document.querySelector('a[href*=""/donate""]')
+    // console.log(topNavLogoLink)
+
+
+    // pushes all anchors into one array to iterate over
+    const anchors = [...leftNavAnchors, topNavLogoLink, topNavDiscordLink, topNavDonateLink];
+
+    for (const a of anchors) {
+        if (a instanceof HTMLAnchorElement) {
+            let modifiedUrl;
+            let urlArray = a.href.split('/').filter((segment) => segment !== '');
+            let currentAnchorSegment = `${urlArray[urlArray.length - 1]}`;
+            if ((a.href == `${window.location.origin}/` || a.href == window.location.origin) && currentAnchorSegment !== currentLang) {
+                if (currentLang !== 'en' && !a.href.includes(`/${currentLang}/`)) {
+                    modifiedUrl = `${window.location.origin}/${currentLang}/`
+                }
+                else if (currentLang === 'en' && !a.href.includes(`/${currentLang}/`)) modifiedUrl = `${window.location.origin}/`
+            }
+            else if (currentLang !== 'en' && !a.href.includes(`/${currentLang}/`) && currentAnchorSegment !== currentLang) {
+                modifiedUrl = `${window.location.origin}/${currentLang}/${currentAnchorSegment}/`;
+            }
+            else if (currentLang !== 'en' && currentAnchorSegment !== currentLang && a.href !== `${window.location.origin}`) {
+                modifiedUrl = `${window.location.origin}/${currentLang}/${currentAnchorSegment}/`;
+            }
+            else modifiedUrl = `${window.location.origin}/${currentAnchorSegment}/`;
+            a.href = modifiedUrl
+        }
+    }
+}
+
+const observer = new MutationObserver(function (mutationsList, observer) {
+    for (let mutation of mutationsList) {
+        if (mutation.type === 'childList' || mutation.type === 'subtree') {
+            language_selector();
+        }
+    }
+});
+
+const observerConfig = { childList: true, subtree: true };
+
+document$.subscribe(() => {
+    observer.observe(document.documentElement, observerConfig);
+});
+"
+LSjT1xjc,Critical/Sleep Event Test.ahk,Lorenzo501,Autohotkey,Friday 22nd of March 2024 09:07:08 AM CDT,"#Requires AutoHotkey 2.0
+EVENT_OBJECT_NAMECHANGE := 0x800C
+DllCall(""SetWinEventHook"",
+    ""UInt"", EVENT_OBJECT_NAMECHANGE,
+    ""UInt"", EVENT_OBJECT_NAMECHANGE,
+    ""Ptr"", 0,
+    ""Ptr"", CallbackCreate(HandleTabsOutlinerEvent),
+    ""UInt"", 0,
+    ""UInt"", 0,
+    ""UInt"", 0)
+
+HandleTabsOutlinerEvent(hWinEventHook, event, hWnd, *)
+{
+    static count := 0, text := """"
+
+    try
+        if (WinGetTitle(hWnd) = ""_crx_eggkanocgddhmamlbiijnphhppkpkmkl"")
+        {
+            Critical(-1) ; (W/ BUSY-WAIT) 1 1 2 2 3 3 when uncommented, 1 2 3 3 2 1 when commented-out
+            Tooltip(text .= "" "" (id := ++count))
+            loop (8000000) ; Approx. 2sec busy-wait (has approx. 30% CPU usage at most)
+                continue
+            ;Sleep(-1) ; (W/ CRITICAL ON) 1 2 3 3 2 1 when uncommented, 1 1 2 2 3 3 when commented-out
+            Tooltip(text .= "" "" id)
+        }
+}"
+4pVf18aN,Untitled,Bette,TCL,Friday 22nd of March 2024 08:45:26 AM CDT,"proc ::bonaPRE::pre:init { args } {
+    if { [catch { package require bonaPRE-SQL 1.0 }] } {
+        set AE_LOGERR  [format ""${::bonaPRE::VAR(release)} modTCL * mysql.tcl file must be loaded before pre.tcl""]
+        return -code error ${AE_LOGERR};
+    }
+}
+::bonaPRE::pre:init
+
+bind pub -|- !pre ::bonaPRE::pre
+
+proc ::bonaPRE::pre { nick uhost hand chan arg } {
+    set P_Rlsname [lindex ${arg} 0]
+    if { ![channel get ${chan} bpsearch] } {
+        set P_LOGERR   [format ""User %s attempted a !pre on %s, but the channel does not have the necessary *flags*."" ${nick} ${chan}]
+        #set P_MSGERR   [format ""%s tried a !pre, but the channel does not have the necessary *flags*."" ${nick}]
+        putquick ""privmsg ${chan} ${P_MSGERR}""
+        return -code error ${P_LOGERR};
+    }
+    if { ${P_Rlsname} == """" } {
+        set P_LOGERR   [format ""Syntax *%s attempted a !pre on %s, but lacks information..."" ${nick} ${chan}]
+        set P_MSGERR   [format ""Syntax * !pre <release.name>""]
+        putquick ""privmsg ${chan} ${P_MSGERR}""
+        return -code error ${P_LOGERR};
+    }
+    set P_Sql          ""SELECT `${::bonaPRE::db_(id)}`, `${::bonaPRE::db_(rlsname)}`, `${::bonaPRE::db_(section)}`, `${::bonaPRE::db_(datetime)}`, `${::bonaPRE::db_(files)}`, `${::bonaPRE::db_(size)}`"";
+    append P_Sql       ""FROM `${::bonaPRE::mysql_(dbmain)}` "";
+    append P_Sql       ""WHERE `${::bonaPRE::db_(rlsname)}` LIKE '${P_Rlsname}%' "";
+    append P_Sql       ""ORDER BY ${::bonaPRE::db_(datetime)} DESC LIMIT 1;"";
+    set P_Sqld        [::mysql::sel ${::bonaPRE::mysql_(handle)} ${P_Sql} -flatlist];
+    if { ${P_Sqld} != """" } {
+        # (lassign) The SQL List separated into variables https://www.tcl.tk/man/tcl8.7/TclCmd/lassign.html
+        lassign  ${P_Sqld} P_Id P_Rls P_Section P_Datetime P_Files P_Size;
+
+        # Calculate pretimes
+        set now [clock seconds]
+        set pretimestamp [clock scan $P_Datetime]
+        set elapsed [expr {($now - $pretimestamp)}]
+
+        set pretimestring [format_time $elapsed]
+        set P_MSGOK1 [format ""\0030\[\00314SEARCH\0030\]\002\0030 ${P_Rls} \002\0030\[\002\00314PRED\002\0030\]\002\0032\ ${pretimestring} \002\0030ago \0030\[\002\00314PRETiME\002\0030\]\002\0032 ${P_Datetime} \002\0030\[\002\00314${P_Section}\002\0030\]\002\0032\ ${P_Size} \002\0030\MB in\002\0032\ ${P_Files} \002\0030\Files""]
+
+        putquick ""privmsg ${chan} ${P_MSGOK1}""
+        return false;
+    } else {
+        set P_MSGERR [format ""\002\0033(\0037PRE\0033)\002\0037 ${P_Rlsname} \00315does not exist in the database.""]
+        putquick ""privmsg ${chan} ${P_MSGERR}""
+        return false;
+    }
+}
+
+# Function to format time in a simplified human-readable format
+proc format_time {seconds} {
+    set years [expr {$seconds / (365*24*3600)}]
+    set seconds [expr {$seconds % (365*24*3600)}]
+
+    set months [expr {$seconds / (30*24*3600)}]
+    set seconds [expr {$seconds % (30*24*3600)}]
+
+    set weeks [expr {$seconds / (7*24*3600)}]
+    set seconds [expr {$seconds % (7*24*3600)}]
+
+    set days [expr {$seconds / (24*3600)}]
+    set seconds [expr {$seconds % (24*3600)}]
+
+    set hours [expr {$seconds / 3600}]
+    set seconds [expr {$seconds % 3600}]
+
+    set minutes [expr {$seconds / 60}]
+    set seconds [expr {$seconds % 60}]
+
+    set result """"
+    if {$years > 0} {
+        append result ""${years}y ""
+    }
+    if {$months > 0} {
+        append result ""${months}m ""
+    }
+    if {$weeks > 0} {
+        append result ""${weeks}w ""
+    }
+    if {$days > 0} {
+        append result ""${days}d ""
+    }
+    if {$hours > 0} {
+        append result ""${hours}h ""
+    }
+    if {$minutes > 0} {
+        append result ""${minutes}m ""
+    }
+    if {$seconds > 0} {
+        append result ""${seconds}s ""
+    }
+    return [string trim $result]
+}
+
+package provide bonaPRE-PRE-PUBLiC 1.0
+putlog ""Tcl load \[::${::bonaPRE::VAR(release)}::PRE\]: modTCL Loaded.""
+"
+gPSRHtNR,Ketholy,Ketholy,JavaScript,Friday 22nd of March 2024 08:26:33 AM CDT,"/******************************
+** ======= FUNCTIONS ======= **
+*******************************
+** 00. fa_initForumModules
+** 01. fa_navactif
+** 02. fa_theme_changer
+** 03. pseudoInputs
+** 04. toolbar search mod
+** 05. fae_sticky_nav_panel
+** 06. image resizer
+** 07. fae_toggle_category
+** 08. sticky_nav_notifications
+** 09. update_notifier
+** 10. topic_icon_formatter
+** 11. dark mode
+** 12. copy code button
+** 13. local frame styler
+******************************/
+ 
+// IMPORTANT DATA (DO NOT DELETE)
+if (!window.FAE) {
+  window.FAE = new Object();
+}
+ 
+FAE.board_lang =  'Português';
+ 
+ 
+/* -- 00. fa_initForumModules -- */
+// initiate the toggler for the widget columns
+function fa_initForumModules(column_id) {
+  var column = document.getElementById(column_id), menu;
+ 
+  if (column) {
+    column.insertAdjacentHTML('afterbegin', '<div class=""title module_column_title"">Menu Widget</div>');
+ 
+    menu = document.createElement('A');
+    menu.href = '#';
+    menu.title = 'Alternar o widget menu';
+    menu.className = 'widget_menu column_button_' + column_id + ' color-secondary';
+ 
+    menu.onclick = function() {
+      var column = document.getElementById(/left/.test(this.className) ? 'left' : 'right');
+ 
+      $([this, column])[/active/.test(this.className) ? 'removeClass' : 'addClass']('active');
+      return false;
+    };
+ 
+    document.body.appendChild(menu);
+  }
+};
+ 
+// give active panels a very high z-index so they display above other panels and buttons
+// forumotion replaces any z-index above 1000 w/999 in the stylesheet, so this must be applied via JS
+document.write('<style type=""text/css"">'+
+  '.module_column, .widget_menu { z-index:30000; }'+
+  '.module_column.active, .widget_menu.active { z-index:99999; }'+
+'</style>');
+ 
+ 
+/* -- 01. fa_navactif -- */
+// finds the currently active navigation item and adds a classname to it.
+function fa_navactif() {
+  for (var cleanURI = window.location.href.replace(/\?.*|#.*/, ''), a = document.getElementById('page-header').getElementsByTagName('A'), i = 0, j = a.length; i < j; i++) {
+    if (/mainmenu/.test(a[i].className) && cleanURI == a[i].href.replace(/\?.*|#.*/,'')) {
+      a[i].className+=' fa_navactif';
+      break;
+    }
+  }
+  $('.mainmenu[href=""/search""]').removeAttr('onclick');
+};
+ 
+ 
+/* -- 02. fa_theme_changer -- */
+// theme selector for the forum
+(function() {
+  var cc = my_getcookie('fae_custom-theme');
+ 
+  window.fa_theme_color = {
+    selected : my_getcookie('fa_theme_color') || 'Selecionar um tema',
+ 
+    palette : {
+""Selecionar um tema"" : [],
+""Tema Personalizado"" : [cc ? fae_editColor(cc, +1) : '#77AADD', cc || '#6699CC', cc ? fae_editColor(cc, -1) : '#5588BB', cc ? fae_editColor(cc, -3) : '#336699', cc ? fae_editColor(cc, 'darken') : '#334455'],
+""Tema Aleatório"" : [],
+""Silver"" : [""#DDDDDD"", ""#cccccc"", ""#BBBBBB"", ""#999999"", ""#555555""],
+""Dusty Gray"" : [""#AAAAAA"", ""#999999"", ""#888888"", ""#666666"", ""#444444""],
+""Dove Gray"" : [""#777777"", ""#666666"", ""#555555"", ""#333333"", ""#333333""],
+""Mine Shaft"" : [""#444444"", ""#333333"", ""#222222"", ""#000000"", ""#222222""],
+""Persian Red"" : [""#DD4444"", ""#cc3333"", ""#BB2222"", ""#990000"", ""#552222""],
+""Christmas Red"" : [""#CC3333"", ""#bb2222"", ""#AA1111"", ""#880000"", ""#441111""],
+""Coral Red"" : [""#FF5555"", ""#ff4444"", ""#EE3333"", ""#CC1111"", ""#662222""],
+""Chestnut Rose"" : [""#DD7777"", ""#cc6666"", ""#BB5555"", ""#993333"", ""#553333""],
+""Eunry"" : [""#DDAAAA"", ""#cc9999"", ""#BB8888"", ""#996666"", ""#554444""],
+""Brandy Rose"" : [""#CC9999"", ""#bb8888"", ""#AA7777"", ""#885555"", ""#443333""],
+""Bazaar"" : [""#AA8888"", ""#997777"", ""#886666"", ""#664444"", ""#443333""],
+""Cinnabar"" : [""#FF5544"", ""#ee4433"", ""#DD3322"", ""#BB1100"", ""#552222""],
+""Crail"" : [""#CC6655"", ""#bb5544"", ""#AA4433"", ""#882211"", ""#442222""],
+""Flamingo"" : [""#FF6644"", ""#ee5533"", ""#DD4422"", ""#BB2200"", ""#552222""],
+""Red Damask"" : [""#EE7755"", ""#dd6644"", ""#CC5533"", ""#AA3311"", ""#553322""],
+""Tabasco"" : [""#AA4422"", ""#993311"", ""#882200"", ""#660000"", ""#442211""],
+""Paarl"" : [""#BB6644"", ""#aa5533"", ""#994422"", ""#772200"", ""#442222""],
+""Cape Palliser"" : [""#BB7755"", ""#aa6644"", ""#995533"", ""#773311"", ""#443322""],
+""Tuscany"" : [""#DD7744"", ""#cc6633"", ""#BB5522"", ""#993300"", ""#553322""],
+""Hot Cinnamon"" : [""#EE7733"", ""#dd6622"", ""#CC5511"", ""#AA3300"", ""#553311""],
+""Blaze Orange"" : [""#FF7711"", ""#ff6600"", ""#EE5500"", ""#CC3300"", ""#663300""],
+""Pumpkin"" : [""#FF8822"", ""#ff7711"", ""#EE6600"", ""#CC4400"", ""#663311""],
+""Antique Brass"" : [""#DDAA77"", ""#cc9966"", ""#BB8855"", ""#996633"", ""#554433""],
+""Raw Sienna"" : [""#DD9955"", ""#cc8844"", ""#BB7733"", ""#995511"", ""#553322""],
+""Earthtone"" : [""#775533"", ""#664422"", ""#553311"", ""#331100"", ""#332211""],
+""Americano"" : [""#998877"", ""#887766"", ""#776655"", ""#554433"", ""#333333""],
+""Coffee"" : [""#887766"", ""#776655"", ""#665544"", ""#443322"", ""#333322""],
+""Cinnamon"" : [""#995511"", ""#884400"", ""#773300"", ""#551100"", ""#332200""],
+""Brown"" : [""#AA6611"", ""#995500"", ""#884400"", ""#662200"", ""#442200""],
+""Sandy Tan"" : [""#EECC99"", ""#ddbb88"", ""#CCAA77"", ""#AA8855"", ""#554433""],
+""Hokey Pokey"" : [""#DDAA44"", ""#cc9933"", ""#BB8822"", ""#996600"", ""#554422""],
+""Sienna"" : [""#776644"", ""#665533"", ""#554422"", ""#332200"", ""#332222""],
+""Shadow"" : [""#998866"", ""#887755"", ""#776644"", ""#554422"", ""#333322""],
+""Buttercup"" : [""#FFBB22"", ""#eeaa11"", ""#DD9900"", ""#BB7700"", ""#554411""],
+""Tulip Tree"" : [""#FFCC44"", ""#eebb33"", ""#DDAA22"", ""#BB8800"", ""#554422""],
+""Golden Grass"" : [""#EEBB33"", ""#ddaa22"", ""#CC9911"", ""#AA7700"", ""#554411""],
+""Pizza"" : [""#DDAA22"", ""#cc9911"", ""#BB8800"", ""#996600"", ""#554411""],
+""Reef Gold"" : [""#BB9933"", ""#aa8822"", ""#997711"", ""#775500"", ""#443311""],
+""Olive"" : [""#999911"", ""#888800"", ""#777700"", ""#555500"", ""#333300""],
+""Camouflage"" : [""#555522"", ""#444411"", ""#333300"", ""#111100"", ""#222211""],
+""Avocado"" : [""#999977"", ""#888866"", ""#777755"", ""#555533"", ""#333333""],
+""Earls Green"" : [""#DDDD44"", ""#cccc33"", ""#BBBB22"", ""#999900"", ""#555522""],
+""Laser"" : [""#DDDD77"", ""#cccc66"", ""#BBBB55"", ""#999933"", ""#555533""],
+""Pine Glade"" : [""#DDDDAA"", ""#cccc99"", ""#BBBB88"", ""#999966"", ""#555544""],
+""Pea Green"" : [""#88AA33"", ""#779922"", ""#668811"", ""#446600"", ""#334411""],
+""Celery"" : [""#AADD44"", ""#99cc33"", ""#88BB22"", ""#669900"", ""#445522""],
+""Chartreuse"" : [""#99EE11"", ""#88dd00"", ""#77CC00"", ""#55AA00"", ""#335500""],
+""Forumactif Green"" : [""#99DD44"", ""#88cc33"", ""#77BB22"", ""#559900"", ""#335522""],
+""Dollar Bill"" : [""#99CC66"", ""#88bb55"", ""#77AA44"", ""#558822"", ""#334422""],
+""Wild Willow"" : [""#AADD77"", ""#99cc66"", ""#88BB55"", ""#669933"", ""#445533""],
+""Asparagus"" : [""#88BB66"", ""#77aa55"", ""#669944"", ""#447722"", ""#334422""],
+""Atlantis"" : [""#77DD44"", ""#66cc33"", ""#55BB22"", ""#339900"", ""#335522""],
+""Forest Green"" : [""#339933"", ""#228822"", ""#117711"", ""#005500"", ""#113311""],
+""Christmas Green"" : [""#117711"", ""#006600"", ""#005500"", ""#003300"", ""#003300""],
+""Apple"" : [""#44DD44"", ""#33cc33"", ""#22BB22"", ""#009900"", ""#225522""],
+""Mantis"" : [""#77DD77"", ""#66cc66"", ""#55BB55"", ""#339933"", ""#335533""],
+""De York"" : [""#AADDAA"", ""#99cc99"", ""#88BB88"", ""#669966"", ""#445544""],
+""Envy"" : [""#99BB99"", ""#88aa88"", ""#779977"", ""#557755"", ""#334433""],
+""Spruce"" : [""#77DD88"", ""#66cc77"", ""#55BB66"", ""#339944"", ""#335533""],
+""Bottle Green"" : [""#22BB44"", ""#11aa33"", ""#009922"", ""#007700"", ""#114422""],
+""Aqua Forest"" : [""#77BB88"", ""#66aa77"", ""#559966"", ""#337744"", ""#334433""],
+""Mountain Meadow"" : [""#44DD77"", ""#33cc66"", ""#22BB55"", ""#009933"", ""#225533""],
+""Meadow"" : [""#33BB66"", ""#22aa55"", ""#119944"", ""#007722"", ""#114422""],
+""Sea Green"" : [""#449966"", ""#338855"", ""#227744"", ""#005522"", ""#223322""],
+""Amazon"" : [""#448866"", ""#337755"", ""#226644"", ""#004422"", ""#223322""],
+""Emerald"" : [""#77DDAA"", ""#66cc99"", ""#55BB88"", ""#339966"", ""#335544""],
+""Shamrock"" : [""#44DDAA"", ""#33cc99"", ""#22BB88"", ""#009966"", ""#225544""],
+""Blue Lagoon"" : [""#55CCBB"", ""#44bbaa"", ""#33AA99"", ""#118877"", ""#224444""],
+""Turquoise"" : [""#44DDDD"", ""#33cccc"", ""#22BBBB"", ""#009999"", ""#225555""],
+""Downy"" : [""#77DDDD"", ""#66cccc"", ""#55BBBB"", ""#339999"", ""#335555""],
+""Sinbad"" : [""#AADDDD"", ""#99cccc"", ""#88BBBB"", ""#669999"", ""#445555""],
+""Teal"" : [""#119999"", ""#008888"", ""#007777"", ""#005555"", ""#003333""],
+""Blue Chill"" : [""#2299AA"", ""#118899"", ""#007788"", ""#005566"", ""#113344""],
+""Cerulean"" : [""#11BBEE"", ""#00aadd"", ""#0099CC"", ""#0077AA"", ""#004455""],
+""Deep Cerulean"" : [""#1188BB"", ""#0077aa"", ""#006699"", ""#004477"", ""#003344""],
+""Curious Blue"" : [""#44AADD"", ""#3399cc"", ""#2288BB"", ""#006699"", ""#224455""],
+""Slate Gray"" : [""#8899AA"", ""#778899"", ""#667788"", ""#445566"", ""#333344""],
+""Danube"" : [""#77AADD"", ""#6699cc"", ""#5588BB"", ""#336699"", ""#334455""],
+""Azure Radiance"" : [""#1188FF"", ""#0077ff"", ""#0066EE"", ""#0044CC"", ""#003366""],
+""Mariner"" : [""#4477DD"", ""#3366cc"", ""#2255BB"", ""#003399"", ""#223355""],
+""Azure"" : [""#4466BB"", ""#3355aa"", ""#224499"", ""#002277"", ""#222244""],
+""Governor Bay"" : [""#4444DD"", ""#3333cc"", ""#2222BB"", ""#000099"", ""#222255""],
+""Blue Marguerite"" : [""#7777DD"", ""#6666cc"", ""#5555BB"", ""#333399"", ""#333355""],
+""Blue Bell"" : [""#AAAADD"", ""#9999cc"", ""#8888BB"", ""#666699"", ""#444455""],
+""Comet"" : [""#666688"", ""#555577"", ""#444466"", ""#222244"", ""#222233""],
+""Purple Heart"" : [""#7744DD"", ""#6633cc"", ""#5522BB"", ""#330099"", ""#332255""],
+""Amethyst"" : [""#AA77DD"", ""#9966cc"", ""#8855BB"", ""#663399"", ""#443355""],
+""Amethyst Smoke"" : [""#BBAACC"", ""#aa99bb"", ""#9988AA"", ""#776688"", ""#444444""],
+""Mauve"" : [""#EEBBFF"", ""#ddaaff"", ""#CC99EE"", ""#AA77CC"", ""#554466""],
+""Affair"" : [""#8855AA"", ""#774499"", ""#663388"", ""#441166"", ""#332244""],
+""Purple"" : [""#AA44DD"", ""#9933cc"", ""#8822BB"", ""#660099"", ""#442255""],
+""Lavendar"" : [""#CC88EE"", ""#bb77dd"", ""#AA66CC"", ""#8844AA"", ""#443355""],
+""Cerise"" : [""#DD44DD"", ""#cc33cc"", ""#BB22BB"", ""#990099"", ""#552255""],
+""Fuchsia Pink"" : [""#DD77DD"", ""#cc66cc"", ""#BB55BB"", ""#993399"", ""#553355""],
+""Lilac"" : [""#DDAADD"", ""#cc99cc"", ""#BB88BB"", ""#996699"", ""#554455""],
+""Red Violet"" : [""#DD44AA"", ""#cc3399"", ""#BB2288"", ""#990066"", ""#552244""],
+""Disco"" : [""#992266"", ""#881155"", ""#770044"", ""#550022"", ""#331122""],
+""Carnation Pink"" : [""#FFAADD"", ""#ff99cc"", ""#EE88BB"", ""#CC6699"", ""#664455""],
+""Hopbush"" : [""#DD77AA"", ""#cc6699"", ""#BB5588"", ""#993366"", ""#553344""],
+""French Rose"" : [""#FF5599"", ""#ee4488"", ""#DD3377"", ""#BB1155"", ""#552233""],
+""Hibiscus"" : [""#DD4477"", ""#cc3366"", ""#BB2255"", ""#990033"", ""#552233""],
+""Claret"" : [""#882244"", ""#771133"", ""#660022"", ""#440000"", ""#331122""],
+""Bordeaux"" : [""#771133"", ""#660022"", ""#550011"", ""#330000"", ""#330011""],
+""Tickle Me Pink"" : [""#FF99BB"", ""#ff88aa"", ""#EE7799"", ""#CC5577"", ""#663344""],
+""Burgundy"" : [""#991133"", ""#880022"", ""#770011"", ""#550000"", ""#330011""],
+""Blush"" : [""#EE6688"", ""#dd5577"", ""#CC4466"", ""#AA2244"", ""#552233""],
+""Wild Watermelon"" : [""#FF6688"", ""#ff5577"", ""#EE4466"", ""#CC2244"", ""#662233""],
+""Amaranth"" : [""#FF4466"", ""#ee3355"", ""#DD2244"", ""#BB0022"", ""#552222""],
+""Mauvelous"" : [""#FFAABB"", ""#ff99aa"", ""#EE8899"", ""#CC6677"", ""#664444""],
+""Alizarin Crimson"" : [""#FF3344"", ""#ee2233"", ""#DD1122"", ""#BB0000"", ""#551122""],
+""Verde"" : [""#388E18"", ""#277d07"", ""#166C06"", ""#044A04"", ""#133503""],
+""Black"" : [""#111111"", ""#000000"", ""#000000"", ""#000000"", ""#000000""]
+ 
+},
+ 
+    change : function(color) {
+      var head = document.getElementsByTagName('HEAD')[0],
+          style = document.getElementById('fa_theme_style');
+ 
+      my_setcookie('fa_theme_color', color, true);
+ 
+      if (color != 'Selecionar um tema' && color != 'Tema Personalizado') {
+        fa_theme_color.selected = color == 'Tema Aleatório' ? fa_theme_color.palette['Tema Aleatório'][Math.floor(Math.random() * fa_theme_color.palette['Tema Aleatório'].length)] : color;
+        fa_theme_color.selector.style.backgroundColor = fa_theme_color.palette[fa_theme_color.selected][1];
+        fa_theme_color.selector.style.borderColor = fa_theme_color.palette[fa_theme_color.selected][2];
+        fa_theme_color.selector.firstChild.innerHTML = 'Tema Padrão';
+ 
+        if (style) head.removeChild(style);
+        fa_theme_color.picker.style.display = 'none';
+ 
+        $(head).append('<style type=""text/css"" id=""fa_theme_style"">' + fa_theme_color.css() + '</style>');
+ 
+      } else if (color == 'Tema Personalizado') {
+        fa_theme_color.selected = 'Tema Personalizado';
+ 
+        if (style) {
+          head.removeChild(style);
+        }
+ 
+        var val = fa_theme_color.picker.value.toUpperCase();
+        my_setcookie('fae_custom-theme', val, true);
+ 
+        fa_theme_color.picker.style.display = '';
+        fa_theme_color.selector.style.backgroundColor = val;
+        fa_theme_color.selector.style.borderColor = fae_editColor(val, -1);
+ 
+        window.fa_theme_color.palette['Tema Personalizado'] = [
+          fae_editColor(val, +1),
+          val,
+          fae_editColor(val, -1),
+          fae_editColor(val, -3),
+          fae_editColor(val, 'darken')
+        ];
+ 
+        $(head).append('<style type=""text/css"" id=""fa_theme_style"">' + fa_theme_color.css() + '</style>');
+ 
+      } else {
+        if (style) {
+          head.removeChild(style);
+        }
+ 
+        fa_theme_color.picker.style.display = 'none';
+ 
+        fa_theme_color.selector.style.backgroundColor = '#999';
+        fa_theme_color.selector.style.borderColor = '#888';
+        fa_theme_color.selector.firstChild.innerHTML = 'Selecionar um tema';
+      }
+    },
+ 
+    css : function() {
+      var palette = fa_theme_color.palette[fa_theme_color.selected];
+      return '.color-primary, .title, h2.u, .h3, .inner h1.page-title, .mainmenu:after, .forumline tbody .catHead, form.search-form input.search-keywords, input.search-button, .pagination span a, a.button1, a.button2, button.button2, input.button1, input.button2, input.button, #profile-advanced-add a, img[src*=""?poll""], .fa_pseudo_radio:after, #tabs, body div.sceditor-dropdown .button, .codebox dt, blockquote cite, .sceditor-container .sceditor-toolbar, body #fa_toolbar, body #fa_toolbar_hidden, body #fa_toolbar #fa_right #notif_list li.see_all, #fae_sticky_nav_panel a:after, img[src*=""color=primary""], .table1 thead th, .breadcrumbs, input[type=""button""], input[type=""submit""], input[type=""reset""], input[type=""file""], .forumbg li.header, #chatbox_header, body #chatbox_footer { background-color:' + palette[1] + '; }'+
+            '#cp-main h1:not(.title) { background-color:' + palette[1] + '; }'+
+            '.pagination span a:hover, a.button1:hover, a.button2:hover, button.button2:hover, input.button1:hover, input.button2:hover, input.button:hover, #profile-advanced-add a:hover, input.search-button:hover, body div.sceditor-dropdown .button:hover, img[src*=""color=primary""]:hover, input[type=""button""]:hover, input[type=""submit""]:hover, input[type=""reset""]:hover, input[type=""file""]:hover { background-color:' + palette[2] + '; }'+
+            '.pagination span a:active, .pagination span a:focus, .pagination span strong, a.button1:active, a.button2:active, button.button2:active, input.button1:active, input.button2:active, input.button:active, input[type=""button""]:active, input[type=""submit""]:active, input[type=""reset""]:active, input[type=""file""]:active, a.button1:focus, a.button2:focus, button.button2:focus, input.button1:focus, input.button2:focus, input.button:focus, input.search-button:focus, #tabs a:after, body div.sceditor-dropdown .button:active, body div.sceditor-dropdown .button:focus, body #fa_search #fa_textarea, body #fa_search #fa_magnifier, img[src*=""color=primary""]:active, input[type=""button""]:focus, input[type=""submit""]:focus, input[type=""reset""]:focus, input[type=""file""]:focus { background-color:' + palette[3] + '; }'+
+            '.fa_pseudo_checkbox:after, h2.post-content, h3.post-content, h4.post-content, .codebox .fae_copy-code:before { color:' + palette[1] + '; }'+
+            'img[src*=""?poll""], .sceditor-container .sceditor-toolbar, .sceditor-container .sceditor-group, body #fa_toolbar, body #fa_toolbar_hidden { border-color:' + palette[2] + '; }'+
+            '.color-secondary, .forum-status[style*=""locked=true""], img[src*=""color=secondary""] { background-color:' + palette[4] + '; }'+
+            '.forum-status[style*=""state=new""] { background-color:' + palette[0] + '; }'+
+            'form.search-form { background-color:' + palette[2] + '; }'+
+            'form.search-form input.search-keywords, input.search-button { border-color:' + palette[0] + '!important; }'+
+            'input[type=""text""]:hover, input.post:hover, input.inputbox:hover, textarea:hover, select:hover, input[type=""text""]:focus, input.post:focus, input.inputbox:focus, textarea:focus, select:focus, body div.sceditor-dropdown input:focus, body div.sceditor-dropdown textarea:focus, .fa_pseudo_checkbox:hover, .fa_pseudo_radio:hover, .sceditor-container, h2.post-content, h3.post-content, h4.post-content, .lastpost-avatar, #wio_new_avatar, .avatar-mini img, .avatar, #chatbox, #chatbox_members, #chatbox_members > h4.away, #chatbox_members > ul.away-users, body #chatbox .cb-avatar { border-color:' + palette[1] + ' !important; }'+
+            'a, a:link, a:visited { color:' + palette[3] + '; }'+
+            'a:hover, a:active { color:' + palette[2] + '; }'+
+            '::selection { background-color:' + palette[1] + '; } ::-moz-selection { background-color:' + palette[1] + '; }'+
+            '::-webkit-scrollbar-thumb, ::-webkit-scrollbar-button:single-button { background-color:' + palette[1] + '; }'+
+            '::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-button:single-button:hover { background-color:' + palette[2] + '; }'+
+            '::-webkit-scrollbar-thumb:active, ::-webkit-scrollbar-button:single-button:active { background-color:' + palette[3] + '; }';
+    }
+  };
+ 
+  var selector = document.createElement('SELECT'),
+      picker = document.createElement('INPUT'),
+      frag = document.createDocumentFragment(),
+      opt,
+      color,
+      i;
+ 
+  if (!fa_theme_color.palette[fa_theme_color.selected]) {
+    for (i in fa_theme_color.palette) {
+      fa_theme_color.selected = i;
+      my_setcookie('fa_theme_color', i, true);
+      break;
+    }
+  }
+ 
+  selector.id = 'fa_theme_selector';
+  selector.onchange = function() {
+    fa_theme_color.change(this.value);
+  };
+ 
+  picker.id = 'fae_custom-theme';
+ 
+  try {
+    picker.type = 'color';
+  } catch (error) {
+    picker.type = 'text';
+  }
+ 
+  picker.value = cc || '#6699CC';
+  picker.style.display = my_getcookie('fae_custom-theme') ? '' : 'none';
+  picker.onchange = function () {
+    fa_theme_color.change('Tema Personalizado');
+  };
+ 
+  for (i in fa_theme_color.palette) {
+    opt = document.createElement('OPTION');
+    color = /Tema Aleatório|Selecionar um tema|Tema Personalizado/.test(i) ? ['#FFF', '#000'] : [fa_theme_color.palette[i][2], ''];
+ 
+    if (!/Tema Aleatório|Selecionar um tema|Tema Personalizado/.test(i)) {
+      fa_theme_color.palette['Tema Aleatório'][fa_theme_color.palette['Tema Aleatório'].length] = i;
+    }
+ 
+    opt.value = i;
+    opt.innerHTML = i;
+    opt.selected = fa_theme_color.selected == i ? true : false;
+    opt.style.backgroundColor = color[0];
+    opt.style.color = color[1];
+ 
+    frag.appendChild(opt);
+  }
+ 
+  selector.appendChild(frag);
+ 
+  document.write('<style type=""text/css"">#fa_theme_selector { color:#FFF; border:1px solid transparent; float:left; outline:none; } #fae_custom-theme { margin:3px; float:left; }</style>');
+ 
+  fa_theme_color.selector = selector;
+  fa_theme_color.picker = picker;
+  fa_theme_color.change(fa_theme_color.selected);
+ 
+  $(function() {
+    var body = document.getElementById('page-body');
+    body.insertBefore(picker, body.firstChild);
+    body.insertBefore(selector, body.firstChild);
+ 
+    /* THEME CHANGER UI */
+    if (fa_theme_color.selector) {
+      var frag = document.createDocumentFragment();
+ 
+      // create the theme picker
+      window.fae_theme_picker = document.createElement('A');
+      fae_theme_picker.href = '#';
+      fae_theme_picker.dataset.selectedIndex = fa_theme_color.selector.selectedIndex;
+      fae_theme_picker.innerHTML = fa_theme_color.selector.options[fa_theme_color.selector.selectedIndex].innerHTML;
+      fae_theme_picker.style.width = fa_theme_color.selector.getBoundingClientRect().width - 12 + 'px';
+      fae_theme_picker.style.backgroundColor = fa_theme_color.selector.style.backgroundColor;
+      fae_theme_picker.style.borderColor = fa_theme_color.selector.style.borderColor;
+      fae_theme_picker.id = 'fae_theme_picker';
+      fae_theme_picker.onclick = function () {
+        return false;
+      };
+ 
+      // show / hide the theme picker on click
+      document.addEventListener('click', function (e) {
+        var that = e.target;
+ 
+        if (that.id == 'fae_theme_picker') {
+ 
+          if (fae_theme_list.className == 'theme_list_hidden') {
+            var offset = that.getBoundingClientRect(),
+                selected = fae_theme_list.querySelector('[data-index=""' + fae_theme_picker.dataset.selectedIndex + '""]');
+ 
+            fae_theme_list.className = '';
+            fae_theme_list.style.left = offset.left + 'px';
+            fae_theme_list.style.marginTop = offset.height + 1 + 'px';
+ 
+            fae_hover_theme(selected);
+            fae_theme_list.scrollTop = (selected.offsetTop - fae_theme_list.getBoundingClientRect().height) + (selected.getBoundingClientRect().height + 2);
+ 
+          } else {
+            fae_theme_list.className = 'theme_list_hidden';
+          }
+ 
+        } else if (!fae_theme_list.className) {
+          fae_theme_list.className = 'theme_list_hidden';
+        }
+      });
+ 
+      // change the theme when the up or down arrows are pressed
+      fae_theme_picker.onkeydown = function (e) {
+        var index = +fae_theme_picker.dataset.selectedIndex;
+            next = fae_theme_list.querySelector('[data-index=""' + (e.keyCode == 38 ? index - 1 : e.keyCode == 40 ? index + 1 : index) + '""]');
+ 
+        if (next && next.className != 'pseudo-hover') {
+          next.click();
+          fae_hover_theme(next);
+        }
+ 
+        return false;
+      };
+ 
+      // hover the selected option / last hovered option
+      window.fae_hover_theme = function (that) {
+        var hovered = document.querySelector('.pseudo-hover');
+ 
+        if (hovered) {
+          hovered.className = '';
+        }
+ 
+        that.className = 'pseudo-hover';
+      };
+ 
+      // change the theme picker style when the custom theme is changed
+      document.getElementById('fae_custom-theme').addEventListener('change', function () {
+        fae_theme_picker.style.backgroundColor = fa_theme_color.selector.style.backgroundColor;
+        fae_theme_picker.style.borderColor = fa_theme_color.selector.style.borderColor;
+      });
+ 
+ 
+      // create the theme list
+      window.fae_theme_list = document.createElement('DIV');
+      fae_theme_list.id = 'fae_theme_list';
+      fae_theme_list.className = 'theme_list_hidden';
+      fae_theme_list.style.width = fa_theme_color.selector.getBoundingClientRect().width + 'px';
+ 
+      // prevent unwanted window scrolling when the theme list has been scrolled all the way from the top or bottom
+      fae_theme_list.onwheel = function (e) {
+        if ((fae_theme_list.scrollTop == (fae_theme_list.scrollHeight - fae_theme_list.clientHeight) && e.deltaY > 0) || fae_theme_list.scrollTop == 0 && e.deltaY < 0) {
+          return false;
+        }
+      };
+ 
+      // hide the theme list on scroll
+      window.addEventListener('scroll', function () {
+        if (!fae_theme_list.className) {
+          fae_theme_list.className = 'theme_list_hidden';
+        }
+      });
+ 
+      // get the original theme options and create new options for the updated UI
+      for (var opts = fa_theme_color.selector.options, i = 0, j = opts.length, option; i < j; i++) {
+        option = document.createElement('A');
+        option.href = '#';
+        option.dataset.index = i;
+        option.innerHTML = opts[i].innerHTML;
+        option.style.color = opts[i].style.color || '#FFF';
+        option.style.backgroundColor = opts[i].style.backgroundColor;
+ 
+        // apply the selected theme to both the new UI and hidden select element
+        option.onclick = function () {
+          var color = fa_theme_color.selector.options[this.dataset.index];
+ 
+          color.selected = true;
+          fae_theme_picker.innerHTML = fa_theme_color.selector.value;
+          fae_theme_picker.dataset.selectedIndex = this.dataset.index;
+ 
+          fa_theme_color.change(color.value);
+ 
+          fae_theme_picker.style.backgroundColor = fa_theme_color.selector.style.backgroundColor;
+          fae_theme_picker.style.borderColor = fa_theme_color.selector.style.borderColor;
+ 
+          fae_theme_list.className = 'theme_list_hidden';
+          fae_theme_picker.focus();
+ 
+          return false;
+        };
+ 
+        // update selected option on hover
+        option.onmouseover = function () {
+          fae_hover_theme(this);
+        };
+ 
+        fae_theme_list.appendChild(option);
+      }
+ 
+      // add the theme picker, list, and style to the document
+      frag.appendChild(fae_theme_picker);
+      frag.appendChild(fae_theme_list);
+ 
+      $('head').append(
+        '<style type=""text/css"">'+
+          '#footer_end #fae_theme_list,#page-footer #fae_theme_list{margin-top:-335px!important}'+
+          'a#fae_theme_picker{color:#FFF;font-size:13px;font-family:Arial;background:#999;border:1px solid #888;position:relative;display:inline-block;padding:6px;margin:1px;float:left;text-decoration:none;outline:none;}'+
+          '#fae_theme_picker:after{content:""\\f0dd"";font-family:FontAwesome;position:absolute;right:4px}'+
+          '#fae_theme_list{background:#FFF;border:1px solid rgba(0,0,0,.175);position:absolute;max-height:335px;overflow:auto;overflow-x:hidden;z-index:10;white-space:nowrap;visibility:visible}'+
+          '#fae_theme_list.theme_list_hidden{visibility:hidden}'+
+          '#fae_theme_list a{font-family:Arial;display:block;padding:6px;text-decoration:none}'+
+          '#fae_theme_list a.pseudo-hover{color:#FFF!important;background:#28F!important}'+
+          '@media (max-width: 768px) and (min-width: 0px) {body #fae_theme_picker{float:right;width:240px !important;margin:0 0 6px}body #fae_theme_list{width:252px !important}}'+
+        '</style>'
+      );
+ 
+      fa_theme_color.selector.parentNode.insertBefore(frag, fa_theme_color.selector);
+      fa_theme_color.selector.style.display = 'none'; // hide to original theme selector element
+    }
+ 
+  });
+}());
+ 
+function fae_editColor (str, op) {
+  var letter = { 'F' : 15, 'E' : 14, 'D' : 13, 'C' : 12, 'B' : 11, 'A' : 10 },
+      hex = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'A', 'B', 'C', 'D', 'E', 'F'],
+      neg = [0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6];
+ 
+  str = str.toUpperCase().split('');
+ 
+  for (var i = 1; i < 7; i++) {
+    if (letter[str[i]]) {
+      str[i] = letter[str[i]];
+    } else {
+      str[i] = +str[i];
+    }
+ 
+    if (op == 'darken') {
+      str[i] = neg[str[i]];
+    } else {
+      str[i] += op;
+    }
+ 
+    if (str[i] > 15) {
+      str[i] = 15;
+    } else if (str[i] < 0) {
+      str[i] = 0;
+    }
+ 
+    str[i] = hex[str[i]];
+  }
+ 
+  return str.join('');
+};
+ 
+ 
+/* -- 03. pseudoInputs -- */
+// function to hide all checkboxes / radios and replace them with pseudo inputs
+$(function() {
+  for (var input = document.getElementsByTagName('INPUT'), i = 0, j = input.length, type; i < j; i++) {
+    type = input[i].type;
+    if (/radio|checkbox/i.test(type)) {
+      input[i].className += ' fa_input_hidden';
+      input[i].insertAdjacentHTML('afterend', '<span class=""fa_pseudo_' + type + '"" onclick=""this.previousSibling.click(); return false;""/>');
+    }
+  }
+});
+ 
+ 
+/* -- 04. toolbar search mod -- */
+// gives the search bar a placeholder and attaches an event handler to the button
+window.fa_textarea_placeholer = 'Buscar...';
+ 
+$(function(){
+  $(function() {
+    var fa_magnifier = document.getElementById('fa_magnifier'),
+        fa_textarea = document.getElementById('fa_textarea');
+ 
+    if (fa_magnifier) {
+      fa_magnifier.onclick = function() {
+        this.parentNode.submit();
+      };
+    }
+ 
+    if (fa_textarea) {
+      fa_textarea.value = fa_textarea_placeholer;
+ 
+      fa_textarea.onfocus = function() {
+        if (this.value == fa_textarea_placeholer) {
+          this.value = '';
+        }
+      };
+ 
+      fa_textarea.onblur = function() {
+        if (!this.value) {
+          this.value = fa_textarea_placeholer;
+        }
+      };
+ 
+    }
+ 
+  });
+});
+ 
+ 
+/* -- 05. fae_sticky_nav_panel -- */
+// adds a sticky navigation for quick use when the navbar isn't visible
+$(function() {
+  window.fae_sticky = {
+            // various user options
+            navbar : 'navbar',
+          position : 'left',
+            title : 'Navegação Rápida',
+          tooltip : 'Alternar Navegação Rápida',
+    additionalHTML : '<div class=""nav-actions""><a href=""javascript:fae_sticky.copyURL();"" title=""Copiar BBCode URL""><i class=""fa fa-link""></i></a>' + ( _userdata.user_level == 1 ? '<a href=""/admin"" title=""Painel Admin""><i class=""fa fa-wrench""></i></a>' : '' ) + '<a href=""#top"" title=""Início da Página""><i class=""fa fa-chevron-up""></i></a><a href=""#bottom"" title=""Fim da Página""><i class=""fa fa-chevron-down""></i></a></div>',
+    alwaysVisible : false,
+ 
+    // copy page URL as bbcode
+    copyURL : function() {
+      window.prompt('Copiar o BBCode URL abaixo. (CTRL+C)', '[url=' + window.location + ']' + document.title + '[/url]');
+    },
+ 
+    // listen for changes in the navbar's bottom rect
+    scroll : function() {
+      var rect = fae_sticky.navbar.getBoundingClientRect(),
+          position = fae_sticky.node[0].style[fae_sticky.position];
+ 
+      if (rect.bottom <= fae_sticky.offset[fae_sticky.tb_state] && position == '-30px') {
+        fae_sticky.node[0].style[fae_sticky.position] = '';
+      } else if (rect.bottom > fae_sticky.offset[fae_sticky.tb_state] && position != '-30px') {
+        fae_sticky.node[0].style[fae_sticky.position] = '-30px';
+        $(fae_sticky.node).removeClass('active');
+      }
+    },
+ 
+    // offsets for when the toolbar is hidden / shown
+    offset : {
+      fa_hide : 0,
+      fa_show : 30
+    }
+  };
+ 
+  // nodes used in the module
+  fae_sticky.node = [
+    // button
+    $('<a class=""widget_menu column_button_' + fae_sticky.position + ' color-secondary"" />').attr({
+      href : '#',
+        id : 'fa_sticky_nav_button',
+      style : fae_sticky.position + ':-30px;',
+      title : fae_sticky.tooltip
+ 
+    }).click(function() {
+      $(fae_sticky.node)[/active/.test(this.className) ? 'removeClass' : 'addClass']('active');
+      return false;
+    })[0],
+ 
+    // panel
+    $('<div id=""fae_sticky_nav_panel"" class=""module_column column_' + fae_sticky.position + ' color-secondary"" />')
+    .html('<div class=""title module_column_title"">' + fae_sticky.title + '</div><div class=""module_inner""></div>')[0]
+  ];
+ 
+  fae_sticky.navbar = document.getElementById(fae_sticky.navbar); // get the old navbar
+ 
+  // then clone its contents and add it to the sticky panel
+  $('.module_inner', fae_sticky.node[1]).append($('a.mainmenu', fae_sticky.navbar).clone()).append(fae_sticky.additionalHTML);
+  $(document.body).append(fae_sticky.node);
+ 
+  if (!fae_sticky.alwaysVisible) {
+    fae_sticky.tb_state = my_getcookie('toolbar_state') || (_userdata.activate_toolbar ? 'fa_show' : 'fa_hide');
+    fae_sticky.scroll();
+ 
+    $(window).scroll(fae_sticky.scroll);
+ 
+    $(function() {
+      $('#fa_hide, #fa_show').click(function() {
+        fae_sticky.tb_state = this.id;
+      });
+    });
+  } else {
+    fae_sticky.node[0].style[fae_sticky.position] = '';
+  }
+});
+ 
+ 
+/* -- 06. image resizer -- */
+(function() {
+  window.fa_img_resizer = {
+    max_width : 400, // maximum image width (400px)
+    max_height : 250, // maximum image height (250px)
+ 
+    selector : '.postbody .content img, .mod_news img, .message-text img', // where images should be resized
+ 
+    options : {
+            bar : true, // resized image options bar
+        toggler : true, // Enlarge / Reduce Image
+      full_size : true, // Mostrar tamanho grande
+      download : false, // Baixar imagem link
+      lightbox : true // lightbox effect
+    },
+ 
+    // texts
+    lang : {
+      full_size : '<i class=""fa fa-external-link""></i> Mostrar tamanho grande',
+        enlarge : '<i class=""fa fa-search-plus""></i> Aumentar imagem',
+        reduce : '<i class=""fa fa-search-minus""></i> Reduzir imagem',
+      download : '<i class=""fa fa-download""></i> Baixar imagem',
+      tooltip : 'Clique para ver imagem completa'
+    },
+ 
+    // resize all images inside the ""resizeIn"" elements
+    resize : function() {
+      for (var a = $(fa_img_resizer.selector), i = 0, j = a.length; i < j; i++) {
+        if (!a[i].longdesc && (a[i].naturalWidth > fa_img_resizer.max_width || a[i].naturalHeight > fa_img_resizer.max_height)) {
+          a[i].className += ' fa_img_reduced';
+ 
+          // make the image a ""link"" if it's not wrapper with one
+          if (fa_img_resizer.options.lightbox && a[i].parentNode.tagName != 'A') {
+            a[i].style.cursor = 'pointer';
+            a[i].title = fa_img_resizer.lang.tooltip;
+ 
+            a[i].onclick = function() {
+              fa_img_resizer.lightbox(this);
+            };
+          }
+ 
+          // create the resize bar
+          if (fa_img_resizer.options.bar) {
+            (a[i].parentNode.tagName == 'A' ? a[i].parentNode : a[i]).insertAdjacentHTML('beforebegin',
+              '<div class=""fa_img_resizer"" style=""width:' + (a[i].width - 8) + 'px;"">'+
+                (fa_img_resizer.options.toggler ? '<a class=""fa_img_enlarge"" href=""#"" onclick=""fa_img_resizer.toggle(this); return false;"">' + fa_img_resizer.lang.enlarge + '</a>' : '')+
+                (fa_img_resizer.options.full_size ? '<a class=""fa_img_full"" href=""/viewimage.forum?u=' + a[i].src + '"" target=""_blank"">' + fa_img_resizer.lang.full_size + '</a>' : '')+
+                (fa_img_resizer.options.download && !/Firefox/.test(navigator.userAgent) && 'download' in document.createElement('A') ? '<a class=""fa_img_download"" href=""' + a[i].src + '"" target=""_blank"" download>' + fa_img_resizer.lang.download + '</a>' : '' )+
+              '</div>'
+            );
+          }
+        }
+      }
+    },
+ 
+    // toggle between enlarged and reduced image sizes
+    toggle : function(that) {
+      var img = that.parentNode.nextSibling;
+ 
+      if (img.tagName == 'A') {
+        img = img.getElementsByTagName('IMG')[0];
+      }
+ 
+      if (/fa_img_reduced/.test(img.className)) {
+        that.innerHTML = fa_img_resizer.lang.reduce;
+        that.className = 'fa_img_reduce';
+        img.className = img.className.replace(/fa_img_reduced/, 'fa_img_enlarged');
+      } else {
+        that.innerHTML = fa_img_resizer.lang.enlarge;
+        that.className = 'fa_img_enlarge';
+        img.className = img.className.replace(/fa_img_enlarged/, 'fa_img_reduced');
+      }
+ 
+      that.parentNode.style.width = img.width - 8 + 'px';
+    },
+ 
+    // lightbox effect
+    lightbox : function(that) {
+      var frag = document.createDocumentFragment(),
+          overlay = $('<div id=""fa_img_lb_overlay"" />')[0],
+          img = $('<img id=""fa_img_lb_image"" src=""' + that.src + '"" />')[0];
+ 
+      overlay.onclick = fa_img_resizer.kill_lightbox;
+      img.onclick = fa_img_resizer.kill_lightbox;
+ 
+      frag.appendChild(overlay);
+      frag.appendChild(img);
+      document.body.appendChild(frag);
+      document.body.style.overflow = 'hidden';
+ 
+      img.style.marginTop = '-' + (img.height / 2) + 'px';
+      img.style.marginLeft = '-' + (img.width / 2) + 'px';
+    },
+ 
+    // kill the lightbox
+    kill_lightbox : function() {
+      var overlay = document.getElementById('fa_img_lb_overlay'),
+          img = document.getElementById('fa_img_lb_image');
+ 
+      overlay && document.body.removeChild(overlay);
+      img && document.body.removeChild(img);
+      document.body.style.overflow = '';
+    }
+  };
+ 
+  // write styles into the document head
+  document.write(
+    '<style type=""text/css"">'+
+      fa_img_resizer.selector + ', .fa_img_reduced { max-width:' + fa_img_resizer.max_width + 'px; max-height:' + fa_img_resizer.max_height + 'px; }'+
+      '.fa_img_enlarged { max-width:100% !important; max-height:100% !important; }'+
+      '.fa_img_resizer { font-size:12px; text-align:left; padding:3px; margin:3px 0; background:#FFF; border:1px solid #CCC; }'+
+      '.fa_img_resizer a { display:inline-block; margin:0 3px; }'+
+      '.fa_img_resizer i { font-size:14px; vertical-align:middle; }'+
+      '#fa_img_lb_overlay { background:rgba(0, 0, 0, 0.7); position:fixed; top:0; right:0; bottom:0; left:0; z-index:999999; cursor:pointer; }'+
+      '#fa_img_lb_image { max-height:100%; max-width:100%; position:fixed; left:50%; top:50%; z-index:9999999; cursor:pointer; }'+
+    '</style>'
+  );
+ 
+  // begin modifying images when the page is loaded
+  $(window).load(fa_img_resizer.resize);
+ 
+  // kill forumactif's image resizer
+  if (window.resize_images) {
+    window.resize_images = function() {
+      return false;
+    };
+  }
+}());
+ 
+ 
+/* -- 07. fae_toggle_category -- */
+function fae_toggle_category(that) {
+  var next = that.nextSibling;
+  that.className = 'title ';
+ 
+  if (next.style.display == 'none') {
+    next.style.display = '';
+    that.className += 'c_hide';
+    my_setcookie('fae_' + next.id, 'shown');
+  } else {
+    next.style.display = 'none';
+    that.className += 'c_show';
+    my_setcookie('fae_' + next.id, 'hidden');
+  }
+};
+ 
+ 
+/* -- 08. sticky_nav_notifications -- */
+$(function() {
+  if (_userdata.session_logged_in) {
+    var nav = document.getElementById('fae_sticky_nav_panel'),
+        a = $('<a class=""mainmenu"" href=""/profile?mode=editprofile&page_profil=notifications"">Notificações</a>')[0];
+ 
+    if (nav) {
+      $('a[href=""/privmsg?folder=inbox""]', nav).after(a);
+ 
+      $.get('/notification.forum', function(o) {
+        if (o && o.unread) {
+          a.insertAdjacentHTML('beforeend', ' <span id=""sticky_notif_unread"">(' + o.unread + ')</span>');
+        }
+      }, 'json');
+    }
+  }
+});
+ 
+ 
+/* -- 09. update_notifier -- */
+$(function() {
+  if (_userdata.user_id == 1 && !my_getcookie('fae_update_alerted')) {
+ 
+    $.get('https://raw.githubusercontent.com/SethClydesdale/forumactif-edge/master/javascripts/version-data.js', function(d) {
+      var script = document.createElement('SCRIPT');
+      script.type = 'text/javascript';
+      script.text = d.replace(/forumactif_edge_version_data/, 'fae_github_version_data');
+      document.body.appendChild(script);
+ 
+      if (forumactif_edge_version_data.length < fae_github_version_data.length) {
+        alert('An update has been found for Forumactif Edge. When you\'re ready, please proceed to your FAE Control Panel and click ""Check for updates"" to begin the update process.');
+      }
+ 
+      my_setcookie('fae_update_alerted', '1');
+    });
+ 
+  }
+});
+ 
+ 
+/* -- 10. topic_icon_formatter -- */
+$(function() {
+  var a = $('.forum-info[style*=""background-image""]'),
+      i = 0,
+      j = a.length;
+ 
+  if (j) {
+    for (; i < j; i++) {
+      a[i].insertAdjacentHTML('afterbegin', '<img class=""topic-icon"" src=""' + a[i].style.backgroundImage.replace(/.*?url\((.*?)\).*/, '$1').replace(/'|""/g, '') + '"" />');
+      a[i].style.backgroundImage = '';
+    }
+ 
+    $('head').append('<style type=""text/css"">.topic-icon{vertical-align:middle;margin:0 3px;}</style>');
+  }
+});
+ 
+ 
+/* -- 11. dark mode -- */
+(function() {
+  window.fae_lightSwitchMode = my_getcookie('fae_light-switch-mode') || 'dark';
+ 
+  document.write('<style type=""text/css"">#fae_light-switch-container{margin:6px 0}#fae_light-switch-label{font-weight:700;vertical-align:middle}#fae_light-switch{background-color:rgba(0,0,0,.25);vertical-align:middle;display:inline-block;position:relative;height:26px;width:56px;border-radius:20px;cursor:pointer;overflow:hidden}#fae_light-switch>input{display:none}#fae_light-switch>div{background-color:rgba(255,255,255,.5);position:absolute;top:3px;left:3px;height:20px;width:20px;border-radius:20px;transition:.4s;font-size:13px;font-weight:700;line-height:22px}#fae_light-switch>div:before{content:""ON"";margin-left:-24px;color:transparent;transition:.4s}#fae_light-switch>div:after{content:""OFF"";margin-left:30px;color:rgba(255,255,255,.5);transition:.4s}#fae_light-switch>input:checked+div{background-color:#FFF;left:33px}#fae_light-switch>input:checked+div:before{color:#FFF}#fae_light-switch>input:checked+div:after{color:transparent}</style>');
+ 
+  var footer = '.footer-links.left',
+ 
+      cookie = my_getcookie('fae_light-switch'),
+      rgb,
+      button,
+      container,
+ 
+      changeTheme = function (cookie) {
+        var button = document.querySelector('#fae_light-switch input');
+ 
+        if ((button && button.checked) || cookie == 'on') {
+          my_setcookie('fae_light-switch', 'on', true);
+ 
+          if (window.sessionStorage && window.sessionStorage.faeLightSwitch) {
+            $('head').append('<style type=""text/css"" id=""fae_light-switch-css"">' + window.sessionStorage.faeLightSwitch + '</style>');
+          } else {
+            $.get('https://raw.githubusercontent.com/SethClydesdale/forumactif-edge/master/css/dark-mode/' + fae_lightSwitchMode + '-mode.min.css', function (d) {
+              $('head').append('<style type=""text/css"" id=""fae_light-switch-css"">' + d + '</style>');
+ 
+              if (window.sessionStorage) {
+                window.sessionStorage.faeLightSwitch = d;
+              }
+            });
+          }
+ 
+        } else {
+          var css = document.getElementById('fae_light-switch-css');
+ 
+          my_setcookie('fae_light-switch', 'off', true);
+ 
+          if (css) {
+            document.head.removeChild(css);
+          }
+        }
+      };
+ 
+  cookie && changeTheme(cookie);
+ 
+  $(function() {
+    if (!my_getcookie('fae_light-switch-mode')) {
+      rgb = window.getComputedStyle(document.body, null).getPropertyValue('background-color').replace(/rgb\(|\)|\s/g, '').split(',');
+      fae_lightSwitchMode = Math.round(((parseInt(rgb[0]) * 299) + (parseInt(rgb[1]) * 587) + (parseInt(rgb[2]) * 114)) /1000) > 125 ? 'dark' : 'light';
+ 
+      my_setcookie('fae_light-switch-mode', fae_lightSwitchMode, true);
+    }
+ 
+    footer = document.querySelector(footer);
+ 
+    if (footer) {
+      button = document.createElement('LABEL');
+      button.id = 'fae_light-switch';
+      button.innerHTML = '<input type=""checkbox"" ' + (cookie == 'on' ? 'checked=""true""' : '') + '/><div></div>';
+      button.firstChild.onchange = changeTheme;
+ 
+      container = document.createElement('DIV');
+      container.id = 'fae_light-switch-container';
+      container.innerHTML = '<span id=""fae_light-switch-label"">' + (fae_lightSwitchMode == 'dark' ? 'Modo Escuro:' : 'Modo Claro:') + '</span>';
+ 
+      container.appendChild(button);
+      footer.appendChild(container);
+    }
+  });
+}());
+ 
+ 
+/* -- 12. copy code button -- */
+$.getScript('https://cdn.jsdelivr.net/clipboard.js/1.5.16/clipboard.min.js', function() {
+  window.fae_copyCode = {
+    copy : 'Copiar Código',
+    copied : 'Copiado!'
+  };
+ 
+  $(function() {
+    var a = $('.codebox dt').not('.spoiler > dt, .hidecode > dt'),
+        i = 0,
+        j = a.length;
+ 
+    if (a[0]) {
+      $('head').append('<style type=""text/css"">.fae_copy-code{float:right;cursor:pointer}.fae_copy-code:before{content:""\\f0ea"";font-size:13px;font-family:FontAwesome;text-align:center;color:#69C;background:#FFF;border-radius:100%;display:inline-block;width:19px;height:19px;line-height:19px;margin:-1px 3px 0 3px}.codebox .fae_copy-code:hover:before{color:#EB5}.codebox .fae_copy-code.fae_copied:before{content:""\\f00c"";font-weight:700;color:#8B5}</style>');
+ 
+      for (; i < j; i++) {
+        a[i].insertAdjacentHTML('beforeend', '<span class=""fae_copy-code"">' + fae_copyCode.copy + '</span>');
+      }
+ 
+      new Clipboard('.fae_copy-code',{
+        target : function (copy) {
+          if (copy.innerHTML != fae_copyCode.copied) {
+            return $(copy).closest('.codebox').find('code')[0];
+          }
+        }
+      }).on('success', function (e) {
+        var copy = e.trigger;
+ 
+        if (copy.innerHTML != fae_copyCode.copied) {
+          copy.innerHTML = fae_copyCode.copied;
+          copy.className += ' fae_copied';
+ 
+          window.setTimeout(function() {
+            copy.innerHTML = fae_copyCode.copy;
+            copy.className = copy.className.replace('fae_copied', '');
+          }, 1000);
+        }
+ 
+        e.clearSelection();
+      });
+    }
+ 
+  });
+});
+ 
+ 
+ 
+/* -- 13. local frame styler -- */
+// global function for getting local iframes
+function fae_styleLocalFrames () {
+  var frame = $('iframe[src^=""/""], object[data^=""/""]'),
+      i = 0,
+      j = frame.length;
+ 
+  for (; i < j; i++) {
+    try {
+      var head = $('head', frame[i].contentDocument || frame[i].contentWindow.document);
+ 
+      $('#fa_theme_style, #fae_light-switch-css', head).remove();
+      head.append($('#fa_theme_style, #fae_light-switch-css').clone());
+ 
+    } catch (error) {
+      window.console && console.log(error);
+    }
+  }
+ 
+};
+ 
+ 
+// waits for frames to load (such as chatbox and smilies) and then applies preferred styles to them
+$(window).load(function() {
+  fae_styleLocalFrames();
+  $('iframe[src^=""/""]').on('load', fae_styleLocalFrames);
+  $('object[data^=""/""]').attr('onload', 'fae_styleLocalFrames();');
+  $('#fae_custom-theme, #fa_theme_selector, #fae_light-switch input').on('change', fae_styleLocalFrames);
+});"
+w761ZMbs,Best VS Code config,ceterumcenseo,JSON,Friday 22nd of March 2024 08:10:51 AM CDT,"{
+  ""telemetry.telemetryLevel"": ""off"",
+
+  ""update.enableWindowsBackgroundUpdates"": false,
+  ""update.mode"":""none"",
+  ""update.showReleaseNotes"": false,
+
+  ""extensions.ignoreRecommendations"": true,
+
+  ""explorer.autoReveal"": false,
+  ""explorer.openEditors.visible"": 10,
+  ""explorer.autoRevealExclude"": {
+    "".~lock.*"": true,
+    ""*.dvi"": true
+  },
+  ""explorer.confirmDragAndDrop"": false,
+  ""explorer.confirmDelete"": false,
+
+  ""editor.accessibilitySupport"": ""off"",
+  ""editor.dragAndDrop"": false,
+  ""editor.emptySelectionClipboard"": false,
+  ""editor.fontSize"": 16,
+  ""editor.wordWrap"": ""on"",
+  ""editor.minimap.enabled"": false,
+  ""editor.fontLigatures"": true,
+  ""editor.fontWeight"": ""300"",
+  ""editor.fontFamily"": ""Firicico, Consolas, 'Droid Sans Mono', 'monospace', monospace, 'Droid Sans Fallback'"",
+  ""editor.formatOnSave"": false,
+  ""editor.quickSuggestions"": {
+    ""comments"": ""on"",
+    ""strings"": ""on"",
+    ""other"": ""on""
+  },
+  ""editor.folding"": false,
+  ""editor.tokenColorCustomizations"": {
+    ""textMateRules"": [{
+      ""scope"": [
+        //following will be in italics (=Pacifico)
+        ""comment"",
+        ""entity.name.type.class"", //class names
+        ""keyword"", //import, export, return…
+        //""support.class.builtin.js"", //String, Number, Boolean…, this, super
+        ""storage.modifier"", //static keyword
+        ""storage.type.class.js"", //class keyword
+        ""storage.type.function.js"", // function keyword
+        ""storage.type.js"", // Variable declarations
+        ""keyword.control.import.js"", // Imports
+        ""keyword.control.from.js"", // From-Keyword
+        //""entity.name.type.js"", // new … Expression
+        ""keyword.control.flow.js"", // await
+        ""keyword.control.conditional.js"", // if
+        ""keyword.control.loop.js"", // for
+        ""keyword.operator.new.js"" // new
+      ],
+      ""settings"": {
+        ""fontStyle"": ""italic""
+      }
+    },{
+      ""scope"": [
+        //following will be excluded from italics (My theme (Monokai dark) has some defaults I don't want to be in italics)
+        ""invalid"",
+        ""keyword.operator"",
+        ""constant.numeric.css"",
+        ""keyword.other.unit.px.css"",
+        ""constant.numeric.decimal.js"",
+        ""constant.numeric.json"",
+        ""entity.name.type.class.js""
+      ],
+      ""settings"": {
+        ""fontStyle"": """"
+      }
+    }]
+  },
+  ""editor.codeActionsOnSave"": {
+    ""source.fixAll"": ""explicit""
+  },
+
+  ""diffEditor.renderSideBySide"": false,
+
+  ""workbench.colorTheme"": ""Visual Studio Light"",
+  ""workbench.startupEditor"": ""none"",
+  ""workbench.editorAssociations"": {
+    ""*.pdf"": ""default""
+  },
+  ""workbench.editor.wrapTabs"": true,
+  ""workbench.editor.enablePreview"": false,
+  ""workbench.editor.enablePreviewFromQuickOpen"": false,
+  ""workbench.tree.enableStickyScroll"": false,
+  ""workbench.editor.focusRecentEditorAfterClose"": false,
+
+  ""files.hotExit"": ""off"",
+  ""files.exclude"": {
+    ""**/.classpath"": true,
+    ""**/.DS_Store"": true,
+    ""**/.factorypath"": true,
+    ""**/.git"": true,
+    ""**/.hg"": true,
+    ""**/.project"": true,
+    ""**/.settings"": true,
+    ""**/.svn"": true,
+    ""**/*.pb.go"": true,
+    ""**/*.pb.ts"": true,
+    ""**/*.pbconf.ts"": true,
+    ""**/*.pbsc.ts"": true,
+    ""**/CVS"": true,
+    ""**/node_modules"": true,
+    ""**/*.vcd"": true,
+    ""**/work-*.cf"": true
+  },
+  ""files.watcherExclude"": {
+    ""**/.git/objects/**"": true,
+    ""**/.git/subtree-cache/**"": true,
+    ""**/node_modules/**"": true,
+    ""abs/**/*.js"": true
+  },
+  ""files.trimTrailingWhitespace"": true,
+  ""files.autoSave"": ""off"",
+
+  ""window.title"": ""${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"",
+  ""window.zoomLevel"": 1,
+  ""window.commandCenter"": false,
+  ""breadcrumbs.enabled"": true,
+
+  ""vim.smartcase"": true,
+  ""vim.useCtrlKeys"": true,
+  ""vim.overrideCopy"": true,
+
+  ""lövelauncher.path"": ""c:\\Users\\chris\\Downloads\\love-11.4-win64\\love.exe"",
+  ""lövelauncher.saveAllOnLaunch"": true,
+
+  ""go.formatTool"": ""goimports"",
+  ""go.toolsManagement.autoUpdate"": true,
+  ""go.useLanguageServer"": true,
+  ""go.lintOnSave"": ""file"",
+  ""go.coverOnTestPackage"": false,
+  ""go.testFlags"": [
+    ""-count=1"",
+    ""-v""
+  ],
+  ""go.testTimeout"": ""15s"",
+  ""go.buildOnSave"": ""off"",
+  ""go.disableConcurrentTests"": true,
+  ""go.gopath"": ""/home/chris/go"",
+  ""go.goroot"": ""/usr/local/go"",
+
+  ""git.autorefresh"": false,
+  ""git.autoRepositoryDetection"": false,
+  ""git.ignoreLegacyWarning"": true,
+  ""git.defaultBranchName"": ""master"",
+
+  ""typescript.preferences.importModuleSpecifier"": ""relative"",
+  ""typescript.updateImportsOnFileMove.enabled"": ""always"",
+  ""typescript.format.indentSwitchCase"": false,
+
+  ""[c]"": {
+    ""editor.defaultFormatter"": ""ms-vscode.cpptools""
+  },
+
+  ""[cpp]"": {
+    ""editor.defaultFormatter"": ""xaver.clang-format""
+  },
+
+  ""[proto3]"": {
+      ""editor.formatOnSave"": false
+  },
+
+  ""html.format.enable"": false,
+
+  ""redhat.telemetry.enabled"": false,
+
+  ""js/ts.implicitProjectConfig.checkJs"": true,
+  ""javascript.format.insertSpaceBeforeFunctionParenthesis"": true,
+  ""javascript.format.semicolons"": ""insert"",
+  ""javascript.preferences.quoteStyle"": ""single"",
+  ""javascript.suggest.completeFunctionCalls"": true,
+
+  ""eslint.validate"": [
+    ""javascript"",
+    ""typescript"",
+    ""html""
+  ]
+}"
+rAannDgg,Untitled,PowerTGS440,C++,Friday 22nd of March 2024 07:35:18 AM CDT,"#include <EEPROM.h>
+#include ""GravityTDS.h""
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <ThreeWire.h>
+#include <RtcDS1302.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH1106.h>
+ 
+ 
+ 
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define ONE_WIRE_BUS 5
+Adafruit_SH1106 display(21, 22);
+ 
+ 
+ 
+ 
+ 
+ 
+OneWire oneWire(ONE_WIRE_BUS);
+ 
+DallasTemperature sensors(&oneWire);
+ 
+ThreeWire myWire(19,18,23); //DAT,CLK,RST
+RtcDS1302<ThreeWire> Rtc(myWire);
+ 
+ 
+void Pompa1_wlacz()
+{
+   digitalWrite(33, HIGH);
+   // kod do wlaczenia pompy nr. 1
+}
+
+void Pompa1_wylacz()
+{
+    digitalWrite(33, LOW);
+    // kod do wylaczenia pompy nr. 1
+}
+
+void Pompa2_wlacz()
+{
+   digitalWrite(32, HIGH);
+   // kod do wlaczenia pompy nr. 1
+}
+
+void Pompa2_wylacz()
+{
+    digitalWrite(32, LOW);
+    // kod do wylaczenia pompy nr. 1
+}
+
+void pomiary()
+{
+    RtcDateTime now = Rtc.GetDateTime();
+    sensors.requestTemperatures();
+    static bool F_Pompa_1 = false;
+    static bool F_Pompa_2 = false;
+    int godzina = now.Hour();
+    int minuta = now.Minute();
+    int sekunda = now.Second();
+    
+
+    // WLACZENIE POMPY nr. 1
+    if(godzina == 8 && minuta == 0 && sekunda == 0)
+    {
+      if(!F_Pompa_1)
+      {
+          Pompa1_wlacz();
+          F_Pompa_1 = true;
+      }
+    }
+
+    // WYLACZENIE POMPY nr. 1  
+    if(godzina == 8 && minuta == 0 && sekunda == 5)
+    {
+        if(F_Pompa_1)
+        {
+            Pompa1_wylacz();
+            F_Pompa_1 = false;
+        }
+    }
+
+    // WLACZENIE POMPY nr. 1
+    if(godzina == 19 && minuta == 0 && sekunda == 0)
+    {
+      if(!F_Pompa_1)
+      {
+          Pompa1_wlacz();
+          F_Pompa_1 = true;
+      }
+    }
+
+    // WYLACZENIE POMPY nr. 1  
+    if(godzina == 19 && minuta ==15 && sekunda == 5)
+    {
+        if(F_Pompa_1)
+        {
+            Pompa1_wylacz();
+            F_Pompa_1 = false;
+        }
+    }
+
+    // WLACZENIE POMPY nr. 2
+    if(godzina == 20 && minuta == 0 && sekunda == 0)
+    {
+      if(!F_Pompa_2)
+      {
+          Pompa2_wlacz();
+          F_Pompa_2 = true;
+      }
+    }
+
+    // WYLACZENIE POMPY nr. 2  
+    if(godzina == 20 && minuta == 1 && sekunda == 5)
+    {
+        if(F_Pompa_2)
+        {
+            Pompa2_wylacz();
+            F_Pompa_2 = false;
+        }
+    }
+
+    
+}
+ 
+ 
+ void setup()
+{
+pinMode(12,OUTPUT);
+pinMode(14,OUTPUT);
+ 
+  Rtc.Begin();
+   RtcDateTime now = Rtc.GetDateTime();
+ 
+ RtcDateTime currentTime = RtcDateTime(2024,03,21,8,14,45);
+ Rtc.SetDateTime(currentTime);
+  sensors.begin();
+  pinMode(33, OUTPUT);
+  pinMode(32, OUTPUT);
+  pinMode(25, OUTPUT);
+ 
+    Serial.begin(115200);
+ 
+ 
+pinMode(13,INPUT);
+ 
+   display.begin(SH1106_SWITCHCAPVCC, 0x3C);
+  delay(2000);
+  display.clearDisplay();
+}
+ 
+ 
+ 
+void loop(void)
+{ 
+RtcDateTime now = Rtc.GetDateTime();
+digitalWrite(12,HIGH);
+digitalWrite(14,HIGH);
+pomiary();
+ 
+    display.clearDisplay();
+ 
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 10);
+  // Display static text
+   display.print(""TEMP: "");
+  display.println(sensors.getTempCByIndex(0));
+ 
+  display.println(  );
+  display.print(now.Day() );
+  display.print(""/"");
+  display.print(now.Month());
+  display.print(""/"");
+  display.print(now.Year());
+  display.print(""/"");
+  display.print(now.Hour());
+  display.print(""/"");
+  display.print(now.Minute());
+  display.print(""/"");
+  display.print(now.Second());
+ 
+  display.display();
+  display.clearDisplay(); 
+ ;
+}
+ "
+UUNaMz6A,Pet Sim 99 Gem Dupe Script,quikzyYTbtw,Lua,Friday 22nd of March 2024 07:31:44 AM CDT,"loadstring(game:HttpGet(""https://raw.githubusercontent.com/zerqhy/petsim99/main/PS99%20DUPE%20PUBLIC""))()"
+94uYZukC,Untitled,PowerTGS440,C++,Friday 22nd of March 2024 07:30:17 AM CDT,"#include <EEPROM.h>
+#include ""GravityTDS.h""
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <ThreeWire.h>
+#include <RtcDS1302.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH1106.h>
+ 
+ 
+ 
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define ONE_WIRE_BUS 5
+Adafruit_SH1106 display(21, 22);
+ 
+ 
+ 
+ 
+ 
+ 
+OneWire oneWire(ONE_WIRE_BUS);
+ 
+DallasTemperature sensors(&oneWire);
+ 
+ThreeWire myWire(19,18,23); //DAT,CLK,RST
+RtcDS1302<ThreeWire> Rtc(myWire);
+ 
+ 
+void Pompa1_wlacz()
+{
+   digitalWrite(33, HIGH);
+   // kod do wlaczenia pompy nr. 1
+}
+
+void Pompa1_wylacz()
+{
+    digitalWrite(33, LOW);
+    // kod do wylaczenia pompy nr. 1
+}
+void pomiary()
+{
+    RtcDateTime now = Rtc.GetDateTime();
+    sensors.requestTemperatures();
+    static bool F_Pompa_1 = false;
+    int godzina = now.Hour();
+    int minuta = now.Minute();
+    int sekunda = now.Second();
+    
+
+    // WLACZENIE POMPY nr. 1
+    if(godzina == 8 && minuta == 0 && sekunda == 0)
+    {
+      if(!F_Pompa_1)
+      {
+          Pompa1_wlacz();
+          F_Pompa_1 = true;
+      }
+    }
+
+    // WYLACZENIE POMPY nr. 1  
+    if(godzina == 8 && minuta == 0 && sekunda == 5)
+    {
+        if(F_Pompa_1)
+        {
+            Pompa1_wylacz();
+            F_Pompa_1 = false;
+        }
+    }
+
+    // WLACZENIE POMPY nr. 1
+    if(godzina == 19 && minuta == 0 && sekunda == 0)
+    {
+      if(!F_Pompa_1)
+      {
+          Pompa1_wlacz();
+          F_Pompa_1 = true;
+      }
+    }
+
+    // WYLACZENIE POMPY nr. 1  
+    if(godzina == 19 && minuta ==15 && sekunda == 5)
+    {
+        if(F_Pompa_1)
+        {
+            Pompa1_wylacz();
+            F_Pompa_1 = false;
+        }
+    }
+
+    
+}
+ 
+ 
+ void setup()
+{
+pinMode(12,OUTPUT);
+pinMode(14,OUTPUT);
+ 
+  Rtc.Begin();
+   RtcDateTime now = Rtc.GetDateTime();
+ 
+ RtcDateTime currentTime = RtcDateTime(2024,03,21,8,14,45);
+ Rtc.SetDateTime(currentTime);
+  sensors.begin();
+  pinMode(33, OUTPUT);
+  pinMode(32, OUTPUT);
+  pinMode(25, OUTPUT);
+ 
+    Serial.begin(115200);
+ 
+ 
+pinMode(13,INPUT);
+ 
+   display.begin(SH1106_SWITCHCAPVCC, 0x3C);
+  delay(2000);
+  display.clearDisplay();
+}
+ 
+ 
+ 
+void loop(void)
+{ 
+RtcDateTime now = Rtc.GetDateTime();
+digitalWrite(12,HIGH);
+digitalWrite(14,HIGH);
+pomiary();
+ 
+    display.clearDisplay();
+ 
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 10);
+  // Display static text
+   display.print(""TEMP: "");
+  display.println(sensors.getTempCByIndex(0));
+ 
+  display.println(  );
+  display.print(now.Day() );
+  display.print(""/"");
+  display.print(now.Month());
+  display.print(""/"");
+  display.print(now.Year());
+  display.print(""/"");
+  display.print(now.Hour());
+  display.print(""/"");
+  display.print(now.Minute());
+  display.print(""/"");
+  display.print(now.Second());
+ 
+  display.display();
+  display.clearDisplay(); 
+ ;
+}
+ "
+B9tLhkLT,data876,TestGuy1,JSON,Friday 22nd of March 2024 07:00:07 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '38b49afddf98a2402591492219543427e2460465a7dea229ee7ec6cbcb82b008532fbbe8cd143ba1d97d771723371882a81dcc6472c4a6df574fcf1fd217ceff8db17fe642133d18fc367d55e64b492cd630fcd2415d37a6625ef599b9141c2782c22fa230892e6d8322ad17c6836349c6e34a04016f0167f9f6df05d02ecbca',
+  otherdata: [
+    '3a5947eeca6bfc82f9a414bbcbed3329',
+    'f5244b81ac5326f6a55b3ee96d271e17',
+    'cf05c975b252facf55939360e68f4a31',
+    'bbbea44f8db3abc0d008fad2cba7db01',
+    '202f3bc668065333f3e05626d692c507',
+    '42b8ee6221bb1b5238d9f2cd237c6e9c',
+    '5997589d72c11a59bc9a94628eca2120',
+    '3b571fe01545286d159ad95270b60e81'
+  ]
+}"
+5tzW8eKq,Pet Sim 99 Hugegames Script Premium Unlocked,quikzyYTbtw,Lua,Friday 22nd of March 2024 06:47:53 AM CDT,"--[[
+Premium Unlocked Hugegames Script
+]]
+
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/zerqhy/petsim99/main/hugesgames.io""))()
+
+"
+Aky5rD7f,Vasya project,Argent007,C++,Friday 22nd of March 2024 06:29:00 AM CDT,"// ConsoleApplication1.cpp : Этот файл содержит функцию ""main"". Здесь начинается и заканчивается выполнение программы.
+//
+
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <map>
+#include <fstream>
+
+using namespace std;
+
+struct cell
+{
+    int r, c;
+    bool operator<(const cell &rhs)const
+    {
+        return r < rhs.r || (r == rhs.r && c < rhs.c);
+    }
+    cell operator+(cell rhs)
+    {
+        return { r + rhs.r,c + rhs.c };
+    }
+    bool is_inside(int rows, int cols)
+    {
+        return 0 <= r && r < rows && 0 <= c && c < cols;
+    }
+};
+
+static vector<cell> directions{ {0,1},{1,0},{-1,0},{0,-1} };
+static int infty = 1'000'000;
+
+class labyrinth
+{
+    vector<vector<char>> m;
+public:
+    labyrinth(size_t rows, size_t cols)
+    {
+        m.assign(rows, vector<char>(cols,'.'));
+    }
+    vector<char>& operator[](int row) 
+    {
+        return m[row];
+    }
+    const vector<char>& operator[](int row) const
+    {
+        return m[row];
+    }
+    char& operator()(const cell& C)
+    {
+        return m[C.r][C.c];
+    }
+    const char& operator()(const cell& C) const
+    {
+        return m[C.r][C.c];
+    }
+    int rows() const
+    {
+        return m.size();
+    }
+    int cols() const
+    {
+        return m.size() == 0 ? 0 : m[0].size();
+    }
+};
+
+labyrinth get_lab_from_stream(istream& inp)
+{
+    int rows, cols;
+    inp >> rows >> cols;
+    labyrinth lab(rows, cols);
+    for (size_t i = 0; i < rows; i++)
+    {
+        for (size_t j = 0; j < cols; j++)
+        {
+            inp >> lab[lab.rows()-i-1][j];
+        }
+    }
+    return lab;
+}
+
+void BFS(const labyrinth& lab, cell s, map<cell, int>& d, map<cell, cell>& p, bool requires_init)
+{
+    if (requires_init)
+    {
+        for (int i = 0; i < lab.rows(); i++)
+            for (int j = 0; j < lab.cols(); j++)
+            {
+                d[{i, j}] = infty; //lab.rows() * lab.cols();
+                p[{i, j}] = { -1,-1 };
+            }
+    }
+    d[s] = 0;
+    queue<cell> Q;
+    Q.push(s);
+    while (Q.size())
+    {
+        auto u = Q.front();
+        Q.pop();
+        for (auto dir : directions)
+        {
+            auto v = u + dir;
+            if (!v.is_inside(lab.rows(), lab.cols())) continue;
+            if (lab(v) != '#' && d[v] > d[u] + 1)
+            {
+                d[v] = d[u] + 1;
+                p[v] = u;
+                Q.push(v);
+            }
+        }
+    }
+}
+
+//Вася и потоп
+//flood_speed - интервал затопления очередного уровня
+void BFS2(const labyrinth& lab, cell s, double flood_speed, map<cell, int>& d, map<cell, cell>& p, bool requires_init)
+{
+    if (requires_init)
+    {
+        for (int i = 0; i < lab.rows(); i++)
+            for (int j = 0; j < lab.cols(); j++)
+            {
+                d[{i, j}] = infty; //lab.rows() * lab.cols();
+                p[{i, j}] = { -1,-1 };
+            }
+    }
+    d[s] = 0;
+    queue<cell> Q;
+    Q.push(s);
+    while (Q.size())
+    {
+        auto u = Q.front();
+        Q.pop();
+        for (auto dir : directions)
+        {
+            auto v = u + dir;
+            if (!v.is_inside(lab.rows(), lab.cols())) continue;
+            if (lab(v) != '#' && d[v] > d[u] + 1 && v.r>=floor(d[u]/flood_speed))
+            {
+                d[v] = d[u] + 1;
+                p[v] = u;
+                Q.push(v);
+            }
+        }
+    }
+}
+
+vector<cell> get_path(map<cell, int>& d, map<cell, cell>& p, cell dest)
+{
+    vector<cell> res;
+    if (d[dest] == infty)
+        return res;
+    res.push_back(dest);
+    while (d[res.back()] > 0)
+        res.push_back(p[res.back()]);
+    reverse(begin(res), end(res));
+    return res;
+}
+
+int main()
+{
+    fstream inp(""lab.txt"");
+    auto lab = get_lab_from_stream(inp);
+    map<cell, int> d; 
+    map<cell, cell> p;
+    BFS2(lab, { 0,0 }, 3.1, d, p, true);
+
+    std::cout << d[{ lab.rows() - 1,lab.cols() - 1 }] << std::endl;
+
+    auto path = get_path(d, p, { lab.rows() - 1,lab.cols() - 1 });
+    for (auto v : path)
+        std::cout << '(' << v.r << ',' << v.c << "") "";
+
+    std::cout << ""\n"";
+}
+
+// Запуск программы: CTRL+F5 или меню ""Отладка"" > ""Запуск без отладки""
+// Отладка программы: F5 или меню ""Отладка"" > ""Запустить отладку""
+
+// Советы по началу работы 
+//   1. В окне обозревателя решений можно добавлять файлы и управлять ими.
+//   2. В окне Team Explorer можно подключиться к системе управления версиями.
+//   3. В окне ""Выходные данные"" можно просматривать выходные данные сборки и другие сообщения.
+//   4. В окне ""Список ошибок"" можно просматривать ошибки.
+//   5. Последовательно выберите пункты меню ""Проект"" > ""Добавить новый элемент"", чтобы создать файлы кода, или ""Проект"" > ""Добавить существующий элемент"", чтобы добавить в проект существующие файлы кода.
+//   6. Чтобы снова открыть этот проект позже, выберите пункты меню ""Файл"" > ""Открыть"" > ""Проект"" и выберите SLN-файл.
+"
+pUwGw1qs,scribter role,JohnLennonPlays,Lua,Friday 22nd of March 2024 06:28:24 AM CDT,"local move_part = Instance.new(""RemoteEvent"")
+move_part.Name = ""move_part""
+move_part.Parent = owner
+
+local part = Instance.new(""Part"")
+part.Anchored = true
+part.CFrame = owner.Character:GetPivot()
+part.Parent = workspace
+
+move_part.OnServerEvent:Connect(function(_player, mouse_pos)
+    if _player.UserId ~= owner.UserId then return end
+    
+    part.CFrame = mouse_pos
+end)
+
+local client_script = NLS([[
+local player_mouse = owner:GetMouse()
+local move_part = owner:FindFirstChild(""move_part"")
+
+while true do task.wait(1/30)
+    move_part:FireServer(player_mouse.Hit)
+end
+]])
+
+script.Destroying:Connect(function()
+    move_part:Destroy()
+    part:Destroy()
+    client_script:Destroy()
+end)"
+DhvVmwMs,Untitled,baconmanthelegend,JavaScript,Friday 22nd of March 2024 06:19:53 AM CDT,"function language_selector() {
+    const regex = new RegExp(`${window.location.host}(/pt-br|/de|/es|/id)*`);
+    const onlyCurrentLangRegex = /\/(en|pt-br|de|es|id)\//;
+
+    // fetch current lang from local storage
+    let currentLang = localStorage.getItem('lang');
+    console.log(currentLang)
+
+    // changes language
+    const languageLinks = document.getElementsByClassName('language-select-link');
+    for (const link of languageLinks) {
+        if (link instanceof HTMLAnchorElement) {
+            if (link.hreflang !== 'en') {
+                link.href = window.location.href.replace(regex, window.location.host + '/' + link.hreflang);
+            } else {
+                // if the language is english, don't append /en/ to url
+                link.href = window.location.href.replace(regex, window.location.host);
+            }
+        }
+    }
+
+    // matches the language from the url into an array
+    // ex: learnjapanese.moe/es/kanji/ will return ['/es/', 'es'];
+    let currentUrlLang = onlyCurrentLangRegex.exec(window.location.href);
+
+    // only update local storage when language changes
+    if (currentUrlLang && window.location.href.includes(currentUrlLang[0]) && currentLang !== currentUrlLang[1]) {
+        localStorage.setItem('lang', currentUrlLang[1]);
+    }
+
+    // select all anchor labels inside the left navbar
+    const leftNavAnchors = document.querySelectorAll('.md-nav.md-nav--primary a');
+    // select specific top nav links 
+    const topNavDiscordLink = document.querySelector('a[href*=""/join""]')
+    const topNavDonateLink = document.querySelector('a[href*=""/donate""]')
+
+    // pushes all anchors into one array to iterate over
+    const anchors = [...leftNavAnchors, topNavDiscordLink, topNavDonateLink];
+
+    for (const a of anchors) {
+        if (a instanceof HTMLAnchorElement) {
+            // ignore just the homepage links, unless you want that translated..?
+            if (a.href !== `${window.location.origin}/`) {
+                let modifiedUrl;
+                let urlArray = a.href.split('/').filter((segment) => segment !== '');
+                // holds the section; 'kanji'・'guide'・etc..
+                let currentAnchorSegment = `${urlArray[urlArray.length - 1]}`;
+
+                if (currentLang !== 'en') {
+                    modifiedUrl = `${window.location.origin}/${currentLang}/${currentAnchorSegment}/`;
+                } else {
+                    // if language is english, don't append /en/ to url
+                    modifiedUrl = `${window.location.origin}/${currentAnchorSegment}/`;
+                }
+
+                a.href = modifiedUrl
+            }
+        }
+    }
+}
+
+const observer = new MutationObserver(function (mutationsList, observer) {
+    for (let mutation of mutationsList) {
+        if (mutation.type === 'childList' || mutation.type === 'subtree') {
+            language_selector();
+        }
+    }
+});
+
+const observerConfig = { childList: true, subtree: true };
+
+document$.subscribe(() => {
+    observer.observe(document.documentElement, observerConfig);
+});
+"
+EWmGYAwr,named.conf.options,tferreira,Bash,Friday 22nd of March 2024 06:17:48 AM CDT,"acl ""rede_interna"" {
+		192.168.200.0/24;
+		172.17.0.0/24;
+};
+options {
+	directory ""/var/cache/bind"";
+
+	// If there is a firewall between you and nameservers you want
+	// to talk to, you may need to fix the firewall to allow multiple
+	// ports to talk.  See http://www.kb.cert.org/vuls/id/800113
+
+	// If your ISP provided one or more IP addresses for stable 
+	// nameservers, you probably want to use them as forwarders.  
+	// Uncomment the following block, and insert the addresses replacing 
+	// the all-0's placeholder.
+
+	forwarders {
+	 	8.8.8.8;
+		8.8.4.4;
+	};
+
+	//========================================================================
+	// If BIND logs error messages about the root key being expired,
+	// you will need to update your keys.  See https://www.isc.org/bind-keys
+	//========================================================================
+	dnssec-validation auto;
+	minimal-responses yes;
+	version ""Empresa FatecSeg""
+	allow-query-cache { rede_interna; };
+	allow-query { any; };
+	allow-recursion { rede_ interna; };
+	listen-on-v6 { any; };
+};"
+8U34S58m,Untitled,VDRNV,C++,Friday 22nd of March 2024 06:14:08 AM CDT,"#include ""iostream""
+
+using namespace std;
+
+int main(){
+
+    int n=0;
+    printf(""Введите N-> "");
+    cin >> n;
+    int massive[n];
+    for(int i=0;i<n;i++){
+        printf(""Введите %i-ый элемент ->"",i);
+        cin>>massive[i];
+    }
+
+    int index_max=0;
+    int count_max=0;
+    int number_max=-9999;
+    for (int i=0;i<n-1;i++){
+        int counter_similar=0;
+        for (int j=i;j<n;j++){
+            if (massive[i]==massive[j]){
+                counter_similar+=1;
+            }
+        }
+        if (count_max<=counter_similar and number_max<massive[i]) {
+            index_max = i;
+            count_max=counter_similar;
+            number_max=massive[i];
+        }
+    }
+
+    printf(""Этот элемент %i"",massive[index_max]);
+
+
+    return 0;
+}"
+q2jA6tig,Review One Financial Markets,reviewbrokers,PHP,Friday 22nd of March 2024 06:12:06 AM CDT,https://www.reviewbrokers.net/review-one-financial-markets/
+V8GCxjFE,Review One Financial Markets,fxvnpro,PHP,Friday 22nd of March 2024 06:11:52 AM CDT,https://www.fxvnpro.com/review-one-financial-markets/
+kykpMX9T,db.fatecseg.edu.br,tferreira,Bash,Friday 22nd of March 2024 06:04:06 AM CDT,"$TTL 3600 ; Tempo de vida das respostas fornecidas pelo DNS (cache)
+@ IN SOA ns1.fatecseg.edu.br. hostmaster.fatecseg.edu.br. (
+             2024020901 ; Serial para controle de atualizações entre master e slave
+             28800      ; Tempo de atualizações entre master e slave (refresh)
+             7200       ; Tempo de atualizações caso o refresh falhe
+             604800     ; Tempo de expiração do slave caso não contate o master
+             7200 )     ; Tempo de vida das repostas negativas do servidor
+
+            NS ns1.fatecseg.edu.br.
+            IN MX 10 smtp.fatecseg.edu.br.
+            IN MX 20 smtp2.fatecseg.edu.br.
+fatecseg.edu.br. 	A 	192.168.200.3
+ns1 			A 	192.168.200.2
+www			A 	192.168.200.3
+smtp 			A 	192.168.200.3
+smtp2 			A 	192.168.200.4
+pop3 			A	192.168.200.5
+blog			A	192.168.200.6
+ftp			A	192.168.200.3
+webmail			CNAME 	pop3
+zabbix			CNAME 	www"
+WHmPqQir,Untitled,bebo231312312321,JavaScript,Friday 22nd of March 2024 05:46:28 AM CDT,"import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({
+  name: 'dataRange',
+  standalone: true
+})
+export class DataRangePipe implements PipeTransform {
+  transform(value: { start: string; end: string; } | null | undefined): string {
+    if (!value || !value.start || !value.end) {
+      return 'Неопределен период';
+    }
+    const startDate = new Date(value.start).toLocaleDateString();
+    const endDate = new Date(value.end).toLocaleDateString();
+
+    return `${startDate} - ${endDate}`;
+  }
+
+}
+"
+6MTrGGhD,Untitled,Volvap,Java,Friday 22nd of March 2024 05:46:25 AM CDT,"import java.util.Scanner;
+
+final class Manufacturer {
+    private final boolean isLongTermWarranty;
+
+    Manufacturer(boolean isLongTermWarranty) {
+        this.isLongTermWarranty = isLongTermWarranty;
+    }
+
+    public boolean isLongTermWarranty() {
+        return isLongTermWarranty;
+    }
+}
+
+class ElectricDevice {
+    private final Manufacturer manufacturer;
+    protected int minWarranty;
+
+    public ElectricDevice(Manufacturer manufacturer, int minWarranty) {
+        this.manufacturer = manufacturer;
+        setMinWarranty(minWarranty);
+    }
+
+    public int warranty() {
+        int generalWarranty = getMinWarranty();
+        if (manufacturer.isLongTermWarranty()) {
+            generalWarranty += 12;
+        }
+        return generalWarranty;
+    }
+
+
+    public int getMinWarranty() {
+        return minWarranty;
+    }
+
+    public void setMinWarranty(int minWarranty) {
+        this.minWarranty = Math.max(minWarranty, 6);
+    }
+}
+
+class Cooker extends ElectricDevice {
+    private final boolean isGas;
+
+    public Cooker(Manufacturer manufacturer, int minWarranty, boolean isGas) {
+        super(manufacturer, minWarranty);
+        this.isGas = isGas;
+    }
+
+    @Override
+    public int warranty() {
+        int generalWarranty = super.warranty();
+        if (isGas) {
+            generalWarranty += 12;
+        }
+        return generalWarranty;
+    }
+}
+
+class WashingMachine extends ElectricDevice {
+    private final boolean isDryer;
+
+    public WashingMachine(Manufacturer manufacturer, int minWarranty, boolean isDryer) {
+        super(manufacturer, minWarranty);
+        this.isDryer = isDryer;
+    }
+
+    @Override
+    public int warranty() {
+        int generalWarranty = super.warranty();
+        if (isDryer) {
+            double additionalWarranty = getMinWarranty() * 0.5;
+            generalWarranty += additionalWarranty;
+        }
+        return generalWarranty;
+    }
+}
+
+public class Solution {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+
+        String manufacturerName = scanner.nextLine();
+        boolean isLongTermWarranty = scanner.nextInt() != 0;
+        int minWarranty = scanner.nextInt();
+        boolean isGas = scanner.nextInt() != 0;
+        boolean isDryer = scanner.nextInt() != 0;
+
+        Manufacturer manufacturer = new Manufacturer(isLongTermWarranty);
+
+        ElectricDevice electricDevice = new ElectricDevice(manufacturer, minWarranty);
+        System.out.println(electricDevice.warranty());
+
+        electricDevice = new Cooker(manufacturer, minWarranty, isGas);
+        System.out.println(electricDevice.warranty());
+
+        electricDevice = new WashingMachine(manufacturer, minWarranty, isDryer);
+        System.out.println(electricDevice.warranty());
+    }
+}
+"
+W79EgYtZ,class_students,naren_paste,Python,Friday 22nd of March 2024 05:39:45 AM CDT,"class student:
+    total_students = 0
+
+    def __init__(self, name):
+        self.name = name
+        student.total_students = student.total_students + 1
+
+    @classmethod
+    def get_total_students(cls):
+        return cls.total_students
+
+student1 = student(""Alice"")
+student2 = student(""Bob"")
+student2 = student(""naren"")
+
+total_students = student.get_total_students()
+print(""Total students:"", total_students)  
+"
+GfuNn57R,radius_setter,naren_paste,Python,Friday 22nd of March 2024 05:36:33 AM CDT,"class Circle:
+    def __init__(self, radius):
+        self.__radius = radius
+    
+    @property
+    def radius(self):
+        return self.__radius
+    
+    @radius.setter
+    def radius(self, value):
+        if value <= 0:
+            raise ValueError(""Value is not positive"")
+        self.__radius = value
+    
+    def area(self):
+        return 3.14 * self.__radius * self.__radius
+
+
+my_circle = Circle(5)
+print(""Initial radius:"", my_circle.radius) 
+
+my_circle.radius = 7
+print(""Updated radius:"", my_circle.radius) 
+"
+rbCKc4ZX,Shop,UrayFenn,C#,Friday 22nd of March 2024 05:35:17 AM CDT,"namespace Shop
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            TradingProcess tradingProcess = new TradingProcess();
+            tradingProcess.Trading();
+        }
+    }
+
+    class TradingProcess
+    {
+        public void Trading()
+        {
+            const string CommandSalesmanShowRange = ""1"";
+            const string CommandBuyProduct = ""2"";
+            const string CommandCustomerShowInventory = ""3"";
+            const string CommandExitShop = ""4"";
+
+            Salesman salesman = new Salesman(100);
+            Customer customer = new Customer(220);
+            Shop shop = new Shop();
+
+            bool isWork = true;
+
+            while (isWork)
+            {
+                Console.WriteLine($""Деньги продавца: {salesman.CurrentMoney} || Деньги покупателя: {customer.CurrentMoney}\n\n"");
+                Console.WriteLine($""{CommandSalesmanShowRange} - Посмотореть ассортимент магазина."");
+                Console.WriteLine($""{CommandBuyProduct} - Купить товар."");
+                Console.WriteLine($""{CommandCustomerShowInventory} - Посмотреть покупки."");
+                Console.WriteLine($""{CommandExitShop} - Покинуть магазин."");
+
+                string userInput = Console.ReadLine();
+
+                switch (userInput)
+                {
+                    case CommandSalesmanShowRange:
+                        salesman.ShowInventory();
+                        break;
+                    case CommandBuyProduct:
+                        shop.Trade(customer, salesman);
+                        break;
+                    case CommandCustomerShowInventory:
+                        customer.ShowInventory();
+                        break;
+                    case CommandExitShop:
+                        isWork = false;
+                        break;
+                    default:
+                        Console.WriteLine(""Неверная команда, попробуйте снова."");
+                        break;
+                }
+
+                Console.ReadKey();
+                Console.Clear();
+            }
+        }
+
+        class Shop
+        {
+            public void Trade(Customer customer, Salesman salesman)
+            {
+                salesman.ShowInventory();
+
+                if (salesman.TryFind(out Product product) == false)
+                {
+                    Console.WriteLine(""В магазине нет такого товара."");
+                    return;
+                }
+
+                if (product.Price > customer.CurrentMoney)
+                {
+                    Console.WriteLine(""Не хватает денег."");
+                    return;
+                }
+
+                salesman.Sell(product);
+                customer.Buy(product);
+            }
+        }
+
+        class Trader
+        {
+            protected List<Product> Inventory = new List<Product>();
+
+            public Trader(int money)
+            {
+                CurrentMoney = money;
+            }
+
+            public int CurrentMoney { get; protected set; }
+
+            public virtual void ShowInventory()
+            {
+                foreach (Product product in Inventory)
+                {
+                    Console.WriteLine(product.Name);
+                }
+            }
+        }
+
+        class Salesman : Trader
+        {
+            public Salesman(int money) : base(money)
+            {
+                GenerateProducts();
+            }
+
+            public void Sell(Product product)
+            {
+                AcceptPayment(product);
+                Inventory.Remove(product);
+            }
+
+            public bool TryFind(out Product product)
+            {
+                Console.WriteLine(""Что вы хотите купить?"");
+                string userInput = Console.ReadLine();
+
+                foreach (Product productInInventory in Inventory)
+                {
+                    if (productInInventory.Name.ToLower() == userInput.ToLower())
+                    {
+                        product = productInInventory;
+                        return true;
+                    }
+                }
+
+                product = null;
+                return false;
+            }
+
+            public override void ShowInventory()
+            {
+                foreach (Product product in Inventory)
+                {
+                    Console.WriteLine($""{product.Name} {product.Price}"");
+                }
+            }
+
+            private void GenerateProducts()
+            {
+                Inventory.Add(new Product(""Макароны"", 35));
+                Inventory.Add(new Product(""Сахар"", 43));
+                Inventory.Add(new Product(""Кофе"", 180));
+                Inventory.Add(new Product(""Молоко"", 61));
+                Inventory.Add(new Product(""Лимонад"", 13));
+            }
+
+            private void AcceptPayment(Product product)
+            {
+                CurrentMoney += product.Price;
+            }
+        }
+
+        class Customer : Trader
+        {
+            public Customer(int money) : base(money)
+            {
+
+            }
+
+            public void Buy(Product product)
+            {
+                Pay(product);
+                Inventory.Add(product);
+            }
+
+            protected void Pay(Product product)
+            {
+                CurrentMoney -= product.Price;
+            }
+        }
+
+        class Product
+        {
+            public Product(string name, int price)
+            {
+                Name = name;
+                Price = price;
+            }
+
+            public string Name { get; private set; }
+            public int Price { get; private set; }
+        }
+    }
+}"
+WxWujRVY,Untitled,Josif_tepe,C++,Friday 22nd of March 2024 05:28:27 AM CDT,"#include <iostream>
+#include <vector>
+#include <map>
+#include <set>
+using namespace std;
+typedef long long ll;
+
+
+
+int main() {
+    bool prva_nula = false;
+    int tmp_min = 2e9, tmp_max = -2e9;
+    int global_min = 2e9, global_max = -2e9;
+    for(int i = 0; i < 1000000; i++) {
+        int x;
+        cin >> x;
+        if(x == 11111) {
+            break;
+        }
+        if(x == 0 and !prva_nula) {
+            prva_nula = true;
+            continue;
+        }
+        if(x !=0 and prva_nula) {
+            tmp_min = min(tmp_min, x);
+            tmp_max = max(tmp_max, x);
+        }
+        if(x == 0) {
+            global_max = max(global_max, tmp_max);
+            global_min = min(global_min, tmp_min);
+            
+            tmp_max = -2e9;
+            tmp_min = 2e9;
+            
+        }
+    }
+    cout << global_max - global_min << endl;
+    return 0;
+}
+//   2 1 3 3
+"
+jkURjyxf,Untitled,XaskeL,Lua,Friday 22nd of March 2024 05:03:23 AM CDT,"[657] = {
+		[""bumper_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""diffuser""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""exhaust""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""fenders_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""fenders_r""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""skirts""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""splitter""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[1] = { name=""2"", price=0 },
+			[1] = { name=""3"", price=0 },
+		},
+		[""splitter""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+		[""spoiler""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+			[4] = { name=""4"", price=0 },
+		},
+	},
+	[657] = {
+		[""bumper_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""diffuser""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""exhaust""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""fenders_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""head_lights""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""mirror""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""misc""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+		[""roof""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""scoop""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""splitter""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""trunk""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+	},
+	[656] = {
+		[""bonnet_attach""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""bonnet_badge""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+		},
+		[""bumper_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+		[""bumper_r""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+		[""exhaust""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+			[4] = { name=""4"", price=0 },
+		},
+		[""fenders_f""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+		},
+		[""fenders_r""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+		},
+		[""skirts""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+			[3] = { name=""3"", price=0 },
+		},
+		[""spoiler""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+		},
+		[""trunk""] = {
+			[0] = { name=""Stock"", price=0 },
+			[1] = { name=""1"", price=0 },
+			[2] = { name=""2"", price=0 },
+		},
+	},"
+S6rPKsbD,dips,xmd79,Python,Friday 22nd of March 2024 05:02:48 AM CDT,"from binance.client import Client
+import matplotlib.pyplot as plt
+import numpy as np
+from datetime import datetime
+import talib as ta
+import statsmodels.api as sm
+import os, sys
+
+import asyncio
+
+
+class Trader:
+    def __init__(self, file):
+        self.connect(file)
+
+    """""" Creates Binance client """"""
+    def connect(self,file):
+        lines = [line.rstrip('\n') for line in open(file)]
+        key = lines[0]
+        secret = lines[1]
+        self.client = Client(key, secret)
+
+    """""" Gets all account balances """"""
+    def getBalances(self):
+        prices = self.client.get_withdraw_history()
+        return prices
+
+filename = 'credentials.txt'
+trader = Trader(filename)
+
+
+
+filtered_pairs1 = []
+filtered_pairs2 = []
+filtered_pairs3 = []
+selected_pair = []
+selected_pairCMO = []
+
+
+trading_pairs = []
+
+# Assuming 'trader' and 'client' are predefined objects
+info = trader.client.get_exchange_info()
+symbols = info['symbols']
+
+for s in symbols:
+    # Check if the symbol's quote asset is 'USDT' and is active for trading
+    if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING' and 'SPOT' in s['permissions']:
+        trading_pairs.append(s['symbol'])
+
+with open('alts.txt', 'w') as f:
+    for pair in trading_pairs:
+        f.write(pair + '\n')
+
+
+def filter1(pair):
+
+    interval = '2h'
+    symbol = pair
+    klines = trader.client.get_klines(symbol=symbol,interval=interval)
+    open_time = [int(entry[0]) for entry in klines]
+    close = [float(entry[4]) for entry in klines]
+    close_array = np.asarray(close)
+
+    print(""on 2h timeframe "" + symbol)
+
+    x = close
+    y = range(len(x))
+
+    best_fit_line1 = np.poly1d(np.polyfit(y, x, 1))(y)
+    best_fit_line2 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 1.01
+    best_fit_line3 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 0.99
+ 
+    if x[-1] < best_fit_line3[-1] and best_fit_line1[0] <= best_fit_line1[-1]:
+        filtered_pairs1.append(symbol)
+        print('found')
+
+        #plt.figure(figsize=(8,6))
+        #plt.grid(True)
+        #plt.plot(x)
+        #plt.plot(best_fit_line1, '--', color='r')
+        #plt.plot(best_fit_line2, '--', color='r')
+        #plt.plot(best_fit_line3, '--', color='r')
+        #plt.show(block=False)
+        #plt.pause(6)
+        #plt.close()
+
+    elif x[-1] < best_fit_line3[-1] and best_fit_line1[0] >= best_fit_line1[-1]:
+        filtered_pairs1.append(symbol)
+        print('found')
+
+        #plt.figure(figsize=(8,6))
+        #plt.grid(True)
+        #plt.plot(x)
+        #plt.plot(best_fit_line1, '--', color='r')
+        #plt.plot(best_fit_line2, '--', color='r')
+        #plt.plot(best_fit_line3, '--', color='r')
+        #plt.show(block=False)
+        #plt.pause(6)
+        #plt.close()
+
+    else:
+        print('searching') 
+
+def filter2(filtered_pairs1):
+    interval = '15m'
+    symbol = filtered_pairs1
+    klines = trader.client.get_klines(symbol=symbol,interval=interval)
+    open_time = [int(entry[0]) for entry in klines]
+    close = [float(entry[4]) for entry in klines]
+    close_array = np.asarray(close)
+
+    print(""on 15min timeframe "" + symbol)
+
+    x = close
+    y = range(len(x))
+
+    best_fit_line1 = np.poly1d(np.polyfit(y, x, 1))(y)
+    best_fit_line2 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 1.01
+    best_fit_line3 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 0.99
+
+    if x[-1] < best_fit_line3[-1] and best_fit_line1[0] < best_fit_line1[-1]:
+        filtered_pairs2.append(symbol)
+        print('found')
+
+        #plt.figure(figsize=(8,6))
+        #plt.grid(True)
+        #plt.plot(x)
+        #plt.plot(best_fit_line1, '--', color='r')
+        #plt.plot(best_fit_line2, '--', color='r')
+        #plt.plot(best_fit_line3, '--', color='r')
+        #plt.show(block=False)
+        #plt.pause(6)
+        #plt.close()
+
+    if x[-1] < best_fit_line3[-1] and best_fit_line1[0] >= best_fit_line1[-1]:
+        filtered_pairs2.append(symbol)
+        print('found') 
+
+        #plt.figure(figsize=(8,6))
+        #plt.grid(True)
+        #plt.plot(x)
+        #plt.plot(best_fit_line1, '--', color='r')
+        #plt.plot(best_fit_line2, '--', color='r')
+        #plt.plot(best_fit_line3, '--', color='r')
+        #plt.show(block=False)
+        #plt.pause(6)
+        #plt.close()
+
+def filter3(filtered_pairs2):
+    interval = '5m'
+    symbol = filtered_pairs2
+    klines = trader.client.get_klines(symbol=symbol,interval=interval)
+    open_time = [int(entry[0]) for entry in klines]
+    close = [float(entry[4]) for entry in klines]
+    close_array = np.asarray(close)
+
+    print(""on 5m timeframe "" + symbol)
+
+    #min = ta.MIN(close_array, timeperiod=30)
+    #max = ta.MAX(close_array, timeperiod=30)
+
+    #real = ta.HT_TRENDLINE(close_array)
+    #wcl = ta.WCLPRICE(max, min, close_array)
+    
+    print(close[-1])
+    print()
+    #print(min[-1])
+    #print(max[-1])
+    #print(real[-1])    
+
+    x = close
+    y = range(len(x))
+
+    best_fit_line1 = np.poly1d(np.polyfit(y, x, 1))(y)
+    best_fit_line2 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 1.01
+    best_fit_line3 = (np.poly1d(np.polyfit(y, x, 1))(y)) * 0.99
+
+    if x[-1] < best_fit_line1[-1]:
+        filtered_pairs3.append(symbol)
+        print('found')
+
+        #plt.figure(figsize=(8,6))
+        #plt.title(symbol)
+        #plt.grid(True)
+        #plt.plot(close)
+        #plt.plot(best_fit_line1, '--', color='r')
+        #plt.plot(best_fit_line2, '--', color='r')
+        #plt.plot(best_fit_line3, '--', color='r')
+        #plt.plot(close)
+        #plt.plot(min)
+        #plt.plot(max)
+        #plt.plot(real)
+        #plt.show(block=False)
+        #plt.pause(5)
+        #plt.close()
+
+    else:
+        print('searching') 
+
+
+def momentum(filtered_pairs3):
+    interval = '1m'
+    symbol = filtered_pairs3
+    klines = trader.client.get_klines(symbol=symbol,interval=interval)
+    open_time = [int(entry[0]) for entry in klines]
+    close = [float(entry[4]) for entry in klines]
+    close_array = np.asarray(close)
+
+    print(""on 1m timeframe "" + symbol)
+
+    real = ta.CMO(close_array, timeperiod=14)
+    #print(real[-1])
+
+    if real[-1] < -50:
+        print('oversold dip found')
+        selected_pair.append(symbol)
+        selected_pairCMO.append(real[-1])
+
+    else:
+        print('searching')
+
+for i in trading_pairs:
+    output = filter1(i)
+    print(filtered_pairs1)
+
+for i in filtered_pairs1:
+    output = filter2(i)
+    print(filtered_pairs2) 
+
+for i in filtered_pairs2:
+    output = filter3(i)
+    print(filtered_pairs3) 
+
+for i in filtered_pairs3:
+    output = momentum(i)
+    print(selected_pair)
+
+if len(selected_pair) > 1:
+    print('dips are more then 1 oversold') 
+    print(selected_pair) 
+    print(selected_pairCMO)
+    
+    if min(selected_pairCMO) in selected_pairCMO:
+        #print(selected_pairCMO.index(min(selected_pairCMO)))
+        position = selected_pairCMO.index(min(selected_pairCMO))
+
+    for id, value in enumerate(selected_pair):
+        if id == position:
+            print(selected_pair[id])
+    #sys.exit()
+
+elif len(selected_pair) == 1:
+    print('1 dip found')   
+    print(selected_pair) 
+    print(selected_pairCMO)
+    #sys.exit()
+
+else:
+    print('no oversold dips for the moment, restart script...')
+    print(selected_pair) 
+    print(selected_pairCMO) 
+    #os.execl(sys.executable, sys.executable, *sys.argv)
+
+sys.exit(0)
+sys.exit()
+exit()
+
+"
+cNtew8gF,Untitled,Josif_tepe,C++,Friday 22nd of March 2024 04:57:12 AM CDT,"#include <iostream>
+#include <vector>
+#include <map>
+#include <set>
+using namespace std;
+typedef long long ll;
+
+
+
+int main() {
+    int n;
+    cin >> n;
+    
+    vector<int> cnt(10, 0);
+    while(n > 0) {
+        int cifra = n % 10;
+        cnt[cifra]++;
+        n /= 10;
+    }
+    int res = 0;
+    for(int i = 100; i <= 999; i++) {
+        vector<int> tmp(10, 0);
+        int t = i;
+        while(t > 0) {
+            int cifra = t % 10;
+            tmp[cifra]++;
+            t /= 10;
+        }
+        if(cnt == tmp) {
+            res++;
+        }
+    }
+    cout << res << endl;
+    
+    return 0;
+}
+//   2 1 3 3
+"
+cmmGhc2a,Untitled,Josif_tepe,C++,Friday 22nd of March 2024 04:47:29 AM CDT,"#include <iostream>
+#include <vector>
+#include <map>
+#include <set>
+using namespace std;
+typedef long long ll;
+
+
+
+int main() {
+    int x;
+    cin >> x;
+    while(x > 0) {
+        int cifra = x % 10;
+        cout << cifra << "" "";
+        x /= 10;
+    }
+    return 0;
+}
+//   2 1 3 3
+"
+1KVNqd0U,Web Socket Security,MrShtein,Java,Friday 22nd of March 2024 04:23:22 AM CDT,"package com.covenant.tribe.chat.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.simp.SimpMessageType;
+import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.config.annotation.web.socket.EnableWebSocketSecurity;
+import org.springframework.security.messaging.access.intercept.MessageMatcherDelegatingAuthorizationManager;
+
+@EnableWebSocketSecurity
+@Configuration
+public class WebSocketSecurity {
+
+    @Bean
+    public AuthorizationManager<Message<?>> messageAuthorizationManager(MessageMatcherDelegatingAuthorizationManager.Builder messages) {
+        messages.anyMessage().authenticated();
+        return messages.build();
+    }
+
+}
+"
+tQGEMC1P,fluid,SkyNetCloud,Lua,Friday 22nd of March 2024 04:22:57 AM CDT,"---------------------------------------------
+--	Tank module for caftNanny
+--	by demethan
+--	www.breakfastcraft.com
+--  www.craftnanny.org
+--  2015 08 12  demethan: 
+--		-fixed modem support
+--		-did some error magement
+-- 		-added visual bar	
+---------------------------------------------
+
+-- variables
+
+local containers={}
+local version = 1
+
+local installer = ""Q8ah3K9S""
+local token = '0'
+local module_name = ''
+local username = ''
+local type = ''
+
+-- write text to the terminal screen
+function draw_text_term(x, y, text, text_color, bg_color)
+  term.setTextColor(text_color)
+  term.setBackgroundColor(bg_color)
+  term.setCursorPos(x,y)
+  write(text)
+end
+
+-- draw a line on the terminal screen
+function draw_line_term(x, y, length, color)
+    term.setBackgroundColor(color)
+    term.setCursorPos(x,y)
+    term.write(string.rep("" "", length))
+end
+
+function bars()
+	draw_line_term(1, 1, 51, colors.lime)
+	draw_line_term(1, 19, 51, colors.lime)
+	draw_text_term(15, 1, 'CraftNanny Fluid Module', colors.gray, colors.lime)
+	draw_text_term(10, 19, 'www.craftnanny.org', colors.gray, colors.lime)
+end
+
+function terminal_screen()
+	term.clear()
+	
+	bars()
+	draw_text_term(1, 2, 'Module: ', colors.lime, colors.black)
+	draw_text_term(10, 2, module_name, colors.white, colors.black)
+	draw_text_term(1, 3, 'Owner: ', colors.lime, colors.black)
+	draw_text_term(8, 3, username, colors.white, colors.black)
+	draw_text_term(1, 4 , string.rep(""-"", 51), colors.lime, colors.black)
+	
+	--draw_text_term(2, 8, ""I dont know what to put here..."", colors.white, colors.black)
+end
+
+-- retrieves token from local text file
+function load_config()
+  sr = fs.open(""config.txt"", ""r"")
+    token = sr.readLine()
+	module_name = sr.readLine()
+	username = sr.readLine()
+	type = sr.readLine()
+  sr.close()
+end
+
+-- called for new installations and when the scanner needs to be updated
+function run_installer()
+	if fs.exists(""install"") then
+	    fs.delete(""install"")
+	  end
+	  shell.run(""pastebin get ""..installer.."" install"")
+	  sleep(1)
+	  shell.run(""install"")
+end
+
+
+------  Start module specific code ---------
+
+
+function phone_home(tank_name, fluid_type, percent)
+    response = http.post(""https://craftnanny.org/code/fluid.php"",
+    			""token=""..token..""&id=""..os.getComputerID()..""&tank_name=""..tank_name..""&fluid_type=""..fluid_type..""&percent=""..percent)		
+	return_string = response.readAll()
+	
+	if tonumber(return_string) > version then
+			run_installer()
+	end
+end
+
+
+-- function findPeripheralSide()
+--     -- Define the list of faces to check
+--     local faces = {""left"", ""right"", ""bottom"", ""top"", ""back""}
+
+--     -- Iterate through each face
+--     for _, face in ipairs(faces) do
+--         if peripheral.isPresent(face) then
+--             return true, face  -- Return if a peripheral is found on this face
+--         end
+--     end
+
+--     return false, """"  -- Return false if no peripheral is found
+-- end
+
+function round(num, decimals)
+    local mult = 10^(decimals or 0)
+    return math.floor(num * mult + 0.5) / mult
+end
+
+function capitalizeAndRemoveUnderscores(str)
+    return str:gsub(""([^_]+)([^_]*)"", function(first, rest)
+        first = first:gsub(""^%l"", string.upper) -- Capitalize the first letter of the first word
+        rest = rest:gsub(""^%l"", string.upper)   -- Capitalize the first letter of the second word
+        return first:gsub(""_"", """") .. rest:gsub(""_"", """") -- Concatenate the words after removing underscores
+    end)
+end
+
+
+
+function getTankInformation(t, tankName)
+    local tnk = peripheral.wrap(t)
+    local okLiquid, msg = pcall(tnk.getInfo)
+
+    if okLiquid then 
+        local amount = msg.amount
+        local capacity = msg.capacity
+        local fluid = tostring(msg.fluid):gsub(""^[^:]*:"", """")  -- Remove anything before the first colon
+        fluid = capitalizeAndRemoveUnderscores(fluid) -- Capitalize the first letter 
+        local percent = round((amount / capacity * 100), 2)
+
+        
+        phone_home(tankName, fluid, percent)
+        
+        print(fluid, "":"")
+        local graphBar = round(((term.getSize() * percent) / 100), 0)
+        if graphBar < 50 then 
+            draw_line_term(6, 7, graphBar , colors.green)
+            draw_line_term(6 + graphBar, 7, term.getSize() - graphBar - 6, colors.red)
+            draw_text_term(1, 7, percent .. "" % "", colors.lime, colors.black)
+            term.setBackgroundColor(colors.black)
+        else
+            draw_line_term(6, 7, graphBar - 6 , colors.green)
+            draw_text_term(1, 7, percent .. "" % "", colors.lime, colors.black)
+            term.setBackgroundColor(colors.black)
+        end
+        return true
+    else
+        return false
+    end
+end
+
+
+function start_loop()
+    local side
+    local tanks = peripheral.getNames()
+    local faces = {""left"", ""right"", ""bottom"", ""top"", ""back""}
+
+    -- Find the side where a peripheral is present
+    for _, face in ipairs(faces) do
+        if peripheral.isPresent(face) then
+            side = face
+            break
+        end
+    end
+
+    -- -- If no peripheral is found, exit the loop
+    -- if not side then
+    --     print(""No tank storage found"")
+    --     print(""Please check your modems"")
+    --     return
+    -- end
+
+    while true do
+        terminal_screen()
+
+        if #tanks > 2 then
+            print(""Only one device is supported"")
+            break
+        elseif #tanks == 2 then
+            for _, tank in pairs(tanks) do
+                if tank ~= side then
+                    ok = getTankInformation(tank, tank)          
+                end
+            end
+        else
+            ok = getTankInformation(side, ""Tank""..os.getComputerID())
+        end
+
+        if not ok then 
+            print(""No tank storage found"")
+            print(""Do you have the right module?"")
+            print(""Please check your modems"")
+            break
+        end
+
+        -- Main active status with server
+        sleep(30)
+    end
+end
+
+
+function start()
+	term.clear()
+	term.setCursorPos(1,1)
+	
+  if fs.exists(""config.txt"") then
+      load_config()
+	  start_loop()
+  else
+  	  run_installer()
+  end
+end
+
+start()"
+MNx2aYXc,WebSocketConfig,MrShtein,Java,Friday 22nd of March 2024 04:22:38 AM CDT,"package com.covenant.tribe.chat.config;
+
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.handler.invocation.HandlerMethodArgumentResolver;
+import org.springframework.messaging.simp.config.ChannelRegistration;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
+import org.springframework.security.authorization.AuthorizationEventPublisher;
+import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.authorization.SpringAuthorizationEventPublisher;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.messaging.access.intercept.AuthorizationChannelInterceptor;
+import org.springframework.security.messaging.context.AuthenticationPrincipalArgumentResolver;
+import org.springframework.security.messaging.context.SecurityContextChannelInterceptor;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+@Configuration
+@EnableWebSocketMessageBroker
+@Order(Ordered.HIGHEST_PRECEDENCE + 99)
+@NoArgsConstructor
+@Slf4j
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    ApplicationContext applicationContext;
+
+    @Autowired
+    public WebSocketConfig(ApplicationContext applicationContext) {
+        this.applicationContext = applicationContext;
+    }
+
+    @Override
+    public void addArgumentResolvers(List<HandlerMethodArgumentResolver> argumentResolvers) {
+        argumentResolvers.add(new AuthenticationPrincipalArgumentResolver());
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        AuthorizationManager<Message<?>> myAuthorizationRules = AuthenticatedAuthorizationManager.authenticated();
+        AuthorizationChannelInterceptor authz = new AuthorizationChannelInterceptor(myAuthorizationRules);
+        AuthorizationEventPublisher publisher = new SpringAuthorizationEventPublisher(applicationContext);
+        authz.setAuthorizationEventPublisher(publisher);
+        registration.interceptors(getChannelIntercepter(), new SecurityContextChannelInterceptor(), authz);
+    }
+
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.addEndpoint(""/api/v1/ws"")
+                .setAllowedOriginPatterns(""*"");
+        registry.addEndpoint(""/api/v1/ws/web"")
+                .setAllowedOriginPatterns(""*"")
+                .withSockJS();
+
+    }
+
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry config) {
+        config.setApplicationDestinationPrefixes(""/app"");
+        config.enableSimpleBroker(""/topic"");
+    }
+
+
+    public ChannelInterceptor getChannelIntercepter() {
+        return new ChannelInterceptor() {
+
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                StompHeaderAccessor accessor =
+                        MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+                if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+                    String token = Objects.requireNonNull(accessor.getNativeHeader(""Authorization"")).get(0);
+                    String tokenWithoutBearer = token.split(""Bearer "")[1];
+                    JwtDecoder jwtDecoder = applicationContext.getBean(""accessJwtDecoder"", JwtDecoder.class);
+                    Jwt jwt = null;
+                    try {
+                        jwt = jwtDecoder.decode(tokenWithoutBearer);
+                    } catch (Exception e) {
+                        log.error(e.getMessage(), e);
+                    }
+                    Authentication user = new JwtAuthenticationToken(jwt, new ArrayList<>(), jwt.getClaim(""sub""));
+                    accessor.setUser(user);
+                } else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                    JwtAuthenticationToken token = (JwtAuthenticationToken) accessor.getUser();
+                    if (token == null) {
+                        String erMessage = ""Token is null, you are not authenticated"";
+                        log.error(erMessage);
+                        throw new AccessDeniedException(erMessage);
+                    }
+                    Instant expiresAt = token.getToken().getExpiresAt();
+                    if (expiresAt == null || expiresAt.isBefore(Instant.now())) {
+                        accessor.setUser(null);
+                        String erMessage = ""Token is expired"";
+                        log.error(erMessage);
+                        throw new AccessDeniedException(erMessage);
+                    }
+                }
+                return message;
+            }
+        };
+    }
+
+}
+"
+zCX8pXfX,API weather,icarussiano,Python,Friday 22nd of March 2024 04:22:02 AM CDT,"import requests
+import datetime
+import os
+
+def nome_fase_lunare(moon_phase_value):
+    if moon_phase_value == 0 or moon_phase_value == 1:
+        return 'luna nuova'
+    elif moon_phase_value == 0.25:
+        return 'primo quarto'
+    elif moon_phase_value == 0.5:
+        return 'luna piena'
+    elif moon_phase_value == 0.75:
+        return 'ultimo quarto'
+    elif 0 < moon_phase_value < 0.25:
+        return 'crescente'
+    elif 0.25 < moon_phase_value < 0.5:
+        return 'gibbosa crescente'
+    elif 0.5 < moon_phase_value < 0.75:
+        return 'gibbosa calante'
+    elif 0.75 < moon_phase_value < 1:
+        return 'calante'
+    else:
+        return 'Errore: valore non valido'
+
+def get_weather_data(city, state, api_key):
+    url = f""https://api.openweathermap.org/geo/1.0/direct?q={city},{state}&appid={api_key}""
+    response = requests.get(url)
+    data = response.json()
+    lat, lon = data[0]['lat'], data[0]['lon']
+    url = f""https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&appid={api_key}&units=metric""
+    response = requests.get(url)
+    data = response.json()
+    sunrise = datetime.datetime.fromtimestamp(data['daily'][0]['sunrise'])
+    sunset = datetime.datetime.fromtimestamp(data['daily'][0]['sunset'])
+    temperature = data['daily'][1]['temp']
+    moon_phase = data['daily'][0]['moon_phase']
+    weather = data['daily'][0]['weather'][0]['description']
+    return sunrise, sunset, temperature, moon_phase, weather
+
+api_key = os.getenv('WEATHER_API_KEY')
+city = input(""Scrivi la tua cittò: "")
+state = input(""Scrivi il tuo Stato(ISO 3166. es. ITA): "")
+
+sunrise, sunset, temperature, moon_phase, weather = get_weather_data(city, state, api_key)
+print(f""Fase lunare: {nome_fase_lunare(moon_phase)}"")
+temperature_str = ', '.join(f""{k}: {v}°C"" for k, v in temperature.items())
+print(f""Temperature: {temperature_str}"")
+print(f""Alba: {sunrise: %D %H:%M:%S}"")
+print(f""Tramonto: {sunset: %D %H:%M:%S}"")
+print(f""Tempo: {weather}"")
+"
+KaL0r8u5,Untitled,Josif_tepe,C++,Friday 22nd of March 2024 04:10:57 AM CDT,"#include <iostream>
+#include <vector>
+#include <map>
+#include <set>
+using namespace std;
+typedef long long ll;
+ll sum[100005];
+
+
+int main() {
+    int n, p;
+    cin >> n >> p;
+    multiset<int> ms;
+    ll zbir = 0;
+    for(int i = 0; i < n; i++) {
+        int x;
+        cin >> x;
+        zbir += x;
+        ms.insert(x);
+    }
+    sum[0] = zbir;
+    for(int i = 0; i < n - 1; i++) {
+        int max_element = *ms.rbegin();
+        int min_element = *ms.begin();
+        
+        ms.erase(ms.find(max_element));
+        ms.erase(ms.find(min_element));
+        zbir -= (max_element + min_element);
+        zbir += (max_element - min_element);
+        ms.insert(max_element - min_element);
+        sum[i + 1] = zbir;
+        
+    }
+    
+    for(int i = 0; i < p; i++) {
+        int x;
+        cin >> x;
+        cout << sum[x] << "" "";
+    }
+    return 0;
+}
+//   2 1 3 3
+"
+5WjZdcJj,TheClockData,ya_Bob_Jonez,JSON,Friday 22nd of March 2024 04:06:29 AM CDT,"{
+  ""current"": ""2017-11-29"",
+  ""stable"": ""2017-11-28"",
+  ""changed"": ""2024-03-22"",
+  ""advancingSpeed"": 0
+}"
+JkjrBiLb,Review LiteFinance,reviewbrokers,PHP,Friday 22nd of March 2024 03:52:49 AM CDT,https://www.reviewbrokers.net/review-litefinance/
