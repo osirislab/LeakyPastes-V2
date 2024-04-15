@@ -1,0 +1,3674 @@
+id,title,username,language,date,content
+Epi4CYFE,Untitled,GLASHATAY_007,Oracle 11,Monday 15th of April 2024 07:03:51 AM CDT,"
+create table ksp_15_04_24_fin_new as
+with fin AS (
+SELECT
+  lot_id,
+  fin.budget_type,
+  fin.targetexpenseitemcode,
+  cs_name.name target_name,
+  MIN(CASE WHEN fin.TYPE=1 THEN fin.YEAR ELSE NULL END) first_year   -- первый год планового фин
+ ,MAX(CASE WHEN fin.TYPE=1 THEN fin.YEAR ELSE NULL END)  last_year-- последний год планового финас
+ ,SUM(CASE WHEN fin.TYPE=1 THEN fin.finsum ELSE NULL END) finsum_plan  -- 44 плановое финансирования по контракту
+ ,SUM(CASE WHEN fin.TYPE=2 THEN fin.finsum ELSE NULL END) finsum_fact -- 45 фактическое финансирования по контракту
+ ,MAX(CASE WHEN fin.targetexpenseitemcode IN (SELECT targetexpenseitemcode FROM dwh_targetexpenseitemcode_aip) THEN 1 ELSE 0 END) aip_flag -- 50 признак АИП (проверить)
+FROM dwh_contract_fin_kgntv_temp fin
+Left join dwh_kf_cs cs_name on cs_name.code=fin.targetexpenseitemcode and fin.year=cs_name.year
+WHERE fin.Targetexpenseitemcode IN (SELECT DISTINCT targetexpenseitemcode FROM dwh_targetexpenseitemcode_2020)
+AND fin.YEAR>=2023
+GROUP BY lot_id,fin.budget_type, fin.targetexpenseitemcode,cs_name.name
+)
+
+
+SELECT
+    c.lotid,
+    c.contractrnk, -- 1 рнк
+    p.f_year YEAR, -- 2 год бюджета, к которому относятся ассигнования (вместо года размещения процедуры (requestyear) берем год финансирования контракта.
+    fin.first_year first_fin_cont_year,-- 3 год первого финансирования по контракту
+    fin.last_year, -- год последнего финансирования контракта
+    c.requestyear f_year -- 5 год плана размещения
+    ,c.finsource --6 источники финансирования
+    ,fin.budget_type -- 7 тип бюджетных средств
+    ,fin.targetexpenseitemcode -- 8 код целевой статьи
+    ,fin.target_name -- 9 наименование целевой статьи
+    ,CASE
+        WHEN o_u.id IN (503,592,1407,2710,2229,2703,1409,2709,508,1898,2702,988,2711,504,509,500,1897,1411,1408,1412,1728) THEN o_u.full_name 
+        ELSE NULL 
+    END uo_org -- 10 уполномоченный орган
+   ,COALESCE(cons.inn,o_u.inn,c.customerinn) AS inn -- 11 ИНН организации разместившей извещение
+   ,COALESCE(cons.orgtitle, o_u.full_name,c.customername)AS c_org -- 12 наименование организации разместившей извещение*/
+   ,c.customerinn -- 13 заказчик инн организации
+   ,c.customername-- 14 заказчик наименование  
+   ,c.grbsname-- 15 ГРБС название
+   ,gr.fshorttitle -- 16 сокращенное наименование грбс
+   ,COALESCE ( p.reqnum,c.contractnoticenumber)contractnoticenumber  -- 17 номер извещения
+   ,p.date_notice_published -- 18 дата размещения извещения о закупке
+   ,CASE 
+        WHEN  p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимся запроса котировок в соответствии частями 1 и 3 статьи 79 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                                THEN 'Запрос котировок в электронной форме'
+        WHEN p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимся двухэтапного конкурса в соответствии с частями 1 и 7 статьи 55 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                THEN 'Двухэтапный конкурс в электронной форме'
+        WHEN p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимися открытого конкурса в соответствии с частями 1 и 7 статьи 55 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                THEN 'Открытый конкурс в электронной форме'
+        WHEN p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимся электронного аукциона в соответствии частями 1 – 3.1 статьи 71 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                THEN 'Аукцион в электронной форме'
+        WHEN p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимися конкурса с ограниченным участием в соответствии с частями 1 и 7 статьи 55 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                THEN 'Конкурс с ограниченным участием в электронной форме'
+        WHEN p.fordertypename = 'Закупка у единственного поставщика' AND p.oneexec = 'Часть 1 пункт 25 статьи 93 -  Закупка вследствие признания несостоявшимся запроса предложений в соответствии с частью 18 статьи 83 Федерального закона решения об осуществлении закупки у единственного поставщика (подрядчика, исполнителя)'
+                THEN 'Запрос предложений в электронной форме'
+        ELSE p.fordertypename 
+    END   fordertypename -- 19 способо закупки на этапе размещения извещения
+   ,c.contractsigndate -- 20 дата заключения контракта
+   ,c.contractsubject -- 21 наименование объекта закупки
+   ,c.contractrejectdate -- 22 дата расторжения контракта
+   ,CASE WHEN c.contractoneexecreason  LIKE 'Часть 1 пункт 25 статьи 93%' THEN 'Закупка у единственного поставщика' ELSE c.ordertypename END ordertypename -- 23 соп
+   ,p.f_productprice -- 24 нмцк 
+   ,c.contractsigningprice -- 25 первоначальная цена
+   ,c.contractfullprice -- 26 текущая цена
+   ,c.contractplaneexecdate -- 27 планируемая дата окончания исполнения контракта
+   ,c.contractactualexecdate -- 28 фактическая дата исполнения контракта
+   ,c.supplierinn -- 29 поставщик инн
+   ,c.suppliername -- 30 поставщик наименование 
+   ,case when c.contractoneexecreason is not null then 1 else 0 end onneexec_type-- 31 признак заключения контракта с единственным поставщиком
+   ,c.contractoneexecreason -- 32 основание заключения контракта с ед поставщиком    
+   ,c.stagetitle -- 33 статус контракта
+   ,c.contractrejectreason -- 34 основание расторжения контракта
+   ,CASE WHEN p.placement ='Централизованная закупка' THEN 1 ELSE 0 END central -- 35 признак централизованной закупки
+   ,p.joflag -- 36 признак совместных торгов 
+   ,c.supply_impossible -- 37 признак невозможно определить количество
+   ,c.SUPPLIERCRIMINAL -- 38 учреждение уголовно-испытательной системы
+   ,c.SUPPLIERINVALID -- 39 учреждение инвалидов
+   ,c.SUPPLIERSMP -- 40 ПОСТАВЩИК ЯВЛЯЕТСЯ СМП ИЛИ СОНКО
+   ,c.SUPPLIERSMPSONCO -- 41 СОНКО
+   ,case when penalty.sum_ is not null then 1 else 0 end penaty_flag-- 42 признак применения штрафных санкций
+   ,penalty.sum_ -- 43 сумма начисленных санкций
+   ,penalty.pen_pay_sum_ -- 44 сумма оплаченных санкций
+    ,fin.finsum_plan -- 45 плановое финансирования по контракту
+    ,fin.finsum_fact -- 46 фактическое финансирования по контракту
+   , case when c.is_concluded_in_e_shop is not null then 1 else 0 end eshop_flag-- 47 признак заключения контракта в ЭМ
+   ,c.contract_modification_reasons   -- 48 причина изменения усвловий контракта/договора
+   ,pea.nmck_type -- 49 метод определения и обоснования НМЦК
+    ,fin.aip_flag -- 50 признак АИП (проверить)
+    ,CASE WHEN c.perc_size IS NOT NULL OR c.perc_rub_size IS NOT NULL THEN 1 ELSE 0 END subpodr_flag -- 51 признак наличия субподрпяда
+    ,c.perc_size -- 52 объем привлеченных к исполнению субподр %
+    ,c.perc_rub_size -- 53 объем привлеченных к исполнению субподр руб
+    ,p.ADVANCE_PAY_AMOUNT -- 54 размер аванса %
+    ,p.advance_hand_amount -- 55 размер аванса руб
+FROM dwh_contract_kgntv c
+join dwh_procedures_kgntv p on c.lotid=p.lotuuid
+JOIN fin ON c.lotid=fin.lot_id
+LEFT JOIN dwh_procedures_cons_kgntv cons ON cons.lotuuid = p.Joint_procedure_id
+LEFT JOIN dwh_organization_kgntv o_u    ON o_u.id = p.uo_orgid
+LEFT JOIN ksp_grbs_shotname gr  ON gr.KGNTVID = c.grbsid
+LEFT join(SELECT 
+            contractid,
+            listagg(list_, '; ') within GROUP (ORDER BY contractid) pen,
+            SUM(nvl(amount,0))sum_
+            ,SUM(nvl(penalty_pay_sum,0)) pen_pay_sum_
+          FROM (SELECT 
+                     id contractid, 
+                    CASE 
+                        WHEN reason_id IN (1,3) THEN 'Исполнитель'  WHEN reason_id IN (2,4) THEN 'Заказчик' 
+                        ELSE NULL 
+                    END  list_
+                    ,amount
+                    ,penalty_pay_sum
+                FROM dwh_contract_penalty_kgntv
+                )GROUP BY contractid
+        )penalty ON penalty.contractid = c.contractid
+LEFT JOIN (
+SELECT 
+COALESCE(l.lot_id,sovm.lot_id) lot_id,
+COALESCE(l.plnm_name,l.plnm_name2,sovm.plnm_name) nmck_type
+FROM DWH_LOT_KGNTV_EXT_ATTR_1 l
+LEFT JOIN (SELECT
+            m.plnm_name,
+            COALESCE(l.lot_id,m.lot_id,TO_NUMBER(p.lotuuid)) lot_id,
+            COALESCE(p.MORD_FLAG,m.MORD_FLAG) 
+            FROM DWH_LOT_KGNTV_EXT_ATTR_1 l
+            LEFT JOIN dwh_procedures_kgntv p ON p.lotuuid = l.lot_id AND p.MORD_FLAG = 'D' --
+            LEFT JOIN
+               (SELECT
+                COALESCE(gm.plnm_name,gm.plnm_name2) plnm_name,
+                COALESCE(l.lot_id,gm.lot_id,TO_NUMBER(p.lotuuid)) lot_id, --p.lotuuid
+                COALESCE(p.MORD_FLAG,gm.MORD_FLAG) MORD_FLAG
+                FROM DWH_LOT_KGNTV_EXT_ATTR_1 l
+                    LEFT JOIN
+                        (SELECT l.*,MORD_FLAG 
+                         FROM DWH_LOT_KGNTV_EXT_ATTR_1 l
+                            LEFT JOIN dwh_procedures_kgntv p ON p.lotuuid = l.lot_id 
+                         WHERE MORD_FLAG IS NULL
+                        ) gm ON gm.lot_id = l.joint_procedure_id
+                    LEFT JOIN dwh_procedures_kgntv p ON p.lotuuid = l.lot_id AND p.MORD_FLAG = 'M'
+                    WHERE
+                    l.joint_procedure_id IS NOT NULL
+                  )m ON m.lot_id = p.LOT_CONS_M) sovm ON sovm.lot_id = l.lot_id) pea ON pea.lot_id = p.lotuuid    
+;"
+suaE1JZA,Get File System Filter Drivers,guyrleech,PowerShell,Monday 15th of April 2024 07:00:57 AM CDT,"## Get running file system filter drivers via WMI/CIM so can get when not elevated unlike fltmc.exe
+
+$drivers=Get-CimInstance -classname Win32_SystemDriver; Get-CimInstance -ClassName Win32_LoadOrderGroupServiceMembers| Where-Object { $_.GroupComponent.Name -match '^FSFilter' } | Select @{n='Driver';e={$_.PartComponent.Name}},@{n='Group';e={$_.GroupComponent.Name}}|Select *,@{n='State';e={$drivers|Where-Object Name -ieq $_.Driver|Select -ExpandProperty State}}|Where State -ieq 'Running'|sort driver"
+9RDjxnpk,p3s9nin,suramraja1,Lua,Monday 15th of April 2024 06:54:53 AM CDT,"
+_G.key = ""6fcdd0d1afcc4d8687686abaf5e51de8""
+
+getgenv().Config = {""AutoDigsite"":false,""AutoMerchant"":false,""WebHookTime"":60,""TapPerTime"":3,""MerchantTF"":{""RegularMerchant"":false,""GardenMerchant"":false,""AdvancedMerchant"":false},""AutoClaimFreeReward"":true,""TNTRebirth"":false,""TapTime"":1,""Webhook"":true,""ReEnableIfHardstuck"":300,""AutoFruit"":false,""AutoRebirth"":false,""FarmingMode"":""All"",""AutoClaimMail"":true,""AutoPotion"":false,""FarmCoin"":true,""WebHookUrl"":""https://discord.com/api/webhooks/1221310536080162896/4iGxtil1JPoSUGe6oHw5l5_1A0-icoW70uDvM3rfmYlTlxmR7tQs-KVa5E8zxAWqEyvG"",""AutoBuyUpdrage"":true,""AutoBuyPetSlot"":true,""DelayHopIfHardstuck"":60,""AutoEquipEnchant"":false,""IgnoreUpgrade"":{""Magnet"":false,""Drops"":false,""LessGold"":false,""Pet Speed"":false,""Pet Damage"":false,""LessRainbow"":false,""Luck"":false,""Ultimates"":false,""Walkspeed"":false,""Coins"":false,""Diamonds"":false,""Tap Damage"":false},""HopIfGoPopUp"":false,""MinZoneUseFlag"":1,""DigsiteHopp"":false,""Atlantis"":false,""SpawnObby"":false,""EquippedEnchant"":[{""tier"":1,""slot"":1}],""AutoCoinFlag"":false,""DigsiteLevel"":3,""ClaimRankReward"":true,""AutoUltimate"":false,""DigsiteZone"":""Advanced Digsite"",""MaxMap"":92,""CauCa"":false,""ListSendMail"":[{""Enabled"":true,""Item"":""Diamonds"",""Category"":""Currency"",""MinItem"":1000000,""Username"":""Carlen104""}],""HiddenPresent"":true,""OpenGiftBag"":true,""AutoWorld2"":false,""MinTier"":3,""Potions"":[],""SelectBest"":true,""Minefield"":false,""Fruits"":[],""AutoTap"":true,""AutoOpenMap"":true,""RebirthTime"":1}
+
+loadstring(game:HttpGet(""https://nousigi.com/loader.lua""))()
+
+
+coroutine.wrap(function()
+    pcall(function()
+        task.wait(10)
+        game:service'VirtualInputManager':SendKeyEvent(true, ""Tab"", false, game)
+        task.wait(120)
+        game:GetService(""RunService""):Set3dRenderingEnabled(true)
+    end)
+end)()"
+98bh0mpf,🤑 G2A.com Free Gift Card Guide Apr 2024 FIX 🤑,ssss50w,GetText,Monday 15th of April 2024 06:46:07 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view?usp=sharing
+  
+Working as of:
+15 April 2024"
+NTBM8yyf,🤑 G2A.com Free Gift Card Guide Apr 2024 FIX 🤑,jusst2k4,GetText,Monday 15th of April 2024 06:44:06 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_193961.pdf
+
+Working as of:
+15 April 2024"
+QndRET1N,Untitled,whatiamdoing,Python,Monday 15th of April 2024 06:03:34 AM CDT,"preprocessing_function = get_image_generator_preprocessing_function(name)
+
+   train_data_generator = ImageDataGenerator(
+        preprocessing_function=preprocessing_function,
+        validation_split=0.2
+    )
+
+    train_images = train_data_generator.flow_from_dataframe(
+        dataframe=train_df,
+        x_col='filepath',
+        y_col='label',
+        target_size=(TARGET_SIZE, TARGET_SIZE),
+        color_mode='rgb',
+        class_mode='categorical',
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        seed=42,
+        subset='training'
+    )
+    
+    print(train_images.class_indices)
+    
+    val_images = train_data_generator.flow_from_dataframe(
+        dataframe=train_df,
+        x_col='filepath',
+        y_col='label',
+        target_size=(TARGET_SIZE, TARGET_SIZE),
+        color_mode='rgb',
+        class_mode='categorical',
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        seed=42,
+        subset='validation'
+    )
+    
+    print(len(train_images))
+    print(len(val_images))
+    
+    print(f""Тренировка модели: {name}..."")
+    history = compile_and_train(model, name, train_images, val_images)
+    histories[name] = history
+    
+    test_data_generator = ImageDataGenerator(
+        preprocessing_function=preprocessing_function
+    )
+
+    test_images = test_data_generator.flow_from_dataframe(
+        dataframe=test_df,
+        x_col='filepath',
+        y_col='label',
+        target_size=(TARGET_SIZE, TARGET_SIZE),
+        color_mode='rgb',
+        class_mode='categorical',
+        batch_size=BATCH_SIZE,
+        shuffle=False
+    )"
+SNMNwrrS,lepota.site and toggles styles,valeraplusplus,JavaScript,Monday 15th of April 2024 06:00:52 AM CDT,"// ==UserScript==
+// @name         Shortcut Tracker
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  Tracks Ctrl \ key combination on https://app.lepota.site/ and toggles styles
+// @author       Your Name
+// @match        https://app.lepota.site/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    var ctrlPressed = false;
+    var cmdPressed = false;
+
+    // Добавляем стили
+    var style = document.createElement('style');
+    style.innerHTML = `
+    .ant-app.hide_elems aside {
+        opacity: 0;
+        pointer-events: none;
+    }
+    .ant-app.hide_elems {
+        pointer-events: none;
+    }
+    .ant-app.hide_elems div[class^=styled__ZoomButtonsWrapper] {
+        opacity: 0;
+        pointer-events: none;
+    }
+    .ant-app.hide_elems div[class^=styled__CanvasControlsWrapper]{
+        opacity: 0;
+        pointer-events: none;
+    }
+    .ant-app.hide_elems .ant-btn.ant-btn-icon-only {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    `;
+    document.head.appendChild(style);
+
+    document.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && event.key === ""\\"") {
+            ctrlPressed = true;
+        }
+        if (event.metaKey && event.key === ""/"") { // Для макбуков Cmd + /
+            cmdPressed = true;
+        }
+    });
+
+    document.addEventListener('keyup', function(event) {
+        if( window.location.pathname.match('editor') ){
+            if ((ctrlPressed && event.key === ""\\"") || (cmdPressed && event.key === ""/"")) {
+                ctrlPressed = false;
+                cmdPressed = false;
+                toggleStyles();
+            }
+        }
+    });
+
+    function toggleStyles() {
+        var layoutContent = document.querySelector('.ant-app');
+        if (layoutContent) {
+            layoutContent.classList.toggle('hide_elems');
+        }
+    }
+})();"
+pqZ0EHxi,data897,TestGuy1,JSON,Monday 15th of April 2024 06:00:14 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'd272f74ae1327ef853437ee2107f288eae51f1c43f7d384202c37c65e43094c5cdaf3d445bdecdb0d926970915fac9078cf9fbda1ca35d29dc4d93e8adff91935e052ab8461d05d85a39bee8ec43abf6ae5180599daede6a442ff09f4c85d058858a885629f83dff35a6ee20e414a5f014300f7932b16fe11fcc3e1f8d1875cd',
+  otherdata: [
+    'c394392f73277362a5bcf682900b5ec8',
+    '9cf2830fd2e932c1e998f6a41761634f',
+    'aadd32ba0a692d7c697fbddaaa352a71',
+    'db71a52bfc32e4df2d2726146ed7946c',
+    'b0dcf8d2378c03df68eb1f54d8c25afb',
+    '1c3e04de58e7b43dc132402b200c1eb3',
+    '699054fa55a11e7c6308ff01bbbedff8',
+    '3ce69526c85f5620c0ce498969eb4d8c'
+  ]
+}"
+jmDi8xag,SQL - Introduction to Window Function - Aggregate Function by HadiMaster,hadimaster65555,PostgreSQL,Monday 15th of April 2024 05:55:06 AM CDT,"-- Create table for salary data
+CREATE TABLE salary_data (
+    employee_id SERIAL PRIMARY KEY,
+    employee_name VARCHAR(100),
+    job_title VARCHAR(100),
+    salary INTEGER
+);
+
+-- Insert sample data into the salary_data table
+INSERT INTO salary_data (employee_id, employee_name, job_title, salary) VALUES
+(1, 'John Doe', 'Data Scientist', 90000),
+(2, 'Jane Smith', 'Data Analyst', 65000),
+(3, 'Bob Johnson', 'Machine Learning Engineer', 100000),
+(4, 'Sarah Lee', 'Data Engineer', 75000),
+(5, 'Michael Brown', 'Data Scientist', 95000),
+(6, 'Emily Davis', 'Data Analyst', 60000),
+(7, 'Alex Wilson', 'Machine Learning Engineer', 110000),
+(8, 'Jessica Clark', 'Data Engineer', 70000),
+(9, 'David Rodriguez', 'Data Scientist', 85000),
+(10, 'Lisa Martinez', 'Data Analyst', 62000),
+(11, 'James Taylor', 'Machine Learning Engineer', 105000),
+(12, 'Olivia Anderson', 'Data Engineer', 72000),
+(13, 'William Thomas', 'Data Scientist', 92000),
+(14, 'Sophia White', 'Data Analyst', 63000),
+(15, 'Ethan Hall', 'Machine Learning Engineer', 115000),
+(16, 'Mia Moore', 'Data Engineer', 74000),
+(17, 'Jacob Garcia', 'Data Scientist', 88000),
+(18, 'Ava Martinez', 'Data Analyst', 61000),
+(19, 'Benjamin Young', 'Machine Learning Engineer', 120000),
+(20, 'Harper Hernandez', 'Data Engineer', 77000),
+(21, 'Amelia King', 'Data Scientist', 89000),
+(22, 'Ryan Adams', 'Data Analyst', 64000),
+(23, 'Zoe Rivera', 'Machine Learning Engineer', 125000),
+(24, 'Elijah Long', 'Data Engineer', 78000),
+(25, 'Layla Torres', 'Data Scientist', 91000),
+(26, 'Jackson Nguyen', 'Data Analyst', 63000),
+(27, 'Penelope Scott', 'Machine Learning Engineer', 130000),
+(28, 'Chloe Green', 'Data Engineer', 80000),
+(29, 'Sebastian Lopez', 'Data Scientist', 93000),
+(30, 'Aiden Hill', 'Data Analyst', 65000);
+
+-- check data
+SELECT * FROM salary_data
+
+-- average salary for each job title
+SELECT
+    employee_id,
+    employee_name,
+    job_title,
+    salary,
+    AVG(salary) OVER(PARTITION BY job_title) AS avg_salary_per_job
+FROM
+    salary_data;
+
+-- count of employee for each job title
+SELECT
+    employee_id,
+    employee_name,
+    job_title,
+    salary,
+    COUNT(*) OVER(PARTITION BY job_title) AS num_employees_per_job
+FROM
+    salary_data;
+
+-- minimum salary for each job title
+SELECT
+    employee_id,
+    employee_name,
+    job_title,
+    salary,
+    MIN(salary) OVER(PARTITION BY job_title) AS min_salary_per_job
+FROM
+    salary_data;
+
+-- maximum salary for each job title
+SELECT
+    employee_id,
+    employee_name,
+    job_title,
+    salary,
+    MAX(salary) OVER(PARTITION BY job_title) AS min_salary_per_job
+FROM
+    salary_data;
+
+-- total salary for each job title
+SELECT
+    employee_id,
+    employee_name,
+    job_title,
+    salary,
+    SUM(salary) OVER(PARTITION BY job_title) AS total_salary_per_job
+FROM
+    salary_data;"
+if5b8u03,help,AlewAlow,Lua,Monday 15th of April 2024 05:53:12 AM CDT,"local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local UserInputService = game:GetService(""UserInputService"")
+
+local Matter = require(ReplicatedStorage.Shared.Libs.Matter)
+local Components = require(ReplicatedStorage.Shared.Components)
+local Constants = require(ReplicatedStorage.Shared.Constants)
+
+local GetEntityGlobalScale = require(ReplicatedStorage.Shared.Utils.GetEntityGlobalScale)
+local GetEntityGlobalPosition = require(ReplicatedStorage.Shared.Utils.GetEntityGlobalPosition)
+local GetEntityDescendants = require(ReplicatedStorage.Shared.Utils.GetEntityDescendants)
+
+local function FireShapecast(origin, direction, size, entities, world)
+	if type(entities) == ""number"" then
+		entities = GetEntityDescendants(entities, world)
+	end
+	
+	local invDirection = 1 / direction
+
+	local closestHit = nil
+	local closestTime = math.huge
+	local closestNormal = Vector2.new()
+	local closestPosition = Vector2.new()
+
+	for _, id in entities do
+		local transform = world:get(id, Components.Transform)
+		if not transform then
+			continue
+		end
+		
+		local collider = world:get(id, Components.Collider)
+		if not collider then
+			continue
+		end
+		
+		local globalPosition = GetEntityGlobalPosition(id, world)
+		local globalSize = GetEntityGlobalScale(id, world) * collider.Size
+		
+		local topleft = globalPosition - globalSize / 2
+		local botright = globalPosition + globalSize / 2
+		
+		local tEnter = (Vector2.new(topleft.X, topleft.Y) - origin) * invDirection
+		local tExit = (Vector2.new(botright.X, botright.Y) - origin) * invDirection
+
+		local tMin = Vector2.new(math.min(tEnter.X, tExit.X), math.min(tEnter.Y, tExit.Y))
+		local tMax = Vector2.new(math.max(tEnter.X, tExit.X), math.max(tEnter.Y, tExit.Y))
+
+		if (tMax.X >= tMin.Y) and (tMax.Y >= tMin.X) then
+			-- Calculate the collision normal (direction from box A to box B)
+			local normalX = (tMin.X > tMin.Y) and -1 or 1
+			local normalY = (tMin.X > tMin.Y) and 0 or 1
+
+			-- Calculate the collision position (closest intersection point)
+			local collisionTime = math.max(tMin.X, tMin.Y)
+			local collisionPoint = origin + collisionTime * direction
+			
+			local collisionNormal = Vector2.new(normalX, normalY)
+			local collisionPosition = Vector2.new(collisionPoint.X, collisionPoint.Y)
+			
+			if collisionTime < closestTime then
+				closestNormal = collisionNormal
+				closestPosition = collisionPosition
+				closestTime = collisionTime
+				closestHit = id
+			end
+		end
+	end
+	
+	if closestTime < math.huge then
+		return {
+			Hit = closestHit,
+			Position = closestPosition,
+			Normal = closestNormal,
+		}
+	end
+	
+	return false
+end
+
+
+return FireShapecast"
+caEhWL3n,Untitled,Pasterbiner123321,PHP,Monday 15th of April 2024 05:40:31 AM CDT,"<div style=""border: 1px solid black; padding: 10px; margin-bottom: 20px;"">
+        <h2>Elder Ghastly Dragon Hidden Resp - Sugerowany poziom: 300 lvl 1 rb</h2>
+        <a href=""#"" onclick=""window.open('egd.png', 'Elder Ghastly Dragon Hidden Resp Map', 'width=600, height=400'); return false;"">ZOBACZ MAPE!</a>
+        <p><font color=""green"">Moby, które spotkasz na drodze: Wszystkie POI mobs, Elder Ghastly Dragon</font></p>
+    </div>"
+6U4z0nq2,asd,Igor150195,JavaScript,Monday 15th of April 2024 04:37:25 AM CDT,"// ==UserScript==
+// @name         Shortcut Tracker
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  Tracks Ctrl \ key combination on https://app.lepota.site/ and toggles styles
+// @author       Your Name
+// @match        https://app.lepota.site/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    var ctrlPressed = false;
+    var cmdPressed = false;
+
+    // Добавляем стили
+    var style = document.createElement('style');
+    style.innerHTML = `
+    .ant-layout-content.hide aside {
+        opacity: 0;
+        pointer-events: none;
+    }
+    .ant-layout-content.hide {
+        pointer-events: none;
+    }
+    .ant-layout-content.hide div[class^=styled__ZoomButtonsWrapper] {
+        opacity: 0;
+        pointer-events: none;
+    }
+    `;
+    document.head.appendChild(style);
+
+    document.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && event.key === ""\\"") {
+            ctrlPressed = true;
+        }
+        if (event.metaKey && event.key === ""/"") { // Для макбуков Cmd + /
+            cmdPressed = true;
+        }
+    });
+
+    document.addEventListener('keyup', function(event) {
+        if( window.location.pathname.match('editor') ){
+            if ((ctrlPressed && event.key === ""\\"") || (cmdPressed && event.key === ""/"")) {
+                ctrlPressed = false;
+                cmdPressed = false;
+                toggleStyles();
+            }
+        }
+    });
+
+    function toggleStyles() {
+        var layoutContent = document.querySelector('.ant-layout-content');
+        if (layoutContent) {
+            layoutContent.classList.toggle('hide');
+        }
+    }
+})();
+"
+0S9C7wkh,test,charis2324,JSON,Monday 15th of April 2024 03:59:28 AM CDT,"{     ""chat-id"": ""test"",     ""created-at"": ""2024-04-15T03:04:24"",     ""creator"": ""Charis"",     ""participants"": [         ""Charis""     ],     ""messages"": [         {             ""created-at"": ""2024-04-15T03:04:24"",             ""author"": ""Charis"",             ""message"": ""Helsdo, World""         }     ],     ""past-chat-content"": null }"
+4kyXLQ7E,9 lab,Radoslav_03,MySQL,Monday 15th of April 2024 03:50:51 AM CDT,"-- 1 зад
+DELIMITER //
+CREATE TRIGGER salarypayments_delete_trigger
+AFTER DELETE ON salaryPayments
+FOR EACH ROW
+BEGIN
+    INSERT INTO salarypayments_log (
+        operation,
+        old_coach_id,
+        old_month,
+        old_year,
+        old_salaryAmount,
+        old_dateOfPayment,
+        dateOfLog
+    )
+    VALUES (
+        'DELETE',
+        OLD.coach_id,
+        OLD.month,
+        OLD.year,
+        OLD.salaryAmount,
+        OLD.dateOfPayment,
+        NOW()
+    );
+END;
+//
+DELIMITER ;
+
+
+-- 2 зад
+DELETE FROM salaryPayments;
+INSERT INTO salaryPayments (coach_id, month, year, salaryAmount, dateOfPayment)
+SELECT old_coach_id, old_month, old_year, old_salaryAmount, old_dateOfPayment
+FROM salarypayments_log
+WHERE operation = 'DELETE';
+
+
+-- 3 зад
+DELIMITER //
+CREATE TRIGGER before_insert_student_sport_trigger
+BEFORE INSERT ON student_sport
+FOR EACH ROW
+BEGIN
+    DECLARE group_count INT;
+
+    SELECT COUNT(*) INTO group_count
+    FROM student_sport
+    WHERE student_id = NEW.student_id;
+
+    IF group_count >= 2 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Ученикът вече участва в две групи. Не може да бъде добавен в още една група.';
+    END IF;
+END;
+//
+DELIMITER ;
+
+
+-- 4 зад
+CREATE VIEW students_info AS
+SELECT s.name AS student_name, COUNT(ss.student_id) AS group_count
+FROM students s
+JOIN student_sport ss ON s.id = ss.student_id
+GROUP BY s.id;
+SELECT * FROM students_info;
+
+
+-- 5 зад
+DELIMITER //
+CREATE PROCEDURE GetStudentsByCoachName(IN coachName VARCHAR(255))
+BEGIN
+    SELECT st.name AS student_name, sg.id AS group_id, sp.name AS sport_name
+    FROM students st
+    JOIN student_sport ss ON st.id = ss.student_id
+    JOIN sportGroups sg ON ss.sportGroup_id = sg.id
+    JOIN sports sp ON sg.sport_id = sp.id
+    JOIN coaches c ON sg.coach_id = c.id
+    WHERE c.name = coachName;
+END//
+DELIMITER ;
+CALL GetStudentsByCoachName(""Ivan Todorov Petkov"");
+
+
+-- 6 зад
+DELIMITER //
+CREATE PROCEDURE GetCoachesBySportName(IN sportName VARCHAR(255))
+BEGIN
+    SELECT c.name AS coach_name, sg.location, sg.hourOfTraining, sg.dayOfWeek
+    FROM sportGroups sg
+    JOIN coaches c ON sg.coach_id = c.id
+    JOIN sports s ON sg.sport_id = s.id
+    WHERE s.name = sportName;
+END//
+DELIMITER ;
+CALL GetCoachesBySportName(""Football"");"
+xSk63NVF,bash-225671,sleekkeepup,Bash,Monday 15th of April 2024 03:33:06 AM CDT,tr -dc 0-9abcdefghijkmnopqrstuvwxyz < /dev/urandom | head -c 26 ; echo
+qCcAQz10,DDD.ValueType,VssA,C#,Monday 15th of April 2024 02:31:02 AM CDT,"using Ddd.Taxi.Domain;
+using System.Reflection;
+using System.Text;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Ddd.Infrastructure
+{
+    public class ValueType<T>
+    {
+        private readonly List<PropertyInfo> propertyInfos;
+
+        public ValueType()
+        {
+            propertyInfos = GetType()
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .OrderBy(property => property.Name)
+                .ToList();
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = 0;
+                foreach (var property in propertyInfos)
+                {
+                    var propertyValue = property.GetValue(this, null);
+                    var propertyHash = propertyValue != null ? propertyValue.GetHashCode() : 0;
+                    hash = (hash * 1244324135) ^ propertyHash;
+                }
+                return hash;
+            }
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (obj is null)
+                return false;
+
+            if (obj is not ValueType<T> otherValue)
+                return false;
+
+                
+
+            foreach (var property in propertyInfos)
+            {
+                if (property.GetValue(this) == null && property.GetValue(otherValue) == null)
+                    continue;
+
+                if (!(property.GetValue(this) == null || property.GetValue(otherValue) == null || !property.GetValue(this)
+                                                                                                        .Equals(property.GetValue(otherValue))))
+                    continue;
+                return false;
+            }
+            return true;
+        }
+
+        public bool Equals(PersonName name) => Equals((object)name);
+
+        public override string ToString()
+        {
+            var result = new StringBuilder(GetType().Name + ""("");
+            for (int index = 0; index < propertyInfos.Count; index++)
+            {
+                var property = propertyInfos[index];
+                var propertyValue = property.GetValue(this, null);
+                result.AppendFormat(""{0}: {1}{2}"", property.Name, propertyValue, index != propertyInfos.Count - 1 ? ""; "" : "")"");
+            }
+            return result.ToString();
+        }
+    }
+}"
+89x7Ayqd,TVBOX,small-bao,JSON,Monday 15th of April 2024 02:25:19 AM CDT,"{
+    ""urls"": [
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/app.json"",
+            ""name"": ""app线路""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/pg/jsm.json"",
+            ""name"": ""panda Groove""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/tv.json"",
+            ""name"": ""南瓜""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/fan.json"",
+            ""name"": ""饭太硬""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/fongmi.json"",
+            ""name"": ""蜂蜜""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/XYQTVBox/XYQTVBox.json"",
+            ""name"": ""香雅情""
+        },
+        {
+            ""url"": ""https://proxy.v2gh.com/https://raw.githubusercontent.com/qirenzhidao/tvbox18/main/XYQTVBox/drpy_js/drjs_config.json"",
+            ""name"": ""道长""
+        }
+    ]
+}"
+Uvnkntns,crystal-growth.lua,Inlife,Lua,Monday 15th of April 2024 02:12:11 AM CDT,"local FILE_PATH = ""storage.dat""
+local SLEEP_WAIT = 60
+local GROWTH_TIME = 8200 * 1000
+
+function getLast()
+    if not fs.exists(FILE_PATH) then
+         return 0
+    end
+
+    local file = fs.open(FILE_PATH, ""r"")
+    local contents = file.readAll()
+    file.close()
+
+    return tonumber(contents)
+end
+
+function setLast(value)
+    local file = fs.open(FILE_PATH, ""w"")
+    file.write("""" .. value)
+    file.close()
+end
+
+function iterate()
+    print(""[cr] waiting for growth ..."")
+    while (os.epoch(""utc"") - getLast()) < GROWTH_TIME do
+        sleep(SLEEP_WAIT)
+    end
+
+    print(""[cr] growth assumed to be finished!"")
+    setLast(os.epoch(""utc""))
+    redstone.setOutput(""back"", true)
+    sleep(2)
+    redstone.setOutput(""back"", false)
+end
+
+function main()
+    print(""\n\n-------------------------------"")
+    print(""[cr] starting the program; v1.0"")
+    print(""-------------------------------\n\n"");
+
+    while true do
+        iterate()
+    end
+end
+
+main()"
+tpRzh1Ed,Stripmining,FabianW2408,Lua,Monday 15th of April 2024 02:02:50 AM CDT,"local args = ...
+
+function fw()
+    turtle.dig()
+    turtle.digUp()
+    turtle.forward()
+    turtle.digUp()
+    bridge()
+end
+function rf()
+    if turtle.getFuelLevel() <= 4 then
+        turtle.select(1)
+        turtle.refuel()
+    end
+end
+function bridge()
+    if not turtle.detectDown() then
+        print(""No block below!"")
+    end
+end
+
+for i = 1, tonumber(args) do
+    rf()
+    fw()
+end"
+9GYCkt4N,Лента ВМа: Скрыть наш стики,Luxup,JavaScript,Monday 15th of April 2024 01:52:32 AM CDT,"/* Скрыть topAd/floorAd */                        
+<script>
+    let show_topad_yandex = function () { 
+ 
+    window.yaContextCb.push(()=>{
+    Ya.Context.AdvManager.render({ 
+    ""blockId"": ""R-A-671348-728"", /* РСЯ-тег Ленты ВМа */
+    ""type"": ""topAd"", /* ???Это не нужно??? */
+    statId: 1
+    });
+    });
+    }
+    show_topad_yandex();                                    
+    
+    document.documentElement.addEventListener('luxupYandexFeedOnScreen', (e) => { 
+    if (e.detail && e.detail.onScreen) { 
+    Ya.Context.AdvManager.destroy({blockId: 'R-A-671348-728'}); /* РСЯ-тег нашего стики */
+    } else { 
+    show_topad_yandex();}});
+</script>"
+Vt6hm4bv,Лента: Скрыть AdFox ВМа,Luxup,JavaScript,Monday 15th of April 2024 01:50:59 AM CDT,"<script>
+	let btm_adfox_hsticky = document.querySelector('.adfox_sticky_container') /* Указать селектор блока с AdFox, который нужно скрыть #selector_id, .selector_class */
+	document.documentElement.addEventListener('luxupYandexFeedOnScreen', (e) => {
+	if (e.detail && e.detail.onScreen) {
+	btm_adfox_hsticky.style.display='none';
+	} else {
+	btm_adfox_hsticky.style.display='block'
+	}
+	});
+</script>"
+HLfqfX8d,Лента: Скрыть topAd/floorAd,Luxup,JavaScript,Monday 15th of April 2024 01:47:06 AM CDT,"/* Скрыть topAd/floorAd */						
+<script>
+	let show_topad_yandex = function () { 
+
+	window.yaContextCb.push(()=>{
+	Ya.Context.AdvManager.render({ 
+	""blockId"": ""R-A-671348-728"", /* ID блока РСЯ паблишера */
+	""type"": ""topAd"", /* Указать тип блока topAd или floorAd */
+	statId: 1
+	});
+	});
+	}
+	show_topad_yandex();									
+	
+	document.documentElement.addEventListener('luxupYandexFeedOnScreen', (e) => { 
+	if (e.detail && e.detail.onScreen) { 
+	Ya.Context.AdvManager.destroy({blockId: 'R-A-671348-728'}); /* ID блока РСЯ паблишера */
+	} else { 
+	show_topad_yandex();}});
+</script>"
+nBhkaRUf,Untitled,sambacar,XML,Monday 15th of April 2024 01:31:11 AM CDT,"<!--
+	Generated by e-racuni.hr
+
+	Release number: 961.4
+	Release date: 14.04.2024
+	Request URL: /H2c/API
+-->
+
+<response status=""error"">
+	<error description=""H2c@2024-04-15T05:10:34:Cannot parse API parameter SalesOrder. Error: Error: Read-only property #position for data type #SalesOrderItem must not be specified"">
+	</error>
+</response> [] []
+"
+VxqmUd94,Untitled,sambacar,XML,Monday 15th of April 2024 01:30:41 AM CDT,"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<request>
+    <login username=""WOMM"" md5pass=""xxx"" token=""xxx""/>
+    <method name=""SalesOrderCreate"">
+        <parameter name=""SalesOrder"">
+            <date>2024-04-15</date>
+            <deliveryDate>2024-04-15</deliveryDate>
+            <orderReference>1000026259</orderReference>
+            <deliveryMethod>GLS dostava (rok dostave 1-3 radna dana)</deliveryMethod>
+            <buyerName>Luka xxx</buyerName>
+            <buyerEMail>luka.xxx@gmail.com</buyerEMail>
+            <buyerStreet>Trg Eugena Kumicica 6</buyerStreet>
+            <buyerPostalCode>48000</buyerPostalCode>
+            <buyerCity>Koprivnica</buyerCity>
+            <buyerCountry>HR</buyerCountry>
+            <buyerPhone>0991234567</buyerPhone>
+            <customerContactPerson/>
+            <methodOfPayment>CreditCard</methodOfPayment>
+            <documentLanguage>Croatian</documentLanguage>
+            <Address>
+                <nameFirst>Luka</nameFirst>
+                <nameLast>xxx</nameLast>
+                <organization/>
+                <city>Koprivnica</city>
+                <country>HR</country>
+                <postalCode>48000</postalCode>
+                <street>Trg Eugena Kumicica 1</street>
+                <telephone>0991234567</telephone>
+                <type>Delivery</type>
+            </Address>
+            <Items>
+                <Item>
+                    <position>1</position>
+                    <productCode>2421-02</productCode>
+                    <quantity>1</quantity>
+                </Item>
+                <Item>
+                    <position>2</position>
+                    <description>GLS dostava (rok dostave 1-3 radna dana)</description>
+                    <quantity>1</quantity>
+                    <price>4.7800</price>
+                </Item>
+            </Items>
+        </parameter>
+    </method>
+</request>"
+jRwEAwx4,Untitled,sambacar,MXML,Monday 15th of April 2024 01:29:02 AM CDT,"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<request>
+    <login username=""WOMM"" md5pass=""xxx"" token=""xxx""/>
+    <method name=""SalesOrderCreate"">
+        <parameter name=""SalesOrder"">
+            <date>2024-04-15</date>
+            <deliveryDate>2024-04-15</deliveryDate>
+            <orderReference>1000026260</orderReference>
+            <deliveryMethod>GLS dostava (rok dostave 1-3 radna dana)</deliveryMethod>
+            <buyerName>Kristina xxx</buyerName>
+            <buyerEMail>xxx@gmail.com</buyerEMail>
+            <buyerStreet>Vladimira Nazora 1</buyerStreet>
+            <buyerPostalCode>35257</buyerPostalCode>
+            <buyerCity>Lužani</buyerCity>
+            <buyerCountry>HR</buyerCountry>
+            <buyerPhone>0997449061</buyerPhone>
+            <customerContactPerson/>
+            <methodOfPayment>BankTransfer</methodOfPayment>
+            <documentLanguage>Croatian</documentLanguage>
+            <Address>
+                <nameFirst>Kristina</nameFirst>
+                <nameLast>xxx</nameLast>
+                <organization/>
+                <city>Lužani</city>
+                <country>HR</country>
+                <postalCode>35257</postalCode>
+                <street>Vladimira Nazora 1</street>
+                <telephone>0991234567</telephone>
+                <type>Delivery</type>
+            </Address>
+            <Items>
+                <Item>
+                    <position>1</position>
+                    <productCode>2591-0141</productCode>
+                    <quantity>1</quantity>
+                </Item>
+            </Items>
+        </parameter>
+    </method>
+</request>"
+qzsqCE2r,/calculate,Koshmario,JSON,Monday 15th of April 2024 12:42:55 AM CDT,"{
+    ""items"": [
+        {
+            ""id"": ""ad450f72-7bc2-4aff-92f2-d8294db85028"",
+            ""carType"": ""ЭКОНОМ [3 пасс]"",
+            ""carTypeId"": ""f8f683d4-6fa1-11e7-8114-38d54717b27a"",
+            ""duration"": 14261,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""2""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""50""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""947.3684210526315789473""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""9f10a90a-fa4e-4df2-a871-8c58e5cbcb1f"",
+            ""carType"": ""СТАНДАРТ [3 пасс]"",
+            ""carTypeId"": ""2ab94d41-6713-11e4-80cb-d850e6b9b58f"",
+            ""duration"": 14261,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""2""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""50""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""947.3684210526315789473""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""7bafa945-4d55-45d0-b5bb-df8c410d0444"",
+            ""carType"": ""КОМФОРТ [3 пасс]"",
+            ""carTypeId"": ""1c28cf96-431a-11e5-90e1-d850e6b9b58f"",
+            ""duration"": 14261,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""6""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""4""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""50""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""1315.7894736842105263157""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""1ddf5369-8776-4761-b757-91d498d4b327"",
+            ""carType"": ""МИНИВЭН [до 7 пасс]"",
+            ""carTypeId"": ""2e7a878b-c00e-11e5-88a9-d850e6b9b58f"",
+            ""duration"": 17113,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""100""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""1684.2105263157894736842""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""4""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""b6da4925-6f33-4dd1-b7c3-faee42c51758"",
+            ""carType"": ""МИКРОАВТОБУС [8-10 пасс]"",
+            ""carTypeId"": ""1c28cf97-431a-11e5-90e1-d850e6b9b58f"",
+            ""duration"": 18539,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""af21cdf3-4ec3-40ed-ac8f-3f406568afa6"",
+            ""carType"": ""ВОДНОЕ СУДНО"",
+            ""carTypeId"": ""2d580a63-2ae9-11ee-b1e4-d05099dece85"",
+            ""duration"": 14261,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""50""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        },
+        {
+            ""id"": ""107d76d9-dcb0-4798-a8b7-13bcfaa99056"",
+            ""carType"": ""БРОНИРОВАНИЕ ПРОЧИХ ТРЭВЕЛ УСЛУГ"",
+            ""carTypeId"": ""96fee9c0-c584-11ed-b1dd-d05099dece85"",
+            ""duration"": 14261,
+            ""total"": 0,
+            ""cancellationWithoutPenalty"": 0,
+            ""costDetails"": [],
+            ""tariffDetails"": [
+                {
+                    ""name"": ""FreeWaitingAirportIntl"",
+                    ""value"": ""90""
+                },
+                {
+                    ""name"": ""FreeWaitingAirport"",
+                    ""value"": ""60""
+                },
+                {
+                    ""name"": ""FreeWaiting"",
+                    ""value"": ""20""
+                },
+                {
+                    ""name"": ""MinOrderHours"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""CancellationWithoutPenalty"",
+                    ""value"": ""24""
+                },
+                {
+                    ""name"": ""ReturnTransferCost"",
+                    ""value"": ""50""
+                },
+                {
+                    ""name"": ""RentPrice"",
+                    ""value"": ""0""
+                },
+                {
+                    ""name"": ""MinRentHours"",
+                    ""value"": ""3""
+                },
+                {
+                    ""name"": ""FreeWaitingCurrent"",
+                    ""value"": ""20""
+                }
+            ],
+            ""services"": [
+                {
+                    ""id"": ""8c64e258-131f-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Автомобильный бустер"",
+                    ""price"": 150
+                },
+                {
+                    ""id"": ""179802f1-1321-11ed-b1cc-d05099dece85"",
+                    ""name"": ""Детское автокресло"",
+                    ""price"": 450
+                }
+            ]
+        }
+    ],
+    ""distance"": 271
+}"
+4ckSc6jW,/calculate,Koshmario,JSON,Monday 15th of April 2024 12:40:03 AM CDT,"{
+    ""origin"": [
+        {
+            ""lon"": ""86.086847"",
+            ""lat"": ""55.355198""
+        }
+    ],
+    ""destination"": [
+        {
+            ""lon"": ""82.92043"",
+            ""lat"": ""55.030204""
+        }
+    ],
+    ""pickupDate"": ""2024-04-16T12:34:44.324Z"",
+    ""type"": ""transfer"",
+    ""carType"": null,
+    ""services"": {
+        ""waiting"": 0,
+        ""rent"": 0,
+        ""meetWithTable"": false
+    }
+}"
+Px29GP7m,邀您一起看：小姐姐,xiaomianao666,JavaScript,Monday 15th of April 2024 12:37:55 AM CDT,海阔视界规则分享，当前分享的是：二级页面详情￥page_detail￥小姐姐@@eyJkYXRhIjoie1wiYXNzb2NpYXRlZE1vZGVsc01hcEZvckpvaW5UYWJsZVwiOnt9LFwiYXNzb2NpYXRlZE1vZGVsc01hcFdpdGhGS1wiOnt9LFwiYXNzb2NpYXRlZE1vZGVsc01hcFdpdGhvdXRGS1wiOnt9LFwiZmllbGRzVG9TZXRUb0RlZmF1bHRcIjpbXSxcImdtdE1vZGlmaWVkXCI6MCxcImlkXCI6MCxcImxpc3RUb0NsZWFyQXNzb2NpYXRlZEZLXCI6W10sXCJsaXN0VG9DbGVhclNlbGZGS1wiOltdLFwicGFnZUxpc3RcIjpbXSxcInNhdmVkXCI6ZmFsc2UsXCJ0aXRsZVwiOlwi5oiR55qE5Li76aG1XCIsXCJ2ZXJzaW9uXCI6MCxcInVybFwiOlwiaGlrZXI6Ly9lbXB0eVwiLFwiY29sX3R5cGVcIjpcIng1X3dlYnZpZXdfc2luZ2xlXCIsXCJmaW5kX3J1bGVcIjpcImpzOnNldFJlc3VsdChbe1xcbiAgICB1cmw6XFxcImZpbGU6Ly8vc3RvcmFnZS9lbXVsYXRlZC8wL0FuZHJvaWQvZGF0YS9jb20uZXhhbXBsZS5oaWtlcnZpZXltei9maWxlcy9Eb2N1bWVudHMvbmV3UGxhbkhvbWUuaHRtbCNub1JlY29yZEhpc3RvcnkjXFxcIixcXG5kZXNjOlxcXCIxMDAlJiZmbG9hdFxcXCIsXFxuZXh0cmE6e2NhbkJhY2s6IHRydWV9XFxufV0pO1wiLFwiZ3JvdXBcIjpcIuKRoOaOqOiNkFwifSIsInRpdGxlIjoi5bCP5aeQ5aeQIn0=
+E6rhNv8D,Задача shop2.init,valeraplusplus,JavaScript,Monday 15th of April 2024 12:06:02 AM CDT,"shop2.init({
+    ""productRefs"": {
+        ""6730709"": {
+            ""razmery"": {
+                ""597x1850x670"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029309"",
+                    ""8029509"",
+                    ""8029709""
+                ]
+            },
+            ""cvet_676"": {
+                ""2417709"": [
+                    ""8029309""
+                ],
+                ""2417509"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029709""
+                ],
+                ""2418109"": [
+                    ""8029509""
+                ]
+            },
+            ""ob_em"": {
+                ""356"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029709""
+                ],
+                ""450"": [
+                    ""8029309""
+                ],
+                ""500"": [
+                    ""8029509""
+                ]
+            },
+            ""klass_energopotrebleniya"": {
+                ""2417109"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029709""
+                ],
+                ""2417909"": [
+                    ""8029309"",
+                    ""8029509""
+                ]
+            },
+            ""klass_morozilnoy_kamery"": {
+                ""2417309"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029309"",
+                    ""8029509"",
+                    ""8029709""
+                ]
+            },
+            ""kolichestvo_vydvizhnyh_yaschikov"": {
+                ""3"": [
+                    ""8021909"",
+                    ""8029109"",
+                    ""8029709""
+                ],
+                ""5"": [
+                    ""8029309""
+                ],
+                ""6"": [
+                    ""8029509""
+                ]
+            }
+        },
+        ""6730909"": {
+            ""razmery"": {
+                ""700x1850x740"": [
+                    ""8022109""
+                ]
+            },
+            ""cvet_676"": {
+                ""2417709"": [
+                    ""8022109""
+                ]
+            },
+            ""ob_em"": {
+                ""435"": [
+                    ""8022109""
+                ]
+            },
+            ""klass_energopotrebleniya"": {
+                ""2417109"": [
+                    ""8022109""
+                ]
+            },
+            ""klass_morozilnoy_kamery"": {
+                ""2417309"": [
+                    ""8022109""
+                ]
+            },
+            ""kolichestvo_vydvizhnyh_yaschikov"": {
+                ""1"": [
+                    ""8022109""
+                ]
+            }
+        },
+        ""6731109"": {
+            ""razmery"": {
+                ""595x2000x669"": [
+                    ""8022309""
+                ]
+            },
+            ""cvet_676"": {
+                ""2418109"": [
+                    ""8022309""
+                ]
+            },
+            ""ob_em"": {
+                ""394"": [
+                    ""8022309""
+                ]
+            },
+            ""klass_energopotrebleniya"": {
+                ""2417909"": [
+                    ""8022309""
+                ]
+            },
+            ""klass_morozilnoy_kamery"": {
+                ""2417309"": [
+                    ""8022309""
+                ]
+            },
+            ""kolichestvo_vydvizhnyh_yaschikov"": {
+                ""1"": [
+                    ""8022309""
+                ]
+            }
+        },
+        ""6731309"": {
+            ""razmery"": {
+                ""595x647x1780"": [
+                    ""8022509""
+                ]
+            },
+            ""ob_em"": {
+                ""286"": [
+                    ""8022509""
+                ]
+            },
+            ""klass_energopotrebleniya"": {
+                ""2417109"": [
+                    ""8022509""
+                ]
+            },
+            ""klass_morozilnoy_kamery"": {
+                ""2417309"": [
+                    ""8022509""
+                ]
+            },
+            ""kolichestvo_vydvizhnyh_yaschikov"": {
+                ""2"": [
+                    ""8022509""
+                ]
+            }
+        },
+        ""6731509"": {
+            ""razmery"": {
+                ""600x2000x646"": [
+                    ""8022709""
+                ]
+            },
+            ""cvet_676"": {
+                ""2417509"": [
+                    ""8022709""
+                ]
+            },
+            ""ob_em"": {
+                ""348"": [
+                    ""8022709""
+                ]
+            },
+            ""klass_energopotrebleniya"": {
+                ""2417109"": [
+                    ""8022709""
+                ]
+            },
+            ""klass_morozilnoy_kamery"": {
+                ""2417309"": [
+                    ""8022709""
+                ]
+            },
+            ""kolichestvo_vydvizhnyh_yaschikov"": {
+                ""1"": [
+                    ""8022709""
+                ]
+            }
+        },
+        ""6731709"": {
+            ""razmery"": {
+                ""600x850x450"": [
+                    ""8022909""
+                ]
+            },
+            ""cvet_676"": {
+                ""2417509"": [
+                    ""8022909""
+                ]
+            },
+            ""skorost_otzhima"": {
+                ""1200"": [
+                    ""8022909""
+                ]
+            }
+        },
+        ""6731909"": {
+            ""razmery"": {
+                ""670x885x660"": [
+                    ""8023109""
+                ]
+            },
+            ""cvet_676"": {
+                ""2418309"": [
+                    ""8023109""
+                ]
+            },
+            ""skorost_otzhima"": {
+                ""1400"": [
+                    ""8023109""
+                ]
+            }
+        },
+        ""6732109"": {
+            ""razmery"": {
+                ""600\u0445850\u0445550"": [
+                    ""8023309""
+                ]
+            },
+            ""cvet_676"": {
+                ""2418309"": [
+                    ""8023309""
+                ]
+            },
+            ""skorost_otzhima"": {
+                ""1400"": [
+                    ""8023309""
+                ]
+            }
+        }
+    },
+    ""apiHash"": {
+        ""getPromoProducts"": ""be4ccbbf941425f49c548a4c72ea6ae7"",
+        ""getSearchMatches"": ""5dbae9cd62fa26dc06512a5dac186f8a"",
+        ""getFolderCustomFields"": ""f8beafe65639ea38ad7ea70eacc2f4e1"",
+        ""getProductListItem"": ""d1b2c03b15cd0949a9038c3756976112"",
+        ""cartAddItem"": ""061f7f5da909e2e9486db65c26b614c6"",
+        ""cartRemoveItem"": ""24616a3c90c58971c091059aa57acb99"",
+        ""cartUpdate"": ""ce7d317477063679053ba98ba3e5d016"",
+        ""cartRemoveCoupon"": ""fb8ccd3b2642961d41fec008f1782f1f"",
+        ""cartAddCoupon"": ""e966a761414807dfcf9d556959666b9e"",
+        ""deliveryCalc"": ""d650b0fff90972cbeb5e6649db189c43"",
+        ""printOrder"": ""e599e963183ab3d6752c7d5f4838af62"",
+        ""cancelOrder"": ""285827939b19158dacdce7681491f692"",
+        ""cancelOrderNotify"": ""c0d44dbb2160b71393873955f5398db8"",
+        ""repeatOrder"": ""6b3a2d6d531a787907b768ecd6e3d408"",
+        ""paymentMethods"": ""851e3d09cfe024131407eac04382cf6d"",
+        ""compare"": ""ec6cb777ad5c2f5c032ab474a404eac8""
+    },
+    ""hash"": null,
+    ""verId"": 5955130,
+    ""mode"": ""main"",
+    ""step"": """",
+    ""uri"": ""/magazin"",
+    ""IMAGES_DIR"": ""/d/"",
+    ""my"": {
+        ""show_sections"": true,
+        ""show_flags_filter"": true,
+        ""lazy_load_subpages"": false
+    },
+    ""shop2_cart_order_payments"": 3,
+    ""cf_margin_price_enabled"": 0,
+    ""maps_yandex_key"": """",
+    ""maps_google_key"": """"
+});"
+g1qezZG4,6.0.4 Twitter Share,TheiPhoneFan,HTML,Sunday 14th of April 2024 11:01:50 PM CDT,"        <div class=""twitter-share-button"">
+            <a href=""https://twitter.com/share?ref_src=twsrc%5Etfw"" class=""twitter-share-button"" data-size=""large"" data-related=""jordans_blog"" data-show-count=""false"">Tweet</a>
+            <script async src=""https://platform.twitter.com/widgets.js"" charset=""utf-8""></script>
+        </div>"
+yi1aLrPm,A* algorithm,nathanwailes,Python,Sunday 14th of April 2024 10:53:08 PM CDT,"""""""
+The A* (A-star) algorithm is an efficient pathfinding and graph traversal algorithm. It finds the shortest path from the start node to a goal node by using a heuristic to estimate the cost from the current node to the goal, thus prioritizing paths that appear to be leading closer to the goal.
+
+Below is a concise example of the A* algorithm in Python. This implementation assumes you have a graph where nodes are connected by weighted edges and you have a heuristic function that estimates the cost from any node to the goal node. We'll use a simple heuristic function: the Euclidean distance (for a grid-based graph), or you can adjust it according to your specific use case.
+
+There are two concepts used to determine the best path from a start node to a goal node: weight and heuristic. Let's clarify each of these:
+- Weight is a measure of the effort, distance, or resource consumption required to move between nodes directly connected in the graph. It is a concrete measure based on the actual layout and characteristics of the graph.
+- The heuristic function is used to estimate the cost from a given node to the goal node, providing an informed guess about the remaining distance or cost. The heuristic function does not reflect the actual shortest path cost between two nodes, but rather provides an optimistic estimate, which guides the A* algorithm in its search for the shortest path.
+
+- The total cost of a path through a given node is evaluated as f(n) = g(n) + h(n), where g(n) is the actual cost from the start node to node n (accumulated weights), and h(n) is the heuristic estimate from node n to the goal.
+- The algorithm maintains a priority queue (or a heap in this code) that sorts nodes based on their f(n) values, meaning nodes with lower estimated total costs are explored first.
+
+Nathan's notes: This is basically just like a BFS except using a heap to order the vertices to be explored by their estimated total cost.
+""""""
+import heapq
+from random import randint
+
+class Node:
+    def __init__(self, name, x, y, neighbors=None):
+        self.name = name
+        self.x, self.y = x, y
+        self.neighbors = neighbors if neighbors else {}  # dict to Node: weight
+
+def astar(start, goal, heuristic):
+    # Heap of (estimated_total_cost, cost_to_start, node, path)
+    open_heap = [(heuristic(start, goal), 0, start, [start.name])]
+    while open_heap:
+        current_est, current_cost, current_node, path = heapq.heappop(open_heap)
+        if current_node == goal:
+            return path  # Goal reached, return the path
+        for neighbor, weight in current_node.neighbors.items():
+            new_cost = current_cost + weight
+            estimated_total_cost = new_cost + heuristic(neighbor, goal)
+            heapq.heappush(open_heap, (estimated_total_cost, new_cost, neighbor, path + [neighbor.name]))
+    return None  # No path found
+
+def heuristic(node, goal):
+    """"""Example heuristic: Euclidean distance.""""""
+    return ((node.x - goal.x) ** 2 + (node.y - goal.y) ** 2) ** 0.5
+
+# Example usage
+# Creating a simple graph (with dummy heuristic values as placeholders)
+node_a = Node('A', randint(0, 10), randint(0, 10))
+node_b = Node('B', randint(0, 10), randint(0, 10))
+node_c = Node('C', randint(0, 10), randint(0, 10))
+node_d = Node('D', randint(0, 10), randint(0, 10))
+node_e = Node('E', randint(0, 10), randint(0, 10))
+
+# Cost from each node to its neighbor (e.g. the speed of travel on a particular segment of road)
+node_a.neighbors = {node_b: 1.0, node_c: 3.0}
+node_b.neighbors = {node_d: 1.0}
+node_c.neighbors = {node_d: 1.0, node_e: 5.0}
+node_d.neighbors = {node_e: 1.0}
+
+# Find path from A to E
+path = astar(node_a, node_e, heuristic)
+print(""Path from A to E:"", path)"
+Mzewnmby,Dijkstra's algorithm,nathanwailes,Python,Sunday 14th of April 2024 10:46:40 PM CDT,"import heapq
+
+def dijkstra(graph, start):
+    # Initialize distances from start to all other nodes as infinity
+    distances = {vertex: float('infinity') for vertex in graph}
+    # Set the distance for the start node to zero
+    distances[start] = 0
+    # Priority queue to hold vertices to be processed
+    pq = [(0, start)]  # (distance, vertex)
+    
+    while pq:
+        # Get the vertex with the smallest distance
+        current_distance, current_vertex = heapq.heappop(pq)
+        
+        # Nodes can be pushed into the queue multiple times. We only
+        # process a vertex the first time we remove it from the queue.
+        if current_distance > distances[current_vertex]:
+            continue
+
+        # Consider all the neighbors of the current vertex
+        for neighbor, weight in graph[current_vertex]:
+            distance = current_distance + weight
+            
+            # If a shorter path is found
+            if distance < distances[neighbor]:
+                distances[neighbor] = distance
+                heapq.heappush(pq, (distance, neighbor))
+    
+    return distances
+
+# Example usage
+graph = {
+    'A': [('B', 1), ('C', 4)],
+    'B': [('A', 1), ('C', 2), ('D', 5)],
+    'C': [('A', 4), ('B', 2), ('D', 1)],
+    'D': [('B', 5), ('C', 1)]
+}
+start_vertex = 'A'
+shortest_paths = dijkstra(graph, start_vertex)
+print(shortest_paths)"
+i2Lvc8ia,areaMiner,yelby,Lua,Sunday 14th of April 2024 09:39:00 PM CDT,"function digIt()
+  if turtle.detect() then
+    turtle.dig()
+  end
+end
+
+function turtleTurn(direction)
+  if direction == ""l"" then
+    turtle.turnLeft()
+  end
+  if direction == ""r"" then
+    turtle.turnRight()
+  end
+end
+
+function returnToStart()
+  print(""Returning to start"")
+  turtle.turnRight()
+  for i = 1, 15 do
+    turtle.forward()
+  end
+end
+
+function spinDig(direction)
+  print(""Spinning ""..direction)
+  turtleTurn(direction)
+  digIt()
+  turtle.forward()
+  turtleTurn(direction)
+end
+
+function digStrip()
+  local stripLength = 15
+  for i = 1, stripLength do
+    print(i..""/""..stripLength.."" | ""..turtle.getFuelLevel())
+    if i <= stripLength then
+      digIt()
+    end
+    turtle.forward()
+  end
+end
+
+function planeDig()
+  local dir = ""r""
+  local rows = 16
+  for i = 1, rows do
+    print(""Plane Row [""..i..""/""..rows..""]"")
+    digStrip()
+    if i < rows then
+      spinDig(dir)
+    end
+    dir = dir == ""l"" and ""r"" or ""l""
+  end
+end
+
+local height = 1
+term.write(""Height: "")
+height = read()
+
+for i = 1, height do
+  print(""Current Height: ""..i..""/""..height)
+  planeDig()
+  returnToStart()
+  if turtle.detectUp() then
+    turtle.digUp()
+  end
+  turtle.up()
+  turtle.turnRight()
+end
+"
+LJPCAJjW,startup.lua,enimaloc,Lua,Sunday 14th of April 2024 09:00:29 PM CDT,"-- FRONT = Gate
+-- UP = Gate Detector
+-- BACK = Control
+GATE = ""front""
+GATE_DETECTOR = ""up""
+TRAIN_CONTROL = ""back""
+DETECTOR_1 = ""right""
+DETECTOR_2 = ""left""
+
+redstone.setOutput(TRAIN_CONTROL, true)
+oldLeft = false
+oldRight = false
+
+function getDetector()
+    local right = redstone.getInput(DETECTOR_1)
+    local left  = redstone.getInput(DETECTOR_2)
+    return right, left
+end
+
+function awaitDetector()
+    os.pullEvent(""redstone"")
+    local r, l = getDetector()
+    if r or l then
+        return r, l
+    else
+        return awaitDetector()
+    end
+end
+
+function awaitGate()
+    os.pullEvent(""redstone"")
+    local gd = redstone.getInput(GATE_DETECTOR)
+    if gd then
+        return gd
+    else
+        return awaitGate()
+    end
+end
+
+function signalGate()
+    redstone.setOutput(GATE, true)
+    sleep(1)
+    redstone.setOutput(GATE, false)
+end
+
+while true do
+    local right, left = awaitDetector()
+    if left ~= oldLeft or right ~= oldRight then
+		signalGate()
+        os.pullEvent(""redstone"")
+        redstone.setOutput(TRAIN_CONTROL, false)
+   		local r, l = awaitDetector()
+		while not (left and r) and not (right and l) do
+			r, l = awaitDetector()
+		end
+        if (left and r) or (right and l) then
+            redstone.setOutput(TRAIN_CONTROL, true)
+		    signalGate()
+        end
+        oldRight = right
+        oldLeft = left
+    end
+end"
+2KxwfQW5,邀您一起看：云口令,xiaomianao666,JavaScript,Sunday 14th of April 2024 08:55:53 PM CDT,海阔视界规则分享，当前分享的是：二级页面详情￥page_detail￥云口令@@eyJkYXRhIjoie1wiYXNzb2NpYXRlZE1vZGVsc01hcEZvckpvaW5UYWJsZVwiOnt9LFwiYXNzb2NpYXRlZE1vZGVsc01hcFdpdGhGS1wiOnt9LFwiYXNzb2NpYXRlZE1vZGVsc01hcFdpdGhvdXRGS1wiOnt9LFwiZmllbGRzVG9TZXRUb0RlZmF1bHRcIjpbXSxcImdtdE1vZGlmaWVkXCI6MCxcImlkXCI6MCxcImxpc3RUb0NsZWFyQXNzb2NpYXRlZEZLXCI6W10sXCJsaXN0VG9DbGVhclNlbGZGS1wiOltdLFwicGFnZUxpc3RcIjpbXSxcInNhdmVkXCI6ZmFsc2UsXCJ0aXRsZVwiOlwi5LqR5Y+j5LukXCIsXCJ2ZXJzaW9uXCI6MCxcInVybFwiOlwiaGlrZXI6Ly9lbXB0eVwiLFwiY29sX3R5cGVcIjpcIng1X3dlYnZpZXdfc2luZ2xlXCIsXCJmaW5kX3J1bGVcIjpcImpzOnNldFJlc3VsdChbe1xcbiAgICB1cmw6XFxcImh0dHBzOi8veGlhb21pYW5hby5sYW56b3VtLmNvbS9peWFDZDF2NTNpeGNcXFwiLFxcbmRlc2M6XFxcIjEwMCUmJmZsb2F0XFxcIixcXG5leHRyYTp7Y2FuQmFjazogdHJ1ZX1cXG59XSk7XCIsXCJncm91cFwiOlwiXCJ9IiwidGl0bGUiOiLkupHlj6Pku6QifQ==
+4pS058Yt,RacePoint to Donation,XConquer,C#,Sunday 14th of April 2024 08:41:12 PM CDT,"how to use/convert RacePoint Store to Donation Store
+
+1.- in the Source and Client find the File named RacePointShop.ini 
+2.- Modify the File as u Like for example Delete all items and make Empty File, for example this [ https://prnt.sc/mPY-jrg5zKDW ]
+3.- Same Modifys in the SOURCE/CLIENT (Same File)
+4.- Explanation of the code in the Shop 
+616439  5000  item     other      new
+IDITEM	Price NotMove  NotMove	  Sticker new or hot
+
+for example if i want added Wings i make like this 
+204009 2000000 item other new
+
+5.- How i can give the Points to Players can make Command or put in Bosses with this Code:
+ killer.Owner.RacePoints += 50;//This code is for Points
+===================================================
+if u want i make all, have a cost."
+9jKziZ70,Added Points in the Bosses,XConquer,C#,Sunday 14th of April 2024 08:34:05 PM CDT,"how to added points in the Bosses Drachma or Phoenix at the same 
+MonsterTable.cs find Bosses Names example ""SnowBanshee"" and added as u Like 
+
+ killer.DrachmaOfficer += 1;
+ killer.ThePhoenix += 1;
+
+so u can modify as u Like.
+
+https://prnt.sc/p8F2yx4_GK35  Check image for example."
+gwueP4Kv,Deo koda,El_Azar99,Java,Sunday 14th of April 2024 08:28:46 PM CDT,"int hrs = match.getSchedule().getDateTime().getHour();
+int min = match.getSchedule().getDateTime().getMinute();
+if ((hrs > 20 || (hrs == 20 && min > 0)) && (this instanceof Stadium)) {
+    throw new AddingMatchException(""Match starts too late to be added to Stadium, try earlier than 8pm!"");
+} else {
+    ArrayList<Athlete> athletesList = match.getAthletesList();
+    if (athletesList == null || athletesList.isEmpty()) {
+        throw new SportDisciplineException(""No athletes assigned to the match."");
+    }
+    for (Athlete athlete : athletesList) {
+        if (athlete.getDiscipline() != this.getDiscipline()) {
+            throw new SportDisciplineException(""Unable to add the match to the venue, as the venue accepts matches of discipline "" + this.getDiscipline() + "", and athlete "" + athlete.getName() + "" assigned to the match competes in discipline "" + athlete.getDiscipline() + ""."");
+        }
+    }
+
+    for (int i = 0; i < listOfMatches.length; i++) {
+        if (listOfMatches[i] == null) {
+            listOfMatches[i] = match;
+            System.out.println(""Successfully added match: \n"" + match.toString());
+            break;
+        } else if (i == listOfMatches.length - 1) {
+            throw new AddingMatchException(""List of matches is full!"");
+        }
+    }
+}"
+C85ZEVa4,Untitled,Diamond32_Tutoriales,C#,Sunday 14th of April 2024 07:51:35 PM CDT,"//CAMBIAR VALORES DESDE ADENTRO DE LAS SALAS
+        if (PhotonNetwork.InRoom)
+        {
+            Hashtable newdata = PhotonNetwork.CurrentRoom.CustomProperties;
+
+            newdata[""HOLA""] = 3000;
+
+            PhotonNetwork.CurrentRoom.SetCustomProperties(newdata);
+        }
+
+
+//CREAR SALA Y ASIGNAR CUSTOMS PROPERTIES
+RoomOptions roomOptions = new RoomOptions();
+roomOptions.MaxPlayers = 5;
+roomOptions.IsVisible = true;
+roomOptions.IsOpen = true;
+
+Hashtable roomSettings = new Hashtable();
+roomSettings[""HOLA""] = 100;
+
+roomOptions.CustomRoomProperties = roomSettings;
+roomOptions.CustomRoomPropertiesForLobby = new string[] { ""HOLA"" };
+
+string roomName = ""Room"" + (Random.Range(10000, 99999)).ToString();
+
+PhotonNetwork.JoinRandomOrCreateRoom(null, 0, MatchmakingMode.FillRoom, TypedLobby.Default, null, roomName, roomOptions);
+
+
+
+
+
+
+//OBTENER CUSTOMS PROPERTIES DESDE EL ROOMINFO DESDE EL LOBBY
+    public RoomInfo info_room;
+
+    private void Start()
+    {
+        Hashtable customs = info_room.CustomProperties;
+
+        if (customs.ContainsKey(""HOLA""))
+        {
+#if UNITY_EDITOR
+            Debug.Log(customs[""HOLA""]);
+#endif
+            GetComponentInChildren<TextMeshProUGUI>().text = ""Room: "" + info_room.Name + "" | Players: "" + info_room.PlayerCount + ""/"" + info_room.MaxPlayers + "" | VALOR: "" + (int)customs[""HOLA""];
+        }
+        else
+        {
+            GetComponentInChildren<TextMeshProUGUI>().text = ""Room: "" + info_room.Name + "" | Players: "" + info_room.PlayerCount + ""/"" + info_room.MaxPlayers;
+        }
+    }"
+3Y0ZwscA,2024-04-14_stats.json,rdp_snitch,JSON,Sunday 14th of April 2024 07:18:24 PM CDT,"{
+  ""ip"": {
+    ""165.154.129.130"": 3,
+    ""58.218.204.183"": 9,
+    ""3.110.161.54"": 6,
+    ""198.235.24.76"": 9,
+    ""194.165.16.73"": 6,
+    ""167.99.186.189"": 6,
+    ""194.165.16.78"": 6,
+    ""152.42.186.54"": 3,
+    ""185.170.144.3"": 6,
+    ""87.251.75.120"": 6,
+    ""152.32.245.196"": 3,
+    ""84.17.46.239"": 3,
+    ""196.190.117.7"": 6,
+    ""205.210.31.171"": 9,
+    ""110.42.102.173"": 3,
+    ""116.204.125.52"": 9,
+    ""36.91.222.100"": 6,
+    ""87.251.75.145"": 3,
+    ""193.53.245.249"": 3,
+    ""112.4.139.162"": 3,
+    ""96.8.115.25"": 3,
+    ""194.165.16.11"": 6,
+    ""45.227.254.26"": 6,
+    ""45.227.254.49"": 3,
+    ""198.235.24.204"": 9,
+    ""87.251.75.64"": 3,
+    ""116.140.196.215"": 3,
+    ""71.6.134.235"": 30,
+    ""152.32.183.213"": 726,
+    ""94.232.46.132"": 3,
+    ""194.169.175.21"": 3,
+    ""205.210.31.52"": 9,
+    ""162.142.125.211"": 3
+  },
+  ""asn"": {
+    ""AS135377"": 732,
+    ""AS4134"": 9,
+    ""AS16509"": 6,
+    ""AS396982"": 36,
+    ""AS48721"": 18,
+    ""AS14061"": 9,
+    ""AS197414"": 6,
+    ""AS208091"": 12,
+    ""AS60068"": 3,
+    ""AS24757"": 6,
+    ""AS136188"": 3,
+    ""AS55990"": 9,
+    ""AS7713"": 6,
+    ""AS209711"": 3,
+    ""AS56046"": 3,
+    ""AS36352"": 3,
+    ""AS267784"": 9,
+    ""AS4837"": 3,
+    ""AS10439"": 30,
+    ""AS212482"": 3,
+    ""AS209605"": 3,
+    ""AS398324"": 3
+  },
+  ""isp"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 732,
+    ""Chinanet"": 9,
+    ""Amazon Technologies Inc."": 6,
+    ""Google LLC"": 36,
+    ""Flyservers S.A."": 27,
+    ""DigitalOcean, LLC"": 9,
+    ""Xhost Internet Solutions LP"": 21,
+    ""DataCamp Limited"": 3,
+    ""Ethiotelecom"": 6,
+    ""China Telecom"": 3,
+    ""Huawei Cloud Service data center"": 9,
+    ""PT Telekomunikasi Indonesia"": 6,
+    ""MUV Bilisim ve Telekomunikasyon Hizmetleri Ltd. Sti"": 3,
+    ""China Mobile Communications Corporation"": 3,
+    ""HostPapa"": 3,
+    ""China Unicom CHINA169 Network"": 3,
+    ""CariNet, Inc."": 30,
+    ""UAB Host Baltic"": 3,
+    ""Censys, Inc."": 3
+  },
+  ""org"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Chinanet JS"": 9,
+    ""AWS EC2 (ap-south-1)"": 6,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Flyservers S.A"": 18,
+    ""DigitalOcean, LLC"": 6,
+    ""Digital Ocean"": 3,
+    ""Xhostis"": 6,
+    ""Xhost Internet Solutions"": 12,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""Cdn77 AMS"": 3,
+    ""Unknown"": 6,
+    ""Ningbo Zhuo Zhi Innovation Network Technology Co., Ltd"": 3,
+    ""Wonten Network Ltd."": 9,
+    ""Telekomunikasi Indonesia"": 6,
+    ""MUVHost - Vodafone Tuzla"": 3,
+    ""China Mobile Communications Corporation"": 3,
+    ""Michael Charlery"": 3,
+    ""UAB Host Baltic"": 9,
+    ""China United Network Communications Corporation Limited"": 3,
+    ""CariNet, Inc."": 30,
+    ""Ucloud Information Technology"": 726,
+    ""Dmitriy Panchenko"": 3,
+    ""EmanuelHosting LTD"": 3,
+    ""Censys Inc"": 3
+  },
+  ""regionName"": {
+    ""England"": 3,
+    ""Jiangsu"": 12,
+    ""Maharashtra"": 6,
+    ""California"": 36,
+    ""Kaunas"": 21,
+    ""Ontario"": 6,
+    ""South West"": 3,
+    ""North Holland"": 21,
+    ""Bangkok"": 3,
+    ""Addis Ababa"": 6,
+    ""Zhejiang"": 3,
+    ""Beijing"": 12,
+    ""Jakarta"": 6,
+    ""Istanbul"": 3,
+    ""Texas"": 3,
+    ""Vilnius"": 9,
+    ""Nevada"": 30,
+    ""Virginia"": 726,
+    ""Perm Krai"": 3,
+    ""Michigan"": 3
+  },
+  ""country"": {
+    ""United Kingdom"": 3,
+    ""China"": 27,
+    ""India"": 6,
+    ""United States"": 798,
+    ""Lithuania"": 30,
+    ""Canada"": 6,
+    ""Singapore"": 3,
+    ""The Netherlands"": 21,
+    ""Thailand"": 3,
+    ""Ethiopia"": 6,
+    ""Indonesia"": 6,
+    ""Turkey"": 3,
+    ""Russia"": 3
+  },
+  ""account"": {
+    ""Administrator"": 192,
+    ""hello"": 42,
+    ""WvLWQQHkf"": 3,
+    ""yrSwcd"": 3,
+    ""IFTQUa"": 3,
+    ""Test"": 36,
+    ""Administr"": 24,
+    ""LNVZfNLXV"": 3,
+    ""flrxNC"": 3,
+    ""nmVZfp"": 3,
+    ""(empty)"": 12,
+    ""kKPHVbV"": 3,
+    ""JvmojkaLX"": 3,
+    ""dycCjG"": 3,
+    ""cuGDNl"": 3,
+    ""eltons"": 15,
+    ""administr"": 15,
+    ""Admin"": 201,
+    ""Whatuptime.com"": 180,
+    ""Jakartakini123#"": 159,
+    ""MyXgIXBAB"": 3,
+    ""WyNyMj"": 3,
+    ""DgxXTh"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 915
+  },
+  ""client_build"": {
+    ""Unknown"": 915
+  },
+  ""client_name"": {
+    ""Unknown"": 915
+  },
+  ""ip_type"": {
+    ""hosting"": 786,
+    ""Unknown"": 81,
+    ""hosting & proxy"": 42,
+    ""mobile"": 3,
+    ""proxy"": 3
+  }
+}"
+wjw9d2Gy,2024-04-14_stats.json,rdp_snitch,JSON,Sunday 14th of April 2024 07:16:12 PM CDT,"{
+  ""ip"": {
+    ""165.154.129.130"": 2,
+    ""58.218.204.183"": 6,
+    ""3.110.161.54"": 4,
+    ""198.235.24.76"": 6,
+    ""194.165.16.73"": 4,
+    ""167.99.186.189"": 4,
+    ""194.165.16.78"": 4,
+    ""152.42.186.54"": 2,
+    ""185.170.144.3"": 4,
+    ""87.251.75.120"": 4,
+    ""152.32.245.196"": 2,
+    ""84.17.46.239"": 2,
+    ""196.190.117.7"": 4,
+    ""205.210.31.171"": 6,
+    ""110.42.102.173"": 2,
+    ""116.204.125.52"": 6,
+    ""36.91.222.100"": 4,
+    ""87.251.75.145"": 2,
+    ""193.53.245.249"": 2,
+    ""112.4.139.162"": 2,
+    ""96.8.115.25"": 2,
+    ""194.165.16.11"": 4,
+    ""45.227.254.26"": 4,
+    ""45.227.254.49"": 2,
+    ""198.235.24.204"": 6,
+    ""87.251.75.64"": 2,
+    ""116.140.196.215"": 2,
+    ""71.6.134.235"": 20,
+    ""152.32.183.213"": 484,
+    ""94.232.46.132"": 2,
+    ""194.169.175.21"": 2,
+    ""205.210.31.52"": 6,
+    ""162.142.125.211"": 2
+  },
+  ""asn"": {
+    ""AS135377"": 488,
+    ""AS4134"": 6,
+    ""AS16509"": 4,
+    ""AS396982"": 24,
+    ""AS48721"": 12,
+    ""AS14061"": 6,
+    ""AS197414"": 4,
+    ""AS208091"": 8,
+    ""AS60068"": 2,
+    ""AS24757"": 4,
+    ""AS136188"": 2,
+    ""AS55990"": 6,
+    ""AS7713"": 4,
+    ""AS209711"": 2,
+    ""AS56046"": 2,
+    ""AS36352"": 2,
+    ""AS267784"": 6,
+    ""AS4837"": 2,
+    ""AS10439"": 20,
+    ""AS212482"": 2,
+    ""AS209605"": 2,
+    ""AS398324"": 2
+  },
+  ""isp"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 488,
+    ""Chinanet"": 6,
+    ""Amazon Technologies Inc."": 4,
+    ""Google LLC"": 24,
+    ""Flyservers S.A."": 18,
+    ""DigitalOcean, LLC"": 6,
+    ""Xhost Internet Solutions LP"": 14,
+    ""DataCamp Limited"": 2,
+    ""Ethiotelecom"": 4,
+    ""China Telecom"": 2,
+    ""Huawei Cloud Service data center"": 6,
+    ""PT Telekomunikasi Indonesia"": 4,
+    ""MUV Bilisim ve Telekomunikasyon Hizmetleri Ltd. Sti"": 2,
+    ""China Mobile Communications Corporation"": 2,
+    ""HostPapa"": 2,
+    ""China Unicom CHINA169 Network"": 2,
+    ""CariNet, Inc."": 20,
+    ""UAB Host Baltic"": 2,
+    ""Censys, Inc."": 2
+  },
+  ""org"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 2,
+    ""Chinanet JS"": 6,
+    ""AWS EC2 (ap-south-1)"": 4,
+    ""Palo Alto Networks, Inc"": 24,
+    ""Flyservers S.A"": 12,
+    ""DigitalOcean, LLC"": 4,
+    ""Digital Ocean"": 2,
+    ""Xhostis"": 4,
+    ""Xhost Internet Solutions"": 8,
+    ""Ucloud Information Technology (hk) Limited"": 2,
+    ""Cdn77 AMS"": 2,
+    ""Unknown"": 4,
+    ""Ningbo Zhuo Zhi Innovation Network Technology Co., Ltd"": 2,
+    ""Wonten Network Ltd."": 6,
+    ""Telekomunikasi Indonesia"": 4,
+    ""MUVHost - Vodafone Tuzla"": 2,
+    ""China Mobile Communications Corporation"": 2,
+    ""Michael Charlery"": 2,
+    ""UAB Host Baltic"": 6,
+    ""China United Network Communications Corporation Limited"": 2,
+    ""CariNet, Inc."": 20,
+    ""Ucloud Information Technology"": 484,
+    ""Dmitriy Panchenko"": 2,
+    ""EmanuelHosting LTD"": 2,
+    ""Censys Inc"": 2
+  },
+  ""regionName"": {
+    ""England"": 2,
+    ""Jiangsu"": 8,
+    ""Maharashtra"": 4,
+    ""California"": 24,
+    ""Kaunas"": 14,
+    ""Ontario"": 4,
+    ""South West"": 2,
+    ""North Holland"": 14,
+    ""Bangkok"": 2,
+    ""Addis Ababa"": 4,
+    ""Zhejiang"": 2,
+    ""Beijing"": 8,
+    ""Jakarta"": 4,
+    ""Istanbul"": 2,
+    ""Texas"": 2,
+    ""Vilnius"": 6,
+    ""Nevada"": 20,
+    ""Virginia"": 484,
+    ""Perm Krai"": 2,
+    ""Michigan"": 2
+  },
+  ""country"": {
+    ""United Kingdom"": 2,
+    ""China"": 18,
+    ""India"": 4,
+    ""United States"": 532,
+    ""Lithuania"": 20,
+    ""Canada"": 4,
+    ""Singapore"": 2,
+    ""The Netherlands"": 14,
+    ""Thailand"": 2,
+    ""Ethiopia"": 4,
+    ""Indonesia"": 4,
+    ""Turkey"": 2,
+    ""Russia"": 2
+  },
+  ""account"": {
+    ""Administrator"": 128,
+    ""hello"": 28,
+    ""WvLWQQHkf"": 2,
+    ""yrSwcd"": 2,
+    ""IFTQUa"": 2,
+    ""Test"": 24,
+    ""Administr"": 16,
+    ""LNVZfNLXV"": 2,
+    ""flrxNC"": 2,
+    ""nmVZfp"": 2,
+    ""(empty)"": 8,
+    ""kKPHVbV"": 2,
+    ""JvmojkaLX"": 2,
+    ""dycCjG"": 2,
+    ""cuGDNl"": 2,
+    ""eltons"": 10,
+    ""administr"": 10,
+    ""Admin"": 134,
+    ""Whatuptime.com"": 120,
+    ""Jakartakini123#"": 106,
+    ""MyXgIXBAB"": 2,
+    ""WyNyMj"": 2,
+    ""DgxXTh"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 610
+  },
+  ""client_build"": {
+    ""Unknown"": 610
+  },
+  ""client_name"": {
+    ""Unknown"": 610
+  },
+  ""ip_type"": {
+    ""hosting"": 524,
+    ""Unknown"": 54,
+    ""hosting & proxy"": 28,
+    ""mobile"": 2,
+    ""proxy"": 2
+  }
+}"
+Ym4YC7GW,2024-04-14_stats.json,rdp_snitch,JSON,Sunday 14th of April 2024 07:15:09 PM CDT,"{
+  ""ip"": {
+    ""165.154.129.130"": 1,
+    ""58.218.204.183"": 3,
+    ""3.110.161.54"": 2,
+    ""198.235.24.76"": 3,
+    ""194.165.16.73"": 2,
+    ""167.99.186.189"": 2,
+    ""194.165.16.78"": 2,
+    ""152.42.186.54"": 1,
+    ""185.170.144.3"": 2,
+    ""87.251.75.120"": 2,
+    ""152.32.245.196"": 1,
+    ""84.17.46.239"": 1,
+    ""196.190.117.7"": 2,
+    ""205.210.31.171"": 3,
+    ""110.42.102.173"": 1,
+    ""116.204.125.52"": 3,
+    ""36.91.222.100"": 2,
+    ""87.251.75.145"": 1,
+    ""193.53.245.249"": 1,
+    ""112.4.139.162"": 1,
+    ""96.8.115.25"": 1,
+    ""194.165.16.11"": 2,
+    ""45.227.254.26"": 2,
+    ""45.227.254.49"": 1,
+    ""198.235.24.204"": 3,
+    ""87.251.75.64"": 1,
+    ""116.140.196.215"": 1,
+    ""71.6.134.235"": 10,
+    ""152.32.183.213"": 242,
+    ""94.232.46.132"": 1,
+    ""194.169.175.21"": 1,
+    ""205.210.31.52"": 3,
+    ""162.142.125.211"": 1
+  },
+  ""asn"": {
+    ""AS135377"": 244,
+    ""AS4134"": 3,
+    ""AS16509"": 2,
+    ""AS396982"": 12,
+    ""AS48721"": 6,
+    ""AS14061"": 3,
+    ""AS197414"": 2,
+    ""AS208091"": 4,
+    ""AS60068"": 1,
+    ""AS24757"": 2,
+    ""AS136188"": 1,
+    ""AS55990"": 3,
+    ""AS7713"": 2,
+    ""AS209711"": 1,
+    ""AS56046"": 1,
+    ""AS36352"": 1,
+    ""AS267784"": 3,
+    ""AS4837"": 1,
+    ""AS10439"": 10,
+    ""AS212482"": 1,
+    ""AS209605"": 1,
+    ""AS398324"": 1
+  },
+  ""isp"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 244,
+    ""Chinanet"": 3,
+    ""Amazon Technologies Inc."": 2,
+    ""Google LLC"": 12,
+    ""Flyservers S.A."": 9,
+    ""DigitalOcean, LLC"": 3,
+    ""Xhost Internet Solutions LP"": 7,
+    ""DataCamp Limited"": 1,
+    ""Ethiotelecom"": 2,
+    ""China Telecom"": 1,
+    ""Huawei Cloud Service data center"": 3,
+    ""PT Telekomunikasi Indonesia"": 2,
+    ""MUV Bilisim ve Telekomunikasyon Hizmetleri Ltd. Sti"": 1,
+    ""China Mobile Communications Corporation"": 1,
+    ""HostPapa"": 1,
+    ""China Unicom CHINA169 Network"": 1,
+    ""CariNet, Inc."": 10,
+    ""UAB Host Baltic"": 1,
+    ""Censys, Inc."": 1
+  },
+  ""org"": {
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 1,
+    ""Chinanet JS"": 3,
+    ""AWS EC2 (ap-south-1)"": 2,
+    ""Palo Alto Networks, Inc"": 12,
+    ""Flyservers S.A"": 6,
+    ""DigitalOcean, LLC"": 2,
+    ""Digital Ocean"": 1,
+    ""Xhostis"": 2,
+    ""Xhost Internet Solutions"": 4,
+    ""Ucloud Information Technology (hk) Limited"": 1,
+    ""Cdn77 AMS"": 1,
+    ""Unknown"": 2,
+    ""Ningbo Zhuo Zhi Innovation Network Technology Co., Ltd"": 1,
+    ""Wonten Network Ltd."": 3,
+    ""Telekomunikasi Indonesia"": 2,
+    ""MUVHost - Vodafone Tuzla"": 1,
+    ""China Mobile Communications Corporation"": 1,
+    ""Michael Charlery"": 1,
+    ""UAB Host Baltic"": 3,
+    ""China United Network Communications Corporation Limited"": 1,
+    ""CariNet, Inc."": 10,
+    ""Ucloud Information Technology"": 242,
+    ""Dmitriy Panchenko"": 1,
+    ""EmanuelHosting LTD"": 1,
+    ""Censys Inc"": 1
+  },
+  ""regionName"": {
+    ""England"": 1,
+    ""Jiangsu"": 4,
+    ""Maharashtra"": 2,
+    ""California"": 12,
+    ""Kaunas"": 7,
+    ""Ontario"": 2,
+    ""South West"": 1,
+    ""North Holland"": 7,
+    ""Bangkok"": 1,
+    ""Addis Ababa"": 2,
+    ""Zhejiang"": 1,
+    ""Beijing"": 4,
+    ""Jakarta"": 2,
+    ""Istanbul"": 1,
+    ""Texas"": 1,
+    ""Vilnius"": 3,
+    ""Nevada"": 10,
+    ""Virginia"": 242,
+    ""Perm Krai"": 1,
+    ""Michigan"": 1
+  },
+  ""country"": {
+    ""United Kingdom"": 1,
+    ""China"": 9,
+    ""India"": 2,
+    ""United States"": 266,
+    ""Lithuania"": 10,
+    ""Canada"": 2,
+    ""Singapore"": 1,
+    ""The Netherlands"": 7,
+    ""Thailand"": 1,
+    ""Ethiopia"": 2,
+    ""Indonesia"": 2,
+    ""Turkey"": 1,
+    ""Russia"": 1
+  },
+  ""account"": {
+    ""Administrator"": 64,
+    ""hello"": 14,
+    ""WvLWQQHkf"": 1,
+    ""yrSwcd"": 1,
+    ""IFTQUa"": 1,
+    ""Test"": 12,
+    ""Administr"": 8,
+    ""LNVZfNLXV"": 1,
+    ""flrxNC"": 1,
+    ""nmVZfp"": 1,
+    ""(empty)"": 4,
+    ""kKPHVbV"": 1,
+    ""JvmojkaLX"": 1,
+    ""dycCjG"": 1,
+    ""cuGDNl"": 1,
+    ""eltons"": 5,
+    ""administr"": 5,
+    ""Admin"": 67,
+    ""Whatuptime.com"": 60,
+    ""Jakartakini123#"": 53,
+    ""MyXgIXBAB"": 1,
+    ""WyNyMj"": 1,
+    ""DgxXTh"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 305
+  },
+  ""client_build"": {
+    ""Unknown"": 305
+  },
+  ""client_name"": {
+    ""Unknown"": 305
+  },
+  ""ip_type"": {
+    ""hosting"": 262,
+    ""Unknown"": 27,
+    ""hosting & proxy"": 14,
+    ""mobile"": 1,
+    ""proxy"": 1
+  }
+}"
+ikwc28xL,cs2config,jkirem,JSON,Sunday 14th of April 2024 06:26:21 PM CDT,"alias ""+jumpaction"" ""+jump;""
+alias ""+throwaction"" ""-attack; -attack2""
+alias ""-jumpaction"" ""-jump""
+    
+bind n ""+jumpaction;+throwaction;""
+bind ""t"" = ""+cl_show_team_equipment""
+bind ""c"" = ""smoke;+lookatweapon;-lookatweapon""
+
+alias knife slot3
+alias he slot6
+alias flash slot7
+alias smoke slot8
+alias fire slot10
+
+
+alias ""+hjump"" ""+jump; +duck""; 
+alias ""-hjump"" ""-jump; -duck""; 
+bind space ""+hjump""
+
+bind ""MOUSE4"" = ""knife;he;fire;+lookatweapon;-lookatweapon""
+bind ""MOUSE5"" = ""knife;smoke;flash;+lookatweapon;-lookatweapon""
+
+
+alias dd ""disconnect; aa""
+alias aa ""exec autoexec.cfg""
+alias pp ""exec praccfg.cfg"""
+Dqj0W57w,Laberinto con A Star y Raylib,nBiker77,C++,Sunday 14th of April 2024 05:52:41 PM CDT,"// 
+// ██╗      █████╗ ██████╗ ███████╗██████╗ ██╗███╗   ██╗████████╗ ██████╗ 
+// ██║     ██╔══██╗██╔══██╗██╔════╝██╔══██╗██║████╗  ██║╚══██╔══╝██╔═══██╗
+// ██║     ███████║██████╔╝█████╗  ██████╔╝██║██╔██╗ ██║   ██║   ██║   ██║
+// ██║     ██╔══██║██╔══██╗██╔══╝  ██╔══██╗██║██║╚██╗██║   ██║   ██║   ██║
+// ███████╗██║  ██║██████╔╝███████╗██║  ██║██║██║ ╚████║   ██║   ╚██████╔╝
+// ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ 
+
+/*
+Nombre del archivo: laberinto.cpp
+Nombre del programa: Laberinto solucion por algoitmos de busqueda
+
+Autor(es): Natxo Varona, IA's
+Fecha de creación: 2024-04-12
+Versión: 1.5
+Licencia: GPLv3
+Descripción breve: Este programa calcula la forma optima de salir de un laberinto.
+Palabras clave: laberinto, aritmético, busqueda, cálculo, .
+Contacto: nvarona@hotmail.es, ia@ia.com
+Dependencias: libreiria raylib
+
+Descripcion: Resolucion de un supuesto laberinto utilizando el Algoritmo (A-star).*
+ 
+Este código implementa el algoritmo A* para encontrar la ruta más corta en un laberinto representado 
+por una matriz de caracteres. Se utiliza una cola de prioridad para explorar los nodos de acuerdo con 
+su valor de f, que es la suma de los valores g y h. La función de evaluación h es la distancia 
+euclidiana desde un nodo hasta el nodo objetivo. La función de evaluación g es la distancia 
+recorrida desde el nodo inicial hasta el nodo actual.
+
+Instrucciones de uso:
+1. Compilar el programa: g++ laberinto.cpp -o laberinto -lraylib -std=c++11
+2. Ejecutar el programa: ./laberinto
+3. Ingresar los números separados por espacios: 1 2 3 4 5
+4. El programa mostrará en una ventana grafica un laberinto y su solucion.
+
+Historial de cambios:
+- Versión 1.0 (2024-04-12): Implementación inicial del programa.
+- Versión 1.5 (2024-04-14): Implementacion de impresion de inicio, final y ruta.
+*/
+
+#include <iostream>
+#include <ctime>
+#include <vector>
+#include <queue>
+#include <utility>
+#include <cmath>
+#include <climits>
+#include <raylib.h>
+
+using namespace std;
+
+// Definicion de variables y constantes para el programa -----------------
+Color Green = Color{38, 185, 154, 255};
+Color Dark_Green = Color{20, 160, 133, 255};
+Color Light_Green = Color{129, 204, 184, 255};
+Color Yellow = Color{243, 213, 91, 255};
+Color Grey = Color{29, 29, 29, 255};
+Color lightGreen = {173, 204, 96, 255};
+Color darkGreen = {43, 51, 24, 255};
+
+const int START = 2;     // Carácter que representa el inicio
+const int GOAL = 3;      // Carácter que representa la meta
+const int mazeWidth = 10;
+const int mazeHeight = 10;
+
+// Definición del laberinto como una matriz de caracteres ---------------
+int maze[mazeWidth][mazeHeight] = {
+    {1, 2, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+    {1, 0, 1, 0, 1, 0, 1, 1, 0, 1},
+    {1, 0, 1, 0, 1, 0, 1, 0, 0, 1},
+    {1, 0, 1, 0, 1, 0, 1, 0, 1, 1},
+    {1, 0, 1, 0, 0, 0, 1, 0, 0, 1},
+    {1, 0, 1, 1, 1, 0, 1, 1, 0, 1},
+    {1, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+    {1, 1, 1, 0, 1, 1, 1, 1, 0, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 3, 1}
+};
+
+// Direcciones posibles para explorar (arriba, abajo, izquierda, derecha)
+int dx[] = {-1, 1, 0, 0};
+int dy[] = {0, 0, -1, 1};
+
+// Función para calcular la distancia euclidiana entre dos puntos en el laberinto
+double heuristic(int x, int y, int goal_x, int goal_y) {
+    return sqrt((x - goal_x) * (x - goal_x) + (y - goal_y) * (y - goal_y));
+}
+
+// Estructura para representar un nodo en el laberinto
+struct Node {
+    int x, y;       // Posición del nodo
+    double f, g, h; // Valores de la función de evaluación
+};
+
+// Sobrecarga del operador < para ordenar los nodos en función del valor f
+bool operator<(const Node& a, const Node& b) {
+    return a.f > b.f; // Orden inverso para que la cola de prioridad tenga el menor f en el frente
+}
+
+// Función para verificar si una posición está dentro del laberinto y es transitable
+bool isValid(int x, int y, int mazeWidth, int mazeHeight) {
+    return (x >= 0 && x < mazeWidth && y >= 0 && y < mazeHeight && maze[x][y] != '1');
+}
+
+// Función para encontrar la ruta más corta utilizando el algoritmo A*
+vector<pair<int, int>> AStar(int start_x, int start_y, int goal_x, int goal_y, int mazeWidth, int mazeHeight) {
+    // Crear una cola de prioridad para almacenar los nodos a explorar
+    priority_queue<Node> pq;
+
+    // Crear un arreglo para almacenar los valores de g y h de cada nodo
+    vector<vector<pair<double, double>>> values(mazeWidth, vector<pair<double, double>>(mazeHeight, {INFINITY, INFINITY}));
+
+    // Crear un arreglo para almacenar el camino encontrado
+    vector<pair<int, int>> path;
+
+    // Insertar el nodo inicial en la cola de prioridad
+    pq.push({start_x, start_y, 0.0, 0.0, heuristic(start_x, start_y, goal_x, goal_y)});
+    values[start_x][start_y] = {0.0, heuristic(start_x, start_y, goal_x, goal_y)};
+
+    while (!pq.empty()) {
+        // Obtener el nodo con el menor valor f de la cola de prioridad
+        Node current = pq.top();
+        pq.pop();
+
+        int x = current.x;
+        int y = current.y;
+
+        // Verificar si se alcanzó el nodo objetivo
+        if (x == goal_x && y == goal_y) {
+            // Rastrear el camino desde el nodo objetivo hasta el nodo inicial
+            int cx = goal_x, cy = goal_y;
+            while (cx != start_x || cy != start_y) {
+                path.push_back({cx, cy});
+                double min_f = INFINITY;
+                int nx, ny;
+                for (int i = 0; i < 4; ++i) {
+                    int nx = cx + dx[i];
+                    int ny = cy + dy[i];
+                    if (isValid(nx, ny, mazeWidth, mazeHeight) && values[nx][ny].first + values[nx][ny].second < min_f) {
+                        min_f = values[nx][ny].first + values[nx][ny].second;
+                        cx = nx;
+                        cy = ny;
+                    }
+                }
+            }
+            path.push_back({start_x, start_y});
+            reverse(path.begin(), path.end());  // Invertir el camino para que esté en el orden correcto
+            return path;
+        }
+
+        // Explorar los nodos vecinos
+        for (int i = 0; i < 4; ++i) {
+            int nx = x + dx[i];
+            int ny = y + dy[i];
+
+            // Verificar si la posición vecina es válida
+            if (isValid(nx, ny, mazeWidth, mazeHeight)) {
+                double new_g = current.g + 1.0; // Distancia hasta el vecino (asumiendo un costo de movimiento de 1)
+
+                // Verificar si se encontró una mejor ruta hacia el vecino
+                if (new_g < values[nx][ny].first) {
+                    values[nx][ny].first = new_g; // Actualizar el valor de g
+                    values[nx][ny].second = heuristic(nx, ny, goal_x, goal_y); // Calcular el valor de h
+                    pq.push({nx, ny, new_g + values[nx][ny].second, new_g, values[nx][ny].second}); // Insertar el nodo en la cola de prioridad
+                }
+            }
+        }
+    }
+    // Si no se encontró ningún camino, devolver un vector vacío
+    return {};
+}
+
+int main() {
+    // Comenzamos el programa ------------------------------------------
+    std::cout << std::endl;
+    std::cout << ""Starting the program ..."" << std::endl;
+    std::cout << std::endl;
+
+    const int screen_Width = 800;       // Sin interface entero seria 300
+    const int screen_Height = 800;      // Sin interface entero seria 600
+    int FPS = 60;
+    bool lab = false;                   // Estado de la busqueda en el laberinto
+    bool gameOver = false;              // Saber si ya hemos acabado, para no volver a imprimir
+    const int cellSize = 50;
+
+    // Posicion de el comienzo del laberinto y la salida del laberinto
+    int start_x, start_y, goal_x, goal_y;
+
+    // Crear un arreglo para almacenar el camino encontrado
+    vector<pair<int, int>> path;
+    
+    InitWindow(screen_Width, screen_Height, ""Resolucion de Laberintos con RayLib"");
+    SetTargetFPS(FPS);
+    SetConfigFlags(FLAG_VSYNC_HINT);
+
+    // 1. Event Handing ---------------------------------------------
+    BeginDrawing();
+    ClearBackground(WHITE);
+
+    // Encontrar las coordenadas de inicio del laberitno '2' y objetivo de salida '3'
+    for (int y1 = 0; y1 < mazeHeight; ++y1) {
+        for (int x1 = 0; x1 < mazeWidth; ++x1) {
+            if (maze[y1][x1] == START) {
+                start_x = x1;
+                start_y = y1;
+            } else if (maze[y1][x1] == GOAL) {
+                goal_x = x1;
+                goal_y = y1;
+            }
+        }
+    }
+    //cout << endl;
+    //cout << ""Comienzo X: "" << start_x << endl;
+    //cout << ""Comienzo Y: "" << start_y << endl;
+    //cout << ""Salida X: "" << goal_x << endl;
+    //cout << ""Salida Y: "" << goal_y << endl;
+
+    // Punto de inicio del tiempo
+    clock_t start = clock();
+
+    // Llamar al algoritmo A* para encontrar la ruta más corta
+    path = AStar(start_x, start_y, goal_x, goal_y, mazeWidth, mazeHeight);
+    
+    // Punto de finalización del tiempo
+    clock_t end = clock();
+    
+    // Calcula la duración de la ejecución en milisegundos
+    double duration = static_cast<double>(end - start) / CLOCKS_PER_SEC * 1000;
+
+    // Imprime el tiempo transcurrido
+    char durationText[30];
+    snprintf(durationText, sizeof(durationText), ""La busqueda tardó: %.2f ms"", duration);
+    DrawText(durationText, 400, 710, 20, RED);
+    //cout << endl;
+    //cout << ""La busqueda tardó: "" << duration << "" ms en ejecutarse."" << endl;
+
+    // 2. Updating State --------------------------------------------
+
+    // 3. Drawing Objects -------------------------------------------
+
+    // Dibujar el laberinto
+    for (int y1 = 0; y1 < mazeHeight; y1++) {
+        for (int x1 = 0; x1 < mazeWidth; x1++) {
+            if (maze[y1][x1] == 1) {
+                DrawRectangle(x1 * cellSize, y1 * cellSize, cellSize, cellSize, darkGreen);
+            }
+        }
+    }
+    DrawRectangle(start_x * cellSize, start_y * cellSize, cellSize, cellSize, Yellow);
+    DrawRectangle(goal_x * cellSize, goal_y * cellSize, cellSize, cellSize, Grey);
+    if (!path.empty()) {
+        //cout << endl;
+        //cout << ""Se encontró una ruta hasta el objetivo !!"" << endl;
+        //cout << endl;
+        // Imprimir el camino encontrado
+        //cout << ""Camino encontrado:"" << endl;
+        for (int i = path.size() - 1; i >= 0; --i) {
+            DrawRectangle(path[i].first * cellSize, path[i].second * cellSize, cellSize, cellSize, lightGreen); // Dibujar la solucion al laberinto
+            // Impresion por consola del resultado del camino optimo
+            //cout << ""("" << path[i].first << "", "" << path[i].second << "")"";
+            //if (i > 0) cout << "" -> "";
+        }
+        //cout << endl;
+    }
+    
+    // Mostrar mensaje de salida o repeticion.
+    DrawText(""Pulsa una tecla para salir"", 400, 750, 20, RED);
+    EndDrawing();
+    bool keyPressed = false; // Variable para almacenar si se ha presionado una tecla
+    while (!WindowShouldClose() && !keyPressed) {
+        // Esperar a que el usuario pulse la tecla SPACE para continuar
+        if (IsKeyPressed(KEY_SPACE)) {
+            keyPressed = true; // Marcar que se ha presionado una tecla
+        }
+    }
+
+    CloseWindow();
+    return 0;
+}
+"
+2AitUQAe,show_fields_bookmarklet,idarktech,JavaScript,Sunday 14th of April 2024 05:42:35 PM CDT,"javascript:(function() {
+    const hiddenConditionFields = document.querySelectorAll('.form-field-hidden');
+    const alwaysHidden = document.querySelectorAll('.always-hidden');
+    const closedCollapse = document.querySelectorAll('.form-section-closed');
+    const pageBreaks = document.querySelectorAll('.form-pagebreak-next');
+    const otherWidgets = document.querySelectorAll('.form-line[data-type=""control_widget""]');
+    const formSections = document.querySelectorAll('.form-all > .form-section');
+
+  hiddenConditionFields.forEach(function(section) {
+    section.style.display = 'block';
+    section.classList.remove(""form-field-hidden"");
+  });
+
+  alwaysHidden.forEach(function(section) {
+    section.classList.remove(""always-hidden"");
+  });  
+
+  closedCollapse.forEach(function(section) {
+    section.style.height = 'auto';
+    section.classList.remove(""form-section-closed"");
+    section.classList.add(""form-section"");
+  });
+
+  formSections.forEach(function(section) {
+    section.style.display = '';
+  });
+  if (otherWidgets.length > 0) {
+        otherWidgets.forEach(function(el) {                   
+          var qid = el.id.split('_')[1];
+          if (JotForm.getInputType(qid) === 'widget') {
+          JotForm.showWidget(qid);      
+          }
+        });
+      }
+var customCSS = `
+  ul#cardAnimationWrapper {
+    display: flex !important;
+    flex-wrap: nowrap;
+    flex-direction: column;
+    width: auto !important;
+    transform: unset !important;
+    transform-origin: unset !important;
+    align-items: center;
+    position: initial !important;
+    overflow: visible !important;
+}
+.jfCard-wrapper {
+    opacity: 1;
+    visibility: visible;
+    float: unset !important;
+    margin: 10px 0 !important;
+}
+.jfForm-wrapper {
+    overflow: scroll !important;
+}
+.jfCard {
+    transform: unset !important;
+}
+html, body {
+    position: initial !important;
+    overflow: visible !important;
+    transform: unset !important;
+}
+ul#cardAnimationWrapper,
+.jfForm-wrapper{
+    height: auto !important;
+}
+.jfCard-index {
+    display: none;
+}
+.welcomeMode .jfForm-all, .thankyouMode .jfForm-all, .reviewMode .jfForm-all, .sectionHeaderMode .jfForm-all {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: unset !important;
+}
+.jfWelcome-wrapper,
+.jfForm-background-mask{
+display:none !important;
+}
+.form-all > ul.form-section {
+    position: relative !important;
+    counter-increment: step-counter;
+}
+.form-all > ul.form-section:before {
+    color: red;
+    content: counter(step-counter);
+    font-size: 20px;
+    width: 30px;
+    height: 30px;
+    line-height: 30px;
+    text-align: center;
+    position: absolute;
+    right: 0 !important;
+    top: 0 !important;
+    background: #e8e8e8;
+    border-radius: 50%;
+    font-family: fantasy;
+    z-index: 9;
+    display: block;
+}
+div#pdfimporter-root{
+  display:none;
+}`;
+
+  var style = document.createElement('style');
+  style.type = 'text/css';
+  style.appendChild(document.createTextNode(customCSS));
+  document.head.appendChild(style);
+})();"
+J0UaG3ck,3.LoadMealsAdd,Silviya7,JavaScript,Sunday 14th of April 2024 05:06:11 PM CDT,"
+const BtnLoadMeals= document.getElementById('load-meals');
+const BtnAddMeal=document.getElementById('add-meal');
+const ElementList= document.getElementById('list');
+
+const Elementfood= document.getElementById('food');
+const Elementtime= document.getElementById('time');
+const Elementcalories= document.getElementById('calories');
+
+
+    const LoadMeals = async()=> {
+    //Fetch all meals
+    const response = await fetch(baseURL);
+    const data= await response.json();
+   // console.log(Object.values(data));
+    
+    ElementList.innerHTML='';
+
+    for (const meal of Object.values(data)) {        
+        const mealBtndiv= document.createElement('div');
+        mealBtndiv.id='meal-buttons';
+
+        const BtnChange=document.createElement('button');
+        BtnChange.classList.add('change-meal');
+        BtnChange.textContent='Change';
+
+        const BtnDelete=document.createElement('button');
+        BtnDelete.classList.add('delete-meal');
+        BtnDelete.textContent='Delete';
+
+        mealBtndiv.appendChild(BtnChange);
+        mealBtndiv.appendChild(BtnDelete);
+
+        const Elementh1=document.createElement('h2');
+        Elementh1.textContent= meal.food;
+        const Elementhtime3=document.createElement('h3');
+        Elementhtime3.textContent= meal.time;
+        const Elementhcalories3=document.createElement('h3')
+        Elementhcalories3.textContent= meal.calories;
+
+        const divMeal= document.createElement('div');
+        divMeal.classList.add('meal');
+        divMeal.appendChild(Elementh1);
+        divMeal.appendChild(Elementhtime3);
+        divMeal.appendChild(Elementhcalories3);
+        divMeal.appendChild(mealBtndiv);
+
+        ElementList.appendChild(divMeal);
+
+    }
+
+    };
+
+    BtnLoadMeals.addEventListener('click',LoadMeals);
+
+BtnAddMeal.addEventListener('click',async()=>{
+
+    const food= Elementfood.value;
+    const time= Elementtime.value;
+    const calories= Elementcalories.value;
+  //create post request
+
+  const response= await fetch(baseURL, {
+     method :'POST',
+     headers:{
+     'content-type':'application/json',
+     },
+     body: JSON.stringify({food,time,calories }),
+     });
+  
+  await LoadMeals();
+   Elementfood.value="""";
+   Elementtime.value="""";
+   Elementcalories.value="""";
+});"
+tja4zvhW,Untitled,lemansky,C#,Sunday 14th of April 2024 04:32:59 PM CDT,"using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class MagicArrow : MonoBehaviour
+{
+    // Start is called before the first frame update
+    public GameObject prefab;
+    public GameObject prefabCast;
+    public float shootCooldown = 0.2f;
+    public float shootTimer = -1.0f;
+    private GameObject target;
+    private ParticleSystem Effect;
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1))
+        {
+            ShootMagic();
+        }
+    }
+    
+    void ShootMagic()
+    {
+        for(int i = 0; i < 5; i++)
+        {
+            GameObject projectile = Instantiate(prefabCast, transform.position, transform.rotation);
+            target = GameObject.FindGameObjectWithTag(""Enemy"") ?? null;
+            if (target != null)
+            {
+                projectile.GetComponent<TargetProjectile>().UpdateTarget(target.transform, Vector3.zero);
+                Effect = prefab.GetComponent<ParticleSystem>();
+                Effect.Play();
+            }
+        }
+       
+    }
+}
+"
+kva8u5MY,ai,the_1826,C++,Sunday 14th of April 2024 04:10:28 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int entry1[3][3];
+float weights1[3][3], result1[3][3], formul, formul_temp, s = 0.0, target = 0.95, a, b;
+
+inline float float_rand(float minvalue, float maxvalue)
+{
+    float scale = rand() / (float)RAND_MAX;
+    return minvalue + scale * (maxvalue - minvalue);
+}
+
+inline float gamma(float x) {
+    if (x <= a)
+        return 0;
+    else if (x > b)
+        return 1;
+    else return ((x - a)/(b - a));
+}
+
+inline void value_pick_any() {
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            weights1[i][j] = float_rand(-1.0,1.0);
+}
+
+inline float hebb_change(float x) {
+    const float limit = 0.1;
+    return limit * x;
+}
+
+inline void value_pick_hebb() {
+    hebb_restart:
+    value_pick_any();
+    a = 0.2;
+    b = 3.5;
+    cout << ""a = "" << a << endl;
+    cout << ""b = "" << b << endl;
+    cout << ""weight[0][0] = "" << weights1[0][0] << endl;
+    cout << ""weight[0][1] = "" << weights1[0][1] << endl;
+    cout << ""weight[0][2] = "" << weights1[0][2] << endl;
+    cout << ""weight[1][0] = "" << weights1[1][0] << endl;
+    cout << ""weight[1][1] = "" << weights1[1][1] << endl;
+    cout << ""weight[1][2] = "" << weights1[1][2] << endl;
+    cout << ""weight[2][0] = "" << weights1[2][0] << endl;
+    cout << ""weight[2][1] = "" << weights1[2][1] << endl;
+    cout << ""weight[2][2] = "" << weights1[2][2] << endl;
+    cout << ""Starting to search for values..."" << endl;
+    while (!(formul > target)) {
+        s = 0.0;
+        for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                    result1[i][j] = entry1[i][j] * weights1[i][j];
+                    s += result1[i][j];
+                }
+        formul_temp = gamma(s);
+        if ((formul_temp) == 0) {
+            cout << ""Bad weights. Restarting."" << endl;
+            _sleep(500);
+            cout << ""-----"" << endl;
+            goto hebb_restart;
+        }
+        cout << ""Was before Hebb rule: "" << formul_temp << endl;
+        for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                        if (!(weights1[i][j] > 1))
+                            weights1[i][j] += hebb_change(weights1[i][j]);
+                }
+        s = 0.0;
+        for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                    result1[i][j] = entry1[i][j] * weights1[i][j];
+                    s += result1[i][j];
+                }
+        formul = gamma(s);
+        if (formul > formul_temp) {
+            cout << ""Became with Hebb rule: "" << formul << endl;
+            _sleep(500);
+        }
+        else {
+            cout << ""Became with Hebb rule: "" << formul << endl;
+            cout << ""Bad result. Restarting."" << endl;
+            cout << ""-----"" << endl;
+            goto hebb_restart;
+        }
+        }
+    cout << ""Values found!"" << endl;
+    cout << ""Final result: "" << formul << endl;
+}
+
+inline void value_pick_random()
+{
+    s = 0.0;
+    a = float_rand(0.0, 2.0), b = float_rand(0.0, 7.0);
+    cout << ""Starting to search for values..."" << endl;
+    while (!(formul > target)) {
+    value_pick_any();
+        s = 0.0;
+        for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                    result1[i][j] = entry1[i][j] * weights1[i][j];
+                    s += result1[i][j];
+                }
+        formul = gamma(s);
+    }
+    cout << ""Values found!"" << endl;
+    cout << ""a = "" << a << endl;
+    cout << ""b = "" << b << endl;
+    cout << ""weight[0][0] = "" << weights1[0][0] << endl;
+    cout << ""weight[0][1] = "" << weights1[0][1] << endl;
+    cout << ""weight[0][2] = "" << weights1[0][2] << endl;
+    cout << ""weight[1][0] = "" << weights1[1][0] << endl;
+    cout << ""weight[1][1] = "" << weights1[1][1] << endl;
+    cout << ""weight[1][2] = "" << weights1[1][2] << endl;
+    cout << ""weight[2][0] = "" << weights1[2][0] << endl;
+    cout << ""weight[2][1] = "" << weights1[2][1] << endl;
+    cout << ""weight[2][2] = "" << weights1[2][2] << endl;
+    cout << ""formul = "" << formul << endl;
+}
+
+int main()
+{
+    system(""CLS"");
+    system(""title AI"");
+    system(""mode con cols=126 lines=59"");
+    srand(time(NULL));
+    restart:
+    entry1[0][0] = 1;
+    entry1[0][1] = 1;
+    entry1[0][2] = 0;
+    entry1[1][0] = 0;
+    entry1[1][1] = 1;
+    entry1[1][2] = 1;
+    entry1[2][0] = 1;
+    entry1[2][1] = 0;
+    entry1[2][2] = 0;
+    value_pick_hebb();
+    entry1[0][0] = 0;
+    entry1[0][1] = 1;
+    entry1[0][2] = 0;
+    entry1[1][0] = 0;
+    entry1[1][1] = 1;
+    entry1[1][2] = 1;
+    entry1[2][0] = 1;
+    entry1[2][1] = 0;
+    entry1[2][2] = 1;
+    s = 0.0;
+    for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++) {
+                result1[i][j] = entry1[i][j] * weights1[i][j];
+                s += result1[i][j];
+            }
+    formul = gamma(s);
+    if (formul > 0.5) {
+        cout << ""Apr 1"" << ' ' << formul << endl;
+    }
+    else {
+        cout << ""Apr 2"" << ' ' << formul << endl;
+    }
+}
+"
+H0L8QzfD,Empower Your Trading with the $15 Margin Call Bonus at NordFX,reviewbrokers,PHP,Sunday 14th of April 2024 03:22:25 PM CDT,https://www.reviewbrokers.net/empower-your-trading-with-the-15-margin-call-bonus-at-nordfx/
+cs9SzCC4,i3 Config,Wrigs,Bash,Sunday 14th of April 2024 02:53:54 PM CDT,"################################################################################
+#
+#   __  __    __ 
+#   \ \/ / /\ \ \
+#    \ \ \/  \/ /
+# /\_/ /\  /\  / 
+# \___/  \/  \/  
+#
+# This file has been auto-generated by i3-config-wizard(1).
+# It will not be overwritten, so edit it as you like.
+#
+# Should you change your keyboard layout some time, delete
+# this file and re-run i3-config-wizard(1).
+#
+# Modified by Jeff Wrigley
+# See http://i3wm.org/docs/userguide.html for a complete reference!
+#
+################################################################################
+
+# This file has been auto-generated by i3-config-wizard(1).
+# It will not be overwritten, so edit it as you like.
+#
+# Should you change your keyboard layout some time, delete
+# this file and re-run i3-config-wizard(1).
+#
+
+# i3 config file (v4)
+#
+# Please see https://i3wm.org/docs/userguide.html for a complete reference!
+
+set $mod Mod4
+
+# Font for window titles. Will also be used by the bar unless a different font
+# is used in the bar {} block below.
+font pango:System San Francisco Display 10
+
+# This font is widely installed, provides lots of unicode glyphs, right-to-left
+# text rendering and scalability on retina/hidpi displays (thanks to pango).
+#font pango:DejaVu Sans Mono 10
+
+# Start XDG autostart .desktop files using dex. See also
+# https://wiki.archlinux.org/index.php/XDG_Autostart
+exec --no-startup-id dex --autostart --environment i3
+
+# The combination of xss-lock, nm-applet and pactl is a popular choice, so
+# they are included here as an example. Modify as you see fit.
+
+# xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
+# screen before suspend. Use loginctl lock-session to lock your screen.
+exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
+
+# NetworkManager is the most popular way to manage wireless networks on Linux,
+# and nm-applet is a desktop environment-independent system tray GUI for it.
+exec --no-startup-id nm-applet
+
+# Use Mouse+$mod to drag floating windows to their wanted position
+floating_modifier $mod
+
+# start a terminal
+bindsym $mod+Return exec i3-sensible-terminal
+
+# kill focused window
+bindsym $mod+Shift+q kill
+
+# start dmenu (a program launcher)
+# bindsym $mod+d exec --no-startup-id dmenu_run
+# A more modern dmenu replacement is rofi:
+# bindcode $mod+40 exec ""rofi -modi drun,run -show drun""
+# There also is i3-dmenu-desktop which only displays applications shipping a
+# .desktop file. It is a wrapper around dmenu, so you need that installed.
+# bindcode $mod+40 exec --no-startup-id i3-dmenu-desktop
+
+# start rofi (a program launcher)
+bindsym $mod+d exec --no-startup-id rofi -show drun -show-icons -display-drun prompt
+
+# change focus
+bindsym $mod+j focus left
+bindsym $mod+k focus down
+bindsym $mod+l focus up
+bindsym $mod+semicolon focus right
+
+# alternatively, you can use the cursor keys:
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# move focused window
+bindsym $mod+Shift+j move left
+bindsym $mod+Shift+k move down
+bindsym $mod+Shift+l move up
+bindsym $mod+Shift+semicolon move right
+
+# alternatively, you can use the cursor keys:
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# split in horizontal orientation
+bindsym $mod+h split h
+
+# split in vertical orientation
+bindsym $mod+v split v
+
+# enter fullscreen mode for the focused container
+bindsym $mod+f fullscreen toggle
+
+# change container layout (stacked, tabbed, toggle split)
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+
+# toggle tiling / floating
+bindsym $mod+Shift+space floating toggle
+
+# change focus between tiling / floating windows
+bindsym $mod+space focus mode_toggle
+
+# focus the parent container
+bindsym $mod+a focus parent
+
+# focus the child container
+#bindsym $mod+d focus child
+
+
+################################################################################
+##  Workspaces
+################################################################################
+
+# Define names for default workspaces for which we configure key bindings later on.
+# We use variables to avoid repeating the names in multiple places.
+set $ws1 ""1""
+set $ws2 ""2""
+set $ws3 ""3""
+set $ws4 ""4""
+set $ws5 ""5""
+set $ws6 ""6""
+set $ws7 ""7""
+set $ws8 ""8""
+set $ws9 ""9""
+set $ws10 ""10""
+
+# switch to workspace
+bindsym $mod+1 workspace number $ws1
+bindsym $mod+2 workspace number $ws2
+bindsym $mod+3 workspace number $ws3
+bindsym $mod+4 workspace number $ws4
+bindsym $mod+5 workspace number $ws5
+bindsym $mod+6 workspace number $ws6
+bindsym $mod+7 workspace number $ws7
+bindsym $mod+8 workspace number $ws8
+bindsym $mod+9 workspace number $ws9
+bindsym $mod+0 workspace number $ws10
+
+# move focused container to workspace
+bindsym $mod+Shift+1 move container to workspace number $ws1
+bindsym $mod+Shift+2 move container to workspace number $ws2
+bindsym $mod+Shift+3 move container to workspace number $ws3
+bindsym $mod+Shift+4 move container to workspace number $ws4
+bindsym $mod+Shift+5 move container to workspace number $ws5
+bindsym $mod+Shift+6 move container to workspace number $ws6
+bindsym $mod+Shift+7 move container to workspace number $ws7
+bindsym $mod+Shift+8 move container to workspace number $ws8
+bindsym $mod+Shift+9 move container to workspace number $ws9
+bindsym $mod+Shift+0 move container to workspace number $ws10
+
+# reload the configuration file
+bindsym $mod+Shift+c reload
+# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
+bindsym $mod+Shift+r restart
+# exit i3 (logs you out of your X session)
+bindsym $mod+Shift+e exec ""i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'""
+
+# resize window (you can also use the mouse for that)
+mode ""resize"" {
+        # These bindings trigger as soon as you enter the resize mode
+
+        # Pressing left will shrink the window’s width.
+        # Pressing right will grow the window’s width.
+        # Pressing up will shrink the window’s height.
+        # Pressing down will grow the window’s height.
+        bindsym j resize shrink width 10 px or 10 ppt
+        bindsym k resize grow height 10 px or 10 ppt
+        bindsym l resize shrink height 10 px or 10 ppt
+        bindsym semicolon resize grow width 10 px or 10 ppt
+
+        # same bindings, but for the arrow keys
+        bindsym Left resize shrink width 10 px or 10 ppt
+        bindsym Down resize grow height 10 px or 10 ppt
+        bindsym Up resize shrink height 10 px or 10 ppt
+        bindsym Right resize grow width 10 px or 10 ppt
+
+        # back to normal: Enter or Escape or $mod+r
+        bindsym Return mode ""default""
+        bindsym Escape mode ""default""
+        bindsym $mod+r mode ""default""
+}
+
+bindsym $mod+r mode ""resize""
+
+# Start i3bar to display a workspace bar (plus the system information i3status
+# finds out, if available)
+bar {
+        status_command i3status
+        position top
+        font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
+        font pango:System San Francisco Display 11
+}
+
+################################################################################
+##  Floating or Tiled
+################################################################################
+
+#floating enabled from some programs - find with xprop
+
+# for_window [class=""Arcolinux-welcome-app.py""] floating enable
+# for_window [class=""Arcolinux-tweak-tool.py""] floating enable
+# for_window [class=""Arcolinux-calamares-tool.py""] floating enable
+for_window [class=""Bleachbit""] floating disable
+for_window [class=""Blueberry.py""] floating enable
+for_window [class=""Brasero""] floating disable
+for_window [class=""Galculator""] floating enable
+for_window [class=""Gnome-disks""] floating disable
+for_window [class=""^Gnome-font-viewer$""] floating enable
+for_window [class=""^Gpick$""] floating enable
+for_window [class=""Hexchat""] floating disable
+for_window [class=""Imagewriter""] floating enable
+for_window [class=""Font-manager""] floating enable
+# for_window [class=""qt5ct|Lxappearance] floating enable
+for_window [class=""Nitrogen""] floating disable
+for_window [class=""Pavucontrol""] floating disable
+for_window [class=""Peek""] floating enable
+# for_window [class=""^Skype$""] floating enable
+for_window [class=""^Spotify$""] floating disable
+for_window [class=""System-config-printer.py""] floating enable
+for_window [class=""Unetbootin.elf""] floating enable
+for_window [class=""Usb-creator-gtk""] floating enable
+for_window [class=""^Vlc$""] floating disable
+for_window [class=""Wine""] floating disable
+for_window [class=""Xfburn""] floating disable
+for_window [class=""Xfce4-appfinder""] floating enable
+for_window [class=""Xfce4-settings-manager""] floating disable
+for_window [class=""Xfce4-taskmanager""] floating enable
+for_window [class=""KeePassXC""] floating enable
+
+
+#for_window [instance=""gimp""] floating disable
+#for_window [instance=""script-fu""] border normal
+# for_window [instance=""variety""] floating disable
+
+
+for_window [title=""Copying""] floating enable
+for_window [title=""Deleting""] floating enable
+for_window [title=""Moving""] floating enable
+for_window [title=""^Terminator Preferences$""] floating enable
+
+
+#for_window [window_role=""^gimp-toolbox-color-dialog$""] floating enable
+for_window [window_role=""pop-up""] floating enable
+for_window [window_role=""^Preferences$""] floating enable
+for_window [window_role=""setup""] floating enable
+
+
+
+################################################################################
+##  Give Focus to Applications
+################################################################################
+
+for_window [class=""Alactritty""] focus
+for_window [class=""Gnome-terminal""] focus
+for_window [class=""Termite""] focus
+for_window [class=""Terminator""] focus
+for_window [class=""Tilix""] focus
+for_window [class=""Urxvt""] focus
+
+
+################################################################################
+## PulseAudio controls
+################################################################################
+
+bindsym $mod+F10 exec pactl set-sink-mute @DEFAULT_SINK@ toggle # Mute
+bindsym $mod+F11 exec pactl set-sink-volume @DEFAULT_SINK@ -5%  # Up
+bindsym $mod+F12 exec pactl set-sink-volume @DEFAULT_SINK@ +5%  # Down
+
+# Use pactl to adjust volume in PulseAudio.
+set $refresh_i3status killall -SIGUSR1 i3status
+bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status
+bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -10% && $refresh_i3status
+bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
+bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
+
+
+################################################################################
+##  Settings for I3 gaps
+################################################################################
+
+# https://i3wm.org/docs/userguide.html#gaps
+# delete or uncomment the following lines if you do not have it or do not
+# want it
+
+
+for_window [class=""^.*""] border pixel 2
+
+# Inner gaps for all windows: space between two adjacent windows (or split containers).
+gaps inner 6
+
+# Outer gaps for all windows: space along the screen edges.
+gaps outer 6
+
+# Inner and outer gaps for all windows on a specific workspace.
+# <ws> can be a workspace number or name.
+# workspace <ws> gaps inner <gap_size>[px]
+# workspace <ws> gaps outer|horizontal|vertical|top|left|bottom|right <gap_size>[px]
+
+# Enabling “Smart Gaps” means no gaps will be shown when there is
+# precisely one window or split container on the workspace.
+#
+# inverse_outer only enables outer gaps when there is exactly one
+# window or split container on the workspace.
+# smart_gaps on|off|inverse_outer
+
+
+################################################################################
+##  AutoStart Apps
+################################################################################
+exec_always --no-startup-id nitrogen --restore
+
+
+# TRAY APPLICATIONS
+
+# applications that are not installed will not start
+# you may see a wheel - hashtag out things you do not want
+
+# Authentication dialog
+# exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 &
+
+# Updater
+# exec --no-startup-id pamac-tray
+
+# bluetooth
+# exec --no-startup-id blueberry-tray
+
+# network
+exec --no-startup-id nm-applet
+
+# num lock activated
+exec_always --no-startup-id numlockx on
+
+# dropbox
+#exec --no-startup-id dropbox start
+
+# insync
+# exec --no-startup-id insync start
+
+# Volume
+#exec --no-startup-id pasystray
+exec --no-startup-id volumeicon
+
+# Variety
+# exec --no-startup-id variety
+
+# clipman
+# exec --no-startup-id xfce4-clipman
+
+# Conky
+exec --no-startup-id conky -c ~/.config/i3/system-overview
+
+# feh sets wallpaper
+# exec --no-startup-id feh --bg-fill /usr/share/backgrounds/arcolinux/arco-wallpaper.jpg &
+exec --no-startup=id feh --bg-scale ~/Pictures/Wallpapers/wp2445832-autism-wallpapers.jpg
+
+# Polybar
+#exec_always --no-startup-id ~/.config/polybar/launch.sh &
+
+# PulseAudio
+exec --no-startup-id pulseaudio
+exec --no-startup-id pa-applet
+"
