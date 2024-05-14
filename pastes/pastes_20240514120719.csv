@@ -1,0 +1,3625 @@
+id,title,username,language,date,content
+9Wwz2He2,mp4 в mp3.py,egor230,Python,Tuesday 14th of May 2024 06:58:17 AM CDT,"import os, subprocess
+import tkinter as tk
+from tkinter import messagebox, ttk
+a =[]
+def move_up():
+  selected = listbox.curselection()
+  if selected:
+    index = selected[0]
+    if index > 0:
+      item = listbox.get(index)
+      listbox.delete(index)
+      listbox.insert(index - 1, item)
+      listbox.selection_set(index - 1)
+
+def move_down():
+  selected = listbox.curselection()
+  if selected:
+   index = selected[0]
+   if index < listbox.size() - 1:
+    item = listbox.get(index)
+    listbox.delete(index)
+    listbox.insert(index + 1, item)
+    listbox.selection_set(index + 1)
+
+# Пусть selected_files будет списком путей к файлам, который вы получаете
+selected_files = []
+
+
+# Ваша инициализация Tkinter и создание списка a (selected_files)
+def update_progress_bar(progress_bar, value, maximum):
+  """"""Обновляет прогресс бар на заданное значение.""""""
+  progress_bar['value'] = value
+  progress_bar['maximum'] = maximum
+  root.update_idletasks()
+
+def merge_mp4_to_mp3():  # Получить список всех выбранных файлов
+  selected_files = a
+  if not selected_files:
+    messagebox.showerror(""Ошибка"", ""Список файлов пуст"")
+    return
+
+  # Определяем путь сохранения
+  cmd = ['zenity', '--file-selection', '--directory']
+  result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
+  save_directory = result.stdout.strip()
+
+  if not save_directory:
+    messagebox.showerror(""Ошибка"", ""Папка для сохранения не выбрана"")
+    return
+
+  total_files = len(selected_files)
+  selected_files = sorted(selected_files)
+  # Инициализируем прогресс-бар
+  progress_bar = ttk.Progressbar(root, orient='horizontal', length=300, mode='determinate')
+  progress_bar.pack(pady=20)
+  progress_bar['maximum'] = total_files
+
+  for index, mp4_path in enumerate(selected_files, start=1):
+    mp3_path = os.path.join(save_directory, os.path.basename(mp4_path).rsplit('.', 1)[0] + '.mp3')
+    ffmpeg_command = '''#!/bin/bash
+    gnome-terminal -- bash -c '
+    ffmpeg -i ""{mp4_path}"" -q:a 0 -map a ""{mp3_path}"" -y
+    echo ""Файл {mp4_name} был конвертирован в {mp3_name}""
+    exit
+    exec bash'
+    '''.format(mp4_path=mp4_path, mp3_path=mp3_path, mp4_name=os.path.basename(mp4_path), mp3_name=os.path.basename(mp3_path))
+    
+    subprocess.run(['bash', '-c', ffmpeg_command])
+    # Обновляем прогресс-бар
+    progress_bar['value'] = index
+    root.update_idletasks()
+
+  progress_bar.pack_forget()  # Убираем прогресс-бар по завершению работы
+  messagebox.showinfo(""Завершено"", ""Все файлы были конвертированы и сохранены в выбранную папку"")
+
+def open_file_explorer():
+  # Команда для запуска Zenity с фильтром для mp4 файлов.
+  cmd = ['zenity', '--file-selection', '--multiple', '--separator=|', '--file-filter=mp4 files | *.mp4']
+
+  # Вызов Zenity и получение выбранных путей
+  result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, text=True)
+    # Удаляем лишние пробельные символы и разделяем строки по '|' вместо запятой
+    # Затем разделяем каждый путь, убирая символы новой строки
+  file_paths = [path for path in result.stdout.strip().replace('\n', '').split('|') if path]    # Выводим очищенные пути
+
+  for filepath in file_paths:
+    file_name = os.path.basename(filepath)
+    a.append(filepath)    # print(filepath, end=""\n\n"")
+    listbox.insert(tk.END, file_name)
+
+def delete_selected():  # Получаем индекс (-ы) выбранного элемента
+  selected_indices = listbox.curselection()  # Удаляем выбранный элемент из списка
+  for index in selected_indices[::-1]:  # Итерируем в обратном порядке, чтобы избежать ошибок индексации
+    listbox.delete(index)
+root = tk.Tk()
+root.title(""mp4 в mp3"")
+root.geometry(""740x236+580+330"")  # Первые 2 определяют ширину высоту. Пос 2 x и y координаты на экране.
+# Фрейм для Listbox и Scrollbar
+frame = tk.Frame(root)
+frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+# Фрейм для Listbox и Scrollbar
+listbox_frame = tk.Frame(root)
+listbox_frame.pack(side=tk.LEFT, pady=10, padx=20, fill=tk.BOTH, expand=True)
+
+# Listbox с возможностью масштабирования
+listbox = tk.Listbox(listbox_frame, height=15)
+listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+# Scrollbar для Listbox
+scrollbar = tk.Scrollbar(listbox_frame, orient=""vertical"", command=listbox.yview)
+scrollbar.pack(side=tk.LEFT, fill=tk.Y)
+
+# Связываем Scrollbar с Listbox
+listbox.config(yscrollcommand=scrollbar.set)
+
+# Фрейм для кнопок перемещения
+move_frame = tk.Frame(listbox_frame)
+move_frame.pack(side=tk.LEFT, padx=10, fill=tk.Y)
+
+# Кнопки ""Вверх"" и ""Вниз""
+move_up_btn = tk.Button(move_frame, text=""Вверх"", command=move_up)
+move_up_btn.pack(pady=40)
+
+move_down_btn = tk.Button(move_frame, text=""Вниз"", command=move_down)
+move_down_btn.pack(pady=5)
+
+# Кнопка ""Конвертация MP4 в MP3""
+add_file_btn = tk.Button(root,  text=""Конвертация MP4 в MP3"", command=merge_mp4_to_mp3)
+add_file_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=20, pady=5)
+
+# Кнопка ""Добавить файл"" ниже всего остального контента
+merge_pdf_btn = tk.Button(root,text=""Добавить файлы"", command=open_file_explorer)
+merge_pdf_btn.pack(fill=tk.X, padx=20, pady=5)
+
+# Кнопка ""Удалить из списка""
+delete_btn = tk.Button(root, text=""Удалить"", command=delete_selected)
+delete_btn.pack( fill=tk.X,padx=20, pady=25)
+root.mainloop()"
+VeG2iPCp,Untitled,JoSChhmo,MySQL,Tuesday 14th of May 2024 06:56:04 AM CDT,"-- Temporarily disable foreign key checks
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Alter table structure for table `FieldTicket`
+ALTER TABLE `FieldTicket`
+  MODIFY `Ticket` int(11) NOT NULL AUTO_INCREMENT,
+  MODIFY `LeaseID` varchar(10) NOT NULL,
+  MODIFY `WellID` varchar(20) DEFAULT NULL,
+  MODIFY `TicketDate` date NOT NULL,
+  MODIFY `Comments` varchar(255) NOT NULL DEFAULT '',
+  MODIFY `JobTypeID` int(11) NOT NULL,
+  MODIFY `UserID` varchar(10) NOT NULL,
+  MODIFY `Billed` char(1) NOT NULL DEFAULT 'N',
+  MODIFY `Note` text DEFAULT NULL,
+  ADD CONSTRAINT `fk_leaseid` FOREIGN KEY (`LeaseID`) REFERENCES `leases` (`LeaseID`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_jobtypeid` FOREIGN KEY (`JobTypeID`) REFERENCES `JobTypes` (`JobTypeID`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_userid` FOREIGN KEY (`UserID`) REFERENCES `users` (`UserID`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Alter table structure for table `FieldTicketDetail`
+ALTER TABLE `FieldTicketDetail`
+  MODIFY `Ticket` int(11) NOT NULL,
+  MODIFY `TicketLine` int(11) NOT NULL AUTO_INCREMENT,
+  MODIFY `JobItemID` varchar(20) NOT NULL,
+  MODIFY `Quantity` int(11) NOT NULL,
+  MODIFY `Note` varchar(255) DEFAULT NULL,
+  ADD CONSTRAINT `fk_ticket` FOREIGN KEY (`Ticket`) REFERENCES `FieldTicket` (`Ticket`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_jobitemid` FOREIGN KEY (`JobItemID`) REFERENCES `JobItems` (`JobItemID`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Alter table structure for table `ItemTypes`
+ALTER TABLE `ItemTypes`
+  MODIFY `ItemID` varchar(20) NOT NULL,
+  MODIFY `ItemDescription` varchar(255) NOT NULL,
+  MODIFY `UOM` varchar(10) DEFAULT NULL,
+  MODIFY `UseQuantity` char(1) NOT NULL DEFAULT 'Y',
+  MODIFY `UseCost` char(1) NOT NULL DEFAULT 'Y',
+  ADD PRIMARY KEY (`ItemID`);
+
+-- Alter table structure for table `JobItems`
+ALTER TABLE `JobItems`
+  MODIFY `JobTypeID` int(11) NOT NULL,
+  MODIFY `ItemID` varchar(20) NOT NULL,
+  MODIFY `JobItemID` int(11) NOT NULL AUTO_INCREMENT,
+  MODIFY `ItemCost` decimal(9,2) NOT NULL DEFAULT 0.00,
+  MODIFY `ItemQuantity` decimal(10,2) DEFAULT NULL,
+  ADD PRIMARY KEY (`JobTypeID`, `ItemID`),
+  ADD CONSTRAINT `fk_jobtypeid` FOREIGN KEY (`JobTypeID`) REFERENCES `JobTypes` (`JobTypeID`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Alter table structure for table `JobTypes`
+ALTER TABLE `JobTypes`
+  MODIFY `JobTypeID` int(11) NOT NULL AUTO_INCREMENT,
+  MODIFY `Description` varchar(255) DEFAULT NULL,
+  MODIFY `Active` char(1) DEFAULT 'Y',
+  ADD PRIMARY KEY (`JobTypeID`);
+
+-- Alter table structure for table `leases`
+ALTER TABLE `leases`
+  MODIFY `LeaseID` varchar(10) NOT NULL,
+  MODIFY `LeaseName` varchar(255) NOT NULL,
+  MODIFY `Operator` varchar(255) DEFAULT NULL,
+  MODIFY `Field` varchar(255) DEFAULT NULL,
+  MODIFY `lat` decimal(11,7) NOT NULL,
+  MODIFY `lon` decimal(11,7) NOT NULL,
+  MODIFY `address` varchar(255) DEFAULT NULL,
+  MODIFY `county` varchar(255) DEFAULT NULL,
+  MODIFY `state` varchar(255) DEFAULT NULL,
+  MODIFY `city` varchar(255) DEFAULT NULL,
+  MODIFY `zipcode` varchar(255) DEFAULT NULL,
+  ADD PRIMARY KEY (`LeaseID`);
+
+-- Alter table structure for table `purchasers`
+ALTER TABLE `purchasers`
+  MODIFY `PurchaserID` varchar(10) NOT NULL,
+  MODIFY `PurchaserName` varchar(255) NOT NULL,
+  MODIFY `Address` varchar(255) DEFAULT NULL,
+  MODIFY `City` varchar(50) DEFAULT NULL,
+  MODIFY `State` varchar(2) DEFAULT NULL,
+  MODIFY `Zip` varchar(10) DEFAULT NULL,
+  MODIFY `Phone` varchar(15) DEFAULT NULL,
+  MODIFY `Email` varchar(50) DEFAULT NULL,
+  ADD PRIMARY KEY (`PurchaserID`);
+
+-- Alter table structure for table `users`
+ALTER TABLE `users`
+  MODIFY `UserID` varchar(10) NOT NULL,
+  MODIFY `UserName` varchar(50) NOT NULL,
+  MODIFY `Password` varchar(255) NOT NULL,
+  MODIFY `GroupID` varchar(20) DEFAULT NULL,
+  MODIFY `Name` varchar(255) DEFAULT NULL,
+  MODIFY `EMail` varchar(50) NOT NULL,
+  ADD PRIMARY KEY (`UserID`);
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
+"
+RnmW58c1,Untitled,JoSChhmo,MySQL,Tuesday 14th of May 2024 06:55:19 AM CDT,"-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Host: localhost:3306
+-- Generation Time: May 14, 2024 at 05:40 AM
+-- Server version: 10.6.17-MariaDB-cll-lve
+-- PHP Version: 8.1.28
+
+SET SQL_MODE = ""NO_AUTO_VALUE_ON_ZERO"";
+START TRANSACTION;
+SET time_zone = ""+00:00:00"";
+
+-- Temporarily disable foreign key checks
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Character set and collation
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+-- Database: `ogfieldticket_test`
+
+-- Table structure for table `FieldTicket`
+CREATE TABLE `FieldTicket` (
+  `Ticket` int(11) NOT NULL AUTO_INCREMENT,
+  `LeaseID` varchar(10) NOT NULL,
+  `WellID` varchar(20) DEFAULT NULL,
+  `TicketDate` date NOT NULL,
+  `Comments` varchar(255) NOT NULL DEFAULT '',
+  `JobTypeID` int(11) NOT NULL,
+  `UserID` varchar(10) NOT NULL,
+  `Billed` char(1) NOT NULL DEFAULT 'N',
+  `Note` text DEFAULT NULL,
+  PRIMARY KEY (`Ticket`),
+  FOREIGN KEY (`LeaseID`) REFERENCES `leases` (`LeaseID`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`JobTypeID`) REFERENCES `JobTypes` (`JobTypeID`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  FOREIGN KEY (`UserID`) REFERENCES `users` (`UserID`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `FieldTicketDetail`
+CREATE TABLE `FieldTicketDetail` (
+  `Ticket` int(11) NOT NULL,
+  `TicketLine` int(11) NOT NULL AUTO_INCREMENT,
+  `JobItemID` varchar(20) NOT NULL,
+  `Quantity` int(11) NOT NULL,
+  `Note` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`Ticket`, `TicketLine`),
+  FOREIGN KEY (`Ticket`) REFERENCES `FieldTicket` (`Ticket`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`JobItemID`) REFERENCES `JobItems` (`JobItemID`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `ItemTypes`
+CREATE TABLE `ItemTypes` (
+  `ItemID` varchar(20) NOT NULL,
+  `ItemDescription` varchar(255) NOT NULL,
+  `UOM` varchar(10) DEFAULT NULL,
+  `UseQuantity` char(1) NOT NULL DEFAULT 'Y',
+  `UseCost` char(1) NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (`ItemID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `JobItems`
+CREATE TABLE `JobItems` (
+  `JobTypeID` int(11) NOT NULL,
+  `ItemID` varchar(20) NOT NULL,
+  `JobItemID` int(11) NOT NULL AUTO_INCREMENT,
+  `ItemCost` decimal(9,2) NOT NULL DEFAULT 0.00,
+  `ItemQuantity` decimal(10,2) DEFAULT NULL,
+  PRIMARY KEY (`JobTypeID`, `ItemID`),
+  FOREIGN KEY (`JobTypeID`) REFERENCES `JobTypes` (`JobTypeID`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `JobTypes`
+CREATE TABLE `JobTypes` (
+  `JobTypeID` int(11) NOT NULL AUTO_INCREMENT,
+  `Description` varchar(255) DEFAULT NULL,
+  `Active` char(1) DEFAULT 'Y',
+  PRIMARY KEY (`JobTypeID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `leases`
+CREATE TABLE `leases` (
+  `LeaseID` varchar(10) NOT NULL,
+  `LeaseName` varchar(255) NOT NULL,
+  `Operator` varchar(255) DEFAULT NULL,
+  `Field` varchar(255) DEFAULT NULL,
+  `lat` decimal(11,7) NOT NULL,
+  `lon` decimal(11,7) NOT NULL,
+  `address` varchar(255) DEFAULT NULL,
+  `county` varchar(255) DEFAULT NULL,
+  `state` varchar(255) DEFAULT NULL,
+  `city` varchar(255) DEFAULT NULL,
+  `zipcode` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`LeaseID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `purchasers`
+CREATE TABLE `purchasers` (
+  `PurchaserID` varchar(10) NOT NULL,
+  `PurchaserName` varchar(255) NOT NULL,
+  `Address` varchar(255) DEFAULT NULL,
+  `City` varchar(50) DEFAULT NULL,
+  `State` varchar(2) DEFAULT NULL,
+  `Zip` varchar(10) DEFAULT NULL,
+  `Phone` varchar(15) DEFAULT NULL,
+  `Email` varchar(50) DEFAULT NULL,
+  PRIMARY KEY (`PurchaserID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table structure for table `users`
+CREATE TABLE `users` (
+  `UserID` varchar(10) NOT NULL,
+  `UserName` varchar(50) NOT NULL,
+  `Password` varchar(255) NOT NULL,
+  `GroupID` varchar(20) DEFAULT NULL,
+  `Name` varchar(255) DEFAULT NULL,
+  `EMail` varchar(50) NOT NULL,
+  PRIMARY KEY (`UserID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- AUTO_INCREMENT for dumped tables
+ALTER TABLE `FieldTicket`
+  MODIFY `Ticket` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+ALTER TABLE `FieldTicketDetail`
+  MODIFY `TicketLine` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+"
+jHZNyXkE,2 log,qqt15326,HTML,Tuesday 14th of May 2024 06:52:56 AM CDT,"11861 https://pastebin.com/gth9N2Fm
+11860 https://pastebin.com/cTrwERSs"
+BW2QLn47,🤑 G2A.com Free Gift Card Guide May 2024 FIX 🎁,ssss50w,GetText,Tuesday 14th of May 2024 06:16:54 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view?usp=sharing
+ 
+Working as of:
+14 May 2024"
+9d9RnbA2,🤑 G2A.com Free Gift Card Guide May 2024 FIX 🤑,jusst2k4,GetText,Tuesday 14th of May 2024 06:15:47 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_331405.pdf
+
+Working as of:
+14 May 2024"
+FEHzbRY8,Ultrasonic Update rev_01,pleasedontcode,Arduino,Tuesday 14th of May 2024 06:09:56 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Ultrasonic Update
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2024-05-14 11:09:23
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* An Arduino Uno is programmed to accept inputs from */
+	/* sensors, process the data and produce an output */
+	/* that is sent to the output devices in form of */
+	/* signals that in turn switch on or off the pump at */
+	/* threshold and maximum values defined. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Ultrasonic.h> // https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonic_HC_SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonic_HC_SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonic_HC_SR04_Trigger_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonic_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+Ultrasonic ultrasonic(ultrasonic_HC_SR04_Trigger_PIN_D2, ultrasonic_HC_SR04_Echo_PIN_D3);
+
+void setup(void)
+{
+    // put your setup code here, to run once:
+    pinMode(ultrasonic_HC_SR04_Echo_PIN_D3, INPUT);
+    pinMode(ultrasonic_HC_SR04_Trigger_PIN_D2, OUTPUT);
+}
+
+void loop(void)
+{
+    // put your main code here, to run repeatedly:
+    updateOutputs(); // Refresh output data
+}
+
+void updateOutputs()
+{
+    digitalWrite(ultrasonic_HC_SR04_Trigger_PIN_D2, ultrasonic_HC_SR04_Trigger_PIN_D2_rawData);
+}
+
+/* END CODE */"
+LuTdQvvL,Untitled,35657,C++,Tuesday 14th of May 2024 06:05:13 AM CDT,"
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+
+    void SetName(string name) {
+        name_ = name;
+    }
+
+    void SetGender(string gender) {
+        gender_ = gender;
+    }
+
+    void SetAge(int age) {
+        age_ = age;
+    }
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    string name_;
+    string gender_;
+    int age_;
+};
+
+// Рабочий
+class Worker : public Person {
+public:
+
+    void SetSpeciality(string speciality) {
+        speciality_ = speciality;
+    }
+    string GetSpeciality() const {
+        return speciality_;
+    }
+
+    void Speak() {
+        cout << ""Привет, я рабочий"" << endl;
+    }
+
+private:
+    string speciality_;
+};
+
+
+// Студент
+class Student : public Person {
+public:
+
+    void SetFaculty(string faculty) {
+        faculty_ = faculty;
+    }
+    string GetFaculty() const {
+        return faculty_;
+    }
+
+    void Speak() {
+        cout << ""Привет, я студент"" << endl;
+    }
+
+private:
+    string faculty_;
+};
+
+
+// 
+class ExternalStudent : public Worker, public Student  {
+
+};
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    ExternalStudent ex;
+
+    ex.SetSpeciality(""Builder"");
+    ex.SetFaculty(""Programming"");
+
+    cout << ex.GetSpeciality() << "" "" << ex.GetFaculty() << endl;
+
+    //ex.SetName(""Иван""); // это не работает так как не является однозначным
+
+}"
+HqRtcWbT,Untitled,35657,C++,Tuesday 14th of May 2024 06:04:25 AM CDT,"
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+
+
+// Рабочий
+class Worker {
+public:
+
+    void SetSpeciality(string speciality) {
+        speciality_ = speciality;
+    }
+    string GetSpeciality() const {
+        return speciality_;
+    }
+
+    void Speak() {
+        cout << ""Привет, я рабочий"" << endl;
+    }
+
+private:
+    string speciality_;
+};
+
+
+// Студент
+class Student {
+public:
+
+    void SetFaculty(string faculty) {
+        faculty_ = faculty;
+    }
+    string GetFaculty() const {
+        return faculty_;
+    }
+
+    void Speak() {
+        cout << ""Привет, я студент"" << endl;
+    }
+
+private:
+    string faculty_;
+};
+
+
+// 
+class ExternalStudent : public Worker, public Student  {
+
+};
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    ExternalStudent ex;
+
+    ex.SetSpeciality(""Builder"");
+    ex.SetFaculty(""Programming"");
+
+    cout << ex.GetSpeciality() << "" "" << ex.GetFaculty() << endl;
+
+    //ex.Speak(); // не скомпилируется
+
+    ((Student)ex).Speak(); // так скомпилируется - запускаем Speak от класса Student
+
+}"
+4VgdFzvD,NNI_rescaling,vlpap,Python,Tuesday 14th of May 2024 06:00:08 AM CDT,"V_s = np.prod(X.max(axis=0) - X.min(axis=0))
+V_s_ = pow(y_max - y_min, n)
+I_NNI = V_s * (y.max() - y.min()) / (V_s_ * (y_max - y_min)) * I + (y.min() - (y.max() - y.min()) / (y_max - y_min) * y_min) * V_s"
+tbmwDCeH,data926,TestGuy1,JSON,Tuesday 14th of May 2024 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '23f738185c41854303af960c8c6dac4327f1ea6c94abfc0c466947cc1a57be4558bfa09a8d9aa48426be94a376289eb5e7d9a2ca20bea5ef9bf4e685ec390e1408118dce8a25039bd8cf9b11730593cf671e4a3f1852cf5f64d8f388c04c559ba96f6875606ed9a50ce64c76f514b2e50d6fdb821b250795bfd3ded6cc0f7ed0',
+  otherdata: [
+    '55a62b42ec20a75f4e62cd52364582c3',
+    '184dfd555610d6748f5b89d6102a146b',
+    '288b56a2365ed2d53008d7111e67f7bb',
+    'f5934d6cd5cccbef70daedf7de20298f',
+    '18e4e65acc64f3e81509fae96345b048',
+    '55e6bd5962f16215b93419d1964805c2',
+    'e32dbcaaa7119ed8b14c9b478cb9e240',
+    '3a49b967123cc43baccdf603b6b9eda8'
+  ]
+}"
+4u3D9wLU,extract item ids,filipr27,JavaScript,Tuesday 14th of May 2024 05:51:25 AM CDT,"function(){  
+  var prods = {{WP - GA4 - ecommerce.items}};
+  var skus = [];
+  var i; 
+  if (!prods) { return; } 
+  for (i = 0; i < prods.length; i++) {
+    if (prods[i].item_id) { skus.push(prods[i].item_id); } 
+  } 
+  return skus.join(',');
+ }"
+fNfCwaYq,Untitled,LA_,PHP,Tuesday 14th of May 2024 05:50:15 AM CDT,"<?php
+declare(strict_types=1);
+
+namespace plugin\entity\type;
+
+use pocketmine\entity\Entity;
+use pocketmine\entity\EntitySizeInfo;
+use pocketmine\nbt\tag\CompoundTag;
+use pocketmine\entity\Location;
+use pocketmine\player\Player;
+use pocketmine\math\Vector3;
+use pocketmine\event\entity\EntityDamageEvent;
+
+// use pocketmine\entity\Human;
+
+
+// https://github.com/CustomiesDevs/Customies/wiki/Custom-Entities
+class DinosaurEntity extends Entity {
+
+    public function __construct(Location $location) {
+        $this->setNameTag(""Dino"");
+        $this->setNameTagAlwaysVisible(true);
+
+        parent::__construct($location);
+    }
+
+    // public function __construct(Location $location, ?CompoundTag $nbt = null) {
+    //     parent::__construct($location, $nbt);
+    //     $this->setNameTagVisible();
+    //     $this->setNameTagAlwaysVisible();
+    //     $this->setNameTag(""zzzz"");
+    // }
+
+    protected function getInitialSizeInfo() : EntitySizeInfo {
+        return new EntitySizeInfo(1.8, 0.6, 1.62);
+    }
+
+    protected function getInitialDragMultiplier() : float {
+        return 0;
+    }
+
+    protected function getInitialGravity() : float {
+        return 0;
+    }
+
+    public static function getNetworkTypeId() : string {
+        return ""alleva:dinosaur"";
+    }
+
+    // public function onInteract(Player $player, Vector3 $clickPos) : bool{
+    //     $player->sendMessage(""Hello, my friend!"");
+    //     return true;
+    // }
+
+    // public function onInteract(Player $player, Vector3 $clickPos) : bool {
+    //     $player->sendMessage(""Hello, my friend!"");
+    // }
+
+    public function attack(EntityDamageEvent $source): void {
+        parent::attack($source);
+        if ($source instanceof EntityDamageByEntityEvent) {
+            $player = $source->getDamager();
+            $player->sendMessage(""Hello"");
+        }
+    }
+
+    public function entityBaseTick(int $tickDiff = 1) : bool {
+        return parent::entityBaseTick($tickDiff);
+    }
+
+
+    public function onUpdate(int $currentTick) : bool {
+        // $this->server->getLogger()->info(""onUpdate DinosaurEntity"");
+        if ($this->closed){
+            return false;
+        }
+        $tickDiff = $currentTick - $this->lastUpdate;
+        // $this->server->getLogger()->info((string)$tickDiff);
+        // if($this->attackTime > 0) {
+            $this->move($this->motion->x * $tickDiff, $this->motion->y, $this->motion->z * $tickDiff);
+            $this->motion->y -= 0.2 * $tickDiff;
+            $this->updateMovement();
+            return true;
+        // }
+        // return true;
+        return parent::onUpdate($currentTick);
+    }
+}"
+ZaYn57YP,StringName Finder,KoBeWi,Ruby,Tuesday 14th of May 2024 05:13:56 AM CDT,"StringNameList = {}
+StringNameUsage = {}
+
+$actionables = 0
+$maxlen = 0
+
+def print_error(error, path = nil, line_index = nil, line_text = nil)
+    $actionables += 1
+    puts ""\e[31mError: #{error}\e[0m""
+    puts ""at #{File.basename(path)}:#{line_index}"" if path
+    puts line_text if line_text
+    puts """"
+end
+
+def extract_string(line, from = 0)
+    quote = line.index('""', from) + 1
+    line[quote...line.index('""', quote)]
+end
+
+def extract_stringname(path, line, i)
+    name = """"
+    if line.include?(""="")
+        name = line[0...line.index(""="")]
+    else
+        name = line[0...line.index(""("")]
+    end
+
+    string = extract_string(line)
+    if StringNameList.include? string
+        print_error(""Duplicate StringName: #{string}"", path, i)
+    else
+        StringNameList[name.strip] = string
+        $maxlen = [$maxlen, string.length].max
+    end
+end
+
+def scan_stringname_source(path)
+    File.readlines(path).each.with_index do |line, i|
+        if line.include?(""StaticCString::create"")
+            extract_stringname(path, line, i)
+        elsif line.include?('""') and not line.start_with?(""#"") and not line.start_with?(""/*"")
+            print_error(""StringName created in unusual way"", path, i, line)
+            extract_stringname(path, line, i)
+        end
+    end
+end
+
+def check_string_name(line, prefix)
+    return if not line.include?(prefix)
+
+    start = line.index(prefix) + prefix.length
+    string = line[start...line.index("")"", start)]
+    StringNameUsage[string] += 1
+end
+
+def scan_source_file(path)
+    File.readlines(path).each.with_index do |line, i|
+        next if line.start_with?(""#"") or line.start_with?(""/*"")
+
+        if line.include?(""StringNames::get_singleton()->"")
+            print_error(""Legacy StringName usage"", path, i, line)
+        end
+
+        check_string_name(line, ""CoreStringName("")
+        check_string_name(line, ""SceneStringName("")
+        check_string_name(line, ""EditorStringName("")
+
+        quote = line.index('""')
+        while quote
+            string = extract_string(line, quote)
+            if string.length < 2 or string.length > $maxlen or string.include?("" "") or string.include?(""D_METHOD"") or string.include?(""PropertyInfo"")
+                quote = line.index('""', quote + string.length + 2)
+                next
+            end
+
+            key = StringNameList.key(string)
+            if key
+                StringNameUsage[key] += 1
+                print_error(""Potential replacement: #{string}"", path, i, line)
+                break
+            end
+
+            quote = line.index('""', quote + string.length + 2)
+        end
+    end
+end
+
+def scan_directory(path)
+    path.delete_prefix!(""./"")
+
+    (Dir.entries(path) - [""."", ""..""]).each do |entry|
+        next if entry.start_with?(""."")
+
+        entry_path = File.join(path, entry)
+        if File.exist?(entry_path) and File.extname(entry) == "".cpp"" and not entry.include?("".gen"")
+            scan_source_file(entry_path)
+            next
+        end
+
+        if Dir.exist?(entry_path)
+            scan_directory(entry_path)
+        end
+    end
+end
+
+scan_stringname_source(""core/core_string_names.cpp"")
+scan_stringname_source(""scene/scene_string_names.cpp"")
+scan_stringname_source(""editor/editor_string_names.cpp"")
+
+StringNameList.each_key do |string|
+    StringNameUsage[string] = 0
+end
+
+scan_directory(""."")
+
+StringNameUsage.each_pair do |string, usage|
+    if usage == 0
+        print_error(""Unused StringName: #{string}"")
+    elsif usage == 1
+        print_error(""StringName used only once: #{string}"")
+    end
+end
+
+puts ""Finished""
+puts ""Found #{$actionables} actionable items."" if $actionables > 0"
+mqwCqcDg,Lowest Common Ancestor of a Binary Tree,jayati,C++,Tuesday 14th of May 2024 05:02:39 AM CDT,"/**
+ * Definition for a binary tree node.
+ * struct TreeNode {
+ *     int val;
+ *     TreeNode *left;
+ *     TreeNode *right;
+ *     TreeNode(int x) : val(x), left(NULL), right(NULL) {}
+ * };
+ */
+class Solution {
+public:
+    TreeNode* lowestCommonAncestor(TreeNode* root, TreeNode* p, TreeNode* q) {
+
+        if(root==NULL || root==p || root==q)
+        {
+            return root;
+        }
+
+        TreeNode* left = lowestCommonAncestor(root->left,p,q);
+        TreeNode* right = lowestCommonAncestor(root->right,p,q);
+
+        if(left==NULL)
+        {
+            return right;
+        }
+        else if(right==NULL)
+        {
+            return left;
+        }
+        else
+        {
+            return root;
+        }
+        
+    }
+};"
+Qp86A6kP,Untitled,chemelli74,Python,Tuesday 14th of May 2024 04:32:35 AM CDT,"2024-05-14 11:29:48.369 WARNING (SyncWorker_61) [homeassistant.helpers.frame] Detected code that accesses the database without the database executor; Use homeassistant.components.recorder.get_instance(hass).async_add_executor_job() for faster database operations. Please report this issue.
+Stack (most recent call last):
+  File ""/usr/local/lib/python3.12/threading.py"", line 1030, in _bootstrap
+    self._bootstrap_inner()
+  File ""/usr/local/lib/python3.12/threading.py"", line 1073, in _bootstrap_inner
+    self.run()
+  File ""/usr/local/lib/python3.12/threading.py"", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File ""/usr/local/lib/python3.12/concurrent/futures/thread.py"", line 92, in _worker
+    work_item.run()
+  File ""/usr/local/lib/python3.12/concurrent/futures/thread.py"", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/history/__init__.py"", line 80, in get_last_state_changes
+    return _target(hass, number_of_states, entity_id)
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/history/modern.py"", line 540, in get_last_state_changes
+    states = list(execute_stmt_lambda_element(session, stmt, orm_rows=False))
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/util.py"", line 233, in execute_stmt_lambda_element
+    executed = session.connection().execute(stmt)
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/orm/session.py"", line 2034, in connection
+    return self._connection_for_bind(
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/orm/session.py"", line 2050, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File ""<string>"", line 2, in _connection_for_bind
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py"", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/orm/session.py"", line 1144, in _connection_for_bind
+    conn = bind.connect()
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/base.py"", line 3280, in connect
+    return self._connection_cls(self)
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/base.py"", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/base.py"", line 3304, in raw_connection
+    return self.pool.connect()
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/pool/impl.py"", line 447, in connect
+    return _ConnectionFairy._checkout(self, self._fairy)
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/pool/base.py"", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/pool/base.py"", line 712, in checkout
+    rec = pool._do_get()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/pool.py"", line 98, in _do_get
+    return self._do_get_db_connection_protected()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/pool.py"", line 108, in _do_get_db_connection_protected
+    report(
+  File ""/usr/src/homeassistant/homeassistant/helpers/frame.py"", line 154, in report
+    _LOGGER.warning(msg, stack_info=True)
+"
+7Z0h2CVv,Untitled,chemelli74,Python,Tuesday 14th of May 2024 04:31:13 AM CDT,"2024-05-14 11:24:45.532 WARNING (Recorder) [homeassistant.components.recorder.util] The system could not validate that the sqlite3 database at //config/home-assistant_v2.db was shutdown cleanly
+2024-05-14 11:24:45.968 ERROR (MainThread) [homeassistant] Error doing job: Exception in callback Recorder.async_set_db_ready()
+Traceback (most recent call last):
+  File ""/usr/local/lib/python3.12/asyncio/events.py"", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 521, in async_set_db_ready
+    self.async_start_executor()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 297, in async_start_executor
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/executor.py"", line 28, in __init__"
+tmH5m1XC,Untitled,35657,C++,Tuesday 14th of May 2024 04:27:36 AM CDT,"
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+
+
+// Рабочий
+class Worker {
+public:
+
+    Worker() {
+        cout << ""Конструктор рабочего"" << endl;
+    }
+
+    void SetSpeciality(string speciality) {
+        speciality_ = speciality;
+    }
+    string GetSpeciality() const {
+        return speciality_;
+    }
+
+    ~Worker() {
+        cout << ""Деструктор рабочего"" << endl;
+    }
+
+private:
+    string speciality_;
+};
+
+
+// Студент
+class Student {
+public:
+
+    Student() {
+        cout << ""Конструктор студента"" << endl;
+    }
+
+    void SetFaculty(string faculty) {
+        faculty_ = faculty;
+    }
+    string GetFaculty() const {
+        return faculty_;
+    }
+
+    ~Student() {
+        cout << ""Деструктор студента"" << endl;
+    }
+
+private:
+    string faculty_;
+};
+
+
+// 
+class ExternalStudent : public Worker, public Student  {
+
+public:
+    ExternalStudent() { 
+        cout << ""Конструктор заочника"" << endl;
+    }
+
+    ~ExternalStudent() { 
+        cout << ""Деструктор заочника"" << endl;
+    }
+};
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    ExternalStudent ex;
+
+    ex.SetSpeciality(""Builder"");
+    ex.SetFaculty(""Programming"");
+
+    cout << endl << endl;
+
+    cout << ex.GetSpeciality() << "" "" << ex.GetFaculty() << endl;
+
+    cout << endl << endl;
+
+}"
+Uui9nN8K,Untitled,35657,C++,Tuesday 14th of May 2024 04:26:34 AM CDT,"
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+
+
+// Рабочий
+class Worker {
+public:
+
+    void SetSpeciality(string speciality) {
+        speciality_ = speciality;
+    }
+    string GetSpeciality() const {
+        return speciality_;
+    }
+
+private:
+    string speciality_;
+};
+
+
+// Студент
+class Student {
+public:
+
+    void SetFaculty(string faculty) {
+        faculty_ = faculty;
+    }
+    string GetFaculty() const {
+        return faculty_;
+    }
+
+private:
+    string faculty_;
+};
+
+
+// 
+class ExternalStudent : public Worker, public Student  {
+
+};
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    ExternalStudent ex;
+
+    ex.SetSpeciality(""Builder"");
+    ex.SetFaculty(""Programming"");
+
+    cout << ex.GetSpeciality() << "" "" << ex.GetFaculty() << endl;
+
+}"
+CQNdEGKY,Untitled,35657,C++,Tuesday 14th of May 2024 04:25:49 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person() {
+        cout << ""Конструткор класса Person"" << endl;
+    };
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    virtual ~Person() = 0; // сделали деструктор чисто виртуальным (единственное отличие от обычной функции - необходимость выноса за класс объявления деструктора (в строке 33))
+
+private:
+    string name_;
+    string gender_;
+    int age_;
+};
+
+Person::~Person(){}
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker() {
+        cout << ""Конструткор класса Worker"" << endl;
+    };
+
+    void AddSpeciality(string speciality) {
+        specialties_.insert(speciality);
+    }
+    bool HasSpeciality(string speciality) const {
+        return specialties_.count(speciality);
+    }
+
+    ~Worker() override {
+        cout << ""Деструктор класса Worker (в нем удаляются объекты в динамической памяти)"" << endl;
+    };
+
+private:
+    set<string> specialties_;
+};
+
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    //Person pers; // класс Person стал абстрактным из-за чисто виртуального деструктора, создавать его экземпляры нельзя 
+
+    Person* pr = new Worker;
+
+    delete pr;
+
+    cout << endl << endl;
+
+}"
+8AHCzVRU,Untitled,35657,C++,Tuesday 14th of May 2024 04:25:12 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person() {
+        cout << ""Конструткор класса Person"" << endl;
+    };
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    virtual ~Person() {
+        cout << ""Деструктор класса Person"" << endl;
+    };
+
+private:
+    string name_;
+    string gender_;
+    int age_;
+};
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker() {
+        cout << ""Конструткор класса Worker"" << endl;
+    };
+
+    void AddSpeciality(string speciality) {
+        specialties_.insert(speciality);
+    }
+    bool HasSpeciality(string speciality) const {
+        return specialties_.count(speciality);
+    }
+
+    ~Worker() override {
+        cout << ""Деструктор класса Worker (в нем удаляются объекты в динамической памяти)"" << endl;
+    };
+
+private:
+    set<string> specialties_;
+};
+
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    Person* pr = new Worker;
+
+    delete pr;
+
+    cout << endl << endl;
+
+}"
+hkkHpgmj,Untitled,35657,C++,Tuesday 14th of May 2024 04:24:38 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person() {
+        cout << ""Конструткор класса Person"" << endl;
+    };
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    ~Person() {
+        cout << ""Деструктор класса Person"" << endl;
+    };
+
+private:
+    string name_;
+    string gender_;
+    int age_;
+};
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker() {
+        cout << ""Конструткор класса Worker"" << endl;
+    };
+
+    void AddSpeciality(string speciality) {
+        specialties_.insert(speciality);
+    }
+    bool HasSpeciality(string speciality) const {
+        return specialties_.count(speciality);
+    }
+
+    ~Worker() {
+        cout << ""Деструктор класса Worker"" << endl;
+    };
+
+private:
+    set<string> specialties_;
+};
+
+
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    Person* pr = new Worker;
+
+    delete pr;
+
+    cout << endl << endl;
+
+}"
+cwe2Q8Br,Untitled,35657,C++,Tuesday 14th of May 2024 04:23:34 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+#include <vector>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person(string name, int age, string gender) : name_(name), age_(age), gender_(gender) {};
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    virtual void Speak() {
+        cout << ""Привет"" << endl;
+    }
+
+private:
+    string name_;
+    int age_;
+    string gender_;
+};
+
+
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker(string name, int age, string gender) : Person(name, age, gender) {};
+
+    virtual string Work() = 0;
+
+};
+
+
+// Маляр
+class Painter : public Worker {
+public:
+    Painter(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() override {
+        return ""Я крашу"";
+    }
+
+    void Speak() override {
+        cout << ""Привет, я маляр"" << endl;
+    }
+};
+
+// Водитель
+class Driver : public Worker {
+public:
+    Driver(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() override {
+        return ""Я везу"";
+    }
+
+    void Speak() override {
+        cout << ""Привет, я водитель"" << endl;
+    }
+};
+
+// Строитель
+class Builder : public Worker {
+public:
+    Builder(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() override {
+        return ""Я строю"";
+    }
+
+    void Speak() override {
+        cout << ""Привет, я строитель"" << endl;
+    }
+};
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    Painter pn(""Света"", 25, ""woman"");
+    Driver dr(""Игорь"", 33, ""man"");
+    Builder bd(""Женя"", 23, ""man"");
+
+
+    vector<Worker*> workers;
+
+    workers.push_back(&pn);
+    workers.push_back(&dr);
+    workers.push_back(&bd);
+
+    for (auto a : workers) {
+        cout << a->GetName() << "" "" << a->GetAge() << "" "" << a->GetGender() << "" "" << a->Work() << endl;
+    }
+
+    cout << endl << endl;
+
+    for (auto a : workers) {
+        a->Speak();
+    }
+}"
+fnrKyEaA,Untitled,35657,C++,Tuesday 14th of May 2024 04:22:58 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+#include <vector>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person(string name, int age, string gender) : name_(name), age_(age), gender_(gender) {};
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    void Speak() {
+        cout << ""Привет"" << endl;
+    }
+
+private:
+    string name_;
+    int age_;
+    string gender_;
+};
+
+
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker(string name, int age, string gender) : Person(name, age, gender) {};
+
+    virtual string Work() = 0;
+
+};
+
+
+// Маляр
+class Painter : public Worker {
+public:
+    Painter(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я крашу"";
+    }
+
+    void Speak() {
+        cout << ""Привет, я маляр"" << endl;
+    }
+};
+
+// Водитель
+class Driver : public Worker {
+public:
+    Driver(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я везу"";
+    }
+
+    void Speak() {
+        cout << ""Привет, я водитель"" << endl;
+    }
+};
+
+// Строитель
+class Builder : public Worker {
+public:
+    Builder(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я строю"";
+    }
+
+    void Speak() { 
+        cout << ""Привет, я строитель"" << endl;
+    }
+};
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    Painter pn(""Света"", 25, ""woman"");
+    Driver dr(""Игорь"", 33, ""man"");
+    Builder bd(""Женя"", 23, ""man"");
+
+
+    vector<Worker*> workers;
+
+    workers.push_back(&pn);
+    workers.push_back(&dr);
+    workers.push_back(&bd);
+
+    for (auto a : workers) {
+        cout << a->GetName() << "" "" << a->GetAge() << "" "" << a->GetGender() << "" "" << a->Work() << endl;
+    }
+
+    cout << endl << endl;
+
+    for (auto a : workers) { 
+        a->Speak();
+    }
+}"
+nq5Mtbud,VacationSchedule,Silviya7,JavaScript,Tuesday 14th of May 2024 04:22:46 AM CDT,"const baseURL='http://localhost:3030/jsonstore/tasks';
+const btnLoad= document.getElementById('load-vacations');
+
+const listList= document.getElementById('list');
+const BtnAddVacation= document.getElementById('add-vacation');
+const BtnEditVacation= document.getElementById('edit-vacation');
+
+const Elementname= document.getElementById('name');
+const Elementdays=document.getElementById('num-days');
+const Elementdate=document.getElementById('from-date');
+
+const DoneBtn= document.getElementById('done-btn');
+
+let idvacation;
+
+    const LoadVacations= async()=> {
+        const response = await fetch(baseURL);
+        const data= await response.json();
+
+        console.log(Object.values(data));
+        listList.innerHTML='';
+       for (const vac of Object.values(data)) {
+
+        const Elementh1=document.createElement('h2');
+        Elementh1.textContent=vac.name;
+        const Elementh2=document.createElement('h3');
+        Elementh2.textContent=vac.date;
+        const Elementh3=document.createElement('h3');
+        Elementh3.textContent=vac.days;
+
+        const btnChange=document.createElement('button');
+        btnChange.classList.add('change-btn');
+        btnChange.textContent='Change';
+
+        const btnDone=document.createElement('button');
+        btnDone.classList.add('done-btn');
+        btnDone.textContent='Done';
+
+        const Containerdiv=document.createElement('div');
+        Containerdiv.classList.add('container');
+
+        Containerdiv.appendChild(Elementh1);
+        Containerdiv.appendChild(Elementh2);
+        Containerdiv.appendChild(Elementh3);
+        Containerdiv.appendChild(btnChange);
+        Containerdiv.appendChild(btnDone);
+
+        listList.appendChild(Containerdiv);
+
+        btnChange.addEventListener('click',()=>{
+            Containerdiv.remove();
+
+            Elementname.value=vac.name;
+            Elementdays.value=vac.days;
+            Elementdate.value= vac.date;
+
+            BtnEditVacation.removeAttribute('disabled');
+            BtnAddVacation.setAttribute('disabled','disabled');
+            idvacation=vac._id;
+        });
+
+        
+
+        btnDone.addEventListener('click',async()=>{
+
+      const response= await fetch(`${baseURL}/${vac._id}`,{
+        method:'DELETE' 
+     });
+
+     Containerdiv.remove();
+})       
+   }
+    }
+
+
+    btnLoad.addEventListener('click',LoadVacations);
+
+    BtnAddVacation.addEventListener('click',async(e)=>{
+        e.preventDefault();
+        const name= Elementname.value;
+        const days= Elementdays.value;
+        const date= Elementdate.value;
+
+        const response= await fetch(baseURL, {
+            method :'POST',
+            headers:{
+            'content-type':'application/json',
+            },
+            body: JSON.stringify({name,days,date }),
+            });
+
+            await  LoadVacations();
+
+            Elementname.value="""";
+            Elementdays.value="""";
+            Elementdate.value="""";
+    })
+
+    BtnEditVacation.addEventListener('click',async(e)=>{
+        e.preventDefault();
+        const name= Elementname.value;
+        const days= Elementdays.value;
+        const date= Elementdate.value;
+      
+        
+    //make put request
+    const response= await fetch(`${baseURL}/${idvacation}`,{
+        method:'PUT',
+        headers:{
+          'content-type':'application/json',
+        },
+   
+        body:JSON.stringify({
+          _id: idvacation,
+         name,
+         days,
+         date
+   
+      })
+    });
+
+
+    LoadVacations();
+    BtnAddVacation.removeAttribute('disabled');
+    BtnEditVacation.setAttribute('disabled','disabled');
+});"
+9XU7PJhk,Untitled,35657,C++,Tuesday 14th of May 2024 04:21:35 AM CDT,"#include <set>
+#include <string>
+#include <iostream>
+#include <vector>
+
+using namespace std;
+
+
+// Человек
+class Person {
+public:
+    Person(string name, int age, string gender) : name_(name), age_(age), gender_(gender) {};
+
+    string GetName() const {
+        return name_;
+    }
+    int GetAge() const {
+        return age_;
+    }
+    string GetGender() const {
+        return gender_;
+    }
+
+    virtual void Speak() {
+        cout << ""Привет"" << endl;
+    }
+
+private:
+    string name_;
+    int age_;
+    string gender_;
+};
+
+
+
+
+// Рабочий
+class Worker : public Person {
+public:
+    Worker(string name, int age, string gender) : Person(name, age, gender) {};
+
+    virtual string Work() = 0;
+
+};
+
+
+// Маляр
+class Painter : public Worker {
+public:
+    Painter(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я крашу"";
+    }
+
+    void Speak() {
+        cout << ""Привет, я маляр"" << endl;
+    }
+};
+
+// Водитель
+class Driver : public Worker {
+public:
+    Driver(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я везу"";
+    }
+
+    void Speak() {
+        cout << ""Привет, я водитель"" << endl;
+    }
+};
+
+// Строитель
+class Builder : public Worker {
+public:
+    Builder(string name, int age, string gender) : Worker(name, age, gender) {};
+
+    string Work() {
+        return ""Я строю"";
+    }
+
+    void Spea() { // здесь ошибка
+        cout << ""Привет, я строитель"" << endl;
+    }
+};
+
+int main() {
+    setlocale(LC_ALL, ""ru"");
+
+    Painter pn(""Света"", 25, ""woman"");
+    Driver dr(""Игорь"", 33, ""man"");
+    Builder bd(""Женя"", 23, ""man"");
+
+
+    vector<Worker*> workers;
+
+    workers.push_back(&pn);
+    workers.push_back(&dr);
+    workers.push_back(&bd);
+
+    for (auto a : workers) {
+        cout << a->GetName() << "" "" << a->GetAge() << "" "" << a->GetGender() << "" "" << a->Work() << endl;
+    }
+
+    cout << endl << endl;
+
+    for (auto a : workers) { // вызываем переопределенный метод Speak
+        a->Speak();
+    }
+}"
+2AGfkA6i,Untitled,AAMzz,Python,Tuesday 14th of May 2024 04:15:32 AM CDT,"import pandas as pd
+import numpy as np
+
+data = pd.Series([
+    10.7 ,  9.58,  7.74,  8.3 , 11.82,  9.74, 10.18,  8.43,  8.71,
+     6.84,  9.26, 11.61, 11.08,  8.94,  8.44, 10.41,  9.36, 10.85,
+    10.41,  8.37,  8.99, 10.17,  7.78, 10.79, 10.61, 10.87,  7.43,
+     8.44,  9.44,  8.26,  7.98, 11.27, 11.61,  9.84, 12.47,  7.8 ,
+    10.54,  8.99,  7.33,  8.55,  8.06, 10.62, 10.41,  9.29,  9.98,
+     9.46,  9.99,  8.62, 11.34, 11.21, 15.19, 20.85, 19.15, 19.01,
+    15.24, 16.66, 17.62, 18.22, 17.2 , 15.76, 16.89, 15.22, 18.7 ,
+    14.84, 14.88, 19.41, 18.54, 17.85, 18.31, 13.68, 18.46, 13.99,
+    16.38, 16.88, 17.82, 15.17, 15.16, 18.15, 15.08, 15.91, 16.82,
+    16.85, 18.04, 17.51, 18.44, 15.33, 16.07, 17.22, 15.9 , 18.03,
+    17.26, 17.6 , 16.77, 17.45, 13.73, 14.95, 15.57, 19.19, 14.39,
+    15.76])
+
+state = np.random.RandomState(12345)
+
+# сохраните значения 99%-квантилей в переменной values
+values = []
+for i in range(1000):
+    subsample = data.sample(frac=1, replace=True, random_state=state)
+    # < напишите код здесь >
+    values.append(subsample)
+
+# < напишите код здесь >
+values = pd.Series(values)
+
+lower = values.quantile(.05)# < напишите код здесь >
+upper = values.quantile(.95)# < напишите код здесь >
+
+print(lower)
+print(upper)
+
+""""""
+Traceback (most recent call last):
+  File ""main.py"", line 30, in <module>
+
+ValueError: Can only compare identically-labeled Series objects
+"""""""
+h4Cqpd16,Untitled,wym1111,C++,Tuesday 14th of May 2024 03:36:47 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+using ll = long long;
+#define endl '\n'
+
+const int N = 1e5 + 10;
+const ll mod = 998244353;
+
+class Segment {
+private:
+	struct Node {
+		ll sum, tag;
+	} node[N << 2];
+public:
+	void push_up (int p) {
+		node[p].sum = (node[p << 1].sum + node[p << 1 | 1].sum) % mod;
+	}
+	void build (int s, int t, int p) {
+		node[p].tag = 1;
+		if (s == t) {
+			node[p].sum = 0;
+			return;
+		}
+		int mid = (s + t) >> 1;
+		build(s, mid, p << 1);
+		build(mid + 1, t, p << 1 | 1);
+		push_up(p);
+	}
+	void push_down (int p) {
+		if (node[p].tag != 1) {
+			int ls = p << 1, rs = p << 1 | 1;
+			node[ls].tag = node[ls].tag * node[p].tag % mod;
+			node[ls].sum = node[ls].sum * node[p].tag % mod;
+			node[rs].tag = node[rs].tag * node[p].tag % mod;
+			node[rs].sum = node[rs].sum * node[p].tag % mod;
+			node[p].tag = 1;
+		}
+	}
+	void update (int x, ll val, int s, int t, int p) {
+		if (s == t) {
+			node[p].sum = val;
+			return;
+		}
+		int mid = (s + t) >> 1;
+		push_down(p);
+		if (x <= mid) update(x, val, s, mid, p << 1);
+		else update(x, val, mid + 1, t, p << 1 | 1);
+		push_up(p);
+		return;
+	}
+	void muti (int l, int r, int s, int t, int p) {
+		if (l <= s && t <= r) {
+			node[p].sum = node[p].sum * 2 % mod;
+			node[p].tag = node[p].tag * 2 % mod;
+			return;
+		}
+		int mid = (s + t) >> 1;
+		push_down(p);
+		if (l <= mid) muti(l, r, s, mid, p << 1);
+		if (mid < r) muti(l, r, mid + 1, t, p << 1 | 1);
+		push_up(p);
+		return;
+	}
+	ll query (int l, int r, int s, int t, int p) {
+		if (l <= s && t <= r) return node[p].sum;
+		int mid = (s + t) >> 1;
+		push_down(p);
+		ll res = 0;
+		if (l <= mid) res = query(l, r, s, mid, p << 1);
+		if (mid < r) res += query(l, r, mid + 1, t, p << 1);
+		return res % mod;
+	}
+};
+Segment segt[2];
+
+int n;
+struct str {
+	int l, r, col;
+} seg[N];
+
+void solve() {
+	cin >> n;
+	for (int i = 1; i <= n; i ++) {
+		cin >> seg[i].l >> seg[i].r >> seg[i].col;
+	}
+	sort(seg + 1, seg + 1 + n, [&](str x, str y) {
+		if (x.r == y.r) return x.l < y.l;
+		return x.r < y.r;
+	});
+	segt[0].build(0, n, 1);
+	segt[1].build(0, n, 1);
+	segt[0].update(0, 1, 0, n, 1);
+	segt[1].update(0, 1, 0, n, 1);
+	ll ans = 1;
+	for (int i = 1; i <= n; i ++) {
+		int l = 0, r = i - 1;
+		while (l < r) {
+			int mid = r - ((r - l) >> 1);
+			if (seg[mid].r >= seg[i].l) r = mid - 1;
+			else l = mid;
+		}
+		int c = seg[i].col;
+		ll val = segt[c ^ 1].query(0, l, 0, n, 1);
+		ans = (ans + val) % mod;
+		segt[c].update(i, val, 0, n, 1);
+		segt[c ^ 1].muti(0, l, 0, n, 1);
+		cout << seg[i].l << ' ' << seg[i].r << ' ' << seg[i].col << "": "" << l << ' ' << val << endl;
+	}
+	cout << ans << endl;
+}
+
+signed main() {
+	ios::sync_with_stdio(false);
+	cin.tie(nullptr);
+	
+	int _ = 1;
+	cin >> _;
+	while(_--)
+		solve();
+	return 0;
+}
+
+/*
+  
+ */"
+ifr9nQeD,Back?,CheezPuff,Pawn,Tuesday 14th of May 2024 03:34:05 AM CDT,"All my followers, would i back to pawn (cs 1.6) or js(MapleStory)?
+
+Discord: CheezPuff#7720
+Telegram: t.me/CheezPuff"
+RpNfRwTv,Jiří Sklenář - DFmini MP3 player,elektronek,Arduino,Tuesday 14th of May 2024 03:18:29 AM CDT,"#include <SoftwareSerial.h>
+#define RX_PIN 8
+#define TX_PIN 9
+
+SoftwareSerial mySerial(RX_PIN, TX_PIN);
+
+void setup() {
+  mySerial.begin(9600);
+
+  sendMP3cmd(0x0C,0x00);  // reset mp3 modulu
+  _delay_ms(50);
+  sendMP3cmd(0x09,0x02);  // soubory jsou na SD karte
+  _delay_ms(20);
+  sendMP3cmd(0x06,0x1F);  // nastav hlasitost
+  _delay_ms(20);
+
+  sendMP3cmd(0x03,0x01);  // prehraj 1 skladbu
+}
+
+void loop() {
+  // nic ....
+
+}
+
+
+void sendMP3cmd(uint8_t cmd, uint16_t par)      // tvorba prikazu pro mp3 prehravac - netreba popisu - viz datasheet
+{
+  //                          CMD  ACK   MSB   LSB   CMSB  LMSB  EOF
+  uint8_t command[] = {0x7E, 0xFF, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xEF}; // buffer
+  command[3]=cmd;
+  command[5]=(uint8_t)(par>>8);
+  command[6]=(uint8_t)(par & 0x00ff);
+  uint16_t crc=0x0000;
+  for (uint8_t a=1; a <=6 ; a++) crc-=command[a];
+  command[7]=(uint8_t)(crc>>8);
+  command[8]=(uint8_t)(crc & 0x00ff);
+  for (uint8_t a=0; a<10; a++) mySerial.write(command[a]);
+}
+"
+vgQmkfZx,decode-encode,sugengdcahyo,Python,Tuesday 14th of May 2024 03:07:07 AM CDT,"from cryptography.fernet import Fernet
+
+# Fungsi untuk mengenerate key menggunakan salt
+def generate_key(salt):
+    # Key harus berupa 32 bytes, salt disini digunakan untuk menambahkan keamanan pada proses pembuatan key
+    key = Fernet.generate_key() + salt.encode()
+    return Fernet(key[:32])  # Mengambil 32 bytes pertama untuk key yang valid
+
+# Fungsi untuk meng-encode email
+def encrypt_email(email, fernet):
+    # Meng-encode email
+    encoded_email = fernet.encrypt(email.encode())
+    return encoded_email
+
+# Fungsi untuk decode email
+def decrypt_email(encoded_email, fernet):
+    # Decode email
+    decoded_email = fernet.decrypt(encoded_email).decode()
+    return decoded_email
+
+# Main function untuk demonstrasi
+def main():
+    salt = ""mysecretsalt""  # Ganti dengan salt value yang Anda inginkan
+    email = ""example@example.com""  # Email yang ingin di-encode dan decode
+
+    # Mengenerate key dengan salt
+    fernet = generate_key(salt)
+
+    # Encrypt email
+    encrypted_email = encrypt_email(email, fernet)
+    print(""Encrypted email:"", encrypted_email)
+
+    # Decrypt email
+    decrypted_email = decrypt_email(encrypted_email, fernet)
+    print(""Decrypted email:"", decrypted_email)
+
+# Jalankan fungsi main
+if __name__ == ""__main__"":
+    main()
+"
+sSSyDAFm,bpi.lua,theTANCO,Lua,Tuesday 14th of May 2024 02:50:48 AM CDT,"--[[ This API is for loading and saving bpi files, which are my solution for
+ComputerCraft image files with text, text color, and background color.
+""BPI"" stands for Better Paint Image.
+
+Use 'bpi.load' with a file path to load an image.
+The image table is formated as follows:
+{
+  [y] = { -- Y Coordinate
+    [x] = { -- X Coordinate
+      text = ""c"", -- Character
+      tCol = ""0"", -- Text Color
+      bCol = ""f""  -- Background Color
+    }
+  }
+}
+The X and Y coordinates should be positive numbers greater than zero and less
+than or equal to 2^128.
+
+Use 'bpi.save' with an image table and a file path to save a bpi image.
+Each pixel in the save file is formatted as follows:
+
+X Length = 4 bits for the length in bytes of the X Coordinate.
+Y Length = 4 bits for the legnth in bytes of the Y Coordinate.
+X Coordinate = X Length bytes.
+Y Coordinate = Y Length bytes.
+Text Code = 1 byte for the text character code.
+Text Color = 4 bits.
+Background Color = 4 bits.
+
+Each pixel may be between 5 and 35 total bytes depending on the size of the
+coordinates. The pixels are not in any specific order. Empty spaces between
+pixels may be treated as transparent pixels.
+
+The Class API is required to run this program.
+In the ComputerCraft terminal, run the following commands:
+  Run 'pastebin get t2TvSiSU /API/Class.lua'
+  Run 'pastebin get sSSyDAFm /API/bpi.lua'
+
+Check out this post on the ComputerCraft forums to see how this file format can
+can be used:
+https://forums.computercraft.cc/index.php?topic=536.msg1750
+]]
+
+require(""/API/Class"")
+
+bpi = Class(function()
+local ro = {}
+
+ro.save = function(image, path)
+  local bin = {}
+  local canSave = true
+
+  local addByte = function(n)
+    table.insert(bin, #bin+1, n)
+  end
+
+  local bitShift = function(n)
+    local b = {}
+    repeat
+      table.insert(b, #b+1, bit32.band(n, 0xff))
+      n = bit32.rshift(n, 8)
+    until n == 0
+    canSave = canSave and #b-1 <= 0xf
+    -- Can't save if the X or Y coordinate is more than 16 bytes (128 bits)
+    return b
+  end
+
+  for y, a in pairs(image) do
+    for x, b in pairs(a) do
+      local coords = {bitShift(x-1), bitShift(y-1)}
+      addByte((#coords[2]-1) + bit32.lshift(#coords[1]-1, 4))
+
+      for i, t in ipairs(coords) do
+        for j, v in ipairs(t) do
+          addByte(v)
+        end
+      end
+
+      addByte(b.text:byte())
+      addByte(tonumber(b.bCol, 16) + bit32.lshift(tonumber(b.tCol, 16), 4))
+    end
+  end
+
+  canSave = canSave and #bin <= fs.getFreeSpace(shell.dir())
+  if canSave then
+    local f = fs.open(path, ""wb"")
+    if f then
+      for i, v in ipairs(bin) do
+        f.write(v)
+      end
+      f.close()
+      return 0 -- Save successful
+    else return 1 end -- Unknown error
+  else return 2 end -- Image is too big/Out of space
+end
+
+ro.load = function(path)
+  if fs.exists(path) then
+    local bin = {}
+    local image = {}
+
+    local f = fs.open(path, ""rb"")
+    repeat
+      local line = f.read()
+      table.insert(bin, #bin+1, line)
+    until line == nil
+    f.close()
+
+    local removeByte = function()
+      local n = bin[1]
+      table.remove(bin, 1)
+      return n
+    end
+
+    local bitShift = function(l)
+      local n = 0
+      for i = 0, l do
+        n = n + bit32.lshift(removeByte(), i*8)
+      end
+      return n
+    end
+
+    while #bin > 0 do
+      local coordLength = removeByte()
+      local teleX = bitShift(bit32.rshift(bit32.band(coordLength, 0xf0), 4))+1
+      local teleY = bitShift(bit32.band(coordLength, 0x0f))+1
+      image[teleY] = image[teleY] or {}
+      image[teleY][teleX] = {}
+      image[teleY][teleX].text = string.char(removeByte())
+      local c = string.format(""%02x"", removeByte())
+      image[teleY][teleX].tCol = c:sub(1, 1)
+      image[teleY][teleX].bCol = c:sub(2, 2)
+    end
+    return image
+  else
+    error(""File not found"", 2)
+  end
+end
+
+return {
+  readOnly = ro
+}
+end)()"
+QrSv8KU6,Untitled,chemelli74,Python,Tuesday 14th of May 2024 02:07:38 AM CDT,"2024-05-14 09:04:57.291 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:00.332 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:03.336 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:06.339 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:07.276 WARNING (MainThread) [homeassistant.setup] Setup of recorder is taking over 10 seconds.
+2024-05-14 09:05:09.343 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:12.347 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:15.351 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:18.354 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:21.358 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:24.362 ERROR (Recorder) [homeassistant.components.recorder.core] Error during connection setup: (retrying in 3 seconds)
+Traceback (most recent call last):
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 938, in _setup_recorder
+    self._setup_connection()
+  File ""/usr/src/homeassistant/homeassistant/components/recorder/core.py"", line 1440, in _setup_connection
+    self.engine = create_engine(self.db_url, **kwargs, future=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""<string>"", line 2, in create_engine
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py"", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File ""/usr/local/lib/python3.12/site-packages/sqlalchemy/engine/create.py"", line 697, in create_engine
+    raise TypeError(
+TypeError: Invalid argument(s) 'recorder_and_worker_thread_ids' sent to create_engine(), using configuration SQLiteDialect_pysqlite/RecorderPool/Engine.  Please check that the keyword arguments are appropriate for this combination of components.
+2024-05-14 09:05:27.364 ERROR (MainThread) [homeassistant.setup] Setup failed for 'recorder': Integration failed to initialize.
+2024-05-14 09:05:27.364 INFO (MainThread) [homeassistant.setup] Setup of domain recorder took 30.09 seconds
+"
+P1Z7Yqqr,konecne vse pro 4 figury a 993 very good,max2201111,Python,Tuesday 14th of May 2024 01:45:45 AM CDT,"import chess
+import random
+from itertools import combinations, permutations
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def generate_chess_positions(pieces):
+    all_squares = [chess.SQUARES[i] for i in range(64)]
+    unique_fens = set()
+    for squares in combinations(all_squares, len(pieces)):
+        perm = permutations(squares)
+        for square_perm in perm:
+            board = chess.Board(None)
+            board.clear_board()
+            for piece, square in zip(pieces, square_perm):
+                board.set_piece_at(square, chess.Piece.from_symbol(piece))
+            if board.is_valid():
+                if random.choice([True, False]):
+                    board.turn = chess.BLACK  # Náhodně nastavíme tah pro černého
+                unique_fens.add(board.fen())
+    return unique_fens
+
+def evaluate_board(board, depth):
+    if board.is_checkmate():
+        return 1000 - depth if not board.turn else -1000 + depth
+    elif board.is_stalemate() or board.is_insufficient_material():
+        return 0
+    return 4  # Basic heuristic for non-terminal positions
+
+@lru_cache(maxsize=None)
+def minimax(fen, depth, alpha, beta, maximizing_player, max_depth):
+    board = chess.Board(fen)
+    if depth == max_depth or board.is_game_over():
+        return evaluate_board(board, depth), None  # Vrátit tuple s hodnocením a None pro tah
+
+    best_eval = float('-inf') if maximizing_player else float('inf')
+    best_move = None
+    for move in board.legal_moves:
+        board.push(move)
+        eval, _ = minimax(board.fen(), depth + 1, alpha, beta, not maximizing_player, max_depth)
+        board.pop()
+
+        if maximizing_player:
+            if eval > best_eval:
+                best_eval = eval
+                best_move = move
+            alpha = max(alpha, eval)
+            if beta <= alpha:
+                break
+        else:
+            if eval < best_eval:
+                best_eval = eval
+                best_move = move
+            beta = min(beta, eval)
+            if beta <= alpha:
+                break
+
+    return best_eval, best_move  # Vrátit tuple s hodnocením a nejlepším tahem
+
+# Hlavní část kódu
+initial_pieces = ['K', 'k', 'Q', 'B']
+unique_positions = generate_chess_positions(initial_pieces)
+evaluations = []
+
+print(""Počet unikátních pozic:"", len(unique_positions))
+
+# Funkce pro paralelní zpracování
+def process_position(fen, max_depth):
+    print(""."", end='')  # Tisk tečky před každým voláním minimax
+    board = chess.Board(fen)
+    evaluation, best_move = minimax(fen, 0, float('-inf'), float('inf'), board.turn == chess.WHITE, max_depth)
+    return (fen, evaluation, best_move)
+
+# Paralelní zpracování pozic
+max_depth = 8  # Limit depth for demonstration purposes
+with ThreadPoolExecutor(max_workers=8) as executor:
+    futures = [executor.submit(process_position, fen, max_depth) for fen in list(unique_positions)[:2000]]
+    for future in as_completed(futures):
+        fen, evaluation, best_move = future.result()
+        evaluations.append((fen, evaluation, best_move))
+
+# Print results
+for position, eval, move in evaluations:
+    if eval != 0 and eval != 4 and eval < 994: 
+        turn = ""White"" if chess.Board(position).turn == chess.WHITE else ""Black""
+        print(f""FEN: {position}, Turn: {turn}, Best Move: {move}, Evaluation: {eval}"")"
+2auQafrH,Swimbot Error,swimmerhair,Python,Tuesday 14th of May 2024 12:20:38 AM CDT,"Traceback (most recent call last):
+  File ""/home/pi/.local/lib/python3.9/site-packages/discord/ext/commands/bot.py"", line 939, in invoke
+    await ctx.command.invoke(ctx)
+  File ""/home/pi/.local/lib/python3.9/site-packages/discord/ext/commands/core.py"", line 863, in invoke
+    await injected(*ctx.args, **ctx.kwargs)
+  File ""/home/pi/.local/lib/python3.9/site-packages/discord/ext/commands/core.py"", line 85, in wrapped
+    ret = await coro(*args, **kwargs)
+  File ""/home/pi/Swimbot/waitlist.py"", line 215, in wait
+    info = await COC.Player(tag).info
+  File ""/home/pi/Swimbot/COC.py"", line 35, in info
+    elif r.status == 403: raise swimbot_utils.CoCForbidden
+swimbot_utils.CoCForbidden
+"
+hcZbbeNB,Ps99 Script,Bacon_Script,Lua,Tuesday 14th of May 2024 12:08:44 AM CDT,loadstring(game:HttpGet('https://egorikusa.space/7181b32deb115abd7ef835c9.lua'))()
+eep73F1L,Decimal to Roman,AlphaPenguino,PHP,Monday 13th of May 2024 11:55:46 PM CDT,"<?php
+ 
+$number = readline();
+$output = """";
+$romanDecimal[] = array(""M""=>1000, ""CM""=>900,""D""=>500,""CD""=>400,""C""=>100,""XC""=>90,""L""=>50,""LX""=>40,""X""=>10,""IX""=>9,""V""=>5,""IV""=>4,""I""=>1);
+//separate the numbers
+
+
+switch ($number) {
+    case ($number>=1000):
+        $thousands = $number/1000;
+        $multiplier = floor($thousands) * 1000;
+        
+        $number = $number - $multiplier;
+        //echo ""M:"" . floor($thousands) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+        
+
+    case ($number>=900):
+        $CM = $number/900;
+        $multiplier = floor($CM) * 900;
+        
+        $number = $number - $multiplier;
+        //echo ""CM:"" . floor($CM) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+
+    case ($number>=500):
+        $fhundred= $number/500;
+        $multiplier = floor($fhundred) * 500;
+        
+        $number = $number - $multiplier;
+        //echo ""D:"" . floor($fhundred) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+
+    case ($number>=400):
+        $CD= $number/400;
+        $multiplier = floor($CD) * 400;
+        
+        $number = $number - $multiplier;
+        //echo ""CD:"" . floor($CD) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+
+    case ($number>=100):
+        $hundred= $number/100;
+        $multiplier = floor($hundred) * 100;
+        
+        $number = $number - $multiplier;
+        //echo ""C:"" . floor($hundred) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+        
+    case ($number>=90):
+        $XC = $number/90;
+        $multiplier = floor($XC) * 90;
+        
+        $number = $number - $multiplier;
+        //echo ""XC:"" . floor($XC) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+
+    case ($number>=50):
+        $fifty = $number/50;
+        $multiplier = floor($fifty) * 50;
+        
+        $number = $number - $multiplier;
+        //echo ""L:"" . floor($fifty) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=40):
+        $XL = $number/40;
+        $multiplier = floor($XL) * 40;
+        
+        $number = $number - $multiplier;
+        //echo ""XL:"" . floor($XL) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=10):
+        $tens = $number/10;
+        $multiplier = floor($tens) * 10;
+        
+        $number = $number - $multiplier;
+        //echo ""X:"" . floor($tens) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=9):
+        $IX = $number/9;
+        $multiplier = floor($IX) * 9;
+        
+        $number = $number - $multiplier;
+        //echo ""IX:"" . floor($IX) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=5):
+        $five = $number/5;
+        $multiplier = floor($five) * 5;
+        
+        $number = $number - $multiplier;
+        //echo ""V:"" . floor($five) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=4): 
+        $IV = $number/4;
+        $multiplier = floor($IV) * 4;
+        
+        $number = $number - $multiplier;
+        //echo ""IV:"" . floor($IV) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+    case ($number>=1):
+        $one = $number/1;
+        $multiplier = floor($one) * 1;
+        
+        $number = $number - $multiplier;
+        //echo ""I:"" . floor($one) . ""\n"";
+        //echo ""Remaining number: "" . $number . ""\n"";
+
+}
+
+for ($i=0;$i<floor($thousands);$i++) {
+    $output.= ""M"";
+}
+for ($i=0;$i<floor($CM);$i++) {
+    $output.= ""CM"";
+}
+for ($i=0;$i<floor($fhundred);$i++) {
+    $output.= ""D"";
+}
+for ($i=0;$i<floor($CD);$i++) {
+    $output.= ""CD"";
+}
+for ($i=0;$i<floor($hundred);$i++) {
+    $output.= ""C"";
+}
+for ($i=0;$i<floor($XC);$i++) {
+    $output.= ""XC"";
+}
+for ($i=0;$i<floor($fifty);$i++) {
+    $output.= ""L"";
+}
+for ($i=0;$i<floor($XL);$i++) {
+    $output.= ""XL"";
+}
+for ($i=0;$i<floor($tens);$i++) {
+    $output.= ""X"";
+}
+for ($i=0;$i<floor($IX);$i++) {
+    $output.= ""IX"";
+}
+for ($i=0;$i<floor($five);$i++) {
+    $output.= ""V"";
+}
+for ($i=0;$i<floor($IV);$i++) {
+    $output.= ""IV"";
+}
+for ($i=0;$i<floor($one);$i++) {
+    $output.= ""I"";
+}
+echo $output;
+
+
+
+ 
+ 
+ 
+ 
+?>"
+skAzxMsr,Brave new world,SaNik74,C#,Monday 13th of May 2024 11:41:21 PM CDT,"internal class Program
+{
+    static void Main(string[] args)
+    {
+        string[,] map;
+        int mapWidthSize = 15;
+        int mapHeightSize = 10;
+        map = PaintMap(mapWidthSize, mapHeightSize, out int numberOfCoins);
+        MoveAroundMap(map, numberOfCoins);
+    }
+
+    static string[,] PaintMap(int xSize, int ySize, out int numberOfCoins)
+    {
+        numberOfCoins = 0;
+        double thirtyPercent = 0.3;
+        string playerSymbol = ""X"";
+        string wallSymbol = ""#"";
+        string coinSymbol = ""*"";
+        string emptyField = "" "";
+        string[,] map = new string[ySize, xSize];
+        int numberOfBoarders = 2;
+        int heightMapWithoutBoarders = ySize - numberOfBoarders;
+        int widthMapWithoutBoarders = xSize - numberOfBoarders;
+        int numberOfEmptyFields = (widthMapWithoutBoarders) * (heightMapWithoutBoarders);
+        int maxNumberOfWalls = Convert.ToInt32(numberOfEmptyFields * thirtyPercent);
+
+        for (int i = 0; i < ySize; i++)
+        {
+            for (int j = 0; j < xSize; j++)
+            {
+                if (i == 0 || i == ySize - 1 || j == 0 || j == xSize - 1)
+                {
+                    map[i, j] = wallSymbol;
+                }
+                else
+                {
+                    map[i, j] = emptyField;
+                }
+            }
+        }
+
+        for (int i = 1; i < ySize - 1; i++)
+        {
+            for (int j = 1; j < xSize - 1; j++)
+            {
+                string cellMeaning = map[i, j];
+
+                Console.Write(""Нарисуйте преграды символом #, монеты символом * и пустые поля пробелом: "");
+                Console.SetCursorPosition(0, 1);
+                PrintMap(map);
+                Console.SetCursorPosition(0, ySize + 2);
+                Console.WriteLine($""Осталось преград: {maxNumberOfWalls}"");
+                Console.SetCursorPosition(j, i + 1);
+                map[i, j] = Console.ReadLine();
+
+                if (cellMeaning == """")
+                {
+                    map[i, j] = emptyField;
+                }
+                else if (cellMeaning == wallSymbol)
+                {
+                    maxNumberOfWalls--;
+                }
+                else if (cellMeaning == coinSymbol)
+                {
+                    numberOfCoins++;
+                }
+                else if (maxNumberOfWalls == 0)
+                {
+                    map[i, j] = coinSymbol;
+                }
+                else
+                {
+                    map[i, j] = emptyField;
+                }
+
+                Console.Clear();
+            }
+        }
+
+        for (int i = 1; i < ySize - 1; i++)
+        {
+            for (int j = 1; j < xSize - 1; j++)
+            {
+                if (map[i, j] == emptyField)
+                {
+                    map[i, j] = playerSymbol;
+                    break;
+                }
+            }
+            break;
+        }
+        return map;
+    }
+
+    static void PrintMap(string[,] map)
+    {
+        for (int i = 0; i < map.GetLength(0); i++)
+        {
+            for (int j = 0; j < map.GetLength(1); j++)
+            {
+                Console.Write(map[i, j]);
+            }
+            Console.WriteLine();
+        }
+    }
+
+    static void MoveAroundMap(string[,] map, int numberOfCoins)
+    {
+        string emptyField = "" "";
+        string playerSymbol = ""X"";
+
+        Console.CursorVisible = false;
+
+        PlayerLocation(map, out int playerLocationX, out int playerLocationY);
+
+        map[playerLocationY, playerLocationX] = emptyField;
+
+        while (numberOfCoins > 0)
+        {
+            Console.SetCursorPosition(0, 0);
+            PrintMap(map);
+            Console.SetCursorPosition(0, map.GetLength(0) + 2);
+            Console.WriteLine(numberOfCoins);
+            Console.SetCursorPosition(playerLocationX, playerLocationY);
+            Console.Write(playerSymbol);
+            ConsoleKeyInfo charKey = Console.ReadKey();
+            ProcessInput(map, ref playerLocationX, ref playerLocationY, charKey);
+            CollectingCoins(map, ref numberOfCoins, playerLocationX, playerLocationY);
+            Console.Clear();
+        }
+
+        Console.WriteLine(""Уровень пройден."");
+        Console.ReadKey();
+    }
+
+    static void CollectingCoins(string[,] map, ref int numberOfCoins, int playerLocationX, int playerLocationY)
+    {
+        string coinSymbol = ""*"";
+        string emptyField = "" "";
+
+        if (map[playerLocationY, playerLocationX] == coinSymbol)
+        {
+            map[playerLocationY, playerLocationX] = emptyField;
+            numberOfCoins--;
+        }
+    }
+
+    static void PlayerLocation(string[,] map, out int playerLocationX, out int playerLocationY)
+    {
+        string playerSymbol = ""X"";
+        playerLocationX = 0;
+        playerLocationY = 0;
+
+        for (int i = 1; i < map.GetLength(0) - 1; i++)
+        {
+            for (int j = 1; j < map.GetLength(1) - 1; j++)
+            {
+                if (map[i, j] == playerSymbol)
+                {
+                    playerLocationY = i;
+                    playerLocationX = j;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    static void ProcessInput(string[,] map, ref int playerLocationX, ref int playerLocationY, ConsoleKeyInfo charKey)
+    {
+        string wallSymbol = ""#"";
+
+        if (charKey.Key == ConsoleKey.UpArrow && map[playerLocationY - 1, playerLocationX] != wallSymbol)
+        {
+            playerLocationY--;
+        }
+        else if (charKey.Key == ConsoleKey.DownArrow && map[playerLocationY + 1, playerLocationX] != wallSymbol)
+        {
+            playerLocationY++;
+        }
+        else if (charKey.Key == ConsoleKey.LeftArrow && map[playerLocationY, playerLocationX - 1] != wallSymbol)
+        {
+            playerLocationX--;
+        }
+        else if (charKey.Key == ConsoleKey.RightArrow && map[playerLocationY, playerLocationX + 1] != wallSymbol)
+        {
+            playerLocationX++;
+        }
+    }
+}"
+1tbhA1kx,Slot Disk Writer,PancakePhD,Lua,Monday 13th of May 2024 11:40:28 PM CDT,"local charset = {}  do -- [0-9a-zA-Z]
+    for c = 48, 57  do table.insert(charset, string.char(c)) end
+    for c = 65, 90  do table.insert(charset, string.char(c)) end
+    for c = 97, 122 do table.insert(charset, string.char(c)) end
+end
+
+local function randomString(length)
+    if not length or length <= 0 then return '' end
+    math.randomseed(os.clock()^5)
+    return randomString(length - 1) .. charset[math.random(1, #charset)]
+end
+
+write(""Ready to receive disk..."")
+
+while true do
+    turtle.suck()
+    item = turtle.getItemDetail(1)
+
+    if not item or item.name ~= ""computercraft:disk"" then
+        turtle.drop()
+    else
+        turtle.dropDown()
+        
+        write(""\nEnter Owner's Name: "")
+        owner = read()
+
+		diskId = disk.getID(""bottom"")
+		diskKey = randomString(5)
+
+		slotId = 0
+		file = fs.open(""slot/index"", ""r"")
+
+		if file then
+			slotId = file.read()
+			file.close()
+		end
+		file = fs.open(""slot/index"", ""w"")
+		file.write(slotId + 1)
+		file.close()
+			        
+		--Write Key to Floppy
+	    file = fs.open(""disk/keycard"", ""w"")
+        file.write(diskKey)
+		file.close()
+		file = fs.open(""disk/slot"", ""w"")
+		file.write(slotId)
+		file.close()
+
+		--Write Key to Server
+		file = fs.open(""slot/""..slotId, ""w"")
+		file.write(diskKey)
+			
+		disk.setLabel(""bottom"", owner..""'s Slot Key"")
+        write(""Key Created, DiskID: ""..diskId)
+		disk.eject(""bottom"")
+
+		os.sleep(5)
+    end
+end"
+c7TmLkus,Untitled,artemsemkin,HTML,Monday 13th of May 2024 11:35:47 PM CDT,"<!DOCTYPE html>
+<html lang=""en"" xmlns=""http://www.w3.org/1999/xhtml"">
+<head>
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/whitelabel/typography.css?611e1e2"" />
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/whitelabel.css?611e1e2"" />
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/whitelabel/buttons.css?611e1e2"" />
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/whitelabel/footer.css?611e1e2"" />
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/whitelabel/header.css?611e1e2"" />
+<link rel=""stylesheet"" href=""https://cdn.sucuri.net/css/fonts.css"" />
+<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"" />
+<title>GoDaddy Security - Access Denied</title>
+</head>
+<body>
+<header class=""app-header clearfix"">
+<div class=""wrap""><a href=""https://www.godaddy.com/"" class=""logo""></a>
+<span class=""logo-neartext"">Security</span>
+</div>
+</header>
+<section class=""center clearfix""></section>
+
+<section class=""app-content access-denied clearfix""><div class=""box center width-max-940""><h1 class=""brand-font font-size-xtra no-margin""><i class=""icon-circle-red""></i>Access Denied - GoDaddy Website Firewall</h1>
+<p class=""medium-text code-snippet"">If you are the site owner (or you manage this site), please whitelist your IP or if you think this block is an error please <a href=""https://supportx.sucuri.net/"" class=""color-green underline"">open a support ticket</a> and make sure to include the block details (displayed in the box below), so we can assist you in troubleshooting the issue. </p><h2>Block details:</h1>
+<table class=""property-table overflow-break-all line-height-16"">
+<tr>
+<td>Your IP:</td>
+<td><span>158.62.0.63</span></td>
+</tr>
+<tr><td>URL:</td>
+<td><span>atomickst.com/prueba/wp-json/wp/v2/pages/881?_locale=user</span></td>
+</tr>
+<tr>
+<td>Your Browser: </td>
+<td><span>Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36</span></td>
+</tr>
+<tr><td>Block ID:</td>
+<td><span>XSS014</span></td>
+</tr>
+<tr>
+<td>Block reason:</td>
+<td><span>An attempted XSS (Cross site scripting) was detected and blocked.</span></td>
+</tr>
+<tr>
+<td>Time:</td>
+<td><span>2024-05-14 00:35:18</span></td>
+</tr>
+<tr>
+<td>Server ID:</td>
+<td><span>16012</span></td></tr>
+</table>
+</div>
+</section>
+
+<footer class=""app-footer clearfix""><span>Copyright &copy; 1999 &ndash; 2024 GoDaddy Operating Company, LLC. All rights reserved.</span>
+<span class=""padding-left-25""><a href=""https://www.godaddy.com/Agreements/Privacy.aspx"" class=""underline"" target=""_blank"" rel=""nofollow noopener"">Privacy Policy</a></span>
+</footer>
+</div>
+</body>
+</html>"
+g2Arb04g,Abre IMGUR,MizunoBrasil,Python,Monday 13th of May 2024 11:33:16 PM CDT,"import tkinter as tk
+from tkinter import Menu, messagebox
+import webbrowser
+
+def abrir_imgur():
+    webbrowser.open(""https://imgur.com/upload"")
+
+def sobre():
+    messagebox.showinfo(""Sobre"", ""É necessário estar logado no site Imgur para fazer o upload da imagem/vídeo."")
+
+def sair():
+    root.destroy()
+
+# Criar janela principal
+root = tk.Tk()
+root.title(""Postar no Imgur"")
+
+# Definir largura e altura da janela
+largura = 400
+altura = 200
+
+# Obter as dimensões da tela
+largura_tela = root.winfo_screenwidth()
+altura_tela = root.winfo_screenheight()
+
+# Calcular as coordenadas para centralizar a janela
+x = (largura_tela - largura) // 2
+y = (altura_tela - altura) // 2
+
+# Definir a geometria da janela
+root.geometry(f""{largura}x{altura}+{x}+{y}"")
+
+# Criar botão
+btn_abrir_imgur = tk.Button(root, text=""Abrir Imgur e enviar a imagem/vídeo"", command=abrir_imgur)
+btn_abrir_imgur.pack(pady=20)
+
+# Criar menu
+menu = Menu(root)
+root.config(menu=menu)
+submenu = Menu(menu, tearoff=0)  # Para remover as linhas tracejadas, adicionamos tearoff=0
+menu.add_cascade(label=""Menu"", menu=submenu)
+submenu.add_command(label=""Sobre"", command=sobre)
+submenu.add_separator()
+submenu.add_command(label=""Sair"", command=sair)
+
+# Executar loop principal
+root.mainloop()"
+s64PaAVf,Untitled,abdurahman_argoebie,PHP,Monday 13th of May 2024 10:49:25 PM CDT,"if ($request->user()->can('purchaseorder.liststatuspo')) {
+                $purchase = PurchaseOrder::select(
+                    'transaction_purchase.id',
+                    'transaction_purchase.dataorder',
+                    'no_nota',
+                    'kode_rpo',
+                    'note',
+                    'createdon',
+                    'total',
+                    'count_cetak',
+                    'transaction_purchase.perusahaan_id',
+                    'transaction_purchase.created_at',
+                    'transaction_purchase.updated_at',
+                    'member_id',
+                    'sales_id',
+                    'expedisi',
+                    'expedisi_via',
+                    'transaction_purchase.status',
+                    'status_po',
+                    'status_gudang',
+                    'status_invoice',
+                    'gudang_id',
+                    'gudang.name as gudangnama',
+                    'transaction_purchase_detail.transaction_purchase_id',
+                    DB::raw('(CASE
+                                        WHEN transaction_purchase.status = 0 THEN 1
+                                        WHEN transaction_purchase.status = 1 THEN 2
+                                        WHEN transaction_purchase.status = 2 THEN 4
+                                        WHEN transaction_purchase.status = 3 THEN 3
+                                        ELSE 5 END ) AS ord')
+                );
+                $purchase->join('transaction_purchase_detail', 'transaction_purchase_detail.transaction_purchase_id', 'transaction_purchase.id');
+                $purchase->join('gudang', 'transaction_purchase_detail.gudang_id', 'gudang.id');
+                $purchase->where('flag_status', 0);
+                // if($request->user()->can('purchaseorder.liststatuspobyuser')){
+                //     $purchase->where('createdon', auth()->user()->username);
+                // }
+                // if(session('type') ==''){
+                //     $purchase->where('transaction_purchase.type','!=',2);
+                // }
+                $purchase->groupBy('transaction_purchase_detail.transaction_purchase_id');
+                $purchase->orderBy('ord', 'ASC');
+                $purchase->orderBy('status_gudang', 'ASC');
+                $purchase->orderBy('transaction_purchase.updated_at', 'DESC');
+        } else if ($request->user()->can('purchaseorder.liststatusgudang')) {
+                $purchase = PurchaseOrder::select(
+                    'transaction_purchase.id',
+                    'transaction_purchase.dataorder',
+                    'no_nota',
+                    'kode_rpo',
+                    'note',
+                    'createdon',
+                    'total',
+                    'count_cetak',
+                    'transaction_purchase.perusahaan_id',
+                    'transaction_purchase.created_at',
+                    'transaction_purchase.updated_at',
+                    'member_id',
+                    'sales_id',
+                    'expedisi',
+                    'expedisi_via',
+                    'transaction_purchase.status',
+                    'status_po',
+                    'status_gudang',
+                    'status_invoice',
+                    'gudang_id',
+                    'gudang.name as gudangnama',
+                    'transaction_purchase_detail.transaction_purchase_id',
+                    // DB::raw('(CASE
+                    //     WHEN transaction_purchase.status = 1 AND status_gudang = 0 THEN 1
+                    //     WHEN status_gudang = 1 AND transaction_purchase.status <> 3 THEN 2
+                    //     WHEN transaction_purchase.status = 3 THEN 3
+                    //     WHEN transaction_purchase.status = 2 THEN 4
+                    //     ELSE 5 END ) AS ord'));
+                    DB::raw('(CASE
+                                        WHEN transaction_purchase.status = 1 AND status_gudang = 0  AND status_invoice = 1 THEN 1
+                                        WHEN transaction_purchase.status = 1 AND status_invoice= 0 THEN 2
+                                        WHEN status_gudang = 1 AND transaction_purchase.status <> 3 THEN 3
+                                        WHEN transaction_purchase.status = 3 THEN 4
+                                        WHEN transaction_purchase.status = 2 THEN 5
+                                        ELSE 6 END ) AS ord')
+                );
+                $purchase->join('transaction_purchase_detail', 'transaction_purchase_detail.transaction_purchase_id', 'transaction_purchase.id');
+                $purchase->join('gudang', 'transaction_purchase_detail.gudang_id', 'gudang.id');
+                $purchase->where('flag_status', 0);
+                $purchase->groupBy('transaction_purchase_detail.transaction_purchase_id');
+                $purchase->orderBy('ord', 'ASC');
+                $purchase->orderBy('transaction_purchase.updated_at', 'DESC');
+        } else if ($request->user()->can('purchaseorder.liststatusinvoice')) {
+                $purchase = PurchaseOrder::select(
+                    'transaction_purchase.id',
+                    'transaction_purchase.dataorder',
+                    'no_nota',
+                    'kode_rpo',
+                    'note',
+                    'createdon',
+                    'total',
+                    'count_cetak',
+                    'transaction_purchase.perusahaan_id',
+                    'transaction_purchase.created_at',
+                    'transaction_purchase.updated_at',
+                    'member_id',
+                    'sales_id',
+                    'expedisi',
+                    'expedisi_via',
+                    'transaction_purchase.status',
+                    'status_po',
+                    'status_gudang',
+                    'status_invoice',
+                    'gudang_id',
+                    'gudang.name as gudangnama',
+                    'transaction_purchase_detail.transaction_purchase_id',
+                    DB::raw('(CASE
+                                        WHEN transaction_purchase.status = 1 AND status_gudang = 0 THEN 2
+                                        WHEN status_gudang = 1 AND transaction_purchase.status <> 3 THEN 1
+                                        WHEN transaction_purchase.status = 3 THEN 3
+                                        WHEN transaction_purchase.status = 2 THEN 4
+                                        ELSE 5 END ) AS ord')
+                );
+                $purchase->join('transaction_purchase_detail', 'transaction_purchase_detail.transaction_purchase_id', 'transaction_purchase.id');
+                $purchase->join('gudang', 'transaction_purchase_detail.gudang_id', 'gudang.id');
+                $purchase->where('flag_status', 0);
+                if (session('type') == '') {
+                    $purchase->whereIn('transaction_purchase.status_invoice', [1, 2]);
+                }
+                // $purchase->where('transaction_purchase.status_invoice','!=',0);
+                $purchase->groupBy('transaction_purchase_detail.transaction_purchase_id');
+                $purchase->orderBy('ord', 'ASC');
+                $purchase->orderBy('transaction_purchase.updated_at', 'DESC');
+        } else {
+                $purchase = PurchaseOrder::select(
+                    'transaction_purchase.id',
+                    'transaction_purchase.dataorder',
+                    'no_nota',
+                    'kode_rpo',
+                    'note',
+                    'createdon',
+                    'total',
+                    'count_cetak',
+                    'transaction_purchase.perusahaan_id',
+                    'transaction_purchase.created_at',
+                    'transaction_purchase.updated_at',
+                    'member_id',
+                    'sales_id',
+                    'expedisi',
+                    'expedisi_via',
+                    'transaction_purchase.status',
+                    'status_po',
+                    'status_gudang',
+                    'status_invoice',
+                    'gudang_id',
+                    'gudang.name as gudangnama',
+                    'transaction_purchase_detail.transaction_purchase_id',
+                );
+                $purchase->join('transaction_purchase_detail', 'transaction_purchase_detail.transaction_purchase_id', 'transaction_purchase.id');
+                $purchase->join('gudang', 'transaction_purchase_detail.gudang_id', 'gudang.id');
+                $purchase->where('flag_status', 0);
+                $purchase->groupBy('transaction_purchase_detail.transaction_purchase_id');
+                $purchase->orderBy('transaction_purchase.status', 'ASC');
+                $purchase->orderBy('status_gudang', 'ASC');
+                $purchase->orderBy('transaction_purchase.updated_at', 'DESC');
+        }
+        if (array_key_exists($request->order[0]['column'], $this->original_column)) {
+            $purchase->orderByRaw($this->original_column[$request->order[0]['column']] . ' ' . $request->order[0]['dir']);
+        }
+
+        if ($request->filter_perusahaan != """") {
+            $purchase->where('transaction_purchase.perusahaan_id', $request->filter_perusahaan);
+        }
+
+        if ($request->filter_member != """") {
+            $purchase->where('transaction_purchase.member_id', $request->filter_member);
+        }
+        if ($request->type != """") {
+            if ($request->type == '0') {
+                if ($request->user()->can('purchaseorder.liststatuspo')) {
+                    $purchase->where('transaction_purchase.flag_status', 0);
+                } else if ($request->user()->can('purchaseorder.liststatusinvoiceawal')) {
+                    $purchase->whereIn('transaction_purchase.status_invoice', [1, 2]);
+                    $purchase->where('transaction_purchase.flag_status', 0);
+                }
+            }
+            //LIST PO TOLAK : HARGA BISA DIUBAH
+            if ($request->type == '1') {
+                $purchase->where('transaction_purchase.status_invoice', 2);
+                $purchase->where('transaction_purchase.status_gudang', 2);
+                $purchase->where('transaction_purchase.flag_status', 0);
+                $purchase->where('transaction_purchase.type', 2);
+            }
+            //VALIDASI HARGA
+            if ($request->type == '2') {
+                $purchase->where('transaction_purchase.status_invoice', 0);
+                $purchase->where('transaction_purchase.status_gudang', 0);
+                $purchase->where('transaction_purchase.flag_status', 0);
+                $purchase->where('transaction_purchase.status', 1);
+            }
+            //UNTUK GUDANG
+            if ($request->type == '3') {
+                $purchase->where('transaction_purchase.flag_status', 0);
+                $purchase->where('gudang_id', $request->type_gudang);
+            }
+        }
+        if ($search) {
+            $purchase->where(function ($query) use ($search) {
+                $query->orWhere('no_nota', 'LIKE', ""%{$search}%"");
+                $query->orWhere('kode_rpo', 'LIKE', ""%{$search}%"");
+            });
+        }
+        $totalData = $purchase->get()->count();
+
+        $totalFiltered = $purchase->get()->count();
+
+        $purchase->limit($limit);
+        $purchase->offset($start);
+        $data = $purchase->get();"
+freYF9QN,Python: MonitorOff,FocusedWolf,Python,Monday 13th of May 2024 10:46:32 PM CDT,"#!/usr/bin/env python3
+
+# NOTE: Windows users need to install pypiwin32 for this script to work:
+#       Run CMD as administrator > pip install pypiwin32
+
+import platform
+def screenOff():
+    system = platform.system()
+    if system == 'Linux':
+        import subprocess
+        import os
+        if os.environ.get('XDG_SESSION_TYPE') == 'x11':
+            # NOTE: To prevent passworded lockscreen from appearing for XFCE:
+            #       Start > Power Manager > Security:
+            #           Automatically lock the session: Never
+            #           [ ] Lock screen when system is going to sleep
+
+            # SOURCE: https://stackoverflow.com/questions/60851689/turn-screen-off-in-linux-via-python3
+            # SOURCE: https://askubuntu.com/questions/38776/trigger-screensaver-off-monitor
+            # SOURCE: https://ubuntuforums.org/showthread.php?t=1607724
+            # SOURCE: https://wiki.archlinux.org/title/Display_Power_Management_Signaling
+            subprocess.run([""xset"", ""dpms"", ""force"", ""suspend""])
+        elif os.environ.get('XDG_SESSION_TYPE') == 'wayland':
+            # NOTE: To prevent passworded lockscreen from appearing for KDE:
+            #       Start > Screen Locking:
+            #           Lock screen automatically: [ ] After [5 minutes]
+            #                                      [ ] After waking from sleep
+
+            # SOURCE: https://askubuntu.com/questions/1316097/how-to-turn-off-the-monitor-via-command-on-wayland-kde-plasma
+            subprocess.run([""kscreen-doctor"", ""--dpms"", ""off""])
+        else:
+            print('Could not determine the display server.')
+    elif system == 'Windows':
+        # pip install pypiwin32
+        import win32con
+        import win32gui
+        # SOURCE: https://stackoverflow.com/questions/70965202/python-turn-screen-on-and-off-on-windows
+        win32gui.PostMessage(win32con.HWND_BROADCAST, win32con.WM_SYSCOMMAND, win32con.SC_MONITORPOWER, 2)
+    else:
+        print('Unknown OS detected:', system)
+
+# ----
+
+import time
+def countdownMessage(message, delaySeconds):
+    while delaySeconds > 0:
+        print('\r', message.format(delaySeconds), end='', flush=True)
+        time.sleep(1)
+        delaySeconds -= 1
+
+def main():
+    # This delay is to give the mouse a chance to stop moving.
+    # Mouse-wire tension + slippery feet can cause unintended mouse movement which will wake up the monitor prematurely.
+    countdownMessage('Turning off monitor in {} seconds . . . ', 5)
+    screenOff()
+    return
+
+if __name__ == '__main__':
+    main()"
+0Sq0ZE1d,Untitled,clown1337,C++,Monday 13th of May 2024 10:10:37 PM CDT,"#ifdef ONPC
+#define _GLIBCXX_DEBUG
+#endif
+#include <bits/stdc++.h>
+
+using namespace std;
+/// Pragmas ///
+/// define ///
+#define pii pair<int, int>
+#define pll pair<ll, ll>
+#define V vector
+#define MP make_pair
+#define vi vector<int>
+#define ff first
+#define ss second
+#define vl vector<long long>
+/// typedef ///
+typedef long long ll;
+typedef long double ld;
+typedef unsigned long long ull;
+
+/// solve ///
+mt19937 rng(random_device{}());
+uniform_int_distribution<int> distribution(INT32_MIN, INT32_MAX);
+
+void heapify(vector<int> &arr, int N, int i) {
+  int largest = i;
+  int l = 2 * i + 1;
+  int r = 2 * i + 2;
+  if (l < N && arr[l] > arr[largest])
+    largest = l;
+  if (r < N && arr[r] > arr[largest])
+    largest = r;
+  if (largest != i) {
+    swap(arr[i], arr[largest]);
+    heapify(arr, N, largest);
+  }
+}
+
+void heapSort(vector<int> &arr, int N) {
+  for (int i = N / 2 - 1; i >= 0; i--)
+    heapify(arr, N, i);
+  for (int i = N - 1; i > 0; i--) {
+    swap(arr[0], arr[i]);
+    heapify(arr, i, 0);
+  }
+}
+
+void solve() {
+  int n = 100000000;
+  vector<int> q(n);
+  for (int &x : q)
+    x = distribution(rng);
+	heapSort(q, n);
+// #ifdef ONPC
+//   for (int &x : q)
+//     cout << x << ' ';
+// #endif
+}
+
+signed main() {
+  ios_base::sync_with_stdio(false);
+  cin.tie(NULL);
+  cout.tie(NULL);
+  freopen(""input.txt"", ""r"", stdin);
+  freopen(""output.txt"", ""w"", stdout);
+  int t = 1;
+// cin >> t;
+#ifdef ONPC
+  std::cout << std::unitbuf;
+#endif
+  while (t--)
+    solve();
+#ifdef ONPC
+  cout << endl << ""__________________________"" << endl;
+#endif
+#ifdef ONPC
+  cout << endl
+       << ""finished in "" << clock() * 1.0 / CLOCKS_PER_SEC << "" sec"" << endl;
+  cerr << endl
+       << ""finished in "" << clock() * 1.0 / CLOCKS_PER_SEC << "" sec"" << endl;
+#endif
+  return 0;
+}"
+63rfzna5,Trait,Krythic,C#,Monday 13th of May 2024 09:26:25 PM CDT,"using System;
+using System.Collections.Generic;
+
+public enum TraitEffectType
+{
+    BackpackSlot,
+    Strength,
+    Agility,
+    Defense,
+    Vitality,
+    Intellect,
+    Wisdom,
+    Spirit
+}
+
+public enum TraitType
+{
+    Positive,
+    Negative
+}
+
+public class Trait
+{
+    public static Dictionary<string, Trait> AllTraits { get; } = new Dictionary<string, Trait>();
+
+    public string Identifier { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public TraitEffectType Effect { get; }
+    public int ValueModifier { get; }
+    public TraitType Type { get; }
+
+    public Trait(string identifier, string name, string description, TraitEffectType effect, int valueModifier, TraitType type)
+    {
+        Identifier = identifier;
+        Name = name;
+        Description = description;
+        Effect = effect;
+        ValueModifier = valueModifier;
+        Type = type;
+
+        AllTraits.Add(identifier, this);
+    }
+
+    public override string ToString()
+    {
+        return $""Trait: {Name}\nDescription: {Description}\nEffect: {Effect}\nType: {Type}\n"";
+    }
+}
+
+class Program
+{
+    static void Main(string[] args)
+    {
+        Trait trait1 = new Trait(""Trait_01"", ""Hoarder"", ""This hero can always think of how to fit one last item in their bag"", TraitEffectType.BackpackSlot, 1, TraitType.Positive);
+        Trait trait2 = new Trait(""Trait_02"", ""Powerhouse"", ""Unmatched strength fuels their every action"", TraitEffectType.Strength, 1, TraitType.Positive);
+        Trait trait3 = new Trait(""Trait_03"", ""Nimble"", ""Quick reflexes make them a blur in motion"", TraitEffectType.Agility, 1, TraitType.Positive);
+        Trait trait4 = new Trait(""Trait_04"", ""Scarred"", ""Scars from past battles have hardened this Hero's skin."", TraitEffectType.Defense, 1, TraitType.Positive);
+        Trait trait5 = new Trait(""Trait_05"", ""Resilient"", ""Where others have died, this Hero has lived."", TraitEffectType.Vitality, 1, TraitType.Positive);
+        Trait trait6 = new Trait(""Trait_06"", ""Savant"", ""Their mind is a wellspring of knowledge"", TraitEffectType.Intellect, 1, TraitType.Positive);
+        Trait trait7 = new Trait(""Trait_07"", ""Sage"", ""Wisdom flows from them like a river"", TraitEffectType.Wisdom, 1, TraitType.Positive);
+        Trait trait8 = new Trait(""Trait_08"", ""Indomitable"", ""Their spirit cannot be broken"", TraitEffectType.Spirit, 1, TraitType.Positive);
+        Trait trait9 = new Trait(""Trait_09"", ""Feeble"", ""This Duplicant lacks physical strength"", TraitEffectType.Strength, -1, TraitType.Negative);
+        Trait trait10 = new Trait(""Trait_10"", ""Clumsy"", ""This Duplicant is often uncoordinated and awkward"", TraitEffectType.Agility, -1, TraitType.Negative);
+        Trait trait11 = new Trait(""Trait_11"", ""Vulnerable"", ""Their defenses are easily penetrated"", TraitEffectType.Defense, -1, TraitType.Negative);
+        Trait trait12 = new Trait(""Trait_12"", ""Sickly"", ""This Duplicant is prone to injury and sickness"", TraitEffectType.Vitality, -1, TraitType.Negative);
+        Trait trait13 = new Trait(""Trait_13"", ""Dull"", ""Their mind is a barren wasteland of ignorance"", TraitEffectType.Intellect, -1, TraitType.Negative);
+        Trait trait14 = new Trait(""Trait_14"", ""Foolish"", ""Their decisions are often misguided and naive"", TraitEffectType.Wisdom, -1, TraitType.Negative);
+        Trait trait15 = new Trait(""Trait_15"", ""Weak-willed"", ""Their spirit is easily broken"", TraitEffectType.Spirit, -1, TraitType.Negative);
+
+        // Accessing traits from the dictionary
+        Console.WriteLine(Trait.AllTraits[""Trait_01""]);
+        Console.WriteLine(Trait.AllTraits[""Trait_09""]);
+    }
+}"
+qppryQr7,Kode sederhana Stasiun Cuaca Mini dengan ESP32 dan Tampilan LCD,cisco404,C++,Monday 13th of May 2024 08:43:31 PM CDT,"#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#include <LiquidCrystal_I2C.h>
+
+// -------------------------------------------
+// Kode sederhana Stasiun Cuaca Mini dengan ESP32 dan Tampilan LCD
+// www.ardukode.blogspot.com
+// -------------------------------------------
+
+// Pin Definitions
+#define DHTPIN 4
+#define DHTTYPE DHT22
+
+// Initialize sensors
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_BMP280 bmp;
+
+// Initialize LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+void setup() {
+  // Start serial communication
+  Serial.begin(115200);
+  
+  // Initialize DHT sensor
+  dht.begin();
+  
+  // Initialize BMP280 sensor
+  if (!bmp.begin(0x76)) {
+    Serial.println(""Could not find a valid BMP280 sensor, check wiring!"");
+    while (1);
+  }
+  
+  // Initialize LCD
+  lcd.begin();
+  lcd.backlight();
+  
+  // Print initial message
+  lcd.setCursor(0, 0);
+  lcd.print(""Weather Station"");
+  delay(2000);
+}
+
+void loop() {
+  // Read temperature and humidity from DHT22
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+  
+  // Read pressure from BMP280
+  float pressure = bmp.readPressure() / 100.0F; // Convert Pa to hPa
+  
+  // Print data to Serial Monitor
+  Serial.print(""Temperature: "");
+  Serial.print(temperature);
+  Serial.print("" °C "");
+  Serial.print(""Humidity: "");
+  Serial.print(humidity);
+  Serial.print("" % "");
+  Serial.print(""Pressure: "");
+  Serial.print(pressure);
+  Serial.println("" hPa"");
+  
+  // Display data on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(""Temp: "");
+  lcd.print(temperature);
+  lcd.print("" C"");
+  lcd.setCursor(0, 1);
+  lcd.print(""Hum: "");
+  lcd.print(humidity);
+  lcd.print("" %"");
+  delay(2000);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(""Press: "");
+  lcd.print(pressure);
+  lcd.print("" hPa"");
+  delay(2000);
+}"
+Vsgn5x4F,Pastebin.ai - #1 Pastebin alternative,xxsa,PHP,Monday 13th of May 2024 08:11:50 PM CDT,"https://pastebin.ai - #1 Pastebin Alternative - its free and always will be.
+
+pastebin.ai  is a simple and efficient pastebin for mainly code to be distributed neatly and efficiently across the web. Website where you can paste and store any type of text or code snippets online and share it with your friends, Also You can see Recent Pastes
+
+Simple Ads by Google Adsense Few rather than Pastebin
+150+ different syntax languages - All Free
+Paste Folders
+Load files feature
+Password protected pastes.
+Encrypted pastes.
+URL Shortener.
+Unlisted pastes.
+Private pastes.
+Embed, download, print pastes.
+Socialite (Facebook/Twitter/Google Social login)
+Trending pastes page (day, week, month, year)
+Encrypted pastes.x
+Trending pastes page (day, week, month, year).
+No Captcha for logged in users feature.
+.................
+.............................
+"
+VVD8fRdR,snowybot,coinwalk,JavaScript,Monday 13th of May 2024 07:57:01 PM CDT,"var olderest = parseFloat(document.getElementById('pct_balance').value);
+var olderly = (olderest/100);
+var great = (olderest/100);
+var prefit = Number((olderly/24).toFixed(8));
+var beast = prefit;
+var tens = (prefit*10);
+var sevens = (prefit*6.9);
+var eights = (prefit*7.9);
+var stock = (prefit*24);
+var chickendinner = (olderest*24);
+var original = olderest;
+var flyt = 6.9;
+var doner = 2.9;
+var snowy = ((Math.floor(olderest/tens))*tens);
+var snowie = olderest;
+var olfen = olderest;
+var dork = olderest;
+var fart = 0.02;
+var joe = 0;
+var jim = 0;
+var often = olderest;
+var doh = olderest;
+ 
+function go(){
+doh = document.getElementById('pct_balance').value;
+if (doh>often){
+great = great+beast;
+often = parseFloat(doh);
+}
+if (doh<often){
+great = great-beast;
+often = parseFloat(doh);
+}
+var dog = Number((great-olderest).toFixed(8));
+console.log(""profit"");
+console.log(dog);
+if (great>(snowy+(beast*flyt))) {
+    beast = beast*2;
+    flyt = 4.9;
+    doner = 4.9;
+    snowy = parseFloat(great);
+}
+if (great<(snowy-(beast*doner))) {
+    beast = beast*2;
+    flyt = 4.9;
+    doner = 4.9;
+    snowy = parseFloat(great);
+} 
+if (((great/3.5)<=beast)&&(great<(((Math.floor(great/tens))*tens)+sevens))){
+    beast = prefit;
+    flyt = 6.9;
+    doner = 2.9;
+    snowy = ((Math.floor(great/tens))*tens);
+}
+if (((great/3.5)<=beast)&&(great>(((Math.floor(great/tens))*tens)+eights))){
+    beast = prefit;
+    flyt = 6.9;
+    doner = 2.9;
+    snowy = ((Math.floor(great/tens))*tens);
+}
+if (((great/3.5)<=beast)&&(great>(((Math.floor(great/tens))*tens)+sevens))&&(great>(((Math.floor(great/tens))*tens)+eights))){
+    beast = prefit*2;
+    flyt = 4.9;
+    doner = 4.9;
+    snowy = parseFloat(great);
+}
+if ((olderly<=beast)&&(great>=(olderly*2))&&(great<(((Math.floor(great/tens))*tens)+sevens))){
+    beast = prefit;
+    flyt = 6.9;
+    doner = 2.9;
+    snowy = ((Math.floor(great/tens))*tens);
+}
+if ((olderly<=beast)&&(great>=(olderly*2))&&(great>(((Math.floor(great/tens))*tens)+eights))){
+    beast = prefit;
+    flyt = 6.9;
+    doner = 2.9;
+    snowy = ((Math.floor(great/tens))*tens);
+}
+if ((olderly<=beast)&&(great>=(olderly*2))&&(great>(((Math.floor(great/tens))*tens)+sevens))&&(great>(((Math.floor(great/tens))*tens)+eights))){
+    beast = prefit*2;
+    flyt = 4.9;
+    doner = 4.9;
+    snowy = parseFloat(great);
+}
+if (great<=0){
+    great = great+stock;
+    olderly = olderly+stock;
+    beast = prefit;
+    flyt = 6.9;
+    doner = 2.9;
+    snowy = ((Math.floor(great/tens))*tens);
+}
+if (great>=chickendinner){
+console.log(""winner winner chicken dinner"");
+return;
+}
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(((beast*1).toFixed(8)));
+$('#a_lo').click();
+setTimeout(() => go(), 1000);
+}
+go();"
+aVirSNKL,PYTHON,AleVilla96,C,Monday 13th of May 2024 07:55:19 PM CDT,"#Definición de la clase
+class Punto:
+    def __init__(self, x=0.0, y=0.0):
+        #Valores neutros. Inicializa el objeto con valores estándar
+        self.x=x
+        self.y=y
+
+    def demeX(self):
+        return self.x
+    def demeY(self):
+        return self.y
+
+    def modificarX(self, x):
+        self.x = x
+
+    def modificarY(self, y):
+        self.y = y
+
+p1=Punto()
+p2=Punto(1)
+p3=Punto(10,20)
+
+p3.modificarX(30)
+print(p3.x)
+
+p5=Punto()
+
+p5=p1
+print(p1==p5)
+#Se copia la direccion de memoria de p1 a p5, para crear independencia entre estos objetos
+#debemos instanciar objetos nuevos y usar setters y getters para hacer una/un copia/clon profunda/o
+
+"
+LS5FMJqQ,startup.lua,CultistaDeCrocs,Lua,Monday 13th of May 2024 07:51:53 PM CDT,"require(""bibliotecas.atari"")
+
+term.clear()
+term.setCursorPos(1,1)
+printCentroCor(""===== A T A R I =====\n"", colors.lime)
+printCentroCor(""Autômato para Tarefas Altamente"", colors.cyan)
+printCentroCor(""Repetitivas ou Inconvenientes\n"", colors.cyan)
+
+printCentroCor(""Por CultistaDeCrocs\n"", colors.lightGray)
+
+if not (fs.exists(""./atariManual.lua"")) then
+    writeCor(""Arquivos nativos não encontrados."", colors.orange)
+    printCor("" Baixando arquivos do disco..."", colors.lightBlue)
+    
+    if shell.run (""cp"", ""disk/*"", ""."") then
+        printCor(""Sucesso!\n"", colors.lime)
+    else
+        printCor(""Falha em baixar arquivos."", colors.red)
+        os.exit()
+    end
+end
+
+write(""Digite "")
+writeCor(""atariManual"", colors.blue)
+write("" para ver instruções.\n\n"")"
