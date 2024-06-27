@@ -1,0 +1,3802 @@
+id,title,username,language,date,content
+KibcxAe1,🤑G2A.com Free Gift Card FIX June 2024🎁,PetrikDev,JavaScript,Thursday 27th of June 2024 01:05:16 AM CDT,"G2A.com complimentary voucher & gaming guide.
+Any item for free on G2A.com including Steam gift cards & anything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+BXJzDB7s,🤑G2A.com Free Gift Card FIX June 2024🤑,x3kiN,JavaScript,Thursday 27th of June 2024 12:59:13 AM CDT,"G2A.com free gift card & gaming guide.
+Any voucher for free on G2A.com including Amazon gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+0YNfe4iW,🤑G2A.com Free Gift Card FIX June 2024🎁,FeasModz514,JavaScript,Thursday 27th of June 2024 12:53:10 AM CDT,"G2A.com complimentary voucher & gaming guide.
+Any item for free on G2A.com including Amazon gift cards & all else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+vGmd8c7g,radar.lua,crococrystal,Lua,Thursday 27th of June 2024 12:49:27 AM CDT,"-- Импорт библиотек
+local component = require(""component"")
+local filesystem = require(""filesystem"")
+local event = require(""event"")
+local term = require(""term"")
+local gpu = component.gpu
+local dkjson = require(""dkjson"")
+local text = require(""text"")
+
+-- Конфигурация и инициализация
+local RADAR_DIR = ""/home/.radar/""
+local running = true
+
+-- Установка разрешения экрана
+gpu.setResolution(93, 27)
+
+-- Создание директории, если не существует
+filesystem.makeDirectory(RADAR_DIR)
+
+-- Очистка экрана
+term.clear()
+term.setCursorBlink(false)
+
+-- Функция для отрисовки рамки по указанным координатам
+local function drawFrame(y, isAtBase)
+    if isAtBase then
+        gpu.setForeground(0x00FF00)  -- Зеленый цвет
+    else
+        gpu.setForeground(0xFFFFFF)  -- Белый цвет
+    end
+    term.setCursor(1, y)
+    print(""┌───────────────────────────────────────────────────────────────────────────────────────────┐"")
+    term.setCursor(1, y + 1)
+    print(""│                                                                                           │"")
+    term.setCursor(1, y + 2)
+    print(""└───────────────────────────────────────────────────────────────────────────────────────────┘"")
+    gpu.setForeground(0xFFFFFF)  -- Возвращаем цвет к белому
+end
+
+-- Функция получения реального времени с учетом часового пояса
+local function getRealTime()
+    local name = os.tmpname()
+    local file = io.open(name, ""w"")
+    file:close()
+    local time = math.floor(filesystem.lastModified(name) / 1000)
+    filesystem.remove(name)
+    time = time + 10 * 3600  -- Корректировка времени (для примера +21 час)
+    return time
+end
+
+-- Функция для вычисления прошедшего времени
+local function timeSince(lastSeen)
+    local currentTime = getRealTime()
+    local elapsed = currentTime - lastSeen
+    local days = math.floor(elapsed / (3600 * 24))
+    local hours = math.floor((elapsed % (3600 * 24)) / 3600)
+    local minutes = math.floor((elapsed % 3600) / 60)
+    local seconds = elapsed % 60
+    return days, hours, minutes, seconds
+end
+
+-- Метатаблица для управления данными игрока
+local PlayerData = {}
+PlayerData.__index = PlayerData
+
+function PlayerData:new(name, lastSeenDate, atBase)
+    local obj = {
+        name = name,
+        lastSeen = os.time(lastSeenDate),
+        atBase = atBase or false,
+        lastSeenDate = lastSeenDate or os.date('*t', getRealTime())
+    }
+    setmetatable(obj, self)
+    return obj
+end
+
+function PlayerData:save()
+    local path = RADAR_DIR .. self.name .. "".json""
+    local isNewFile = not filesystem.exists(path)
+    local file = io.open(path, ""w"")
+    local dataToSave = {
+        name = self.name,
+        atBase = self.atBase,
+        lastSeenDate = self.lastSeenDate
+    }
+    file:write(dkjson.encode(dataToSave, { indent = true }))
+    file:close()
+    
+    if isNewFile then
+        updateDisplay()  -- Обновляем экран при создании нового файла
+    end
+end
+
+function PlayerData:load(name)
+    local path = RADAR_DIR .. name .. "".json""
+    local file = io.open(path, ""r"")
+    if file then
+        local data = dkjson.decode(file:read(""*a""))
+        file:close()
+        if data then
+            local obj = setmetatable({
+                name = data.name,
+                atBase = data.atBase,
+                lastSeenDate = data.lastSeenDate
+            }, self)
+            obj.lastSeen = os.time(data.lastSeenDate)
+            return obj
+        end
+    end
+    return nil
+end
+
+function PlayerData:updatePresence(atBase)
+    self.atBase = atBase
+    self.lastSeen = getRealTime()
+    self.lastSeenDate = os.date('*t', self.lastSeen)
+    self:save()
+end
+
+-- Чтение всех данных игроков
+local function readAllPlayerData()
+    local players = {}
+    for file in filesystem.list(RADAR_DIR) do
+        if file:match(""%.json$"") then
+            local player = PlayerData:load(file:match(""(.+).json""))
+            if player then
+                table.insert(players, player)
+            end
+        end
+    end
+    return players
+end
+
+-- Обновление информации о присутствии игроков на радаре
+local function updatePlayerPresence()
+    local currentPlayers = {}
+    local radarList = component.list(""radar"")
+    for address in pairs(radarList) do
+        local radar = component.proxy(address)
+        local players = radar.getPlayers()
+        for _, player in ipairs(players) do
+            currentPlayers[player.name] = true
+            local playerData = readAllPlayerData()[player.name] or PlayerData:new(player.name)
+            if not playerData.atBase then
+                playerData:updatePresence(true)
+            end
+        end
+    end
+
+    local allPlayers = readAllPlayerData()
+    for _, data in ipairs(allPlayers) do
+        if not currentPlayers[data.name] and data.atBase then
+            data:updatePresence(false)
+        end
+    end
+end
+
+-- Состояние экрана для минимизации обновлений
+local screenState = {}
+
+-- Функция для очистки строки
+local function clearLine(y)
+    term.setCursor(26, y)
+    term.write(string.rep("" "", 66))  -- Очистка строки из 66 символов
+end
+
+-- Функция для обновления и отображения данных на экране
+local function updateDisplay()
+    local players = readAllPlayerData()
+    table.sort(players, function(a, b) return a.atBase and not b.atBase end)  -- Сортировка, чтобы игроки на базе были первыми
+    local yOffset = 1
+    for _, player in ipairs(players) do
+        if not screenState[player.name] or screenState[player.name].atBase ~= player.atBase then
+            drawFrame(yOffset, player.atBase)
+            term.setCursor(3, yOffset + 1)
+            term.write(text.padRight(player.name, 22))
+            screenState[player.name] = {}
+        end
+
+        if player.atBase then
+            local stateString = text.padRight(""В данный момент находится здесь"", 20)
+            clearLine(yOffset + 1)  -- Очистка строки перед выводом
+            term.setCursor(26, yOffset + 1)
+            term.write(stateString)
+            screenState[player.name].atBase = true
+        else
+            local days, hours, minutes, seconds = timeSince(player.lastSeen)
+
+            -- Вывод статичных частей
+            term.setCursor(69, yOffset + 1)
+            term.write(""("")
+            term.setCursor(72, yOffset + 1)
+            term.write(""д"")
+            term.setCursor(76, yOffset + 1)
+            term.write(""ч"")
+            term.setCursor(80, yOffset + 1)
+            term.write(""м"")
+            term.setCursor(84, yOffset + 1)
+            term.write(""с"")
+            term.setCursor(86, yOffset + 1)
+            term.write(""назад"")
+            term.setCursor(91, yOffset + 1)
+            term.write("")"")
+
+            -- Обновление динамичных частей
+            term.setCursor(70, yOffset + 1)
+            term.write(string.format(""%02d"", days))
+            term.setCursor(74, yOffset + 1)
+            term.write(string.format(""%02d"", hours))
+            term.setCursor(78, yOffset + 1)
+            term.write(string.format(""%02d"", minutes))
+            term.setCursor(82, yOffset + 1)
+            term.write(string.format(""%02d"", seconds))
+
+            local dateStr = string.format(""%02d-%02d-%d"", player.lastSeenDate.day, player.lastSeenDate.month, player.lastSeenDate.year)
+            local timeStr = string.format(""%02d:%02d:%02d"", player.lastSeenDate.hour, player.lastSeenDate.min, player.lastSeenDate.sec)
+
+            -- Сохранение состояния для проверки изменений
+            local stateString = string.format(
+                    ""Последнее обнаружение: %s %s"",
+                    dateStr, timeStr
+            )
+
+            if screenState[player.name].presenceString ~= stateString then
+                clearLine(yOffset + 1)  -- Очистка строки перед выводом
+                term.setCursor(26, yOffset + 1)
+                term.write(text.padRight(""Последнее обнаружение:"", 20))
+                term.setCursor(49, yOffset + 1)
+                term.write(dateStr)
+                term.setCursor(60, yOffset + 1)
+                term.write(timeStr)
+                screenState[player.name].presenceString = stateString
+                screenState[player.name].atBase = false  -- Сброс статуса ""на базе""
+            end
+        end
+        yOffset = yOffset + 3  -- Сдвигаем на 4 строки вниз для следующего игрока
+    end
+end
+
+-- Обработчик нажатия клавиши для выхода
+local function handleExit()
+    term.clear()
+    running = false
+end
+
+-- Регистрация событий
+event.listen(""key_down"", function(_, _, key)
+    if key == 13 then  -- клавиша Enter
+        handleExit()
+    end
+end)
+
+-- Основной цикл обновления и отображения данных
+while running do
+    updatePlayerPresence()
+    updateDisplay()  -- Теперь вызываем функцию обновления экрана
+    os.sleep(1)  -- Небольшая задержка
+end
+
+-- Выход из программы
+term.clear()
+os.exit()
+"
+RgrHH6GR,🤑G2A.com Free Gift Card FIX June 2024🤑,kiraezwhethe,JavaScript,Thursday 27th of June 2024 12:47:06 AM CDT,"G2A.com free gift card & gaming guide.
+Any voucher for free on G2A.com including Playstation gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+0r3sY9w7,🤑G2A.com Free Gift Card FIX June 2024🤑,7AcxeMC,JavaScript,Thursday 27th of June 2024 12:40:59 AM CDT,"G2A.com free voucher & games guide.
+Any gift card for free on G2A.com including Steam gift cards & all else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+24th of June 2024
+
+"
+FDUjK597,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024V4 🎁,jusst2k4,GetText,Thursday 27th of June 2024 12:40:16 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_449752.pdf
+ 
+Working as of:
+27 June 2024"
+9C1W4a6c,lol snowybot lua,coinwalk,JavaScript,Thursday 27th of June 2024 12:36:48 AM CDT,"joey = 0
+james = ((math.floor(balance/tens))*tens)
+prefit = (balance/1440000)
+winnerdinner = balance
+tens = (prefit*10)
+sevens = (prefit*6.9)
+eights = (prefit*7.9)
+bethigh = false
+chance = 49.5
+nextbet = prefit
+resetstats()
+ 
+function dobet()      
+if ((balance>(((math.floor(balance/tens))*tens)+sevens)) and (balance<(((math.floor(balance/tens))*tens)+eights)) and (not ((balance>(joey-(prefit/2))) and (balance<(joey+(prefit/2)))))) then
+    nextbet = previousbet*2
+    joey = balance
+end  
+if ((balance>=(james+tens)) and (balance<(((math.floor(balance/tens))*tens)+sevens))) then
+    nextbet = prefit
+    joey = 0
+    james = ((math.floor(balance/tens))*tens)
+end
+if balance >= (winnerdinner * 24000) then
+   print(""winner winner chicken dinner"")
+   stop()
+end     
+end"
+Ec4fQFam,🤑G2A.com Free Gift Card FIX June 2024🤑,tvprekointerneta00,JavaScript,Thursday 27th of June 2024 12:34:55 AM CDT,"G2A.com free voucher & games guide.
+Any item for free on G2A.com including Steam gift cards & anything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+Rzf3NqK8,🤑G2A.com Free Gift Card FIX June 2024🎁,speed_car,JavaScript,Thursday 27th of June 2024 12:28:53 AM CDT,"G2A.com free gift card & games guide.
+Any item for free on G2A.com including Amazon gift cards & anything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+tGe1iHiB,snowybot,coinwalk,JavaScript,Thursday 27th of June 2024 12:23:37 AM CDT,"belance = balance
+joey = 0
+beast = 1
+james = 0
+nion = balance
+prefit = nion / 1440000
+winnerdinner = nion
+smartz = nion
+tens = prefit * 10
+sevens = prefit * 6.9
+eights = prefit * 7.9
+
+function dobet()
+belance = balance
+        
+if ((belance>(((math.floor(belance/tens))*tens)+sevens)) and (belance<(((math.floor(belance/tens))*tens)+eights)) and (not ((belance>(joey-(prefit/2))) and (belance<(joey+(prefit/2)))))) then
+    nextbet = previousbet*2
+    joey = belance
+end
+        
+        if ((belance>=(james+tens)) and (belance<(((math.floor(belance/tens))*tens)+sevens))) then
+            nextbet = prefit
+            joey = 0
+            james = ((math.floor(belance/tens))*tens)
+        end
+        
+        if belance >= (winnerdinner * 24000) then
+            print(""winner winner chicken dinner"")
+            stop()
+        end
+        
+        cat = (belance - smartz)
+        print(""profit"")
+        print(cat)
+end"
+r16CZY41,🤑G2A.com Free Gift Card FIX June 2024🤑,Axel_Jax,JavaScript,Thursday 27th of June 2024 12:22:49 AM CDT,"G2A.com free gift card & gaming guide.
+Any gift card for free on G2A.com including Amazon gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24 2024
+
+"
+SARmerxK,CI/CD Gitlab Runner x Docker Executor,sugengdcahyo,Bash,Thursday 27th of June 2024 12:17:41 AM CDT,"stages:
+  - build
+  - push
+  - deploy
+
+variables:
+  DOCKER_IMAGE: ""username/product-service""
+  DOCKER_TAG: ""latest""
+
+build:
+  stage: build
+  script:
+    - docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
+  only:
+    - main
+
+push:
+  stage: push
+  script:
+    - echo ""$CI_REGISTRY_PASSWORD"" | docker login -u ""$CI_REGISTRY_USER"" --password-stdin
+    - docker push $DOCKER_IMAGE:$DOCKER_TAG
+  only:
+    - main
+
+deploy:
+  stage: deploy
+  script:
+    - docker pull $DOCKER_IMAGE:$DOCKER_TAG
+    - docker stop product-service || true
+    - docker rm product-service || true
+    - docker run -d --name product-service -p 80:80 $DOCKER_IMAGE:$DOCKER_TAG
+  only:
+    - main
+"
+48ZGrY5k,🤑G2A.com Free Gift Card FIX June 2024🤑,FunkyMonkey22,JavaScript,Thursday 27th of June 2024 12:16:46 AM CDT,"G2A.com complimentary voucher & gaming guide.
+Any gift card for free on G2A.com including Xbox gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+HAGrhPPe,🤑G2A.com Free Gift Card FIX June 2024🎁,Darkew,JavaScript,Thursday 27th of June 2024 12:10:38 AM CDT,"G2A.com free voucher & gaming guide.
+Any item for free on G2A.com including Amazon gift cards & everything else offered.
+This is the most latest version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/14nhj_HMYLgijfcEYlszii5McXagnMlc6/view?69872
+
+Working as of:
+June 24th 2024
+
+"
+YuJ6jjZ8,seriously amazing snowybot,coinwalk,JavaScript,Wednesday 26th of June 2024 11:48:11 PM CDT,"var nion = parseFloat(document.getElementById('pct_balance').value);
+var prefit = (nion/1440000)
+var winnerdinner = nion;
+var smartz = nion;
+var tens = (prefit*10);
+var sevens = (prefit*6.9);
+var eights = (prefit*7.9);
+var belance = 0;
+var joey = 0;
+var greedy =  parseFloat(document.getElementById('pct_balance').value);
+ 
+ 
+ 
+function go(){
+if (greedy!=belance){
+belance = parseFloat(document.getElementById('pct_balance').value);
+   if ((belance>(((Math.floor(belance/tens))*tens)+sevens))&&(belance<(((Math.floor(belance/tens))*tens)+eights))&&(!((belance>(joey-(prefit/2)))&&(belance<(joey+(prefit/2)))))) {
+    beast = beast*2;
+    joey = parseFloat(belance);
+}
+    if ((belance>=(james+tens))&&(belance<(((Math.floor(belance/tens))*tens)+sevens))){
+        beast = prefit;
+        joey = 0;
+        james = ((Math.floor(belance/tens))*tens);
+    }
+if (belance>=(winnerdinner*24000)) {
+console.log(""winner winner chicken dinner"");
+    return;
+}
+var cat = ((belance-smartz).toFixed(8));
+console.log(""profit"");
+console.log(cat);
+$('#pct_chance').val(49.5);
+$('#pct_bet').val(((beast*1).toFixed(8)));
+$('#a_lo').click();
+}
+greedy =  parseFloat(document.getElementById('pct_balance').value);
+setTimeout(() => go(), 1);
+}
+ 
+go();"
+8Jribuvn,"Roe2Js :: ""files.js""",jargon,JavaScript,Wednesday 26th of June 2024 11:44:23 PM CDT,"function loadJSONSync(url) {
+    
+	url = fixURL(url);
+	
+	var xhr = new XMLHttpRequest();
+    
+	xhr.open('GET', url, false); // 'false' makes the request synchronous
+    
+	xhr.send(null);
+    
+    if (xhr.status === 200) {
+        
+		return JSON.parse(xhr.responseText);
+		
+    } else {
+		
+		// throw new Error('Failed to load JSON');
+        return [];
+		
+    }
+}
+
+function loadJSONDirect (url) {
+	
+	url = fixURL ( url );
+	
+	if( !fileExists ( url ) ) {
+		return [];
+	}
+	
+	try {
+		var data = loadJSONSync(url);
+		// // console.log(data);
+	} catch (error) {
+		return [];
+		// console.error(error);
+	}
+	// console.log	( basename(url), data );
+	return data;
+}
+
+function fileExists ( url ) {
+	
+	url = fixURL( url );
+	
+	try {
+		fetch ( url );
+	} catch (error) {
+		return false;
+	}
+	return true;
+}
+
+function basename(path = '', ext = '') {
+    // Ensure path is a string
+    path = path.toString();
+
+    // Split the path by '/'
+    let parts = path.split('/');
+    
+    // Get the last part of the path
+    let base = parts[parts.length - 1];
+    
+    // If an extension is specified and the base ends with that extension
+    if (ext && right(base, len(ext)) === ext) {
+        // Remove the extension from the base
+        base = left(base, len(base) - len(ext));
+    }
+    
+    return base;
+}
+
+function fixURL ( url ) {
+
+	// Ensure the URL starts with the host
+	if ( !url.startsWith( host ) ) {
+		url = `${host}${url}`;
+	}
+			
+	// Replace spaces with %20
+	url = url.replace(/ /g, '%20');
+
+	return url;
+}"
+4u0446HJ,"Roe2Js :: ""files.js >> fileExists ( )""",jargon,JavaScript,Wednesday 26th of June 2024 11:22:37 PM CDT,"// Function to check if a file exists using a HEAD request
+function fileExists(url) {
+	try {
+		const response = fetch(url, { method: 'HEAD' });
+		return response.ok;
+	} catch (error) {
+		// console.error(`Error checking file existence: ${error}`);
+		return false;
+	}
+}
+"
+06rrAn2Z,Minified HTML,elmstedt,HTML,Wednesday 26th of June 2024 11:21:36 PM CDT,"<h1>My Markdown Document</h1><h2>Introduction</h2><p>Welcome to this example document. It demonstrates various Markdown formatting types.</p><h3>Formatting</h3><p><strong>Bold text</strong> can be created using double asterisks or double underscores.</p><p><em>Italic text</em> can be created using single asterisks or single underscores.</p><p><del>Strikethrough text</del> is also possible using double tildes.</p><h3>Lists</h3><h4>Unordered List</h4><ul> <li>Item 1</li> <li>Item 2 <ul> <li>Subitem 2.1</li><li>Subitem 2.2</li> </ul> </li> <li>Item 3</li></ul><h4>Ordered List</h4><ol> <li>First item</li><li>Second item <ol> <li>Subitem 2.1</li> <li>Subitem 2.2</li> </ol> </li> <li>Third item</li></ol><h3>Links and Images</h3><p><a href=""https://www.openai.com"">OpenAI</a></p><p><img src=""https://www.openai.com/assets/images/openai-logo.svg"" alt=""OpenAI Logo""></p><h3>Code</h3><p>Inline code: <code>print(""Hello, World!"")</code></p><p>Block of code:</p><pre><code>def greet(): print(""Hello, World!"")</code></pre><h3>Blockquotes</h3><blockquote> <p>This is a blockquote. It can span multiple lines.</p></blockquote><h3>Tables</h3><table> <thead> <tr> <th>Header 1</th> <th>Header 2</th> </tr> </thead> <tbody> <tr> <td>Row 1</td> <td>Data 1</td> </tr> <tr> <td>Row 2</td> <td>Data 2</td> </tr> </tbody></table><h3>Horizontal Rule</h3><hr><h3>Task List</h3><ul> <li>[x] Task 1</li> <li>[ ] Task 2</li> <li>[ ] Task 3</li></ul>"
+wcP083vb,HTML,elmstedt,HTML,Wednesday 26th of June 2024 11:20:42 PM CDT,"<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>My Markdown Document</title>
+</head>
+<body>
+
+<h1>My Markdown Document</h1>
+
+<h2>Introduction</h2>
+
+<p>Welcome to this example document. It demonstrates various Markdown formatting types.</p>
+
+<h3>Formatting</h3>
+
+<p><strong>Bold text</strong> can be created using double asterisks or double underscores.</p>
+
+<p><em>Italic text</em> can be created using single asterisks or single underscores.</p>
+
+<p><del>Strikethrough text</del> is also possible using double tildes.</p>
+
+<h3>Lists</h3>
+
+<h4>Unordered List</h4>
+<ul>
+    <li>Item 1</li>
+    <li>Item 2
+        <ul>
+            <li>Subitem 2.1</li>
+            <li>Subitem 2.2</li>
+        </ul>
+    </li>
+    <li>Item 3</li>
+</ul>
+
+<h4>Ordered List</h4>
+<ol>
+    <li>First item</li>
+    <li>Second item
+        <ol>
+            <li>Subitem 2.1</li>
+            <li>Subitem 2.2</li>
+        </ol>
+    </li>
+    <li>Third item</li>
+</ol>
+
+<h3>Links and Images</h3>
+
+<p><a href=""https://www.openai.com"">OpenAI</a></p>
+
+<p><img src=""https://www.openai.com/assets/images/openai-logo.svg"" alt=""OpenAI Logo""></p>
+
+<h3>Code</h3>
+
+<p>Inline code: <code>print(""Hello, World!"")</code></p>
+
+<p>Block of code:</p>
+
+<pre><code>def greet():
+    print(""Hello, World!"")
+</code></pre>
+
+<h3>Blockquotes</h3>
+
+<blockquote>
+    <p>This is a blockquote. It can span multiple lines.</p>
+</blockquote>
+
+<h3>Tables</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>Header 1</th>
+            <th>Header 2</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Row 1</td>
+            <td>Data 1</td>
+        </tr>
+        <tr>
+            <td>Row 2</td>
+            <td>Data 2</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Horizontal Rule</h3>
+
+<hr>
+
+<h3>Task List</h3>
+
+<ul>
+    <li>[x] Task 1</li>
+    <li>[ ] Task 2</li>
+    <li>[ ] Task 3</li>
+</ul>
+
+</body>
+</html>"
+rqWwcSpb,Relay Control rev_01,pleasedontcode,Arduino,Wednesday 26th of June 2024 10:24:14 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Relay Control
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2024-06-27 03:23:23
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Automate plant watering using a relay module. */
+	/* Control two relay channels connected to digital */
+	/* pins D2 and D3 to manage water pumps. Ensure the */
+	/* system updates output states continuously in the */
+	/* loop function. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Relay.h>  //https://github.com/rafaelnsantos/Relay
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs(void);
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t relay_RelayModule_Signal_PIN_D2 = 2;
+const uint8_t relay_RelayModule_Signal_PIN_D3 = 3;
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool relay_RelayModule_Signal_PIN_D2_rawData = 0;
+bool relay_RelayModule_Signal_PIN_D3_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float relay_RelayModule_Signal_PIN_D2_phyData = 0.0;
+float relay_RelayModule_Signal_PIN_D3_phyData = 0.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+Relay relay1(relay_RelayModule_Signal_PIN_D2, true); // Initialize relay on pin 2, Normally Open
+Relay relay2(relay_RelayModule_Signal_PIN_D3, true); // Initialize relay on pin 3, Normally Open
+
+void setup(void)
+{
+    // put your setup code here, to run once:
+
+    relay1.begin(); // Initialize the pin for relay1
+    relay2.begin(); // Initialize the pin for relay2
+}
+
+void loop(void)
+{
+    // put your main code here, to run repeatedly:
+
+    updateOutputs(); // Refresh output data
+}
+
+void updateOutputs()
+{
+    // Update the state of relay1
+    if (relay_RelayModule_Signal_PIN_D2_rawData)
+        relay1.turnOn();
+    else
+        relay1.turnOff();
+
+    // Update the state of relay2
+    if (relay_RelayModule_Signal_PIN_D3_rawData)
+        relay2.turnOn();
+    else
+        relay2.turnOff();
+}
+
+/* END CODE */"
+1XZ2Xiuv,Untitled,Genral,Dart,Wednesday 26th of June 2024 10:21:40 PM CDT,"import 'package:mysql1/mysql1.dart';
+import 'dart:async';
+
+enum MySqlCommandType { delete, insert, select, update, count }
+
+class MySqlCommand {
+  MySqlCommandType type;
+  StringBuffer _command = StringBuffer();
+  final List<MySqlParameter> _parameters = [];
+  bool firstPart = true;
+  Map<int, String> insertFields = {};
+  Map<int, String> insertValues = {};
+  int lastpair = 0;
+
+  MySqlCommand(this.type) {
+    switch (type) {
+      case MySqlCommandType.select:
+        _command.write('SELECT * FROM <R>');
+        break;
+      case MySqlCommandType.update:
+        _command.write('UPDATE <R> SET ');
+        break;
+      case MySqlCommandType.insert:
+        _command.write('INSERT INTO <R> (<F>) VALUES (<V>)');
+        break;
+      case MySqlCommandType.delete:
+        _command.write('DELETE FROM <R> WHERE <C> = <V>');
+        break;
+      case MySqlCommandType.count:
+        _command.write('SELECT count(<V>) FROM <R>');
+        break;
+    }
+  }
+
+  bool _comma() {
+    if (firstPart) {
+      firstPart = false;
+      return false;
+    }
+    return _command.toString().endsWith(',');
+  }
+
+  MySqlCommand select(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '$table'));
+    return this;
+  }
+
+  MySqlCommand delete(String table, String column, Object value) {
+    _command = StringBuffer(_command
+        .toString()
+        .replaceAll('<R>', '$table')
+        .replaceAll('<C>', '$column')
+        .replaceAll('<V>', value is String ? ""'$value'"" : value.toString()));
+    return this;
+  }
+
+  MySqlCommand update(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '$table'));
+    return this;
+  }
+
+  MySqlCommand set(String column, Object value) {
+    if (type == MySqlCommandType.update) {
+      String parameterPlaceholder = '@$column';
+      if (_comma()) {
+        _command.write(', $column = $parameterPlaceholder ');
+      } else {
+        _command.write('$column = $parameterPlaceholder ');
+      }
+      addParameter(parameterPlaceholder, value);
+    }
+    return this;
+  }
+
+  MySqlCommand insert(String table) {
+    _command = StringBuffer(_command.toString().replaceAll('<R>', '$table'));
+    return this;
+  }
+
+  MySqlCommand insertField(String field, Object value) {
+    insertFields[lastpair] = '$field';
+    insertValues[lastpair] = value is String ? ""'$value'"" : value.toString();
+    addParameter('@$field', value);
+    lastpair++;
+    return this;
+  }
+
+  MySqlCommand addParameter(String name, Object value) {
+    _parameters.add(MySqlParameter(name, value));
+    return this;
+  }
+
+  MySqlCommand where(String column, Object value,
+      {bool greater = false, bool like = false}) {
+    String parameterPlaceholder = '@$column';
+    if (like) {
+      _command.write(' WHERE $column LIKE $parameterPlaceholder');
+      addParameter(parameterPlaceholder, '%$value%');
+    } else {
+      _command.write(
+          ' WHERE $column ${greater ? '>' : '='} $parameterPlaceholder');
+      addParameter(parameterPlaceholder, value);
+    }
+    return this;
+  }
+
+  Future<int> executeAsync(MySqlConnection conn) async {
+    if (type == MySqlCommandType.insert) {
+      var fields = insertFields.values.join(',');
+      var values = insertValues.values.join(',');
+      _command = StringBuffer(_command
+          .toString()
+          .replaceAll('<F>', fields)
+          .replaceAll('<V>', values));
+    }
+
+    var result = await conn.query(
+        _command.toString(), _parameters.map((param) => param.value).toList());
+    return result.affectedRows!;
+  }
+
+  Future<Results> query(MySqlConnection conn) async {
+    var result = await conn.query(
+        _command.toString(), _parameters.map((param) => param.value).toList());
+    return result;
+  }
+}
+
+class MySqlParameter {
+  String name;
+  Object value;
+  MySqlParameter(this.name, this.value);
+}
+
+Future<MySqlConnection> getConnection() async {
+  final settings = ConnectionSettings(
+    host: '192.168.1.10',
+    port: 3306,
+    user: 'root',
+    password: '',
+    db: 'sina',
+  );
+  return await MySqlConnection.connect(settings);
+}
+
+Future GetAccount() async {
+  try {
+    final conn = await getConnection();
+    final cmd = MySqlCommand(MySqlCommandType.insert);
+    cmd
+        .insert(""catcherorr"")
+        .insertField(""UidAcount"", ""afas"")
+        .insertField(""erorr"", 'safasf');
+    await cmd.executeAsync(conn);
+    await conn.close();
+  } catch (e) {
+    print(e.toString());
+  }
+}
+"
+tH7tgWdL,my zsh shell,sypher_01,Bash,Wednesday 26th of June 2024 10:21:15 PM CDT,"# Enable color support
+autoload -U colors && colors
+
+# Set the prompt
+PROMPT='%F{white}╰─λ %F{white}'
+RPROMPT=''
+
+# Function to calculate command execution time
+precmd() {
+  elapsed_time=$(( ($(date +%s%3N) - cmd_start_time) ))
+  PS1=""%F{red}╭─%n@%m %F{magenta}%~ took ${elapsed_time}ms
+%F{white}╰─λ %F{white}""
+}
+
+preexec() {
+  cmd_start_time=$(date +%s%3N)
+}
+
+# Enable auto-correction
+setopt CORRECT
+
+# Enable command auto-completion
+autoload -U compinit && compinit
+
+# Enable extended globbing and regular expressions
+setopt EXTENDED_GLOB
+
+# History settings
+HISTFILE=~/.zsh_history
+HISTSIZE=1000
+SAVEHIST=1000
+setopt APPEND_HISTORY
+setopt INC_APPEND_HISTORY
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_FIND_NO_DUPS
+
+# Aliases
+alias ll='ls -lah'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Load custom scripts if they exist
+if [ -d ""$HOME/.zshrc.d"" ]; then
+  for file in ""$HOME/.zshrc.d""/*.zsh; do
+    [ -r ""$file"" ] && source ""$file""
+  done
+fi
+"
+i2s8uK7r,E,Ankit_132,C++,Wednesday 26th of June 2024 10:11:33 PM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+
+vector<int> z_function(string s) {
+    int n = s.size();
+    vector<int> z(n);
+    int l = 0, r = 0;
+    for(int i = 1; i < n; i++) {
+        if(i < r) {
+            z[i] = min(r - i, z[i - l]);
+        }
+        while(i + z[i] < n && s[z[i]] == s[i + z[i]]) {
+            z[i]++;
+        }
+        if(i + z[i] > r) {
+            l = i;
+            r = i + z[i];
+        }
+    }
+    return z;
+}
+
+
+void solve() {
+    string s, t; cin >> s;
+    int n = s.size();
+    if(n & 1) {
+        cout << ""0\n""; return;
+    }
+    
+    t = s;
+    reverse(t.begin(), t.end()) ;
+    
+    auto z1 = z_function(s);
+    auto z2 = z_function(t);
+
+    int ans = 0 ;
+    for (int sz1 = 0; sz1 <= n / 2; sz1++ ) {
+        int sz2 = (n / 2) - sz1 ;
+        
+        if(z1[sz1] >= sz1 && z2[sz2] >= sz2)
+            ans++ ;
+    }
+    cout << ans << endl;
+    
+    
+}
+
+int main() {
+	// your code goes here
+	int t; cin >> t;
+	while(t--) solve();
+
+}"
+HpnBHL8x,D,Ankit_132,C++,Wednesday 26th of June 2024 10:11:02 PM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+
+int main() {
+    int t;
+    cin >> t;
+    while(t--){
+     
+        int n; cin >> n;
+     
+        vector<int> a(n);
+        for (auto &x : a) cin >> x;
+     
+        vector<vector<int>> g(n);
+        for (int e = 0; e < n - 1; ++e){
+            int u, v; cin >> u >> v;
+            --u, --v;
+            g[u].push_back(v);
+            g[v].push_back(u);
+        }
+     
+        int root = -1, mn = *min_element(a.begin(), a.end());
+        for (int i = 0; i < n; ++i) {
+            if (a[i] == mn) root = i;
+        }
+        
+        cout << n - 1 << ""\n"";
+     
+        function<void(int, int)> dfs = [&](int u, int p){
+            for (auto &v : g[u]){
+                if (v == p) continue;
+                dfs(v, u);
+            }
+            if (u != root) cout << u + 1 << ' ';
+        };
+     
+        dfs(root, -1);
+        cout << ""\n"";
+    }
+}"
+wyM10aFe,C,Ankit_132,C++,Wednesday 26th of June 2024 10:10:26 PM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+
+int main() {
+    int t;
+    cin >> t;
+    while(t--){
+        int n;
+        cin>>n;
+        
+        if(n % 2 == 0){
+            for(int i = 1; i <=n/2; i++)
+                cout << i << "" "" << n-i+1 << "" "";
+        }else{
+            for(int i = 1; i <=n/2; i++)
+                cout << i << "" "" << n-i << "" "";
+            cout << n;
+        }
+        cout << endl;
+    }
+}"
+qGGBPu0H,B,Ankit_132,C++,Wednesday 26th of June 2024 10:09:57 PM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+#define ll long long int
+
+int main() {
+    int t;
+    cin >> t;
+    while(t--){
+        
+        ll n,m;
+        cin>>n>>m;
+
+        ll ans=0;
+
+        vector<ll> v1(n);
+        vector<ll> v2(n);
+        map<ll,ll> m1;
+        map<ll,ll> m2;
+        for (int i = 0; i < n; i++){
+            cin>>v1[i];
+            //m1[v1[i]%m]++;
+        }
+        for (int i = 0; i < n; i++){
+            cin>>v2[i];
+            m2[v2[i]%m]++;
+        }
+
+        for(int i=0;i<n;i++){
+            ans+=m2[(m-(v1[i])%m)%m];
+        }
+        cout<<ans<<endl;
+    }
+}"
+MDr6a4Qt,A,Ankit_132,C++,Wednesday 26th of June 2024 10:09:02 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int main() {
+    int t;
+    cin >> t;
+    while(t--){
+        int n;
+        cin >> n;
+        
+        int A[n];
+        for (int i = 0; i < n; i++) 
+            cin >> A[i];
+        
+        int f = 1;
+        
+        sort(A, A + n);
+        
+        for (int i = 0; i < n; i++) {
+            if (A[i] > i + 1)
+                f = 0;
+        }
+        
+        if (f) 
+            cout << ""YES""<<endl;
+        else 
+            cout << ""NO""<<endl;
+        
+    }
+}"
+Gfmf32ba,Untitled,shevaathalla,PHP,Wednesday 26th of June 2024 09:20:52 PM CDT,"<?php
+
+/**
+ * Function to get all week start dates and count the number of weeks in a date range.
+ *
+ * @param string $start_date The start date in 'Y-m-d' format.
+ * @param string $end_date The end date in 'Y-m-d' format.
+ * @return array Contains 'week_count' and 'week_starts' (array of start dates of each week).
+ */
+function getWeeksInRange($start_date, $end_date) {
+    $start = new DateTime($start_date);
+    $end = new DateTime($end_date);
+    $end->modify('+1 day'); // Include the end date in the range
+
+    // Get the start of the first week
+    $week_start = clone $start;
+    $week_start->modify('monday this week');
+
+    // Calculate the total number of weeks
+    $interval = new DateInterval('P1W');
+    $date_range = new DatePeriod($week_start, $interval, $end);
+
+    // Collect week start dates
+    $week_starts = [];
+    foreach ($date_range as $date) {
+        $week_starts[] = $date->format('Y-m-d');
+    }
+
+    // Return the count of weeks and the start dates of each week
+    return [
+        'week_count' => count($week_starts),
+        'week_starts' => $week_starts
+    ];
+}
+
+// Example usage
+$start_date = '2024-06-01';
+$end_date = '2024-07-31';
+
+$result = getWeeksInRange($start_date, $end_date);
+
+echo ""Number of weeks: "" . $result['week_count'] . PHP_EOL;
+echo ""Week start dates: "" . implode(', ', $result['week_starts']) . PHP_EOL;
+
+?>"
+HTK8kEjW,Day07,HarrJ,Java,Wednesday 26th of June 2024 07:57:37 PM CDT,"import java.util.Scanner;
+
+public class Day07A {
+    public static void main(String[] args) {
+        //preparation
+        Scanner sc = new Scanner(System.in);
+        double num1, num2, result;
+        String op;
+        //input
+        System.out.print(""Enter num1: "");
+        num1 = sc.nextDouble();
+        System.out.print(""Enter num2: "");
+        num2 = sc.nextDouble();
+        sc.nextLine();
+        System.out.print(""Enter Operator(+, -, *, /): "");
+        op = sc.nextLine();
+        
+		// condition for subtraction and division
+        if (op.equals(""-"")) {
+            result = num1 - num2;
+            System.out.println(num1 + "" - "" + num2 + "" = "" + result);
+        } else if (op.equals(""/"")) {
+            if (num2 > 0) {
+                result = num1 / num2;
+                System.out.println(num1 + "" / "" + num2 + "" = "" + result);
+            } else {
+                System.out.println(""Cannot divide by zero"");
+            }
+        } else {
+            System.out.println(""Operator not - or / ."");
+        }
+        
+    }
+}
+"
+gY69cfsm,2024-06-26_stats.json,rdp_snitch,JSON,Wednesday 26th of June 2024 07:18:28 PM CDT,"{
+  ""ip"": {
+    ""94.26.249.208"": 3,
+    ""164.92.104.215"": 15,
+    ""223.166.31.100"": 6,
+    ""103.211.56.178"": 3,
+    ""194.165.16.78"": 6,
+    ""138.68.248.214"": 12,
+    ""104.248.154.46"": 9,
+    ""96.126.124.210"": 3,
+    ""194.165.16.76"": 6,
+    ""84.54.51.43"": 3,
+    ""23.94.182.194"": 3,
+    ""147.78.47.97"": 6,
+    ""198.235.24.56"": 9,
+    ""194.165.16.11"": 6,
+    ""45.83.64.12"": 3,
+    ""212.70.149.142"": 18,
+    ""103.121.74.4"": 3,
+    ""64.124.50.139"": 3,
+    ""45.227.254.49"": 18,
+    ""185.170.144.3"": 6,
+    ""51.103.90.130"": 3,
+    ""20.172.213.49"": 3,
+    ""147.185.132.106"": 9,
+    ""104.152.52.201"": 3,
+    ""207.90.244.14"": 15,
+    ""81.19.135.2"": 9,
+    ""213.109.202.251"": 18,
+    ""187.157.89.218"": 3,
+    ""198.235.24.35"": 9,
+    ""45.227.254.26"": 6,
+    ""168.100.241.25"": 3,
+    ""96.51.53.164"": 3,
+    ""117.173.153.116"": 3,
+    ""116.140.196.215"": 3,
+    ""194.165.16.72"": 6,
+    ""103.130.145.142"": 15,
+    ""198.235.24.112"": 9
+  },
+  ""asn"": {
+    ""AS49505"": 3,
+    ""AS14061"": 36,
+    ""AS17621"": 6,
+    ""AS133676"": 3,
+    ""AS48721"": 24,
+    ""AS63949"": 3,
+    ""AS51396"": 3,
+    ""AS36352"": 3,
+    ""AS209588"": 15,
+    ""AS396982"": 36,
+    ""AS208843"": 3,
+    ""AS204428"": 18,
+    ""AS134886"": 3,
+    ""AS6461"": 3,
+    ""AS267784"": 24,
+    ""AS197414"": 6,
+    ""AS8075"": 6,
+    ""AS14987"": 3,
+    ""AS174"": 15,
+    ""AS208312"": 18,
+    ""AS8151"": 3,
+    ""AS398710"": 3,
+    ""AS6327"": 3,
+    ""AS9808"": 3,
+    ""AS4837"": 3,
+    ""AS34394"": 15
+  },
+  ""isp"": {
+    ""OOO \""Network of data-centers \""Selectel\"""": 3,
+    ""DigitalOcean, LLC"": 36,
+    ""China Unicom Shanghai Province Network"": 6,
+    ""Gstech Software Systems Pvt Ltd"": 3,
+    ""Flyservers S.A."": 63,
+    ""Akamai Technologies, Inc."": 3,
+    ""Pfcloud UG"": 3,
+    ""HostPapa"": 3,
+    ""Google LLC"": 36,
+    ""INTERNET-RESEARCH"": 3,
+    ""SS-Net"": 18,
+    ""Super Sonic Broadband Pvt. Ltd"": 3,
+    ""Zayo Bandwidth"": 3,
+    ""Xhost Internet Solutions LP"": 6,
+    ""Microsoft"": 3,
+    ""Microsoft Corporation"": 3,
+    ""Rethem Hosting LLC"": 3,
+    ""Cogent Communications"": 15,
+    ""Red Byte LLC"": 18,
+    ""Uninet S.A. de C.V."": 3,
+    ""E SHELLS INC"": 3,
+    ""Shaw Communications Inc."": 3,
+    ""China Mobile communications corporation"": 3,
+    ""China Unicom CHINA169 Network"": 3,
+    ""Digi Turunc"": 15
+  },
+  ""org"": {
+    ""Unknown"": 12,
+    ""DigitalOcean, LLC"": 36,
+    ""Gstech Software Systems Pvt Ltd"": 3,
+    ""Flyservers S.A"": 30,
+    ""Linode"": 3,
+    ""Pfcloud UG"": 3,
+    ""HostPapa"": 3,
+    ""Palo Alto Networks, Inc"": 36,
+    ""4Media Ltd"": 18,
+    ""Super Sonic Broadband Pvt Ltd"": 3,
+    ""Microsoft Corporation"": 3,
+    ""UAB Host Baltic"": 24,
+    ""Xhostis"": 6,
+    ""Microsoft Azure Cloud (francecentral)"": 3,
+    ""Microsoft Azure Cloud (eastus)"": 3,
+    ""Rethem Hosting LLC"": 3,
+    ""SHODAN, LLC"": 15,
+    ""Alviva Holding Limited"": 9,
+    ""Chang Way Technologies Co. Limited"": 18,
+    ""Uninet S.A. de C.V."": 3,
+    ""E SHELLS INC"": 3,
+    ""Shaw Communications Inc"": 3,
+    ""China Mobile"": 3,
+    ""China United Network Communications Corporation Limited"": 3,
+    ""Turunc Smart Bilgisayar Ve Teknoloji Ve Dis Tecaret Limited"": 15
+  },
+  ""regionName"": {
+    ""Moscow"": 21,
+    ""California"": 63,
+    ""Shanghai"": 6,
+    ""Uttar Pradesh"": 3,
+    ""Kaunas"": 24,
+    ""Central Singapore"": 9,
+    ""Texas"": 18,
+    ""Limburg"": 3,
+    ""New York"": 3,
+    ""North Holland"": 12,
+    ""Land Berlin"": 3,
+    ""Sofia-Capital"": 18,
+    ""Maharashtra"": 3,
+    ""Virginia"": 6,
+    ""Vilnius"": 24,
+    ""\u00cele-de-France"": 3,
+    ""Illinois"": 6,
+    ""Hesse"": 9,
+    ""Mexico City"": 3,
+    ""Alberta"": 3,
+    ""Sichuan"": 3,
+    ""Beijing"": 3,
+    ""Istanbul"": 15
+  },
+  ""country"": {
+    ""Russia"": 21,
+    ""United States"": 96,
+    ""China"": 12,
+    ""India"": 6,
+    ""Lithuania"": 48,
+    ""Singapore"": 9,
+    ""The Netherlands"": 15,
+    ""Germany"": 12,
+    ""Bulgaria"": 18,
+    ""France"": 3,
+    ""Mexico"": 3,
+    ""Canada"": 3,
+    ""Turkey"": 15
+  },
+  ""account"": {
+    ""(empty)"": 18,
+    ""hello"": 60,
+    ""Test"": 66,
+    ""4f6gmcl0"": 12,
+    ""beio"": 3,
+    ""DESKTOP-0"": 3,
+    ""CLKNCJNog"": 3,
+    ""jlweOt"": 3,
+    ""KhsJIM"": 3,
+    ""user"": 3,
+    ""Administr"": 21,
+    ""NfXqxmQza"": 3,
+    ""WYPuRv"": 3,
+    ""OUwvcr"": 3,
+    ""nmap"": 3,
+    ""root"": 15,
+    ""Domain"": 21,
+    ""JjWAfXerf"": 3,
+    ""KeajIu"": 3,
+    ""ojTzou"": 3,
+    ""CmfxbMMZz"": 3,
+    ""QmuulW"": 3,
+    ""nZhVIk"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 261
+  },
+  ""client_build"": {
+    ""Unknown"": 261
+  },
+  ""client_name"": {
+    ""Unknown"": 261
+  },
+  ""ip_type"": {
+    ""hosting"": 90,
+    ""Unknown"": 147,
+    ""proxy"": 21,
+    ""mobile"": 3
+  }
+}"
+hh5KfAT0,2024-06-26_stats.json,rdp_snitch,JSON,Wednesday 26th of June 2024 07:16:11 PM CDT,"{
+  ""ip"": {
+    ""94.26.249.208"": 2,
+    ""164.92.104.215"": 10,
+    ""223.166.31.100"": 4,
+    ""103.211.56.178"": 2,
+    ""194.165.16.78"": 4,
+    ""138.68.248.214"": 8,
+    ""104.248.154.46"": 6,
+    ""96.126.124.210"": 2,
+    ""194.165.16.76"": 4,
+    ""84.54.51.43"": 2,
+    ""23.94.182.194"": 2,
+    ""147.78.47.97"": 4,
+    ""198.235.24.56"": 6,
+    ""194.165.16.11"": 4,
+    ""45.83.64.12"": 2,
+    ""212.70.149.142"": 12,
+    ""103.121.74.4"": 2,
+    ""64.124.50.139"": 2,
+    ""45.227.254.49"": 12,
+    ""185.170.144.3"": 4,
+    ""51.103.90.130"": 2,
+    ""20.172.213.49"": 2,
+    ""147.185.132.106"": 6,
+    ""104.152.52.201"": 2,
+    ""207.90.244.14"": 10,
+    ""81.19.135.2"": 6,
+    ""213.109.202.251"": 12,
+    ""187.157.89.218"": 2,
+    ""198.235.24.35"": 6,
+    ""45.227.254.26"": 4,
+    ""168.100.241.25"": 2,
+    ""96.51.53.164"": 2,
+    ""117.173.153.116"": 2,
+    ""116.140.196.215"": 2,
+    ""194.165.16.72"": 4,
+    ""103.130.145.142"": 10,
+    ""198.235.24.112"": 6
+  },
+  ""asn"": {
+    ""AS49505"": 2,
+    ""AS14061"": 24,
+    ""AS17621"": 4,
+    ""AS133676"": 2,
+    ""AS48721"": 16,
+    ""AS63949"": 2,
+    ""AS51396"": 2,
+    ""AS36352"": 2,
+    ""AS209588"": 10,
+    ""AS396982"": 24,
+    ""AS208843"": 2,
+    ""AS204428"": 12,
+    ""AS134886"": 2,
+    ""AS6461"": 2,
+    ""AS267784"": 16,
+    ""AS197414"": 4,
+    ""AS8075"": 4,
+    ""AS14987"": 2,
+    ""AS174"": 10,
+    ""AS208312"": 12,
+    ""AS8151"": 2,
+    ""AS398710"": 2,
+    ""AS6327"": 2,
+    ""AS9808"": 2,
+    ""AS4837"": 2,
+    ""AS34394"": 10
+  },
+  ""isp"": {
+    ""OOO \""Network of data-centers \""Selectel\"""": 2,
+    ""DigitalOcean, LLC"": 24,
+    ""China Unicom Shanghai Province Network"": 4,
+    ""Gstech Software Systems Pvt Ltd"": 2,
+    ""Flyservers S.A."": 42,
+    ""Akamai Technologies, Inc."": 2,
+    ""Pfcloud UG"": 2,
+    ""HostPapa"": 2,
+    ""Google LLC"": 24,
+    ""INTERNET-RESEARCH"": 2,
+    ""SS-Net"": 12,
+    ""Super Sonic Broadband Pvt. Ltd"": 2,
+    ""Zayo Bandwidth"": 2,
+    ""Xhost Internet Solutions LP"": 4,
+    ""Microsoft"": 2,
+    ""Microsoft Corporation"": 2,
+    ""Rethem Hosting LLC"": 2,
+    ""Cogent Communications"": 10,
+    ""Red Byte LLC"": 12,
+    ""Uninet S.A. de C.V."": 2,
+    ""E SHELLS INC"": 2,
+    ""Shaw Communications Inc."": 2,
+    ""China Mobile communications corporation"": 2,
+    ""China Unicom CHINA169 Network"": 2,
+    ""Digi Turunc"": 10
+  },
+  ""org"": {
+    ""Unknown"": 8,
+    ""DigitalOcean, LLC"": 24,
+    ""Gstech Software Systems Pvt Ltd"": 2,
+    ""Flyservers S.A"": 20,
+    ""Linode"": 2,
+    ""Pfcloud UG"": 2,
+    ""HostPapa"": 2,
+    ""Palo Alto Networks, Inc"": 24,
+    ""4Media Ltd"": 12,
+    ""Super Sonic Broadband Pvt Ltd"": 2,
+    ""Microsoft Corporation"": 2,
+    ""UAB Host Baltic"": 16,
+    ""Xhostis"": 4,
+    ""Microsoft Azure Cloud (francecentral)"": 2,
+    ""Microsoft Azure Cloud (eastus)"": 2,
+    ""Rethem Hosting LLC"": 2,
+    ""SHODAN, LLC"": 10,
+    ""Alviva Holding Limited"": 6,
+    ""Chang Way Technologies Co. Limited"": 12,
+    ""Uninet S.A. de C.V."": 2,
+    ""E SHELLS INC"": 2,
+    ""Shaw Communications Inc"": 2,
+    ""China Mobile"": 2,
+    ""China United Network Communications Corporation Limited"": 2,
+    ""Turunc Smart Bilgisayar Ve Teknoloji Ve Dis Tecaret Limited"": 10
+  },
+  ""regionName"": {
+    ""Moscow"": 14,
+    ""California"": 42,
+    ""Shanghai"": 4,
+    ""Uttar Pradesh"": 2,
+    ""Kaunas"": 16,
+    ""Central Singapore"": 6,
+    ""Texas"": 12,
+    ""Limburg"": 2,
+    ""New York"": 2,
+    ""North Holland"": 8,
+    ""Land Berlin"": 2,
+    ""Sofia-Capital"": 12,
+    ""Maharashtra"": 2,
+    ""Virginia"": 4,
+    ""Vilnius"": 16,
+    ""\u00cele-de-France"": 2,
+    ""Illinois"": 4,
+    ""Hesse"": 6,
+    ""Mexico City"": 2,
+    ""Alberta"": 2,
+    ""Sichuan"": 2,
+    ""Beijing"": 2,
+    ""Istanbul"": 10
+  },
+  ""country"": {
+    ""Russia"": 14,
+    ""United States"": 64,
+    ""China"": 8,
+    ""India"": 4,
+    ""Lithuania"": 32,
+    ""Singapore"": 6,
+    ""The Netherlands"": 10,
+    ""Germany"": 8,
+    ""Bulgaria"": 12,
+    ""France"": 2,
+    ""Mexico"": 2,
+    ""Canada"": 2,
+    ""Turkey"": 10
+  },
+  ""account"": {
+    ""(empty)"": 12,
+    ""hello"": 40,
+    ""Test"": 44,
+    ""4f6gmcl0"": 8,
+    ""beio"": 2,
+    ""DESKTOP-0"": 2,
+    ""CLKNCJNog"": 2,
+    ""jlweOt"": 2,
+    ""KhsJIM"": 2,
+    ""user"": 2,
+    ""Administr"": 14,
+    ""NfXqxmQza"": 2,
+    ""WYPuRv"": 2,
+    ""OUwvcr"": 2,
+    ""nmap"": 2,
+    ""root"": 10,
+    ""Domain"": 14,
+    ""JjWAfXerf"": 2,
+    ""KeajIu"": 2,
+    ""ojTzou"": 2,
+    ""CmfxbMMZz"": 2,
+    ""QmuulW"": 2,
+    ""nZhVIk"": 2
+  },
+  ""keyboard"": {
+    ""Unknown"": 174
+  },
+  ""client_build"": {
+    ""Unknown"": 174
+  },
+  ""client_name"": {
+    ""Unknown"": 174
+  },
+  ""ip_type"": {
+    ""hosting"": 60,
+    ""Unknown"": 98,
+    ""proxy"": 14,
+    ""mobile"": 2
+  }
+}"
+V2Q9guNw,2024-06-26_stats.json,rdp_snitch,JSON,Wednesday 26th of June 2024 07:15:09 PM CDT,"{
+  ""ip"": {
+    ""94.26.249.208"": 1,
+    ""164.92.104.215"": 5,
+    ""223.166.31.100"": 2,
+    ""103.211.56.178"": 1,
+    ""194.165.16.78"": 2,
+    ""138.68.248.214"": 4,
+    ""104.248.154.46"": 3,
+    ""96.126.124.210"": 1,
+    ""194.165.16.76"": 2,
+    ""84.54.51.43"": 1,
+    ""23.94.182.194"": 1,
+    ""147.78.47.97"": 2,
+    ""198.235.24.56"": 3,
+    ""194.165.16.11"": 2,
+    ""45.83.64.12"": 1,
+    ""212.70.149.142"": 6,
+    ""103.121.74.4"": 1,
+    ""64.124.50.139"": 1,
+    ""45.227.254.49"": 6,
+    ""185.170.144.3"": 2,
+    ""51.103.90.130"": 1,
+    ""20.172.213.49"": 1,
+    ""147.185.132.106"": 3,
+    ""104.152.52.201"": 1,
+    ""207.90.244.14"": 5,
+    ""81.19.135.2"": 3,
+    ""213.109.202.251"": 6,
+    ""187.157.89.218"": 1,
+    ""198.235.24.35"": 3,
+    ""45.227.254.26"": 2,
+    ""168.100.241.25"": 1,
+    ""96.51.53.164"": 1,
+    ""117.173.153.116"": 1,
+    ""116.140.196.215"": 1,
+    ""194.165.16.72"": 2,
+    ""103.130.145.142"": 5,
+    ""198.235.24.112"": 3
+  },
+  ""asn"": {
+    ""AS49505"": 1,
+    ""AS14061"": 12,
+    ""AS17621"": 2,
+    ""AS133676"": 1,
+    ""AS48721"": 8,
+    ""AS63949"": 1,
+    ""AS51396"": 1,
+    ""AS36352"": 1,
+    ""AS209588"": 5,
+    ""AS396982"": 12,
+    ""AS208843"": 1,
+    ""AS204428"": 6,
+    ""AS134886"": 1,
+    ""AS6461"": 1,
+    ""AS267784"": 8,
+    ""AS197414"": 2,
+    ""AS8075"": 2,
+    ""AS14987"": 1,
+    ""AS174"": 5,
+    ""AS208312"": 6,
+    ""AS8151"": 1,
+    ""AS398710"": 1,
+    ""AS6327"": 1,
+    ""AS9808"": 1,
+    ""AS4837"": 1,
+    ""AS34394"": 5
+  },
+  ""isp"": {
+    ""OOO \""Network of data-centers \""Selectel\"""": 1,
+    ""DigitalOcean, LLC"": 12,
+    ""China Unicom Shanghai Province Network"": 2,
+    ""Gstech Software Systems Pvt Ltd"": 1,
+    ""Flyservers S.A."": 21,
+    ""Akamai Technologies, Inc."": 1,
+    ""Pfcloud UG"": 1,
+    ""HostPapa"": 1,
+    ""Google LLC"": 12,
+    ""INTERNET-RESEARCH"": 1,
+    ""SS-Net"": 6,
+    ""Super Sonic Broadband Pvt. Ltd"": 1,
+    ""Zayo Bandwidth"": 1,
+    ""Xhost Internet Solutions LP"": 2,
+    ""Microsoft"": 1,
+    ""Microsoft Corporation"": 1,
+    ""Rethem Hosting LLC"": 1,
+    ""Cogent Communications"": 5,
+    ""Red Byte LLC"": 6,
+    ""Uninet S.A. de C.V."": 1,
+    ""E SHELLS INC"": 1,
+    ""Shaw Communications Inc."": 1,
+    ""China Mobile communications corporation"": 1,
+    ""China Unicom CHINA169 Network"": 1,
+    ""Digi Turunc"": 5
+  },
+  ""org"": {
+    ""Unknown"": 4,
+    ""DigitalOcean, LLC"": 12,
+    ""Gstech Software Systems Pvt Ltd"": 1,
+    ""Flyservers S.A"": 10,
+    ""Linode"": 1,
+    ""Pfcloud UG"": 1,
+    ""HostPapa"": 1,
+    ""Palo Alto Networks, Inc"": 12,
+    ""4Media Ltd"": 6,
+    ""Super Sonic Broadband Pvt Ltd"": 1,
+    ""Microsoft Corporation"": 1,
+    ""UAB Host Baltic"": 8,
+    ""Xhostis"": 2,
+    ""Microsoft Azure Cloud (francecentral)"": 1,
+    ""Microsoft Azure Cloud (eastus)"": 1,
+    ""Rethem Hosting LLC"": 1,
+    ""SHODAN, LLC"": 5,
+    ""Alviva Holding Limited"": 3,
+    ""Chang Way Technologies Co. Limited"": 6,
+    ""Uninet S.A. de C.V."": 1,
+    ""E SHELLS INC"": 1,
+    ""Shaw Communications Inc"": 1,
+    ""China Mobile"": 1,
+    ""China United Network Communications Corporation Limited"": 1,
+    ""Turunc Smart Bilgisayar Ve Teknoloji Ve Dis Tecaret Limited"": 5
+  },
+  ""regionName"": {
+    ""Moscow"": 7,
+    ""California"": 21,
+    ""Shanghai"": 2,
+    ""Uttar Pradesh"": 1,
+    ""Kaunas"": 8,
+    ""Central Singapore"": 3,
+    ""Texas"": 6,
+    ""Limburg"": 1,
+    ""New York"": 1,
+    ""North Holland"": 4,
+    ""Land Berlin"": 1,
+    ""Sofia-Capital"": 6,
+    ""Maharashtra"": 1,
+    ""Virginia"": 2,
+    ""Vilnius"": 8,
+    ""\u00cele-de-France"": 1,
+    ""Illinois"": 2,
+    ""Hesse"": 3,
+    ""Mexico City"": 1,
+    ""Alberta"": 1,
+    ""Sichuan"": 1,
+    ""Beijing"": 1,
+    ""Istanbul"": 5
+  },
+  ""country"": {
+    ""Russia"": 7,
+    ""United States"": 32,
+    ""China"": 4,
+    ""India"": 2,
+    ""Lithuania"": 16,
+    ""Singapore"": 3,
+    ""The Netherlands"": 5,
+    ""Germany"": 4,
+    ""Bulgaria"": 6,
+    ""France"": 1,
+    ""Mexico"": 1,
+    ""Canada"": 1,
+    ""Turkey"": 5
+  },
+  ""account"": {
+    ""(empty)"": 6,
+    ""hello"": 20,
+    ""Test"": 22,
+    ""4f6gmcl0"": 4,
+    ""beio"": 1,
+    ""DESKTOP-0"": 1,
+    ""CLKNCJNog"": 1,
+    ""jlweOt"": 1,
+    ""KhsJIM"": 1,
+    ""user"": 1,
+    ""Administr"": 7,
+    ""NfXqxmQza"": 1,
+    ""WYPuRv"": 1,
+    ""OUwvcr"": 1,
+    ""nmap"": 1,
+    ""root"": 5,
+    ""Domain"": 7,
+    ""JjWAfXerf"": 1,
+    ""KeajIu"": 1,
+    ""ojTzou"": 1,
+    ""CmfxbMMZz"": 1,
+    ""QmuulW"": 1,
+    ""nZhVIk"": 1
+  },
+  ""keyboard"": {
+    ""Unknown"": 87
+  },
+  ""client_build"": {
+    ""Unknown"": 87
+  },
+  ""client_name"": {
+    ""Unknown"": 87
+  },
+  ""ip_type"": {
+    ""hosting"": 30,
+    ""Unknown"": 49,
+    ""proxy"": 7,
+    ""mobile"": 1
+  }
+}"
+c51esEGz,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V3 🎁,wwxcwx,GetText,Wednesday 26th of June 2024 06:59:01 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+
+This is the most up to date version of this script. Any other one posted will not work
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+27 June 2024"
+3YAb9fpD,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V3 🎁,ssss50ws,GetText,Wednesday 26th of June 2024 06:51:48 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered
+
+This is the most up to date version of this script. Any other one posted will not work
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+27 June 2024"
+uyV64043,🤑 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V3 🤑,x2w,GetText,Wednesday 26th of June 2024 06:47:43 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+27 June 2024
+
+"
+3EX3m3xA,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V3 🎁,BitcoinScript2020,GetText,Wednesday 26th of June 2024 06:34:43 PM CDT,"G2A.com free gift card & games updated guide,
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered
+
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+27 June 2024"
+t268pLhS,Computercraft BigReactor Controler with enderIo Capacitorbank extension,Magnetar,Lua,Wednesday 26th of June 2024 06:08:43 PM CDT,"
+
+reactor = { }
+computer = {}
+
+function tprint (tbl, indent)
+    if not indent then indent = 0 end
+    local toprint = string.rep("" "", indent) .. ""{\r\n""
+    indent = indent + 2 
+    for k, v in pairs(tbl) do
+      toprint = toprint .. string.rep("" "", indent)
+      if (type(k) == ""number"") then
+        toprint = toprint .. ""["" .. k .. ""] = ""
+      elseif (type(k) == ""string"") then
+        toprint = toprint  .. k ..  ""= ""   
+      end
+      if (type(v) == ""number"") then
+        toprint = toprint .. v .. "",\r\n""
+      elseif (type(v) == ""string"") then
+        toprint = toprint .. ""\"""" .. v .. ""\"",\r\n""
+      elseif (type(v) == ""table"") then
+        toprint = toprint .. tprint(v, indent + 2) .. "",\r\n""
+      else
+        toprint = toprint .. ""\"""" .. tostring(v) .. ""\"",\r\n""
+      end
+    end
+    toprint = toprint .. string.rep("" "", indent-2) .. ""}""
+    return toprint
+    
+  end
+
+function log(text)
+  local h = fs.open(""log.txt"", ""w"")
+  h.write(text)
+  h.close()
+  
+end
+
+function toint(int)
+  return math.floor(tonumber(int))
+end
+
+settings = {
+  minEnergyToStorePercentage = 0,
+  maxEnergyToStorePercentage = 100,
+  wantedState = true,
+  useReactorAsAdditionalEnergyStorage = true
+}
+function loadSettings()
+  if not fs.exists(""settings.conf"") then
+    saveSettings()
+  end
+  local file = fs.open(""settings.conf"", ""r"")
+  local content = file.readAll()
+  settings = textutils.unserialize(content)
+  file.close()
+end
+function saveSettings()
+  local file = fs.open(""settings.conf"", ""w"")
+  file.write(textutils.serialize(settings))
+  file.close()
+end
+function initialise()
+  loadSettings()
+  reactor.minEnergyToStorePercentage = settings.minEnergyToStorePercentage
+  reactor.maxEnergyToStorePercentage = settings.maxEnergyToStorePercentage
+  reactor.setActive(settings.wantedState)
+
+  local enderio_capacitor_bank = peripheral.find(capacitor_bank.construction_name)
+  if enderio_capacitor_bank then
+    capacitor_bank.api = enderio_capacitor_bank
+  end
+  reactor.getStats(reactor)
+end
+
+reactor.name = ""Reactor 1""
+reactor.HostName = ""Reactor 1""
+reactor.api = peripheral.find(""BigReactors-Reactor"")
+reactor.state = false -- false = off true = on
+reactor.RFProducing = 0
+reactor.FuelAmount = 0
+reactor.getActive = reactor.api.getActive
+reactor.setActive = reactor.api.setActive
+reactor.setOn = function (self)
+  self.setActive(true)
+  settings.wantedState = true
+  saveSettings()
+end
+reactor.setOff = function (self)
+  self.setActive(false)
+  settings.wantedState = false
+  saveSettings()
+end
+reactor.getEnergyStored = function ()
+  local returnment = 0
+  if capacitor_bank.api then
+    returnment = returnment + capacitor_bank.api.getEnergyStored()
+  end
+  if settings.useReactorAsAdditionalEnergyStorage then
+    returnment = returnment + reactor.getReactorEnergyStored()
+  end
+  return returnment
+end
+reactor.getReactorEnergyStored = reactor.api.getEnergyStored
+reactor.energyStored = 0
+reactor.getEnergyCapacity = function ()
+  local returnment = 0
+  if capacitor_bank.api then
+    returnment = returnment + capacitor_bank.api.getMaxEnergyStored()
+  end
+  if settings.useReactorAsAdditionalEnergyStorage then
+    returnment = returnment + reactor.getReactorEnergyCapacity()
+  end
+  return returnment
+end
+reactor.getReactorEnergyCapacity = reactor.api.getEnergyCapacity
+reactor.EnergyCapacity = 0
+reactor.getFuelAmount = reactor.api.getFuelAmount
+reactor.FuelAmount = 0
+reactor.getFuelAmountMax = reactor.api.getFuelAmountMax
+reactor.FuelAmountMax =0
+reactor.getControlRodsLevels = reactor.api.getControlRodsLevels
+reactor.setControlRodsLevels = function (self,state)
+  --local self = setmetatable({},reactor)
+  local controlRods = self.getControlRodsLevels()
+  for i in pairs(controlRods) do
+    controlRods[i] = state
+  end
+  self.api.setControlRodsLevels(controlRods)
+end
+reactor.adjustControlRods = function (self, adjustment)
+  local controlRods = self.getControlRodsLevels()
+  local state = controlRods[0]
+  state = state + adjustment
+  if state < 0 then
+    state = 0
+  elseif state > 100 then
+    state = 0
+  end
+  self.setControlRodsLevels((state))
+end
+reactor.useAsEnergyStorage = function (self, state)
+  settings.useReactorAsAdditionalEnergyStorage = state
+  saveSettings()
+end
+reactor.ControlRodsLevels = 0
+reactor.getEnergyStats = reactor.api.getEnergyStats
+reactor.EnergyStats = 0
+reactor.getFuelConsumedLastTick = reactor.api.getFuelConsumedLastTick
+reactor.FuelConsumedLastTick =0
+reactor.getEnergyProducedLastTick = reactor.api.getEnergyProducedLastTick
+reactor.EnergyProducedLastTick = 0
+reactor.minEnergyToStorePercentage = 0
+reactor.maxEnergyToStorePercentage = 100
+reactor.getStats = function (self)
+  self.state = self.getActive()
+  self.energyStored = self.getEnergyStored()
+  self.EnergyCapacity = self.getEnergyCapacity()
+  self.FuelAmount = self.getFuelAmount()
+  self.FuelAmountMax = self.getFuelAmountMax()
+  self.ControlRodsLevels = self.getControlRodsLevels()
+  self.FuelConsumedLastTick = self.getFuelConsumedLastTick()
+  self.EnergyProducedLastTick = self.getEnergyProducedLastTick()
+end
+reactor.calculateControlRodLevels = function (self)
+  self.energyStored = self.getEnergyStored()
+  local currentStorredEnergy = self.energyStored
+  self.EnergyCapacity = self.getEnergyCapacity()
+  local difMinMaxEnergyToStore = self.maxEnergyToStorePercentage - self.minEnergyToStorePercentage
+  local maxPower = (self.EnergyCapacity / 100) * self.maxEnergyToStorePercentage
+  local minPower = (self.EnergyCapacity / 100) * self.minEnergyToStorePercentage
+
+  if currentStorredEnergy >= maxPower then
+    currentStorredEnergy = maxPower
+  elseif currentStorredEnergy <= minPower then
+    currentStorredEnergy = minPower
+  end
+  --wie viel energy ist mehr als das minimum bereits gespeichert
+  currentStorredEnergy = toint(currentStorredEnergy - (self.EnergyCapacity / 100) * self.minEnergyToStorePercentage)
+  local rfInBetween = (self.EnergyCapacity / 100) * difMinMaxEnergyToStore
+  local rodLevel = toint(math.ceil((currentStorredEnergy / rfInBetween) * 100))
+  self.setControlRodsLevels(self, rodLevel)
+end
+
+capacitor_bank = {
+  construction_name = ""capacitor_bank"",
+  api = nil
+}
+-- Get Reactor only works if one is connected
+initialise()
+--print(reactor.EnergyCapacity)
+sleep(1)
+while true do
+  reactor.getStats(reactor)
+  reactor.calculateControlRodLevels(reactor)
+  sleep(1)
+end
+"
+aqsbawia,test.lua,Harlaquin,Lua,Wednesday 26th of June 2024 05:32:17 PM CDT,"for i = 1, 10, 1 do
+    turtle.forward()
+    turtle.forward()
+    turtle.turnRight()
+    turtle.turnRight()
+end
+"
+HAqkzfEa,poc,blackhat1337,PHP,Wednesday 26th of June 2024 05:13:20 PM CDT,"<?php if (!extension_loaded(""phar"")) die(""skip"");
+
+$phar = new Phar(dirname(__FILE__) . '/poc.phar.tar');
+
+?>
+"
+KtzV6sLh,Untitled,Zeinab_Hamdy,C++,Wednesday 26th of June 2024 04:56:00 PM CDT,"#include<bits/stdc++.h>
+using namespace std;
+#define nl ""\n""
+#define cnl cout << nl;
+#define fi first
+#define se second
+#define pb push_back
+#define ll long long
+#define ull unsigned ll
+#define RV return void
+#define sz(x) int(x.size())
+#define all(v) v.begin(), v.end()
+#define rall(v) v.rbegin(), v.rend()
+#define fixed(n) fixed << setprecision(n)
+#define cin(v) for(auto&x:v) cin >> x;
+#define cout(v) for(auto&x:v) cout << x << "" "";
+void files(){
+    #ifndef ONLINE_JUDGE
+       freopen(""input.txt"", ""r"", stdin);
+       freopen(""output.txt"", ""w"", stdout);
+    #endif
+}
+
+int n , ans , cnt=0;;
+vector < int > v ;
+vector < vector < int > > dp;
+
+
+int rec(int mask , int prev){
+    if(!mask) {
+        return v[prev] ;
+    }
+
+    int &ret = dp[mask][prev];
+    if(~ret)
+        return ret ;
+    ret =0;
+
+    for(int i = 0 ; i < n ; i++){
+        if((mask >> i) & 1 ){
+            if(prev == n + 1) 
+                ret =  max(ret , v[i] + rec( mask^(1<<i) , i ));
+            else
+                ret =  max(ret , abs(v[prev]-v[i])+ rec( mask^(1<<i) , i ));
+        }
+    }
+
+    return ret ;
+}
+
+
+void build(int mask , int prev){
+    if(!mask) {
+        return ;
+    }
+
+    int ret = dp[mask][prev] , ret2=0;
+
+    for(int i = 0 ; i < n ; i++){
+        
+        if((mask >> i) & 1 ){
+            if(prev == n+1)  
+                ret2 = v[i] ;
+            else 
+                ret2= abs(v[prev]-v[i]);
+            
+            ret2 += rec( mask^(1<<i) , i );
+
+            if(ret2 == ret) cnt++ , build(  mask^(1<<i) , i);
+        }
+    }
+
+    return  ;
+}
+
+void solve(){
+   
+    while(cin >> n and n){
+        v.assign(n,0);
+        for(int i =0 ; i < n and cin >> v[i] ; i++);
+
+        //  2 * n + difference between any adj ( + start + end)
+        dp.assign(1 << n , vector < int > (n+2 , -1));
+
+        ans = rec( (1 << n) - 1 , n+1 ) + 2*n;
+        cnt = 0;
+        build((1 << n) - 1 , n+1);
+        cout << ans << "" "" << cnt << nl;
+
+// 20 8
+// 24 2
+
+
+
+    }
+ 
+}
+
+
+int main(){
+    ios_base::sync_with_stdio(false); 
+    cin.tie(nullptr); 
+    cout.tie(nullptr);
+                            
+    //  files();
+    
+    
+    int testCase=1;
+        // cin >> testCase ;
+    for(int i=1 ; i <= testCase ; i++){
+        solve();
+    }
+ 
+    return 0;
+}"
+srzkxDCb,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V2 🎁,portalxwe,GetText,Wednesday 26th of June 2024 04:06:28 PM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+
+This is the most up to date version of this script. Any other one posted will not work
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+27 June 2024"
+zetMz7tG,🎁 G2A.COM FREE GIFT CARD GUIDE JUN 2024 V3 🎁,kaka440ka,GetText,Wednesday 26th of June 2024 03:41:20 PM CDT,"G2A.com free gift card & games updated guide
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered
+
+This is the most up to date version of this script. Any other one posted will not work,
+ 
+PDF guide here:
+https://drive.google.com/file/d/1KMb0fLkKHIC2qdjR4vCSRH9rVSjJVMdX/view
+
+Working as of:
+26 June 2024"
+9fGqJwnH,MsgTaskRank.cs,UchihaT3Alo,C#,Wednesday 26th of June 2024 03:29:48 PM CDT,"using System;
+using ProtoBuf;
+using System.Linq;
+
+namespace GameServer.Game.MsgServer
+{
+    public static class MsgTaskRank
+    {
+        [ProtoContract]
+        public class MsgTaskRankProto
+        {
+            [ProtoMember(1, IsRequired = true)]
+            public uint Type;
+            [ProtoMember(2, IsRequired = true)]
+            public uint TypeRank;
+            [ProtoMember(3, IsRequired = true)]
+            public uint TotalMarbles;
+            [ProtoMember(4, IsRequired = true)]
+            public uint MyRank;
+            [ProtoMember(5, IsRequired = true)]
+            public uint DoneSend;
+            [ProtoMember(6, IsRequired = true)]
+            public System.Collections.Generic.List<RankList> Items = new System.Collections.Generic.List<RankList>();
+            [ProtoMember(7, IsRequired = true)]
+            public uint TodayMarbles;
+            [ProtoMember(8, IsRequired = true)]
+            public uint Unknow8;
+        }
+        [ProtoContract]
+        public class RankList
+        {
+            [ProtoMember(1)]
+            public uint Rank;
+            [ProtoMember(2)]
+            public uint UID;
+            [ProtoMember(3)]
+            public uint MarblesCount;
+            [ProtoMember(4)]
+            public uint Mesh;
+            [ProtoMember(5)]
+            public string Name;
+            [ProtoMember(6)]
+            public string ClanName;
+            [ProtoMember(7)]
+            public string GuildName;
+            [ProtoMember(8)]
+            public uint AvatarFrame;
+        }
+        public static unsafe ServerSockets.Packet CreateTaskRank(this ServerSockets.Packet stream, MsgTaskRankProto obj)
+        {
+            stream.InitWriter();
+            stream.ProtoBufferSerialize(obj);
+            stream.Finalize((ushort)Game.MsgType.MsgTaskRank);
+            return stream;
+        }
+        public static unsafe void GetTaskRank(this ServerSockets.Packet stream, out MsgTaskRankProto pQuery)
+        {
+            pQuery = new MsgTaskRankProto();
+            pQuery = stream.ProtoBufferDeserialize(pQuery);
+        }
+        [Packet((ushort)Game.MsgType.MsgTaskRank)]
+        private static unsafe void Process(Client.GameClient client, ServerSockets.Packet stream)
+        {
+            MsgTaskRankProto Info;
+            stream.GetTaskRank(out Info);
+            //50026 => Marble Man
+            //50025 => Peony Woman
+            switch (Info.Type)
+            {
+                case 0://Send Players Rank
+                    {
+                        if (GameServer.Role.Core.IsBoy(client.Player.Body))
+                        {
+                            if (Pool.BoysFlowersRanking.Peoneys.Values.Count() == 0)
+                                break;
+                            var obj = new MsgTaskRankProto()
+                            {
+                                Type = 0,
+                                TypeRank = 50026,
+                                DoneSend = 1,
+                            };
+                            foreach (var item in Pool.BoysFlowersRanking.Peoneys.Values)
+                            {
+                                Database.FlowerRank.Entry a7a;
+                                if (Database.FlowerRank.RankingList.TryGetValue(item.UID, out a7a))
+                                {
+                                    var proto = new RankList()
+                                    {
+                                        Rank = (uint)item.Rank,
+                                        UID = item.UID,
+                                        MarblesCount = item.Amount,
+                                        Mesh = a7a.Mesh,
+                                        Name = item.Name,
+                                        ClanName = a7a.ClanName,
+                                        GuildName = a7a.GuildName,
+                                        AvatarFrame = a7a.AvatarFrame,
+                                    };
+                                    obj.Items.Add(proto);
+                                    if (obj.Items.Count == 30)
+                                    {
+                                        client.Send(stream.CreateTaskRank(obj));
+                                        obj = new MsgTaskRankProto()
+                                        {
+                                            Type = 0,
+                                            TypeRank = 50026,
+                                            DoneSend = 1,
+                                        };
+                                    }
+                                }
+                            }
+                            client.Send(stream.CreateTaskRank(obj));
+                        }
+                        else if (GameServer.Role.Core.IsGirl(client.Player.Body))
+                        {
+                            if (Pool.GirlsFlowersRanking.Peoneys.Values.Count() == 0)
+                                break;
+                            var obj = new MsgTaskRankProto()
+                            {
+                                Type = 0,
+                                TypeRank = 50025,
+                                DoneSend = 1,
+                            };
+                            foreach (var item in Pool.GirlsFlowersRanking.Peoneys.Values)
+                            {
+                                Database.FlowerRank.Entry a7a;
+                                if (Database.FlowerRank.RankingList.TryGetValue(item.UID, out a7a))
+                                {
+                                    var proto = new RankList()
+                                    {
+                                        Rank = (uint)item.Rank,
+                                        UID = item.UID,
+                                        MarblesCount = item.Amount,
+                                        Mesh = a7a.Mesh,
+                                        Name = item.Name,
+                                        ClanName = a7a.ClanName,
+                                        GuildName = a7a.GuildName,
+                                        AvatarFrame = a7a.AvatarFrame,
+                                    };
+                                    obj.Items.Add(proto);
+                                    if (obj.Items.Count == 30)
+                                    {
+                                        client.Send(stream.CreateTaskRank(obj));
+                                        obj = new MsgTaskRankProto()
+                                        {
+                                            Type = 0,
+                                            TypeRank = 50025,
+                                            DoneSend = 1,
+                                        };
+                                    }
+                                }
+                            }
+                            client.Send(stream.CreateTaskRank(obj));
+                        }
+                        break;
+                    }
+                case 1://Send Info Player
+                    {
+                        if (Role.Core.IsBoy(client.Player.Body))
+                        {
+                            if (Pool.BoysFlowersRanking.Peoneys.Values.Count() == 0)
+                                break;
+                            var obj = new MsgTaskRankProto();
+                            obj.Type = 1;
+                            obj.TypeRank = 50026;
+                            foreach (var item in Pool.BoysFlowersRanking.Peoneys.Values.Where(o => o.UID == client.Player.UID).Take(1))
+                            {
+                                if (item != null)
+                                {
+                                    obj.TotalMarbles = item.Amount;
+                                    obj.MyRank = (uint)item.Rank;
+                                    obj.TodayMarbles = item.Amount2day;
+                                    obj.Unknow8 = 1;
+                                }
+                            }
+                            client.Send(stream.CreateTaskRank(obj));
+                        }
+                        else if (Role.Core.IsGirl(client.Player.Body))//Not
+                        {
+                            if (Pool.GirlsFlowersRanking.Peoneys.Values.Count() == 0)
+                                break;
+                            var obj = new MsgTaskRankProto();
+                            obj.Type = 1;
+                            obj.TypeRank = 50025;
+                            foreach (var item in Pool.GirlsFlowersRanking.Peoneys.Values.Where(o => o.UID == client.Player.UID).Take(1))
+                            {
+                                if (item != null)
+                                {
+                                    obj.TotalMarbles = item.Amount;
+                                    obj.MyRank = (uint)item.Rank;
+                                    obj.TodayMarbles = item.Amount2day;
+                                    obj.Unknow8 = 1;
+                                }
+                            }
+                            client.Send(stream.CreateTaskRank(obj));
+                        }
+                        break;
+                    }
+                default:
+                    {
+                        Console.WriteLine(""Unknow Type MsgTaskRank => "" + Info.Type);
+                        break;
+                    }
+            }
+        }
+    }
+}"
+NjDgCq7D,"""Button Handling"" rev_05",pleasedontcode,Arduino,Wednesday 26th of June 2024 03:01:12 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: ""Button Handling""
+	- Source Code compiled for: Arduino Nano ESP32
+	- Source Code created on: 2024-06-26 20:00:08
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Implement a push-button control system using */
+	/* EasyButton library to detect button presses on */
+	/* digital pin D2. The system should initialize the */
+	/* button in setup() and continuously check for */
+	/* button state changes in loop(). */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <EasyButton.h>  //https://github.com/evert-arias/EasyButton
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t butt_PushButton_PIN_D2 = 2;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+EasyButton button(butt_PushButton_PIN_D2); // Initialize EasyButton object with the pin number
+
+/****** FUNCTION DECLARATIONS *****/
+void onPressed(); // Function to handle button press event
+
+void setup(void)
+{
+  // Initialize serial communication at 115200 baud rate
+  Serial.begin(115200); 
+  Serial.println();
+  Serial.println("">>> EasyButton pressed example <<<"");
+
+  // Initialize the button
+  button.begin(); 
+  // Attach the onPressed function to the button press event
+  button.onPressed(onPressed); 
+}
+
+void loop(void)
+{
+  // Continuously read the button state
+  button.read(); 
+}
+
+void onPressed()
+{
+  // Print message when button is pressed
+  Serial.println(""Button pressed""); 
+}
+
+/* END CODE */"
+s9qWk46U,сигма юнайтед2,POMIDOORKA,HTML,Wednesday 26th of June 2024 02:56:41 PM CDT,"Ссылка на мой дс сервер <a href=""https://discord.gg/Xr9D9SH5"">the hyperlink text</a>
+
+
+
+
+правила сервера
+
+
+1.не использовать читы
+2.не говорить о политике
+3.не использовать баги"
+uhuzaeKK,Untitled,chemelli74,Python,Wednesday 26th of June 2024 02:37:56 PM CDT,"
+Motion sensor log:
+
+
+27980.012 measure_temperature:	=======! 28745.00
+
+
+1719427980.017 measure_temperature:	Rt = 8543.28; tC = 27.94; 
+
+1719427980.022 measure_temperature:	state.tC_sm = 27.94; state.tC= 27.94
+
+
+1719428040.857 cloud_check_minute:	CLOUD TS[5]
+
+1719428040.862 check_signal_strength:	signal strength: -46
+
+
+ Raw adc: 28864
+
+1719428040.894 measure_temperature:	=======! 28864.00
+
+
+1719428040.900 measure_temperature:	Rt = 8615.11; tC = 27.79; 
+
+1719428040.905 measure_temperature:	state.tC_sm = 27.79; state.tC= 27.79
+
+
+1719428040.015 actions_execute:	Action reason[14]: MSG_TYPE_REPORT
+
+1719428040.051 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428040.056 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428040.060 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428040.066 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428040.071 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-46},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:54"",""unixtime"":1719428040,""serial"":44,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.8,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":false,""timestamp"":1719427232,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2071,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428040.329 cloud_read_task:	Received 64 bytes
+
+1719428040.334 cloud_count_json_brackets:	
+PARSED: {""trid"":990,""set"":""status"",""info"":{""serial"":44}}
+
+1719428040.345 cloud_parse_command:	CMD: status
+
+1719428040.349 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":990}}
+
+
+1719428040.359 cloud_count_json_brackets:	Done
+
+1719428100.943 cloud_check_minute:	CLOUD TS[0]
+
+1719428100.948 check_signal_strength:	signal strength: -46
+
+
+ Raw adc: 28962
+
+1719428100.980 measure_temperature:	=======! 28962.00
+
+
+1719428100.985 measure_temperature:	Rt = 8674.71; tC = 27.66; 
+
+1719428100.991 measure_temperature:	state.tC_sm = 27.66; state.tC= 27.66
+
+
+1719428160.826 cloud_check_minute:	CLOUD TS[1]
+
+1719428160.831 check_signal_strength:	signal strength: -46
+
+
+ Raw adc: 29064
+
+1719428160.863 measure_temperature:	=======! 29064.00
+
+
+1719428160.868 measure_temperature:	Rt = 8737.18; tC = 27.52; 
+
+1719428160.874 measure_temperature:	state.tC_sm = 27.52; state.tC= 27.52
+
+
+1719428220.876 cloud_check_minute:	CLOUD TS[2]
+
+1719428220.881 check_signal_strength:	signal strength: -46
+
+
+ Raw adc: 29156
+
+1719428220.913 measure_temperature:	=======! 29156.00
+
+
+1719428220.918 measure_temperature:	Rt = 8793.90; tC = 27.40; 
+
+1719428220.924 measure_temperature:	state.tC_sm = 27.40; state.tC= 27.40
+
+
+1719428232.162 vibration_service:	Vibration!!!
+
+1719428232.167 actions_execute:	Action reason[9]: MSG_TYPE_VIBRATION_ON
+
+1719428232.236 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428232.241 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428232.246 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428232.251 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428232.256 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-46},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:57"",""unixtime"":1719428232,""serial"":45,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.4,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":true,""motion"":false,""timestamp"":1719427232,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""cha
+
+rger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2263,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428233.160 vibration_service:	Vibration!!!
+
+1719428234.949 cloud_read_task:	Received 64 bytes
+
+1719428234.953 cloud_count_json_brackets:	
+PARSED: {""trid"":991,""set"":""status"",""info"":{""serial"":45}}
+
+1719428234.964 cloud_parse_command:	CMD: status
+
+1719428234.969 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":991}}
+
+
+1719428234.979 cloud_count_json_brackets:	Done
+
+1719428239.771 actions_execute:	Action reason[10]: MSG_TYPE_VIBRATION_OFF
+
+1719428239.936 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428239.941 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428239.945 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428239.951 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428239.956 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-46},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:57"",""unixtime"":1719428239,""serial"":46,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.4,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":false,""timestamp"":1719427232,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2270,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428241.439 cloud_read_task:	Received 64 bytes
+
+1719428241.443 cloud_count_json_brackets:	
+PARSED: {""trid"":992,""set"":""status"",""info"":{""serial"":46}}
+
+1719428241.454 cloud_parse_command:	CMD: status
+
+1719428241.459 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":992}}
+
+
+1719428241.468 cloud_count_json_brackets:	Done
+
+1719428280.808 cloud_check_minute:	CLOUD TS[0]
+
+1719428280.813 check_signal_strength:	signal strength: -47
+
+
+ Raw adc: 29241
+
+1719428280.845 measure_temperature:	=======! 29241.00
+
+
+1719428280.850 measure_temperature:	Rt = 8846.64; tC = 27.29; 
+
+1719428280.856 measure_temperature:	state.tC_sm = 27.29; state.tC= 27.29
+
+
+1719428322.328 Motion !!!
+1719428322.331 actions_execute:	Action reason[5]: MSG_TYPE_MOTION_ON
+
+1719428322.400 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428322.405 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428322.410 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428322.416 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428322.420 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-47},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:58"",""unixtime"":1719428322,""serial"":47,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.3,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":true,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2353,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428323.609 cloud_read_task:	Received 64 byt
+
+es
+
+1719428323.614 cloud_count_json_brackets:	
+PARSED: {""trid"":993,""set"":""status"",""info"":{""serial"":47}}
+
+1719428323.624 cloud_parse_command:	CMD: status
+
+1719428323.629 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":993}}
+
+
+1719428323.640 cloud_count_json_brackets:	Done
+
+1719428324.033 vibration_service:	Vibration!!!
+
+1719428324.038 actions_execute:	Action reason[9]: MSG_TYPE_VIBRATION_ON
+
+1719428324.106 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428324.111 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428324.116 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428324.121 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428324.127 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-47},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:58"",""unixtime"":1719428324,""serial"":48,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.3,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":true,""motion"":true,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2355,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428324.326 cloud_read_task:	Received 64 bytes
+
+1719428324.331 cloud_count_json_brackets:	
+PARSED: {""trid"":994,""set"":""status"",""info"":{""serial"":48}}
+
+1719428324.342 cloud_parse_command:	CMD: status
+
+1719428324.346 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":994}}
+
+
+1719428324.356 cloud_count_json_brackets:	Done
+
+1719428325.056 vibration_service:	Vibration!!!
+
+1719428331.642 actions_execute:	Action reason[10]: MSG_TYPE_VIBRATION_OFF
+
+1719428331.807 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428331.812 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428331.817 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428331.822 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428331.827 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-47},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""20:58"",""unixtime"":1719428331,""serial"":49,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":284,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":27.3,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":true,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2362,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428331.036 cloud_read_task:	Received 64 bytes
+
+1719428331.040 cloud_count_json_brackets:	
+PARSED: {""trid"":995,""set"":""status"",""info"":{""serial"":49}}
+
+1719428331.051 cloud_parse_command:	CMD: status
+
+1719428331.055 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":995}}
+
+
+1719428331.066 cloud_count_json_brackets:	Done
+
+1719428340.786 check_signal_strength:	signal strength: -44, current beacon skip is 20
+
+1719428340.794 cloud_check_minute:	CLOUD TS[0]
+
+
+ Raw adc: 29283
+
+1719428340.824 measure_temperature:	=======! 29283.00
+
+
+1719428340.829 measure_temperature:	Rt = 8872.81; tC = 27.23; 
+
+1719428340.835 measure_temperature:	state.tC_sm = 27.23; state.tC= 27.23
+
+
+1719428400.740 cloud_check_minute:	CLOUD TS[1]
+
+1719428400.745 check_signal_strength:	signal s
+
+trength: -44, current beacon skip is 20
+
+
+ Raw adc: 29416
+
+1719428400.780 measure_temperature:	=======! 29416.00
+
+
+1719428400.786 measure_temperature:	Rt = 8956.19; tC = 27.06; 
+
+1719428400.791 measure_temperature:	state.tC_sm = 27.06; state.tC= 27.06
+
+
+1719428460.723 cloud_check_minute:	CLOUD TS[2]
+
+1719428460.728 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 29508
+
+1719428460.763 measure_temperature:	=======! 29508.00
+
+
+1719428460.768 measure_temperature:	Rt = 9014.33; tC = 26.93; 
+
+1719428460.774 measure_temperature:	state.tC_sm = 26.93; state.tC= 26.93
+
+
+1719428520.678 cloud_check_minute:	CLOUD TS[3]
+
+1719428520.683 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 29583
+
+1719428520.718 measure_temperature:	=======! 29583.00
+
+
+1719428520.723 measure_temperature:	Rt = 9062.01; tC = 26.84; 
+
+1719428520.728 measure_temperature:	state.tC_sm = 26.84; state.tC= 26.84
+
+
+1719428580.657 cloud_check_minute:	CLOUD TS[4]
+
+1719428580.663 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 29670
+
+1719428580.698 measure_temperature:	=======! 29670.00
+
+
+1719428580.703 measure_temperature:	Rt = 9117.63; tC = 26.72; 
+
+1719428580.708 measure_temperature:	state.tC_sm = 26.72; state.tC= 26.72
+
+
+1719428580.818 actions_execute:	Action reason[14]: MSG_TYPE_REPORT
+
+1719428580.854 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428580.859 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428580.864 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428580.869 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428580.874 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-42},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""21:03"",""unixtime"":1719428580,""serial"":50,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":190,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":26.7,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":true,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":2611,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719428580.046 cloud_read_task:	Received 64 bytes
+
+1719428580.051 cloud_count_json_brackets:	
+PARSED: {""trid"":996,""set"":""status"",""info"":{""serial"":50}}
+
+1719428580.061 cloud_parse_command:	CMD: status
+
+1719428580.066 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":996}}
+
+
+1719428580.077 cloud_count_json_brackets:	Done
+
+1719428622.537 actions_execute:	Action reason[6]: MSG_TYPE_MOTION_OFF
+
+1719428622.840 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719428622.845 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719428622.850 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719428622.855 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719428622.860 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-42},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""21:03"",""unixtime"":1719428622,""serial"":51,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":190,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":26.7,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":false,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536
+
+,""fs_free"":59408,""uptime"":2653,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""psÆ_mode"":0,""dbg_flags"":0}}
+
+
+1719428622.085 cloud_read_task:	Received 64 bytes
+
+1719428622.090 cloud_count_json_brackets:	
+PARSED: {""trid"":997,""set"":""status"",""info"":{""serial"":51}}
+
+1719428622.100 cloud_parse_command:	CMD: status
+
+1719428622.105 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":997}}
+
+
+1719428622.116 cloud_count_json_brackets:	Done
+
+1719428640.616 cloud_check_minute:	CLOUD TS[0]
+
+1719428640.621 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 29730
+
+1719428640.656 measure_temperature:	=======! 29730.00
+
+
+1719428640.661 measure_temperature:	Rt = 9156.19; tC = 26.64; 
+
+1719428640.667 measure_temperature:	state.tC_sm = 26.64; state.tC= 26.64
+
+
+1719428700.553 cloud_check_minute:	CLOUD TS[1]
+
+1719428700.558 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 29804
+
+1719428700.594 measure_temperature:	=======! 29804.00
+
+
+1719428700.599 measure_temperature:	Rt = 9203.98; tC = 26.54; 
+
+1719428700.604 measure_temperature:	state.tC_sm = 26.54; state.tC= 26.54
+
+
+1719428760.502 cloud_check_minute:	CLOUD TS[2]
+
+1719428760.507 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 29873
+
+1719428760.542 measure_temperature:	=======! 29873.00
+
+
+1719428760.547 measure_temperature:	Rt = 9248.76; tC = 26.45; 
+
+1719428760.553 measure_temperature:	state.tC_sm = 26.45; state.tC= 26.45
+
+
+1719428820.476 cloud_check_minute:	CLOUD TS[3]
+
+1719428820.481 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 29930
+
+1719428820.516 measure_temperature:	=======! 29930.00
+
+
+1719428820.521 measure_temperature:	Rt = 9285.93; tC = 26.38; 
+
+1719428820.527 measure_temperature:	state.tC_sm = 26.38; state.tC= 26.38
+
+
+1719428880.426 cloud_check_minute:	CLOUD TS[4]
+
+1719428880.431 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 29991
+
+1719428880.466 measure_temperature:	=======! 29991.00
+
+
+1719428880.471 measure_temperature:	Rt = 9325.87; tC = 26.30; 
+
+1719428880.477 measure_temperature:	state.tC_sm = 26.30; state.tC= 26.30
+
+
+1719428940.471 cloud_check_minute:	CLOUD TS[5]
+
+1719428940.476 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30059
+
+1719428940.511 measure_temperature:	=======! 30059.00
+
+
+1719428940.517 measure_temperature:	Rt = 9370.59; tC = 26.21; 
+
+1719428940.522 measure_temperature:	state.tC_sm = 26.21; state.tC= 26.21
+
+
+1719429000.347 cloud_check_minute:	CLOUD TS[6]
+
+1719429000.352 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30116
+
+1719429000.387 measure_temperature:	=======! 30116.00
+
+
+1719429000.392 measure_temperature:	Rt = 9408.26; tC = 26.13; 
+
+1719429000.398 measure_temperature:	state.tC_sm = 26.13; state.tC= 26.13
+
+
+1719429060.393 cloud_check_minute:	CLOUD TS[7]
+
+1719429060.398 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30166
+
+1719429060.434 measure_temperature:	=======! 30166.00
+
+
+1719429060.439 measure_temperature:	Rt = 9441.42; tC = 26.07; 
+
+1719429060.444 measure_temperature:	state.tC_sm = 26.07; state.tC= 26.07
+
+
+1719429120.367 cloud_check_minute:	CLOUD TS[8]
+
+1719429120.372 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30225
+
+1719429120.407 measure_temperature:	=======! 30225.00
+
+
+1719429120.413 measure_temperature:	Rt = 9480.71; tC = 25.99; 
+
+1719429120.418 measure_temperature:	state.tC_sm = 25.99; state.tC= 25.99
+
+
+1719429180.314 cloud_check_minute:	CLOUD TS[9]
+
+1719429180.319 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30270
+
+1719429180.354 measure_temperature:	=======! 30270.00
+
+
+1719429180.360 measure_temperature:	Rt = 9510.79; tC = 25.93; 
+
+1719429180.365 measure_temperature:	state.tC_sm = 25.93; state.tC= 25.93
+
+
+1719429240.284 cloud_check_minute:	CLOUD TS[10]
+
+1719429240.290 check_signal_strength:	signal strength: -42, current 
+
+beacon skip is 20
+
+
+ Raw adc: 30310
+
+1719429240.325 measure_temperature:	=======! 30310.00
+
+
+1719429240.330 measure_temperature:	Rt = 9537.61; tC = 25.88; 
+
+1719429240.335 measure_temperature:	state.tC_sm = 25.88; state.tC= 25.88
+
+
+1719429300.230 cloud_check_minute:	CLOUD TS[11]
+
+1719429300.236 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30377
+
+1719429300.271 measure_temperature:	=======! 30377.00
+
+
+1719429300.276 measure_temperature:	Rt = 9582.71; tC = 25.79; 
+
+1719429300.281 measure_temperature:	state.tC_sm = 25.79; state.tC= 25.79
+
+
+1719429360.205 cloud_check_minute:	CLOUD TS[12]
+
+1719429360.211 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30419
+
+1719429360.246 measure_temperature:	=======! 30419.00
+
+
+1719429360.251 measure_temperature:	Rt = 9611.09; tC = 25.74; 
+
+1719429360.256 measure_temperature:	state.tC_sm = 25.74; state.tC= 25.74
+
+
+1719429420.153 cloud_check_minute:	CLOUD TS[13]
+
+1719429420.158 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30453
+
+1719429420.193 measure_temperature:	=======! 30453.00
+
+
+1719429420.198 measure_temperature:	Rt = 9634.13; tC = 25.69; 
+
+1719429420.204 measure_temperature:	state.tC_sm = 25.69; state.tC= 25.69
+
+
+1719429420.314 actions_execute:	Action reason[14]: MSG_TYPE_REPORT
+
+1719429420.349 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1719429420.451 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719429420.457 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719429420.462 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719429420.467 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-42},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""21:17"",""unixtime"":1719429420,""serial"":52,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":190,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":25.7,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":false,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.439},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":3451,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719429420.749 cloud_read_task:	Received 64 bytes
+
+1719429420.754 cloud_count_json_brackets:	
+PARSED: {""trid"":998,""set"":""status"",""info"":{""serial"":52}}
+
+1719429420.765 cloud_parse_command:	CMD: status
+
+1719429420.769 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":998}}
+
+
+1719429420.780 cloud_count_json_brackets:	Done
+
+1719429480.077 cloud_check_minute:	CLOUD TS[0]
+
+1719429480.082 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30492
+
+1719429480.117 measure_temperature:	=======! 30492.00
+
+
+1719429480.122 measure_temperature:	Rt = 9660.63; tC = 25.64; 
+
+1719429480.128 measure_temperature:	state.tC_sm = 25.64; state.tC= 25.64
+
+
+1719429540.123 cloud_check_minute:	CLOUD TS[1]
+
+1719429540.128 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30542
+
+1719429540.163 measure_temperature:	=======! 30542.00
+
+
+1719429540.168 measure_temperature:	Rt = 9694.72; tC = 25.58; 
+
+1719429540.173 measure_temperature:	state.tC_sm = 25.58; state.tC= 25.58
+
+
+1719429600.060 cloud_check_minute:	CLOUD TS[2]
+
+1719429600.065 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30577
+
+1719429600.100 measure_temperature:	=======! 30577.00
+
+
+1719429600.105 measure_temperature:	Rt = 9718.65; tC = 25.53; 
+
+1719429600.111 measure_temperature:	state.tC_sm = 25.53; state.tC= 25.53
+
+
+1719429600.120 actions_execute:	Action reason[0]: MSG_TYPE_STATUS
+
+1719429601.069 cloud_fwinfo_request:	fwinfo.once_done[1]
+
+1
+
+719429601.074 cloud_fwinfo_request:	fwinfo.request[0]
+
+1719429601.079 cloud_tzinfo_request:	tzinfo.once_done[1]
+
+1719429601.084 cloud_tzinfo_request:	tzinfo.request[0]
+
+1719429601.089 cloud_send_msg:	Send to cloud: {""a"":""status"", ""msg"":{""wifi_sta"":{""connected"":true,""ssid"":""Vodafone-Chemellopoulos"",""ip"":""192.168.1.73"",""rssi"":-42},""cloud"":{""enabled"":true,""connected"":true},""mqtt"":{""connected"":false},""time"":""21:20"",""unixtime"":1719429601,""serial"":53,""has_update"":false,""mac"":""84FD2772A156"",""cfg_changed_cnt"":4,""actions_stats"":{""skipped"":0},""sleep_time"":0,""lux"":{""value"":190,""illumination"":""twilight"",""is_valid"":true},""tmp"":{""value"":25.5,""units"":""C"",""is_valid"":true},""sensor"":{""vibration"":false,""motion"":false,""timestamp"":1719428322,""active"":true,""is_valid"":true},""bat"":{""value"":36,""voltage"":3.436},""charger"":false,""update"":{""status"":""unknown"",""has_update"":false,""new_version"":""20240619-130804/v2.2.4@ee290818"",""old_version"":""20240619-130804/v2.2.4@ee290818"",""beta_version"":null},""ram_total"":97280,""ram_free"":22728,""fs_size"":65536,""fs_free"":59408,""uptime"":3632,""fw_info"":{""device"":""shellymotion2-84FD2772A156"",""fw"":""20240619-130804/v2.2.4@ee290818""},""ps_mode"":0,""dbg_flags"":0}}
+
+
+1719429601.356 cloud_read_task:	Received 64 bytes
+
+1719429601.361 cloud_count_json_brackets:	
+PARSED: {""trid"":999,""set"":""status"",""info"":{""serial"":53}}
+
+1719429601.371 cloud_parse_command:	CMD: status
+
+1719429601.376 cloud_send_msg:	Send to cloud: {""a"":""ok"", ""msg"":{""trid"":999}}
+
+
+1719429601.386 cloud_count_json_brackets:	Done
+
+1719429660.951 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30619
+
+1719429660.986 measure_temperature:	=======! 30619.00
+
+
+1719429660.991 measure_temperature:	Rt = 9747.45; tC = 25.47; 
+
+1719429660.996 measure_temperature:	state.tC_sm = 25.47; state.tC= 25.47
+
+
+1719429660.068 cloud_check_minute:	CLOUD TS[0]
+
+tcp=>  192.168.1.51
+1719429720.999 cloud_check_minute:	CLOUD TS[1]
+
+1719429720.004 check_signal_strength:	signal strength: -41, current beacon skip is 20
+
+
+ Raw adc: 30649
+
+1719429720.039 measure_temperature:	=======! 30649.00
+
+
+1719429720.044 measure_temperature:	Rt = 9768.08; tC = 25.44; 
+
+1719429720.050 measure_temperature:	state.tC_sm = 25.44; state.tC= 25.44
+
+
+1719429780.974 cloud_check_minute:	CLOUD TS[2]
+
+1719429780.979 check_signal_strength:	signal strength: -41, current beacon skip is 20
+
+
+ Raw adc: 30688
+
+1719429780.014 measure_temperature:	=======! 30688.00
+
+
+1719429780.019 measure_temperature:	Rt = 9794.96; tC = 25.38; 
+
+1719429780.025 measure_temperature:	state.tC_sm = 25.38; state.tC= 25.38
+
+
+1719429840.922 cloud_check_minute:	CLOUD TS[3]
+
+1719429840.928 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30719
+
+1719429840.963 measure_temperature:	=======! 30719.00
+
+
+1719429840.968 measure_temperature:	Rt = 9816.39; tC = 25.34; 
+
+1719429840.973 measure_temperature:	state.tC_sm = 25.34; state.tC= 25.34
+
+
+1719429900.896 cloud_check_minute:	CLOUD TS[4]
+
+1719429900.901 check_signal_strength:	signal strength: -42, current beacon skip is 20
+
+
+ Raw adc: 30759
+
+1719429900.936 measure_temperature:	=======! 30759.00
+
+
+1719429900.941 measure_temperature:	Rt = 9844.10; tC = 25.29; 
+
+1719429900.947 measure_temperature:	state.tC_sm = 25.29; state.tC= 25.29
+
+
+1719429960.845 cloud_check_minute:	CLOUD TS[5]
+
+1719429960.850 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30783
+
+1719429960.885 measure_temperature:	=======! 30783.00
+
+
+1719429960.890 measure_temperature:	Rt = 9860.77; tC = 25.26; 
+
+1719429960.896 measure_temperature:	state.tC_sm = 25.26; state.tC= 25.26
+
+
+1719430020.789 cloud_check_minute:	CLOUD TS[6]
+
+1719430020.794 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30812
+
+1719430020.829 measure_temperature:	=======! 30812.00
+
+
+1719430020.834 measure_temperature:	Rt = 9880.95; tC = 25.22; 
+
+1719430020.840 measure_temperature:	state.tC_sm = 25.22; state.tC= 25.22
+
+
+1719430080.831 cloud_check_minute:	CLOUD TS[7]
+
+1719430080.836 check_signal_strength:	signal strength: -43, current beac
+
+on skip is 20
+
+
+ Raw adc: 30839
+
+1719430080.871 measure_temperature:	=======! 30839.00
+
+
+1719430080.877 measure_temperature:	Rt = 9899.78; tC = 25.19; 
+
+1719430080.882 measure_temperature:	state.tC_sm = 25.19; state.tC= 25.19
+
+
+1719430140.704 cloud_check_minute:	CLOUD TS[8]
+
+1719430140.709 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30866
+
+1719430140.745 measure_temperature:	=======! 30866.00
+
+
+1719430140.750 measure_temperature:	Rt = 9918.65; tC = 25.15; 
+
+1719430140.755 measure_temperature:	state.tC_sm = 25.15; state.tC= 25.15
+
+
+1719430200.738 cloud_check_minute:	CLOUD TS[9]
+
+1719430200.743 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30902
+
+1719430200.778 measure_temperature:	=======! 30902.00
+
+
+1719430200.784 measure_temperature:	Rt = 9943.86; tC = 25.10; 
+
+1719430200.789 measure_temperature:	state.tC_sm = 25.10; state.tC= 25.10
+
+
+1719430260.700 cloud_check_minute:	CLOUD TS[10]
+
+1719430260.706 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30928
+
+1719430260.740 measure_temperature:	=======! 30928.00
+
+
+1719430260.746 measure_temperature:	Rt = 9962.11; tC = 25.07; 
+
+1719430260.751 measure_temperature:	state.tC_sm = 25.07; state.tC= 25.07
+
+
+1719430320.635 cloud_check_minute:	CLOUD TS[11]
+
+1719430320.641 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30942
+
+1719430320.676 measure_temperature:	=======! 30942.00
+
+
+1719430320.681 measure_temperature:	Rt = 9971.95; tC = 25.05; 
+
+1719430320.686 measure_temperature:	state.tC_sm = 25.05; state.tC= 25.05
+
+
+1719430380.670 cloud_check_minute:	CLOUD TS[12]
+
+1719430380.675 check_signal_strength:	signal strength: -43, current beacon skip is 20
+
+
+ Raw adc: 30967
+
+1719430380.710 measure_temperature:	=======! 30967.00
+
+
+1719430380.716 measure_temperature:	Rt = 9989.55; tC = 25.02; 
+
+1719430380.721 measure_temperature:	state.tC_sm = 25.02; state.tC= 25.02
+
+
+tcp=>  192.168.1.70
+requested debug log: start=14168, end=14167
+
+"
+aSiRHYbQ,ДЗ Отчет о вооружениее,TeT91,C#,Wednesday 26th of June 2024 02:21:02 PM CDT,"using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace CSLight
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            PersonBase person = new PersonBase();
+            person.ShowSoldiersInfo();
+        }
+    }
+
+    class PersonBase
+    {
+        private List<Person> _soldiers;
+
+        public PersonBase()
+        {
+            GenerateSoldiers();
+        }
+
+        public void ShowSoldiersInfo()
+        {
+            var filteredList = _soldiers.Select(soldier => new { Name = soldier.Name, Term = soldier.Term });
+
+            foreach (var soldier in filteredList)
+            {
+                Console.WriteLine($""{soldier.Name} - {soldier.Term} "");
+            }
+
+            Console.ReadKey();
+        }
+
+        private void GenerateSoldiers()
+        {
+            PersonCreator creator = new PersonCreator();
+            int dataBaseCapacity = 20;
+
+            _soldiers = new List<Person>();
+
+            for (int i = 0; i < dataBaseCapacity; i++)
+            {
+                _soldiers.Add(creator.CreatePerson());
+            }
+        }
+    }
+
+
+    class PersonCreator
+    {
+        private List<string> _names;
+        private List<string> _surnames;
+        private List<string> _weapons;
+        private List<string> _ranks;
+
+        public PersonCreator()
+        {
+            InitNames();
+            InitSurnames();
+            InitRanks();
+            InitWeapons();
+        }
+
+        public Person CreatePerson()
+        {
+            int maxTerm = 50;
+
+            string name = GetRandomValue(_names);
+            string surname = GetRandomValue(_surnames);
+            string weapon = GetRandomValue(_weapons);
+            string rank = GetRandomValue(_ranks);
+            int term = UserUtils.GenerateRandomValue(maxTerm);
+
+            return new Person(name, surname, weapon, rank, term);
+        }
+
+        private void InitSurnames()
+        {
+            _surnames = new List<string>();
+            _surnames.Add(""Смирнов"");
+            _surnames.Add(""Иванов"");
+            _surnames.Add(""Кузнецов"");
+            _surnames.Add(""Попов"");
+            _surnames.Add(""Соколов"");
+            _surnames.Add(""Лебедев"");
+            _surnames.Add(""Козлов"");
+            _surnames.Add(""Новиков"");
+            _surnames.Add(""Морозов"");
+            _surnames.Add(""Козлов"");
+            _surnames.Add(""Волков"");
+        }
+
+        private void InitRanks()
+        {
+            _ranks = new List<string>();
+            _ranks.Add(""Новобранец"");
+            _ranks.Add(""Рядовой"");
+            _ranks.Add(""Сержант"");
+            _ranks.Add(""Генерал"");
+
+        }
+
+        private void InitNames()
+        {
+            _names = new List<string>();
+            _names.Add(""Максим"");
+            _names.Add(""Михаил"");
+            _names.Add(""Александр"");
+            _names.Add(""Дмитрий"");
+            _names.Add(""Денис"");
+            _names.Add(""Илья"");
+            _names.Add(""Андрей"");
+            _names.Add(""Артем"");
+            _names.Add(""Иван"");
+            _names.Add(""Алексей"");
+            _names.Add(""Никита"");
+        }
+
+        private void InitWeapons()
+        {
+            _weapons = new List<string>();
+            _weapons.Add(""Пистолет"");
+            _weapons.Add(""Автомат"");
+            _weapons.Add(""Пулемет"");
+            _weapons.Add(""Гранатомет"");
+        }
+
+        private string GetRandomValue(List<string> values)
+        {
+            int randomId = UserUtils.GenerateRandomValue(values.Count);
+            return values[randomId];
+        }
+
+        private bool SetStatus()
+        {
+            int chance = 50;
+            int maxChance = 100;
+
+            return UserUtils.GenerateRandomValue(maxChance) > chance;
+        }
+    }
+
+    class Person
+    {
+        public Person(string name, string surname, string weapon, string rank, int term)
+        {
+            Name = name;
+            Weapon = weapon;
+            Rank = rank;
+            Term = term;
+        }
+
+        public string Name { get; private set; }
+
+        public string Surname { get; private set; }
+
+        public string Weapon { get; private set; }
+
+        public string Rank { get; private set; }
+
+        public int Term { get; private set; }
+    }
+
+    static class UserUtils
+    {
+        private static Random s_random = new Random();
+
+        public static int GenerateRandomValue(int maxValue)
+        {
+            return s_random.Next(maxValue);
+        }
+
+        public static int GenerateRandomValue(int minValue, int maxValue)
+        {
+            return s_random.Next(minValue, maxValue);
+        }
+
+        public static double GenerateRandomDouble()
+        {
+            return s_random.NextDouble();
+        }
+    }
+}"
+VDXuPsAL,seg,nop1984,PHP,Wednesday 26th of June 2024 02:18:22 PM CDT,"<?php 
+namespace Drupal\transcom_seo\Plugin\Segment;
+
+class Testing extends \Drupal\segments\Entity\RequestSegment {
+  /**
+   * {@inheritdoc}
+   */
+  public static function getEvent() {
+	return 'testing';
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getSubject($event) {
+	return 'testing';
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function belongs($subject) {
+	return 'testing';
+  }
+}"
+FUbpQuB5,Untitled,chemelli74,Python,Wednesday 26th of June 2024 01:56:59 PM CDT,"root@MyHomeCenter:~# tcpdump -v -A host 192.168.1.73 and udp port 5683
+tcpdump: listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+20:35:56.018401 IP (tos 0x0, ttl 255, id 875, offset 0, flags [none], proto UDP (17), length 198)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 170
+E....k....4....I...
+.3.3..q.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,44.4],[0,3102,112.0],[0,6107,1],[0,3119,1719426955],[0,3120,1],[0,6110,1],[0,3106,165],[0,3111,47],[0,9103,4]]}
+20:35:59.930827 IP (tos 0x0, ttl 255, id 878, offset 0, flags [none], proto UDP (17), length 198)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 170
+E....n....4....I...
+.3.3..r|P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,40.8],[0,3102,105.4],[0,6107,1],[0,3119,1719426955],[0,3120,1],[0,6110,1],[0,3106,165],[0,3111,47],[0,9103,4]]}
+20:36:10.757679 IP (tos 0x0, ttl 255, id 881, offset 0, flags [none], proto UDP (17), length 198)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 170
+E....q....4....I...
+.3.3..uzP..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,40.8],[0,3102,105.4],[0,6107,1],[0,3119,1719426963],[0,3120,1],[0,6110,0],[0,3106,165],[0,3111,47],[0,9103,4]]}
+20:36:15.949610 IP (tos 0x0, ttl 255, id 884, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E....t....4....I...
+.3.3...IP..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,40.8],[0,3102,105.4],[0,6107,1],[0,3119,1719426963],[0,3120,1],[0,6110,0],[0,3106,39],[0,3111,47],[0,9103,4]]}
+
+20:36:50.058865 IP (tos 0x0, ttl 255, id 891, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E....{....4     ...I...
+.3.3...MP..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,40.8],[0,3102,105.4],[0,6107,1],[0,3119,1719427009],[0,3120,1],[0,6110,1],[0,3106,39],[0,3111,47],[0,9103,4]]}
+20:36:59.962625 IP (tos 0x0, ttl 255, id 894, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E....~....4....I...
+.3.3...TP..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,38.3],[0,3102,101.0],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,1],[0,3106,39],[0,3111,47],[0,9103,4]]}
+20:37:01.760000 IP (tos 0x0, ttl 255, id 901, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3...SP..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,38.3],[0,3102,101.0],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,0],[0,3106,39],[0,3111,47],[0,9103,4]]}
+20:37:14.888217 IP (tos 0x0, ttl 255, id 904, offset 0, flags [none], proto UDP (17), length 198)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 170
+E.........3....I...
+.3.3..t.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!....{""G"":[[0,3101,38.3],[0,3102,101.0],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,0],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:38:00.037861 IP (tos 0x0, ttl 255, id 911, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..|.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!.. .{""G"":[[0,3101,36.0],[0,3102,96.7],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,0],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:38:58.504470 IP (tos 0x0, ttl 255, id 922, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..|.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..!.{""G"":[[0,3101,36.0],[0,3102,96.7],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,1],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:38:59.974344 IP (tos 0x0, ttl 255, id 929, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..y.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!.."".{""G"":[[0,3101,33.8],[0,3102,92.9],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,1],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:39:04.715561 IP (tos 0x0, ttl 255, id 934, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..y.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..#.{""G"":[[0,3101,33.8],[0,3102,92.9],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,0],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:39:52.709762 IP (tos 0x0, ttl 255, id 945, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..y.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..$.{""G"":[[0,3101,33.8],[0,3102,92.9],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,1],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:39:59.965497 IP (tos 0x0, ttl 255, id 949, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3....P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..%.{""G"":[[0,3101,32.6],[0,3102,90.7],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,1],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:40:02.745967 IP (tos 0x0, ttl 255, id 956, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3....P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..&.{""G"":[[0,3101,32.6],[0,3102,90.7],[0,6107,1],[0,3119,1719427017],[0,3120,1],[0,6110,0],[0,3106,190],[0,3111,47],[0,9103,4]]}
+20:40:31.361158 IP (tos 0x0, ttl 255, id 959, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..}.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..'.{""G"":[[0,3101,32.6],[0,3102,90.7],[0,6107,1],[0,3119,1719427228],[0,3120,1],[0,6110,1],[0,3106,182],[0,3111,47],[0,9103,4]]}
+20:40:42.780301 IP (tos 0x0, ttl 255, id 968, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..|.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..(.{""G"":[[0,3101,32.6],[0,3102,90.7],[0,6107,1],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,182],[0,3111,47],[0,9103,4]]}
+
+
+
+
+20:41:59.986301 IP (tos 0x0, ttl 255, id 983, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..x.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..).{""G"":[[0,3101,31.0],[0,3102,87.8],[0,6107,1],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,284],[0,3111,47],[0,9103,4]]}
+20:43:59.954149 IP (tos 0x0, ttl 255, id 991, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..z.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..*.{""G"":[[0,3101,30.0],[0,3102,85.9],[0,6107,1],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,284],[0,3111,47],[0,9103,4]]}
+20:45:31.710867 IP (tos 0x0, ttl 255, id 995, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..q.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..+.{""G"":[[0,3101,29.6],[0,3102,85.3],[0,6107,0],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,284],[0,3111,47],[0,9103,4]]}
+20:48:00.019849 IP (tos 0x0, ttl 255, id 1004, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..l.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..,.{""G"":[[0,3101,28.8],[0,3102,83.9],[0,6107,0],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,284],[0,3111,47],[0,9103,4]]}
+20:54:00.126601 IP (tos 0x0, ttl 255, id 1026, offset 0, flags [none], proto UDP (17), length 197)
+    192.168.1.73.5683 > 192.168.1.10.5683: UDP, length 169
+E.........3....I...
+.3.3..x.P..
+.cit.s...
+SHMOS-02#84FD2772A156#2.C.!..-.{""G"":[[0,3101,27.8],[0,3102,82.0],[0,6107,0],[0,3119,1719427232],[0,3120,1],[0,6110,0],[0,3106,284],[0,3111,36],[0,9103,4]]}"
