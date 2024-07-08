@@ -1,0 +1,638 @@
+id,title,username,language,date,content
+LUp5SSjD,WHY WONT IT WORK!,BassBoostedDuck,C#,Monday 8th of July 2024 01:04:33 PM CDT,"using UdonSharp;
+using UnityEngine;
+using VRC.SDK3.Data;
+using VRC.SDKBase;
+public class Mysterybox : UdonSharpBehaviour
+{
+    public Animator animator;
+    public GameObject[] GunObjectPools;
+    private GameObject[] GunObjectPools2;
+    private bool hasGun;
+    [UdonSynced]public int gunType;
+    public Transform gunSpawn;
+    [UdonSynced]public int[] temp;
+    public bool timer;
+    public float Times;
+    public GameObject Gun;
+    [UdonSynced]public int GunNum;
+    [UdonSynced]public bool check;
+    public AudioSource spintune;
+    public AudioSource BoxClose;
+    public AudioSource BoxOpen;
+    public AudioSource BearTune;
+    private int run;
+    //[UdonSynced]public bool[,] toggles; 
+    public DataDictionary toggles2;
+    [UdonSynced]public string Json;
+    void Start()
+    {
+        GunObjectPools2 = GunObjectPools;
+        //GunObjectPools = new GameObject[15];
+        //GunObjectPools = GunObjectPools2;
+        temp = new int[20];
+        Debug.Log(GunObjectPools.Length);
+        for(int x = 0; x<GunObjectPools.Length; x++)
+        {
+            for(int d = 0; d<GunObjectPools[x].transform.childCount; d++)
+            {
+                toggles2.Add(""Row: ""+ x.ToString()+"" collum: ""+d.ToString(),false);
+                if (VRCJson.TrySerializeToJson(toggles2, JsonExportType.Minify, out DataToken result))
+                {
+                    Json = result.String;
+                    Debug.Log(Json);
+                }
+                else
+                {
+                    Debug.LogError(result.ToString());
+                }
+            }
+        }
+    }
+    public override void Interact()
+    {
+        if (check == false)
+        {
+            SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All,""HittinDaBox"");
+        }
+    }
+    public void HittinDaBox() // called first
+    {
+        animator.SetBool(""Has Triggered"",true);
+        BoxOpen.Play();
+        spintune.Play();
+        timer = true;
+        if(Networking.LocalPlayer.IsOwner(this.gameObject) == true)
+        {
+            GetGun();
+            check = true;
+        }   
+    }
+
+    public void GunCheck()
+    {
+        for(int x = 0; x<GunObjectPools.Length; x++)
+        {
+            for(int d = 0; d<GunObjectPools[x].transform.childCount; d++)
+            {
+                toggles2.SetValue(""Row: ""+ x.ToString()+"" collum: ""+d.ToString(),GunObjectPools[x].transform.GetChild(d).gameObject.activeSelf);
+                if (VRCJson.TrySerializeToJson(toggles2, JsonExportType.Minify, out DataToken result))
+                {
+                    Json = result.String;
+                }
+                else
+                {
+                    Debug.LogError(result.ToString());
+                }
+            }
+        }
+    }
+    public void CloseBox()
+    {
+        BoxClose.Play();
+    }
+    public void SpawnGun() //called by the animation event when the gun needs to be spawned
+    {
+        animator.SetBool(""Has Triggered"",false);
+        Gun.SetActive(true);
+        Gun.transform.SetPositionAndRotation(gunSpawn.position,gunSpawn.rotation);
+        if(gunType == 15)
+        {
+            BearTune.Play();
+        }
+        if(Networking.LocalPlayer.IsOwner(this.gameObject) == true)
+        {
+            toggles2.SetValue(""Row: ""+ gunType.ToString()+"" collum: ""+GunNum.ToString(),true);
+            Gun.SetActive(true);
+            if (VRCJson.TrySerializeToJson(toggles2, JsonExportType.Minify, out DataToken result))
+            {
+                Json = result.String;
+                RequestSerialization();
+            }
+            else
+            {
+                Debug.LogError(result.ToString());
+            }
+            Debug.Log(""setting row: "" + gunType + "" setting collum: "" + GunNum + "" as: "" + GunObjectPools[gunType].transform.GetChild(GunNum).gameObject.activeSelf.ToString());
+            Debug.Log(""spawn gun called"");
+            Networking.SetOwner(Networking.LocalPlayer, Gun);  
+        }
+    }
+    public void PickUpFailed() // this is called by an animation event when the player has not picked up the gun after x amount of time.
+    {
+        Gun.SetActive(false);
+        animator.SetBool(""Has Triggered"",false);
+        timer = false;
+        Debug.Log(""user failed to pick up gun in time"");
+    }
+    public void pickedup()
+    {
+        Debug.Log(""gun has been picked up"");
+        animator.SetBool(""has taken"",true);
+        timer = false;
+    }
+    public void Reset()
+    {
+        animator.SetBool(""Has Triggered"",false);
+        animator.SetBool(""has taken"",false);
+        hasGun = false;
+        Debug.Log(""script has been reset"");
+        run = 0;
+        check = false;
+        timer = false;
+    }
+    public void SetGun(int Type, int Number )
+    {
+
+    }
+    public override void OnDeserialization()
+    {
+        Gun = GunObjectPools[gunType].transform.GetChild(GunNum).gameObject;
+        Debug.Log(Gun.name);
+        if(VRCJson.TryDeserializeFromJson(Json, out DataToken result))
+        {
+            toggles2 = result.DataDictionary;
+        }
+        else
+        {
+            Debug.LogError(result.ToString());
+        }
+        for(int x = 0; x<GunObjectPools.Length; x++)
+        {
+            for(int d = 0; d<GunObjectPools[x].transform.childCount - 1; d++)
+            {
+                if(toggles2.TryGetValue(""Row: ""+ gunType.ToString()+"" collum: ""+GunNum.ToString(), out DataToken value))
+                {
+                    Debug.Log(value);
+                    if (value == ""True"")
+                    {
+                        GunObjectPools[gunType].transform.GetChild(GunNum).gameObject.SetActive(true);
+                        Debug.Log(""setting object as on"");
+                    }
+                    else
+                    {
+                        GunObjectPools[gunType].transform.GetChild(GunNum).gameObject.SetActive(false);
+                        Debug.Log(""setting object as off"");
+                    }
+                }
+            }
+        }
+        
+    }
+
+    public void GetGun() // randomly picking any gun out of all of the netwoked guns in our gameobject arrays as long as the gun is not already out and in use by someone. will randomly pick a new one if the gun picked cannot be picked
+    {
+        gunType = UnityEngine.Random.Range(0,GunObjectPools.Length);
+        while(hasGun != true)
+        {
+            temp[run] = gunType;
+            run++;
+            
+            //temp.Add(gunType);
+            for(int W = 0; W < temp.Length; W++)
+            {
+                Debug.Log(""number: ""+ W + "" of temp is: "" + temp[W]);
+            }
+            for(int i=0; i < GunObjectPools[gunType].transform.childCount; i++) // trying to check if i is within the length of the amount of childrent within one of the objects pools in GunObjectPools
+            {
+                if(GunObjectPools[gunType].transform.GetChild(i).gameObject.activeSelf == false)
+                {
+                    Debug.Log(GunObjectPools[gunType].transform.GetChild(i).gameObject.name.ToString());
+                    Debug.Log(i);
+                    hasGun = true;
+                    GunNum = i;
+                    Gun = GunObjectPools[gunType].transform.GetChild(i).gameObject;
+                    RequestSerialization();
+                    temp = new int[20];
+                    Debug.Log(""found Gun"");
+                    return;
+                }
+            }
+            Debug.Log(""did not find Gun, changing gun type"");
+            while(NewNumber() == false)
+            {
+                Debug.Log(""picking new number"");
+                NewNumber();
+            }
+        }
+    }
+    public bool NewNumber()
+    {
+        int test;
+        test = UnityEngine.Random.Range(0,GunObjectPools.Length);
+        bool result = checkTemp(test);
+        if( result== false)
+        {
+            gunType = test;
+            Debug.Log(""randomly picked gun type already checked, picking new random gun type"");
+            Debug.Log(gunType);
+            Debug.Log(temp);
+            return true;
+        }
+        if(run >= GunObjectPools.Length)
+        {
+            gunType = 15;
+            return true;
+        }
+        return false;
+    }
+    public bool checkTemp(int y)
+    {
+        for(int b=0; b < run; b++)
+        {
+            if(temp[b] == y)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    private void setTime()
+    {
+        Times = 0;
+    }
+    private void Update()
+    {
+        animator.SetFloat(""time"",Times);
+        if(timer == true)
+        {
+            Times = Times + UnityEngine.Time.deltaTime;
+        }
+        else
+        {
+            setTime();
+        }
+    }
+}
+"
+kxse7LvD,Free Apple Products ❤️ METHOD,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:04:30 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) 7yzWuVCkvR"
+5txq1PYL,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:04:12 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free iUlfdJE9Ma"
+ALbawKmL,⭐FREE GIFTCARDS METHOD⭐July 2024,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:03:56 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free LRu2IJGPLT"
+4XTFden8,G2A Timezone Glitch,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:03:39 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free trZgOY5x7k"
+nkU1qe2g,FREE IPHONE 15 PRO REFUNDING GUIDE,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:03:22 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) k5bcibG3EJ"
+x3AMnC6x,Get any giftcard for free [Method],asdnaksjdas,JavaScript,Monday 8th of July 2024 01:03:06 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free ksjDRQmAmy"
+PG02Sx6h,💸Make 500$ in 30 minutes💸,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:02:49 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit 71Q86Rwicf"
+KihXmihR,Free Apple Products ❤️ METHOD,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:02:32 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) Q03AAsaOq6"
+NdPfAWaf,🤑G2A.com Free Gift Card FIX July 2024🎁,angeloee,JavaScript,Monday 8th of July 2024 01:02:26 PM CDT,"G2A.com free voucher & games guide.
+Any item for free on G2A.com including Amazon gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/1kmsO060isPSN-h49hxDuiopqKkABL9ls/view?12376
+
+Working as of:
+8th of July 2024
+
+"
+RnJjsghL,🤑G2A.com Free Gift Card FIX July 2024🤑,notgoodatscripting,JavaScript,Monday 8th of July 2024 01:02:23 PM CDT,"G2A.com free voucher & games guide.
+Any item for free on G2A.com including Playstation gift cards & anything else offered.
+This is the most current version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/1kmsO060isPSN-h49hxDuiopqKkABL9ls/view?05631
+
+Working as of:
+8th of July 2024
+
+"
+VaCb1LPP,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:02:15 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free 3Q9ZviBcDx"
+jviWCbf0,⭐FREE GIFTCARDS METHOD⭐July 2024,asdnaksjdas,JavaScript,Monday 8th of July 2024 01:01:55 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free YIEKgtYbDQ"
+FmBFtZT6,FREE IPHONE 15 PRO REFUNDING GUIDE,bolland,JavaScript,Monday 8th of July 2024 01:01:36 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) o8VvnwJNWo"
+PtXE1vwY,Get any giftcard for free [Method],bolland,JavaScript,Monday 8th of July 2024 01:01:19 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free cHVs9fmvws"
+iuA0y7fw,💸Make 500$ in 30 minutes💸,bolland,JavaScript,Monday 8th of July 2024 01:01:00 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit 21RC03vGdE"
+iRk2pezf,Free Apple Products ❤️ METHOD,bolland,JavaScript,Monday 8th of July 2024 01:00:43 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) D2qD3zboN2"
+qsDFuqrP,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,bolland,JavaScript,Monday 8th of July 2024 01:00:27 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free ilZ3THZzFn"
+WruqGhze,⭐FREE GIFTCARDS METHOD⭐July 2024,bolland,JavaScript,Monday 8th of July 2024 01:00:11 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free N2asVMe5l4"
+wCvWzMc2,G2A Timezone Glitch,bolland,JavaScript,Monday 8th of July 2024 12:59:54 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free XOSNhpHswh"
+3W2puVfw,FREE IPHONE 15 PRO REFUNDING GUIDE,bolland,JavaScript,Monday 8th of July 2024 12:59:36 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) Fyvu2cBHhE"
+ft45Yihu,Get any giftcard for free [Method],bolland,JavaScript,Monday 8th of July 2024 12:59:18 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free JpjkRatbw1"
+2sVe5n6F,💸Make 500$ in 30 minutes💸,bolland,JavaScript,Monday 8th of July 2024 12:59:00 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit mVzDdcWbCq"
+ay3kMKSX,Free Apple Products ❤️ METHOD,bolland,JavaScript,Monday 8th of July 2024 12:58:43 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) BF0CT3R4lC"
+bsx04F4Z,⭐FREE GIFTCARDS METHOD⭐July 2024,bolland,JavaScript,Monday 8th of July 2024 12:58:11 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free o7m513hWcv"
+RNSHyK0h,G2A Timezone Glitch,bolland,JavaScript,Monday 8th of July 2024 12:57:53 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free 1lSoznjgUq"
+UmF5kFHh,Get any giftcard for free [Method],bolland,JavaScript,Monday 8th of July 2024 12:57:20 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free wqoo2BjUN9"
+5UC6rzpb,💸Make 500$ in 30 minutes💸,bolland,JavaScript,Monday 8th of July 2024 12:57:03 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit bHGpTLqi5c"
+BdyDFzVF,Free Apple Products ❤️ METHOD,bolland,JavaScript,Monday 8th of July 2024 12:56:47 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) TDjAvAN7zv"
+hcNzrZFU,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,bolland,JavaScript,Monday 8th of July 2024 12:56:31 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free uw9n0Voy7O"
+NXqPpEPe,🤑G2A.com Free Gift Card FIX July 2024🎁,jcxeq,JavaScript,Monday 8th of July 2024 12:56:22 PM CDT,"G2A.com free gift card & games guide.
+Any item for free on G2A.com including Steam gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/1o-1KEk9MOdgHCmquLSM94wHJiYh0dL_l/view?12376
+
+Working as of:
+8th of July 2024
+
+"
+bFsj5BZ4,🤑G2A.com Free Gift Card FIX July 2024🤑,bgill55,JavaScript,Monday 8th of July 2024 12:56:20 PM CDT,"G2A.com complimentary gift card & games guide.
+Any item for free on G2A.com including Xbox gift cards & everything else offered.
+This is the most up to date version of this script.
+
+PDF guide here:
+https://drive.google.com/file/d/1kmsO060isPSN-h49hxDuiopqKkABL9ls/view?05631
+
+Working as of:
+July 8 2024
+
+"
+VrfYHZYR,⭐FREE GIFTCARDS METHOD⭐July 2024,bolland,JavaScript,Monday 8th of July 2024 12:56:14 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free 5ccsXEzT7v"
+4Uz2GXCH,Get any giftcard for free [Method],KanzenKyo,JavaScript,Monday 8th of July 2024 12:55:20 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free pfDiHI3mIv"
+Pge1CQHc,💸Make 500$ in 30 minutes💸,KanzenKyo,JavaScript,Monday 8th of July 2024 12:55:03 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit eF3JuqCyoJ"
+PpMU43yw,Free Apple Products ❤️ METHOD,KanzenKyo,JavaScript,Monday 8th of July 2024 12:54:47 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) 09p21V8NCe"
+fMKUkChk,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,KanzenKyo,JavaScript,Monday 8th of July 2024 12:54:30 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free cMYVsSYhrG"
+ZJ3jKP5C,⭐FREE GIFTCARDS METHOD⭐July 2024,KanzenKyo,JavaScript,Monday 8th of July 2024 12:54:12 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free eFb8bYegL2"
+RUrKGhen,G2A Timezone Glitch,KanzenKyo,JavaScript,Monday 8th of July 2024 12:53:56 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free uJPilxlXMa"
+JmsTay23,FREE IPHONE 15 PRO REFUNDING GUIDE,KanzenKyo,JavaScript,Monday 8th of July 2024 12:53:39 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) imolRHWhix"
+HKrU3EQa,Get any giftcard for free [Method],KanzenKyo,JavaScript,Monday 8th of July 2024 12:53:22 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free RVZPkC6U0v"
+MKn5dTfp,💸Make 500$ in 30 minutes💸,KanzenKyo,JavaScript,Monday 8th of July 2024 12:53:06 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit XkWvp2ggzf"
+qZ97kthm,Free Apple Products ❤️ METHOD,KanzenKyo,JavaScript,Monday 8th of July 2024 12:52:49 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) HDbI9Fq7or"
+ZyxgGU3k,🤑G2A.com Free Gift Card EXPLOIT July 2024🤑,KanzenKyo,JavaScript,Monday 8th of July 2024 12:52:31 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free qEPvMfUkTH"
+S6fL9A18,⭐FREE GIFTCARDS METHOD⭐July 2024,KanzenKyo,JavaScript,Monday 8th of July 2024 12:52:13 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free Ns2AMMORsm"
+Z7aLbfkK,G2A Timezone Glitch,KanzenKyo,JavaScript,Monday 8th of July 2024 12:51:53 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free n2mdJnzEEd"
+VZfaqF9T,FREE IPHONE 15 PRO REFUNDING GUIDE,KanzenKyo,JavaScript,Monday 8th of July 2024 12:51:36 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) uHODh6gHey"
+6QVtf1YU,Get any giftcard for free [Method],KanzenKyo,JavaScript,Monday 8th of July 2024 12:51:20 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free wAzThxZuot"
+RPSXmjuw,💸Make 500$ in 30 minutes💸,KanzenKyo,JavaScript,Monday 8th of July 2024 12:51:03 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?usp=sharing
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit 6NLL7FRwNS"
+6QCK3FHk,Free Apple Products ❤️ METHOD,KanzenKyo,JavaScript,Monday 8th of July 2024 12:50:46 PM CDT,"Tried this method with iPhone 15 Pro and got it delivered today.
+
+Its a refund method - you get your money back immediately but the products are still shipped to your address.
+
+Guide:
+
+https://drive.google.com/file/d/1c0FT0lY0Ob0V0IzROqiD3IeLEkoLvXa0/view
+
+Enjoy while it still works (its an exploit so probably gonna get patched in a few days) 3G4lvLl4cO"
