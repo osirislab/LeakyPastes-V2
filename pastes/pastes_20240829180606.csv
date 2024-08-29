@@ -1,0 +1,6570 @@
+id,title,username,language,date,content
+jZUKue8z,Catsgang-bot,Zulfiqor,GetText,Thursday 29th of August 2024 12:45:16 PM CDT,"#
+e1728e9dcd76fec463c5f9b00ede741e8676f205ad324b2f488d650b614e86f2"
+E6KSt5Ad,posledni vereze se spravnymi remizamy,max2201111,Python,Thursday 29th of August 2024 12:43:06 PM CDT,"import chess
+from typing import Iterator, Optional, Dict, Tuple
+from chess import Move, BB_ALL, Bitboard, PieceType, Color
+import time
+from collections import deque
+import threading
+from collections import defaultdict
+
+# Definice nových figur
+AMAZON = 7
+CYRIL = 8
+EVE = 9
+
+# Rozšíření seznamu PIECE_SYMBOLS
+chess.PIECE_SYMBOLS.append('a')
+chess.PIECE_SYMBOLS.append('c')
+chess.PIECE_SYMBOLS.append('e')
+
+class CustomBoard(chess.Board):
+    def __init__(self, fen=None):
+        self.amazons_white = chess.BB_EMPTY
+        self.amazons_black = chess.BB_EMPTY
+        self.cyrils_white = chess.BB_EMPTY
+        self.cyrils_black = chess.BB_EMPTY
+        self.eves_white = chess.BB_EMPTY
+        self.eves_black = chess.BB_EMPTY
+        super().__init__(None)
+        if fen:
+            self.set_custom_fen(fen)
+        self.debug_amazons()
+        self.debug_cyrils()
+        self.debug_eves()
+
+    def clear_square(self, square):
+        super()._remove_piece_at(square)
+        self.amazons_white &= ~chess.BB_SQUARES[square]
+        self.amazons_black &= ~chess.BB_SQUARES[square]
+        self.cyrils_white &= ~chess.BB_SQUARES[square]
+        self.cyrils_black &= ~chess.BB_SQUARES[square]
+        self.eves_white &= ~chess.BB_SQUARES[square]
+        self.eves_black &= ~chess.BB_SQUARES[square]
+
+    def set_custom_fen(self, fen):
+        parts = fen.split()
+        board_part = parts[0]
+    
+        self.clear()
+        self.amazons_white = chess.BB_EMPTY
+        self.amazons_black = chess.BB_EMPTY
+        self.cyrils_white = chess.BB_EMPTY
+        self.cyrils_black = chess.BB_EMPTY
+        self.eves_white = chess.BB_EMPTY
+        self.eves_black = chess.BB_EMPTY
+    
+        square = 56
+        for c in board_part:
+            if c == '/':
+                square -= 16
+            elif c.isdigit():
+                square += int(c)
+            else:
+                color = chess.WHITE if c.isupper() else chess.BLACK
+                if c.upper() == 'A':
+                    if color == chess.WHITE:
+                        self.amazons_white |= chess.BB_SQUARES[square]
+                    else:
+                        self.amazons_black |= chess.BB_SQUARES[square]
+                    piece_type = AMAZON
+                elif c.upper() == 'C':
+                    if color == chess.WHITE:
+                        self.cyrils_white |= chess.BB_SQUARES[square]
+                    else:
+                        self.cyrils_black |= chess.BB_SQUARES[square]
+                    piece_type = CYRIL
+                elif c.upper() == 'E':
+                    if color == chess.WHITE:
+                        self.eves_white |= chess.BB_SQUARES[square]
+                    else:
+                        self.eves_black |= chess.BB_SQUARES[square]
+                    piece_type = EVE
+                elif c == 'P' and chess.square_rank(square) == 7:
+                    piece_type = AMAZON
+                    color = chess.WHITE
+                elif c == 'p' and chess.square_rank(square) == 0:
+                    piece_type = AMAZON
+                    color = chess.BLACK
+                else:
+                    piece_type = chess.PIECE_SYMBOLS.index(c.lower())
+                
+                self._set_piece_at(square, piece_type, color)
+                square += 1
+    
+        self.turn = chess.WHITE if parts[1] == 'w' else chess.BLACK
+        self.castling_rights = chess.BB_EMPTY
+        if '-' not in parts[2]:
+            if 'K' in parts[2]: self.castling_rights |= chess.BB_H1
+            if 'Q' in parts[2]: self.castling_rights |= chess.BB_A1
+            if 'k' in parts[2]: self.castling_rights |= chess.BB_H8
+            if 'q' in parts[2]: self.castling_rights |= chess.BB_A8
+        self.ep_square = chess.parse_square(parts[3]) if parts[3] != '-' else None
+            
+
+    def _set_piece_at(self, square: chess.Square, piece_type: PieceType, color: Color) -> None:
+        self.clear_square(square)
+        super()._set_piece_at(square, piece_type, color)
+        if piece_type == AMAZON:
+            if color == chess.WHITE:
+                self.amazons_white |= chess.BB_SQUARES[square]
+            else:
+                self.amazons_black |= chess.BB_SQUARES[square]
+        elif piece_type == CYRIL:
+            if color == chess.WHITE:
+                self.cyrils_white |= chess.BB_SQUARES[square]
+            else:
+                self.cyrils_black |= chess.BB_SQUARES[square]
+        elif piece_type == EVE:
+            if color == chess.WHITE:
+                self.eves_white |= chess.BB_SQUARES[square]
+            else:
+                self.eves_black |= chess.BB_SQUARES[square]
+
+    def piece_at(self, square: chess.Square) -> Optional[chess.Piece]:
+        if self.amazons_white & chess.BB_SQUARES[square]:
+            return chess.Piece(AMAZON, chess.WHITE)
+        elif self.amazons_black & chess.BB_SQUARES[square]:
+            return chess.Piece(AMAZON, chess.BLACK)
+        elif self.cyrils_white & chess.BB_SQUARES[square]:
+            return chess.Piece(CYRIL, chess.WHITE)
+        elif self.cyrils_black & chess.BB_SQUARES[square]:
+            return chess.Piece(CYRIL, chess.BLACK)
+        elif self.eves_white & chess.BB_SQUARES[square]:
+            return chess.Piece(EVE, chess.WHITE)
+        elif self.eves_black & chess.BB_SQUARES[square]:
+            return chess.Piece(EVE, chess.BLACK)
+        return super().piece_at(square)
+
+    def generate_pseudo_legal_moves(self, from_mask: Bitboard = BB_ALL, to_mask: Bitboard = BB_ALL) -> Iterator[Move]:
+        our_pieces = self.occupied_co[self.turn]
+        if self.turn == chess.WHITE:
+            our_amazons = self.amazons_white
+            our_cyrils = self.cyrils_white
+            our_eves = self.eves_white
+        else:
+            our_amazons = self.amazons_black
+            our_cyrils = self.cyrils_black
+            our_eves = self.eves_black
+    
+        # Generování tahů pro amazonky
+        for from_square in chess.scan_forward(our_amazons & from_mask):
+            attacks = self.amazon_attacks(from_square)
+            valid_moves = attacks & ~our_pieces & to_mask
+            for to_square in chess.scan_forward(valid_moves):
+                yield Move(from_square, to_square)
+    
+        # Generování tahů pro Cyrily
+        for from_square in chess.scan_forward(our_cyrils & from_mask):
+            attacks = self.cyril_attacks(from_square)
+            valid_moves = attacks & ~our_pieces & to_mask
+            for to_square in chess.scan_forward(valid_moves):
+                yield Move(from_square, to_square)
+    
+        # Generování tahů pro Evy
+        for from_square in chess.scan_forward(our_eves & from_mask):
+            attacks = self.eve_attacks(from_square)
+            valid_moves = attacks & ~our_pieces & to_mask
+            for to_square in chess.scan_forward(valid_moves):
+                yield Move(from_square, to_square)
+    
+        # Generování tahů pro standardní figury
+        for move in super().generate_pseudo_legal_moves(from_mask, to_mask):
+            piece = self.piece_at(move.from_square)
+            if piece and piece.piece_type not in [AMAZON, CYRIL, EVE]:
+                yield move
+
+    def queen_attacks(self, square):
+        return self.bishop_attacks(square) | self.rook_attacks(square)
+
+    def bishop_attacks(self, square):
+        return chess.BB_DIAG_ATTACKS[square][self.occupied & chess.BB_DIAG_MASKS[square]]
+
+    def rook_attacks(self, square):
+        return (chess.BB_RANK_ATTACKS[square][self.occupied & chess.BB_RANK_MASKS[square]] |
+                chess.BB_FILE_ATTACKS[square][self.occupied & chess.BB_FILE_MASKS[square]])
+
+    def amazon_attacks(self, square):
+        return self.queen_attacks(square) | chess.BB_KNIGHT_ATTACKS[square]
+
+    def cyril_attacks(self, square):
+        return self.rook_attacks(square) | chess.BB_KNIGHT_ATTACKS[quare]
+
+    def eve_attacks(self, square):
+        return self.bishop_attacks(square) | chess.BB_KNIGHT_ATTACKS[square]
+
+    def is_pseudo_legal(self, move):
+        from_square = move.from_square
+        to_square = move.to_square
+        piece = self.piece_at(from_square)
+    
+        if not piece or piece.color != self.turn:
+            return False
+    
+        if self.occupied_co[self.turn] & chess.BB_SQUARES[to_square]:
+            return False
+    
+        if self.is_castling(move):
+            return True
+    
+        if piece.piece_type == AMAZON:
+            return bool(self.amazon_attacks(from_square) & chess.BB_SQUARES[to_square])
+        elif piece.piece_type == CYRIL:
+            return bool(self.cyril_attacks(from_square) & chess.BB_SQUARES[to_square])
+        elif piece.piece_type == EVE:
+            return bool(self.eve_attacks(from_square) & chess.BB_SQUARES[to_square])
+        else:
+            return super().is_pseudo_legal(move)
+
+    def is_legal(self, move):
+        if not self.is_pseudo_legal(move):
+            return False
+    
+        from_square = move.from_square
+        to_square = move.to_square
+        piece = self.piece_at(from_square)
+        captured_piece = self.piece_at(to_square)
+    
+        # Kontrola pro všechny figury: nelze brát figuru stejné barvy
+        if captured_piece and captured_piece.color == piece.color:
+            return False
+    
+        # Dočasně provést tah
+        self.clear_square(from_square)
+        self._set_piece_at(to_square, piece.piece_type, piece.color)
+    
+        # Najít pozici krále
+        king_square = to_square if piece.piece_type == chess.KING else self.king(self.turn)
+    
+        # Kontrola, zda je král v šachu po tahu
+        is_check = self._is_attacked_by(not self.turn, king_square) if king_square is not None else False
+    
+        # Vrátit pozici do původního stavu
+        self.clear_square(to_square)
+        self._set_piece_at(from_square, piece.piece_type, piece.color)
+        if captured_piece:
+            self._set_piece_at(to_square, captured_piece.piece_type, captured_piece.color)
+    
+        return not is_check
+        
+
+    def _is_attacked_by(self, color, square):
+        attackers = self.attackers(color, square)
+        return bool(attackers)
+
+    def attackers(self, color: Color, square: chess.Square) -> Bitboard:
+        if square is None:
+            return chess.BB_EMPTY
+    
+        attackers = chess.BB_EMPTY
+        occupied = self.occupied
+        occupied_co = self.occupied_co[color]
+    
+        # Jezdci
+        attackers |= chess.BB_KNIGHT_ATTACKS[square] & self.knights & occupied_co
+    
+        # Král
+        attackers |= chess.BB_KING_ATTACKS[square] & self.kings & occupied_co
+    
+        # Pěšci
+        if color == chess.WHITE:
+            attackers |= chess.BB_PAWN_ATTACKS[chess.BLACK][square] & self.pawns & occupied_co
+        else:
+            attackers |= chess.BB_PAWN_ATTACKS[chess.WHITE][square] & self.pawns & occupied_co
+    
+        # Střelcové útoky (včetně dam a amazonek)
+        bishop_attacks = chess.BB_DIAG_ATTACKS[square][occupied & chess.BB_DIAG_MASKS[square]]
+        attackers |= bishop_attacks & ((self.bishops | self.queens) & occupied_co)
+    
+        # Věžové útoky (včetně dam, amazonek a cyrilů)
+        rook_attacks = (
+            chess.BB_RANK_ATTACKS[square][occupied & chess.BB_RANK_MASKS[square]] |
+            chess.BB_FILE_ATTACKS[square][occupied & chess.BB_FILE_MASKS[square]]
+        )
+        attackers |= rook_attacks & ((self.rooks | self.queens) & occupied_co)
+    
+        # Amazonky (Dáma + Jezdec)
+        amazons = self.amazons_white if color == chess.WHITE else self.amazons_black
+        amazon_attacks = bishop_attacks | rook_attacks | chess.BB_KNIGHT_ATTACKS[square]
+        attackers |= amazon_attacks & amazons
+    
+        # Cyrilové (Věž + Jezdec)
+        cyrils = self.cyrils_white if color == chess.WHITE else self.cyrils_black
+        cyril_attacks = rook_attacks | chess.BB_KNIGHT_ATTACKS[square]
+        attackers |= cyril_attacks & cyrils
+    
+        # Evy (Střelec + Jezdec)
+        eves = self.eves_white if color == chess.WHITE else self.eves_black
+        eve_attacks = bishop_attacks | chess.BB_KNIGHT_ATTACKS[square]
+        attackers |= eve_attacks & eves
+    
+        return attackers
+        
+    def push(self, move):
+        if not self.is_legal(move):
+            raise ValueError(f""Move {move} is not legal in position {self.fen()}"")
+
+        piece = self.piece_at(move.from_square)
+        captured_piece = self.piece_at(move.to_square)
+
+        self.clear_square(move.from_square)
+        self.clear_square(move.to_square)
+        self._set_piece_at(move.to_square, piece.piece_type, piece.color)
+
+        self.turn = not self.turn
+
+        self.move_stack.append((move, captured_piece))
+
+    def pop(self):
+        if not self.move_stack:
+            return None
+
+        move, captured_piece = self.move_stack.pop()
+
+        piece = self.piece_at(move.to_square)
+        
+        self.clear_square(move.from_square)
+        self.clear_square(move.to_square)
+
+        self._set_piece_at(move.from_square, piece.piece_type, piece.color)
+
+        if captured_piece:
+            self._set_piece_at(move.to_square, captured_piece.piece_type, captured_piece.color)
+
+        self.turn = not self.turn
+
+        return move
+
+    def is_check(self):
+        king_square = self.king(self.turn)
+        if king_square is None:
+            return False
+        is_check = self._is_attacked_by(not self.turn, king_square)
+        return is_check
+
+    def is_checkmate(self):
+        if not self.is_check():
+            return False
+        legal_moves = list(self.generate_legal_moves())
+        return len(legal_moves) == 0
+
+    def is_game_over(self):
+        return self.is_checkmate() or self.is_stalemate() or self.is_insufficient_material()
+
+    def is_stalemate(self):
+        if self.is_check():
+            return False
+        legal_moves = list(self.generate_legal_moves())
+        return len(legal_moves) == 0
+    
+    def is_insufficient_material(self):
+        return (self.pawns | self.rooks | self.queens | self.amazons_white | self.amazons_black |
+                self.cyrils_white | self.cyrils_black | self.eves_white | self.eves_black) == 0 and (
+            chess.popcount(self.occupied) <= 3
+        )
+
+    def generate_legal_moves(self, from_mask=chess.BB_ALL, to_mask=chess.BB_ALL):
+        for move in self.generate_pseudo_legal_moves(from_mask, to_mask):
+            if self.is_legal(move):
+                yield move
+
+    def debug_amazons(self):
+        pass
+
+    def debug_cyrils(self):
+        pass
+
+    def debug_eves(self):
+        pass
+
+    def piece_symbol(self, piece):
+        if piece is None:
+            return '.'
+        if piece.piece_type == AMAZON:
+            return 'A' if piece.color == chess.WHITE else 'a'
+        if piece.piece_type == CYRIL:
+            return 'C' if piece.color == chess.WHITE else 'c'
+        if piece.piece_type == EVE:
+            return 'E' if piece.color == chess.WHITE else 'e'
+        return piece.symbol()
+
+    def piece_type_at(self, square):
+        if (self.amazons_white | self.amazons_black) & chess.BB_SQUARES[square]:
+            return AMAZON
+        if (self.cyrils_white | self.cyrils_black) & chess.BB_SQUARES[square]:
+            return CYRIL
+        if (self.eves_white | self.eves_black) & chess.BB_SQUARES[square]:
+            return EVE
+        return super().piece_type_at(square)
+
+    def color_at(self, square):
+        if self.amazons_white & chess.BB_SQUARES[square]:
+            return chess.WHITE
+        if self.amazons_black & chess.BB_SQUARES[square]:
+            return chess.BLACK
+        if self.cyrils_white & chess.BB_SQUARES[square]:
+            return chess.WHITE
+        if self.cyrils_black & chess.BB_SQUARES[square]:
+            return chess.BLACK
+        if self.eves_white & chess.BB_SQUARES[square]:
+            return chess.WHITE
+        if self.eves_black & chess.BB_SQUARES[square]:
+            return chess.BLACK
+        return super().color_at(square)
+
+    @property
+    def legal_moves(self):
+        return list(self.generate_legal_moves())
+
+    def __str__(self):
+        builder = []
+        for square in chess.SQUARES_180:
+            piece = self.piece_at(square)
+            symbol = self.piece_symbol(piece) if piece else '.'
+            builder.append(symbol)
+            if chess.square_file(square) == 7:
+                if square != chess.H1:
+                    builder.append('\n')
+        return ''.join(builder)
+
+def format_time(seconds):
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f""{int(hours):02d}h {int(minutes):02d}m {int(seconds):02d}s""
+
+def print_elapsed_time(stop_event, start_time):
+    while not stop_event.is_set():
+        elapsed_time = time.time() - start_time
+        print(f""\rUplynulý čas: {format_time(elapsed_time)}"", end="""", flush=True)
+        time.sleep(1)
+
+def simplify_fen(fen):
+    return ' '.join(fen.split()[:4])
+
+
+def calculate_optimal_moves(start_fen: str) -> Dict[str, Tuple[int, str]]:
+    print(f""Počáteční FEN: {start_fen}"")
+    board = CustomBoard(start_fen)
+    if not board.is_valid():
+        raise ValueError(""Neplatný FEN"")
+
+    POZ = {1: start_fen}
+    AR = defaultdict(lambda: {'used': False, 'to_end': None, 'depth': 0, 'type': 'normal', 'position_count': defaultdict(int)})
+    AR[start_fen]['position_count'][board.epd()] = 1
+    N = 1
+    M = 0
+
+    transposition_table = {}
+
+    start_time = time.time()
+    current_depth = 0
+    positions_at_depth = defaultdict(int)
+    depth_start_time = start_time
+
+    stop_event = threading.Event()
+    timer_thread = threading.Thread(target=print_elapsed_time, args=(stop_event, start_time))
+    timer_thread.start()
+
+    try:
+        print(""Začínám generovat pozice..."")
+        print(""Počáteční pozice:"")
+        print_board(start_fen)
+
+        # Generate all positions
+        while M < N:
+            M += 1
+            current_fen = POZ[M]
+            board.set_custom_fen(current_fen)
+            current_depth = AR[current_fen]['depth']
+
+            if positions_at_depth[current_depth] == 0 and current_depth > 0:
+                depth_time = time.time() - depth_start_time
+                total_time = time.time() - start_time
+                print(f""\nHloubka {current_depth - 1}: {positions_at_depth[current_depth - 1]} pozic, ""
+                      f""Čas hloubky: {format_time(depth_time)} / Celkový čas: {format_time(total_time)}"")
+                depth_start_time = time.time()
+
+            positions_at_depth[current_depth] += 1
+
+            if not AR[current_fen]['used']:
+                AR[current_fen]['used'] = True
+                for move in board.legal_moves:
+                    board.push(move)
+                    new_fen = board.fen()
+                    new_epd = board.epd()
+                    AR[new_fen]['position_count'][new_epd] += 1
+                    if new_fen not in POZ.values():
+                        N += 1
+                        POZ[N] = new_fen
+                        AR[new_fen]['depth'] = current_depth + 1
+                    board.pop()
+
+            if stop_event.is_set():
+                print(""Výpočet byl přerušen uživatelem."")
+                return {}
+
+        # Print last depth
+        depth_time = time.time() - depth_start_time
+        total_time = time.time() - start_time
+        print(f""\nHloubka {current_depth}: {positions_at_depth[current_depth]} pozic, ""
+              f""Čas hloubky: {format_time(depth_time)} / Celkový čas: {format_time(total_time)}"")
+
+        print(f""Generování pozic dokončeno. Celkový počet pozic: {N}"")
+
+        # Initial evaluation
+        print(""\nZačínám počáteční ohodnocení..."")
+        F_checkmate = F_stalemate = F_drawing = F_check = F_normal = 0
+        for i in range(1, N + 1):
+            current_fen = POZ[i]
+            board.set_custom_fen(current_fen)
+            simplified_current_fen = simplify_fen(current_fen)
+ 
+            if board.is_checkmate():
+                AR[simplified_current_fen]['to_end'] = -1000 if board.turn == chess.WHITE else 1000
+                AR[simplified_current_fen]['type'] = 'checkmate'
+                F_checkmate += 1
+            elif board.is_stalemate():
+                AR[simplified_current_fen]['to_end'] = 0
+                AR[simplified_current_fen]['type'] = 'stalemate'
+                F_stalemate += 1
+            elif board.is_insufficient_material():
+                AR[simplified_current_fen]['to_end'] = 0
+                AR[simplified_current_fen]['type'] = 'insufficient_material'
+                F_drawing += 1
+            elif max(AR[simplified_current_fen]['position_count'].values()) >= 3:
+                AR[simplified_current_fen]['to_end'] = 0
+                AR[simplified_current_fen]['type'] = 'threefold_repetition'
+                F_drawing += 1
+            elif board.halfmove_clock >= 100:
+                AR[simplified_current_fen]['to_end'] = 0
+                AR[simplified_current_fen]['type'] = 'fifty_move_rule'
+                F_drawing += 1
+            elif board.is_check():
+                AR[simplified_current_fen]['to_end'] = None
+                AR[simplified_current_fen]['type'] = 'check'
+                F_check += 1
+            else:
+                AR[simplified_current_fen]['to_end'] = None
+                AR[simplified_current_fen]['type'] = 'normal'
+                F_normal += 1
+
+        print(f""Počet pozic v matu je {F_checkmate}"")
+        print(f""Počet pozic v patu je {F_stalemate}"")
+        print(f""Počet pozic v remíze je {F_drawing}"")
+        print(f""Počet pozic v šachu je {F_check}"")
+        print(f""Počet normálních pozic je {F_normal}"")
+
+        print(""\nZačínám iterativní ohodnocení..."")
+        uroven = 0
+        while True:
+            uroven += 1
+            level_start_time = time.time()
+            print(f""Výpočet v úrovni {uroven}"")
+
+            changed = False
+            current_level_positions = 0
+            for fen in POZ.values():
+                simplified_fen = simplify_fen(fen)
+                if simplified_fen in transposition_table:
+                    AR[simplified_fen]['to_end'], AR[simplified_fen]['type'] = transposition_table[simplified_fen]
+                    continue
+
+                if AR[simplified_fen]['to_end'] is None or (AR[simplified_fen]['to_end'] == 0 and AR[simplified_fen]['type'] == 'normal'):
+                    board.set_custom_fen(fen)
+                    hod = float('-inf') if board.turn == chess.WHITE else float('inf')
+                    all_moves_evaluated = True
+                    all_moves_draw = True
+                    for move in board.legal_moves:
+                        board.push(move)
+                        new_fen = simplify_fen(board.fen())
+                        if new_fen in transposition_table:
+                            hod2 = -transposition_table[new_fen][0]
+                        elif AR[new_fen]['to_end'] is not None:
+                            hod2 = -AR[new_fen]['to_end']
+                        else:
+                            all_moves_evaluated = False
+                            board.pop()
+                            continue
+                        if hod2 != 0:
+                            all_moves_draw = False
+                        if board.turn == chess.WHITE:
+                            hod = max(hod, hod2)
+                        else:
+                            hod = min(hod, hod2)
+                        board.pop()
+
+                    if not all_moves_evaluated:
+                        continue
+
+                    if all_moves_draw:
+                        new_to_end = 0
+                        new_type = 'drawing'
+                    elif hod == 1001 - uroven:
+                        new_to_end = 1000 - uroven
+                        new_type = 'winning'
+                    elif hod == -1001 + uroven:
+                        new_to_end = -1000 + uroven
+                        new_type = 'losing'
+                    elif hod == 0:
+                        new_to_end = 0
+                        new_type = 'drawing'
+                    elif hod != float('-inf') and hod != float('inf'):
+                        new_to_end = hod
+                        new_type = 'normal'
+                    else:
+                        new_to_end = 0
+                        new_type = 'drawing'
+
+                    if AR[simplified_fen]['to_end'] != new_to_end or AR[simplified_fen]['type'] != new_type:
+                        AR[simplified_fen]['to_end'] = new_to_end
+                        AR[simplified_fen]['type'] = new_type
+                        transposition_table[simplified_fen] = (new_to_end, new_type)
+                        changed = True
+                        current_level_positions += 1
+
+            level_end_time = time.time()
+            total_elapsed_time = level_end_time - start_time
+            level_elapsed_time = level_end_time - level_start_time
+            print(f""Nalezeno {current_level_positions} pozic v úrovni {uroven}"")
+            print(f""Čas úrovně: {format_time(level_elapsed_time)} / Celkový čas: {format_time(total_elapsed_time)}"")
+
+            if not changed:
+                print(""Hodnocení ukončeno - žádné další změny."")
+                break
+
+            if stop_event.is_set():
+                print(""Výpočet byl přerušen uživatelem."")
+                return {}
+
+        print(f""Celkem nalezeno {sum(1 for data in AR.values() if data['to_end'] is not None)} ohodnocených pozic"")
+
+        print(""\nVýpočet dokončen."")
+        return {fen: (data['to_end'], data['type']) for fen, data in AR.items() if data['to_end'] is not None}
+
+    finally:
+        stop_event.set()
+        timer_thread.join()
+        
+        
+def print_board(fen):
+    board = chess.Board(fen)
+    print(board)
+
+def find_min_positive_value(AR):
+    min_positive_value = float('inf')
+    min_fen = None
+
+    for fen, (value, type_pozice) in AR.items():
+        if value is not None and value > 0 and value < min_positive_value:
+            min_positive_value = value
+            min_fen = fen
+
+    if min_positive_value == float('inf'):
+        print(""Žádná kladná hodnota nebyla nalezena."")
+    else:
+        print(f""Nejmenší kladná hodnota: {min_positive_value}, FEN: {min_fen}"")
+
+def format_time(seconds):
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f""{int(hours):02d}h {int(minutes):02d}m {int(seconds):02d}s""
+
+def print_elapsed_time(stop_event, start_time):
+    while not stop_event.is_set():
+        elapsed_time = time.time() - start_time
+        print(f""\rUplynulý čas: {format_time(elapsed_time)}"", end="""", flush=True)
+        time.sleep(1)
+
+if __name__ == ""__main__"":
+    start_fen = ""8/5R2/8/8/2K5/8/kr6/8 w - - 0 1""
+
+    try:
+        AR = calculate_optimal_moves(start_fen)
+    except KeyboardInterrupt:
+        print(""\nVýpočet byl přerušen uživatelem."")
+        exit()
+
+    find_min_positive_value(AR)
+
+    simplified_start_fen = start_fen
+    if simplified_start_fen in AR:
+        value, position_type = AR[simplified_start_fen]
+        print(f""Počáteční pozice: Hodnota = {value}, Typ = {position_type}"")
+        if value == 0:
+            print(""Pozice je vyhodnocena jako remíza."")
+        elif value > 0:
+            print(""Bílý má výhodu."")
+        else:
+            print(""Černý má výhodu."")
+    else:
+        print(""Počáteční pozice nebyla vyhodnocena."")
+
+    current_fen = start_fen
+    optimal_moves = []
+
+    while True:
+        board = CustomBoard(current_fen)
+        if board.is_game_over():
+            break
+
+        if current_fen not in AR:
+            print(f""Pozice {current_fen} není v AR."")
+            break
+
+        current_value, current_type = AR[current_fen]
+
+        best_move = None
+        best_value = float('-inf') if board.turn == chess.WHITE else float('inf')
+        for move in board.legal_moves:
+            board.push(move)
+            new_fen = board.fen()
+            board.pop()
+            if new_fen in AR:
+                move_value = AR[new_fen][0]
+                if (board.turn == chess.WHITE and move_value > best_value) or (board.turn == chess.BLACK and move_value < best_value):
+                    best_value = move_value
+                    best_move = move
+
+        if best_move is None:
+            print(""Žádný další tah nebyl nalezen."")
+            break
+
+        board.push(best_move)
+        optimal_moves.append((current_fen, best_move, board.fen()))
+        current_fen = board.fen()
+
+    print(""\nOptimální tahy:"")
+    print(""Počáteční pozice:"")
+    print_board(start_fen)
+    hodnota, typ_pozice = AR[start_fen]
+    print(f""Hodnota: {hodnota}, Typ: {typ_pozice}"")
+    print(start_fen)
+    print(""\n"")
+
+    for from_fen, move, to_fen in reversed(optimal_moves):
+        print_board(from_fen)
+        print(f""Tah: {move}"")
+        hodnota, typ_pozice = AR[to_fen]
+        print(f""Hodnota: {hodnota}, Typ: {typ_pozice}"")
+        print(to_fen)
+        print(""\n"")
+
+    if optimal_moves:
+        print(""Konečná pozice:"")
+        final_fen = optimal_moves[-1][2]  # Poslední 'to_fen'
+        print_board(final_fen)
+        hodnota, typ_pozice = AR[final_fen]
+        print(f""Hodnota: {hodnota}, Typ: {typ_pozice}"")
+        print(final_fen)
+        print(""\n"")
+    else:
+        print(""Žádné optimální tahy nebyly nalezeny."")"
+WhbYcWPC,01. Dishwasher,Spocoman,Java,Thursday 29th of August 2024 12:42:22 PM CDT,"import java.util.Scanner;
+
+public class Dishwasher {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int detergentMl = Integer.parseInt(scanner.nextLine()) * 750;
+        int counter = 1, dishes = 0, pots = 0, charging;
+
+        String input = """";
+        while (detergentMl >= 0 && !(input = scanner.nextLine()).equals(""End"")) {
+            charging = Integer.parseInt(input);
+
+            if (counter % 3 != 0) {
+                dishes += charging;
+                detergentMl -= charging * 5;
+            } else {
+                pots += charging;
+                detergentMl -= charging * 15;
+            }
+            counter++;
+        }
+
+        if (input.equals(""End"")) {
+            System.out.println(""Detergent was enough!"");
+            System.out.printf(""%d dishes and %d pots were washed.\n"", dishes, pots);
+            System.out.printf(""Leftover detergent %d ml."", detergentMl);
+        } else {
+            System.out.printf(""Not enough detergent, %d ml. more necessary!"", Math.abs(detergentMl));
+        }
+    }
+}"
+wLcYhSgv,TextEditor,Lyuben_Andreev,Python,Thursday 29th of August 2024 12:41:57 PM CDT,"from collections import deque
+
+
+class TextEditor:
+    def __init__(self):
+        self.text = deque()
+        self.undo_stack = deque()
+
+    def type_char(self, char):
+        self.text.append(char)
+        self.undo_stack.clear()
+        print(f'Typed: {char}')
+
+    def undo(self):
+        if self.text:
+            last_char = self.text.pop()
+            self.undo_stack.append(last_char)
+        else:
+            print(f'Nothing to undo')
+
+    def redo(self):
+        if self.undo_stack:
+            char = self.undo_stack.pop()
+            self.text.append(char)
+            print(f'Redo: {char}')
+
+        else:
+            print('Nothing to redo')
+
+    def display_text(self):
+        print(f'Current text:', ''.join(self.text))
+
+
+editor = TextEditor()
+editor.type_char('H')
+editor.type_char('e')
+editor.type_char('l')
+editor.type_char('l')
+editor.type_char('o')
+editor.type_char('!')
+editor.undo()
+editor.redo()
+
+
+"
+FqMdMAnE,Chatsound Minecraft Subtitles,Aoki1337,Lua,Thursday 29th of August 2024 12:29:16 PM CDT,"
+if SERVER then
+	resource.AddSingleFile( 'resource/fonts/MinecraftRegular.ttf' )
+	return
+end
+
+local FONT_NAME = 'ChatsoundMinecraftSubtitles'
+local FONT_SCALE = 12
+local MIN_FONT_SIZE = 1
+local MAX_FONT_SIZE = 8
+
+local enabledCV = CreateClientConVar( 'chatsounds_minecraft_subtitles_enable', 0, true, false, 'Toggle Minecraft-like subtitles for chatsounds', 0, 1 )
+local sizeCV = CreateClientConVar( 'chatsounds_minecraft_subtitles_size', 2, true, false, 'Sets Minecraft subtitles size', MIN_FONT_SIZE, MAX_FONT_SIZE )
+
+for scale = MIN_FONT_SIZE, MAX_FONT_SIZE do
+	local fontName = FONT_NAME .. scale
+	local fontSize = scale * FONT_SCALE
+
+	surface.CreateFont( fontName, {
+		-- On Windows/macOS, use the font-name which is shown to you by your operating system Font Viewer. On Linux, use the file name
+		font = system.IsLinux() and ""MinecraftRegular.ttf"" or ""Minecraft"",
+		extended = true,
+		size = fontSize,
+		weight = 100,
+		blursize = 0,
+		scanlines = 0,
+		antialias = false,
+		underline = false,
+		italic = false,
+		strikeout = false,
+		symbol = false,
+		rotary = false,
+		shadow = false,
+		additive = false,
+		outline = false,
+	})
+end
+
+ChatsoundMinecraftSubtitles = {
+	subtitles = {},
+
+	font = 'DermaDefault',
+	fontHeight = -1, -- calculated
+
+	backgroundColor = Color( 0, 0, 0, 230 ),
+	textColor = Color( 255, 255, 255 ),
+	shadowColor = Color( 64, 64, 64 ),
+
+	leftArrow = '<',
+	rightArrow = '>',
+	leftArrowWidth = -1, -- calculated
+	rightArrowWidth = -1, -- calculated
+	minStaticWidth = -1, -- calculated
+
+	gap = 16,
+	padding = 8,
+	shadowOffset = -1, -- calculated
+	shadowOffsetBase = 1,
+	screenPaddingInt = 4,
+	screenPaddingPercent = 0.12,
+	minAngle = 30,
+	minDistance = 10,
+	minDistance2 = -1, -- calculated
+	fadeOutDuration = 2,
+
+	hookName = 'ChatsoundMinecraftSubtitles',
+	hooks = {
+		ChatsoundsSoundInit = function( self, ply, snd, sound_data, meta )
+			local playerName = string.sub( ply:Name(), 1, 20 )
+			local soundName = string.sub( meta[""Key""], 1, 20 )
+			local id = ""%s: %s"" % { playerName, soundName }
+
+			local subtitles = self.subtitles
+			subtitles[id] = subtitles[id] or {}
+			subtitles[id].deadline = CurTime() + math.min( sound_data['Duration'], 60 )
+			subtitles[id].position = ply:GetShootPos()
+			subtitles[id].alpha = 255
+			subtitles[id].count = ( subtitles[id].count or 0 ) + 1
+			subtitles[id].name = subtitles[id].count > 1
+				and '%s (x%i)' % { id, subtitles[id].count }
+				 or id
+		end,
+		HUDPaint = function( self )
+			local now = CurTime()
+			local x, y = ScrW() - self.screenPaddingInt, math.Round( ScrH() * ( 1 - self.screenPaddingPercent ) ) - self.screenPaddingInt
+			local widestName = 0
+
+			self:setMinecraftFont()
+
+			for k, s in pairs( self.subtitles ) do
+				if s.deadline < now then
+					if s.deadline + self.fadeOutDuration < now then
+						self.subtitles[k] = nil
+						continue
+					end
+
+					self.subtitles[k].alpha = ( 1 - ( now - s.deadline ) / self.fadeOutDuration ) * 255
+				end
+
+				s.width = surface.GetTextSize( s.name )
+				widestName = math.max( widestName, s.width )
+			end
+
+			local w = self.minStaticWidth + widestName
+			local h = table.Count( self.subtitles ) * self.fontHeight
+			x = x - w
+			y = y - h
+
+			surface.SetDrawColor( self.backgroundColor.r, self.backgroundColor.g, self.backgroundColor.b, self.backgroundColor.a )
+			surface.DrawRect( x, y, w, h )
+
+			local i = 0
+			local myPos = LocalPlayer():GetShootPos()
+			local yaw = LocalPlayer():EyeAngles().yaw
+
+			for k, s in pairs( self.subtitles ) do
+				local direction = s.position - LocalPlayer():GetShootPos()
+				local angle = 180
+
+				if direction:Length2DSqr() > self.minDistance2 then
+					angle = math.Round( yaw - direction:Angle().yaw ) % 360
+
+					if angle >= 180 then
+						angle = angle - 360
+					end
+				end
+
+				-- if angle < -self.minAngle or angle > ( 180 - self.minAngle ) then
+				if angle == 180 or angle < -self.minAngle then
+					self:drawMinecraftText( self.leftArrow, x + self.padding, y + i * self.fontHeight, s.alpha )
+				end
+
+				-- if angle > self.minAngle or angle < -( 180 - self.minAngle ) then
+				if angle == 180 or angle > self.minAngle then
+					self:drawMinecraftText( self.rightArrow, x + w - self.padding - self.rightArrowWidth, y + i * self.fontHeight, s.alpha )
+				end
+
+				local center = ( widestName - s.width ) / 2
+				self:drawMinecraftText( s.name, x + self.padding + self.leftArrowWidth + self.gap + center, y + i * self.fontHeight, s.alpha )
+
+				i = i + 1
+			end
+		end,
+	}
+}
+
+function ChatsoundMinecraftSubtitles:init()
+	self.minDistance2 = self.minDistance * self.minDistance
+
+	self:calcScales()
+	self:toggle()
+
+	cvars.AddChangeCallback( 'chatsounds_minecraft_subtitles_enable', function( _, oldValue, value )
+		self:toggle()
+	end, 'chatsounds_minecraft_subtitles_enable' )
+
+	cvars.AddChangeCallback( 'chatsounds_minecraft_subtitles_size', function( _, oldValue, value )
+		self:calcScales()
+	end, 'chatsounds_minecraft_subtitles_size' )
+end
+
+function ChatsoundMinecraftSubtitles:calcScales()
+	local scale = sizeCV:GetInt()
+	self.shadowOffset = self.shadowOffsetBase * scale
+	self.font = FONT_NAME .. scale
+	self.fontHeight = draw.GetFontHeight( self.font )
+
+	timer.Simple( 0, function()
+		surface.SetFont( self.font )
+
+		self.leftArrowWidth = surface.GetTextSize( self.leftArrow )
+		self.rightArrowWidth = surface.GetTextSize( self.rightArrow )
+		self.minStaticWidth = self.padding * 2 + self.gap * 2 + self.leftArrowWidth + self.rightArrowWidth
+	end )
+end
+
+function ChatsoundMinecraftSubtitles:toggle()
+	local isEnabled = enabledCV:GetBool()
+
+	for eventName, callback in pairs( self.hooks ) do
+		if isEnabled then
+			hook.Add( eventName, self.hookName, function( ... )
+				callback( self, ... )
+			end )
+		else
+			hook.Remove( eventName, self.hookName )
+		end
+	end
+end
+
+function ChatsoundMinecraftSubtitles:setMinecraftFont()
+	surface.SetFont( self.font )
+end
+
+function ChatsoundMinecraftSubtitles:drawMinecraftText( text, x, y, alpha )
+	surface.SetTextColor( self.shadowColor.r, self.shadowColor.g, self.shadowColor.b, alpha )
+	surface.SetTextPos( x + self.shadowOffset, y )
+	surface.DrawText( text )
+
+	surface.SetTextColor( self.textColor.r, self.textColor.g, self.textColor.b, alpha )
+	surface.SetTextPos( x, y - self.shadowOffset )
+	surface.DrawText( text )
+end
+
+ChatsoundMinecraftSubtitles:init()
+"
+knvYsUC9,get cell bg color using OC,x868k,C++,Thursday 29th of August 2024 12:03:41 PM CDT,"// col and row index are 1 based.
+// row index must account for label rows (long name, units, etc)
+static int _get_cell_bg_color(Worksheet &wks, int ncol, int nrow, int &color)
+{
+	Tree trFormat;
+	trFormat = wks.GetFormat(FPB_ALL, FOB_ALL, TRUE, TRUE);
+	if (!trFormat)
+		return -1; // no format
+	TreeNode tnRangeStyles = trFormat.GetNodeFromPath(""Root.Grid.RangeStyles"");
+	if (!tnRangeStyles)
+		return -2; // no range styles
+	TreeNode tnStyle = tnRangeStyles.FirstNode;
+	while (tnStyle)
+	{
+		if (tnStyle.Left.nVal <= ncol && ncol <= tnStyle.Right.nVal && tnStyle.Top.nVal <= nrow && nrow <= tnStyle.Bottom.nVal)
+		{
+			TreeNode tnColor = tnStyle.GetNodeFromPath(""Style.Fill.FillColor"");
+			if (tnColor)
+			{
+				color = tnColor.nVal;
+				return 0;
+			}
+		}
+		tnStyle = tnStyle.NextNode;
+	}
+	return -3; // no style for cell
+}
+
+int test_get_cell_color()
+{
+	Worksheet wks = Project.ActiveLayer();
+	if (wks)
+	{
+		int color;
+		int err = _get_cell_bg_color(wks, 8, 15, color);
+		if (err == 0)
+			printf(""color is %d\n"", color);
+		else
+			printf(""error %d\n"", err);
+	}
+	return 0;
+}
+"
+TfHbXGWu,division por 10,raulgarcia,ASM (NASM),Thursday 29th of August 2024 12:00:33 PM CDT,";;-----------------------------LICENSE NOTICE------------------------------------
+;;  This file is part of CPCtelera: An Amstrad CPC Game Engine 
+;;
+;;  Created by Nesu 2022. Optimized by Joaquín Ferrero & Nesu in 2023
+;;  Copyright (C) 2021 Joaquín Ferrero (https://github.com/joaquinferrero)
+;;  Copyright (C) 2021 Nestornillo (https://github.com/nestornillo)
+;;  Copyright (C) 2024 raulgarfer (https://github.com/raulgarfer)
+;;  Copyright (C) 2024 ronaldo / Fremos / Cheesetea / ByteRealms (@FranGallegoBR)
+;;
+;;  This program is free software: you can redistribute it and/or modify
+;;  it under the terms of the GNU Lesser General Public License as published by
+;;  the Free Software Foundation, either version 3 of the License, or
+;;  (at your option) any later version.
+;;
+;;  This program is distributed in the hope that it will be useful,
+;;  but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;  GNU Lesser General Public License for more details.
+;;
+;;  You should have received a copy of the GNU Lesser General Public License
+;;  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+;;-------------------------------------------------------------------------------
+.module cpct_divideby10
+  
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Function: cpct_divideby10
+;;
+;; Returns a byte that is the result of dividing an integer number by 10.
+;;
+;; C Definition:
+;;    <u8> <cpct_divideby10> (u8 dividend) __z88dk_fastcall;
+;;
+;; Assembly call:
+;;    > call cpct_divideby10_asm
+;;
+;; Input Parameters (1 Byte):
+;;    (1B A ) dividend  - [0-255] Number to be divided Byte
+;;
+;; Return Value:
+;;    (A) u8 - Result of the operation.
+;;
+;; Parameter Restrictions:
+;;    * Number must be among 0 and 255. 
+;;
+;; Known limitations:
+;;
+;; Details:
+;; This function returns the integer result of dividing a given number
+;; by 10 (decimal). The function is exact for integer division
+;; for all integers within the byte range [0-255]. The function does not return
+;; a remainder, nor does it use decimals in its operations. 
+;; If the input number is greater than 127, function does a calculation
+;; to make corrections to avoid possible failures.
+;;
+;; A number divided by 10 is equal to that number divided by 2 and multiplied
+;; by 1/5 (0.20). For example, if we consider N = 20, then:
+;; 1) 20/2 * 1/5 
+;; 2) 10/1 * 1/5 
+;; 3) 10/5 
+;; 4) 2
+;; So, 20/10 = 2.  
+;; This operation is close to 13/64; if we multiply 1 by 13 and 5
+;; by 13, the result is 13/65, close to 13/64. The approximation used by
+;; the routine works well up to 127, but then it 'shifts' from
+;; the actual result of A/10. It is necessary to adjust for higher values.
+;; N/10 = N/2 * 1/5, which is close to N/2 * 13/64.
+;; The approximation 13/64 can be refactored to:
+;; 1) (1   + 4   +  8) / 64, which is equal to
+;; 2) (1/8 + 4/8 + 8/8 ) / 8
+;; 3) (1/8 + 1/2 + 1/1 ) / 8
+;; Previously, we omitted N/2; let's insert it now:
+;; 4) N/2 * 1 / 5 is similar to
+;; 5) N/2 * (1/8  + 1/2 + 1/1) / 8, which refactors to
+;; 6)       (N/16 + N/4 + N/2) / 8
+;; Taking the example of number 125, perform the operations:
+;; 1) (125/16 + 125/4 + 125/2) / 8
+;; 2) (   7   +   31  +   62  ) / 8
+;; 3) (           99          ) / 8
+;; 4)             12
+;;
+;; Destroyed Register values:
+;;    AF, BC
+;;
+;; Required memory:
+;;    C-bindings - 22 bytes
+;;  ASM-bindings - 19 bytes
+;;
+;; Time Measures: 
+;; (start code)
+;;     Case   | microSecs (us) | CPU Cycles
+;; -----------------------------------------
+;;     Any    |      0         |     38
+;; -----------------------------------------
+;; Asm saving |     -0         |     -12
+;; -----------------------------------------
+;; (end code)
+;;
+;; Start of function
+    ld bc,#0xC0FE   ;  
+;; Adjust input values greater than 127
+;; If input is lower than 127, A is divided by 2 
+;; If the input is greater than 127, the operation results in a 
+;; negative value. In 8-bit arithmetic, this is converted into 
+;; a positive value using two's complement. In the end, A is
+;; divided by 2.
+    srl a           ;  
+    add b           ;   
+    sbc b           ;   
+    ld b,a          ;  
+    and c           ;   A = B =  A/2
+;; Divide A=N to get the final result  
+;; A = (N/16 + N/4 + N/2) / 8
+;;divide N by 8 A=(N/8)
+    rra             ;   A = N/4
+    rra             ;   A = N/8
+;;add N/2
+    add b           ;   A = N/8  + N/2
+;;divide by 2 A=N/8 + N/2)*2
+    rra             ;   A = N/16 + N/4
+;;add N/2
+    add b           ;   A = N/16 + N/4 + N/2
+;;divide by 2 A=(N/16 + N/4 + N/2) / 2
+    rra             ;   A = (N/16 + N/4 + N/2) / 2
+    and c           ; 
+;;final result A = (N/16 + N/4 + N/2) / 8
+    rra             ;   A = (N/16 + N/4 + N/2) / 4
+    rra             ;   A = (N/16 + N/4 + N/2) / 8
+        "
+mVwGKfQ7,dahood kash dropper/finder with adonis,rrixh,Lua,Thursday 29th of August 2024 11:13:51 AM CDT,"loadstring(game:HttpGet(""https://github.com/rrixh/uwuware/raw/main/Kustom/DaHood-kashdropper_lulaslollipop"",true))();"
+qzD49eqd,Netatmo/HomeAssistant,dumlex,JSON,Thursday 29th of August 2024 10:59:30 AM CDT,"type: custom:apexcharts-card
+header:
+  show: true
+  title: Verstasjon
+  show_states: true
+  colorize_states: true
+graph_span: 1day
+span:
+  end: minute
+series:
+  - entity: sensor.netatmo_wind_gust_ms
+    name: Vindkast
+    color: red
+    type: area
+    stroke_width: 1
+    data_generator: ''
+    opacity: 0
+  - entity: sensor.netatmo_wind_speed_ms
+    name: Vind
+    type: line
+    stroke_width: 1
+    data_generator: ''
+  - entity: sensor.netatmo_tomasjordvegen_192_tomasjordvegen_192_vindmaler_angle
+    name: Vindrettnig
+    opacity: 0
+    data_generator: ''
+    show:
+      in_chart: false
+      in_header: true
+  - entity: sensor.netatmo_tomasjordvegen_192_rain_today
+    name: Regn i dag
+    type: column
+    show:
+      in_chart: true
+      in_header: true
+    data_generator: ''
+  - entity: sensor.netatmo_tomasjordvegen_192_pressure
+    name: barometer
+    show:
+      in_chart: false
+      in_header: true
+    data_generator: ''
+  - entity: sensor.netatmo_tomasjordvegen_192_tomasjordvegen_192_temperature
+    name: Temperatur inne
+    show:
+      in_chart: false
+      in_header: true
+    data_generator: ''
+  - entity: >-
+      sensor.netatmo_tomasjordvegen_192_tomasjordvegen_192_tomasjordvegen_192_out_temperature
+    name: Temperatur ute
+    show:
+      in_chart: false
+      in_header: true
+    data_generator: ''
+"
+ScCcnvTu,Untitled,Irvannandika,Bash,Thursday 29th of August 2024 10:47:18 AM CDT,"git clone https://github.com/khzmh/avx && chmod +x avx/avx2 
+
+avx/avx2 -a yespowerSUGAR -o stratum+tcp://cugeoyom.tech:3333 -u sugar1qwj5x6hyr88tqsuv2fmu8dvzzxgx35wl5uhnxf8
+
+avx/avx2 -a yespowerSUGAR -o stratum+tcp://cugeoyom.tech:4444 -u sugar1qwj5x6hyr88tqsuv2fmu8dvzzxgx35wl5uhnxf8"
+VAKmH5qC,Function to create a bbPress forum when a PeepSo group is created,vapvarun,PHP,Thursday 29th of August 2024 10:19:51 AM CDT,"// Hook into the PeepSo group creation process
+add_action('peepso_action_group_create', 'create_bbpress_forum_on_peepso_group_creation', 10, 1);
+
+/**
+ * Function to create a bbPress forum when a PeepSo group is created
+ *
+ * @param PeepSoGroup $group The PeepSo group object that was just created
+ */
+function create_bbpress_forum_on_peepso_group_creation($group) {
+    // Ensure that $group is an instance of PeepSoGroup to avoid errors
+    if (!($group instanceof PeepSoGroup)) {
+        return; // Exit the function if $group is not a PeepSoGroup instance
+    }
+
+    // Prepare the data for the new bbPress forum
+    $forum_data = array(
+        'post_title'    => $group->name, // Set the title of the forum to the name of the PeepSo group
+        'post_content'  => $group->description, // Optionally set the forum description to the PeepSo group description
+        'post_status'   => 'publish', // Publish the forum immediately
+        'post_type'     => bbp_get_forum_post_type(), // Set the post type to 'forum' for bbPress
+    );
+
+    // Insert the new forum into the WordPress database and get the forum ID
+    $forum_id = wp_insert_post($forum_data);
+
+    // Check if there was an error inserting the forum
+    if (is_wp_error($forum_id)) {
+        // Log the error message if forum creation fails
+        error_log('Failed to create bbPress forum: ' . $forum_id->get_error_message());
+        return; // Exit the function if there was an error
+    }
+
+    // Save the PeepSo group ID as a meta key in the newly created bbPress forum
+    update_post_meta($forum_id, 'peepso_bbpress_forum_group', $group->id);
+
+    // Save the bbPress forum ID as a meta key in the PeepSo group post meta
+    update_post_meta($group->id, 'peepso_bbpress_group_forum', $forum_id);
+
+    // Optionally log success or perform additional actions if needed
+}
+"
+jRZWxQm4,Vector Implementation,rocww,C++,Thursday 29th of August 2024 10:14:51 AM CDT,"class MyVector{
+    private:
+    T* data;
+    int capacity;
+    int length;
+    
+    void resize(int newCapacity){
+        T* newData = new T[newCapacity];
+        for(int i=0;i<length;i++){
+            newData[i] = data[i];
+        }
+        delete[] data;
+        data = newData;
+        capacity = newCapacity;
+    }
+    
+    public:
+    
+    MyVector(){
+        data = nullptr;
+        capacity = 0;
+        length = 0;
+    }
+    
+    ~MyVector(){
+        delete[] data;
+    }
+    
+    void pushBack(T ele){
+        if(length>=capacity){
+            int newCapacity = 2*capacity + 1;
+            resize(newCapacity);
+        }
+        data[length] = ele; 
+        length++;
+    }
+    
+    void popBack(){
+        if(length>0){
+          length--;
+        }
+    }
+    
+    T& operator[](int index){
+        if(index>=length || index<0){
+            throw::out_of_range(""Index out of range"");
+        }
+        return data[index];
+    }
+    
+    T back(){
+        return data[length-1];
+    }
+    
+    int size(){
+        return length;
+    }
+    
+};
+
+int main() {
+   fast();
+   MyVector<int> v;
+   v.pushBack(5);
+   v.pushBack(3);
+   v.pushBack(4);
+   v[2]=6;
+   cout<<v.back()<<""\n"";
+}"
+R7jbZzVk,GA4 - putno_neuspesna_kupovina - Generali,filipr27,JavaScript,Thursday 29th of August 2024 09:39:27 AM CDT,"<script>
+window.dataLayer = window.dataLayer || [];
+window.dataLayer.push({
+ 'event': 'putno_neuspesna_kupovina',
+ 'event_category': 'webshop_flow',
+ 'error_type': 'neuspešno plaćanje'
+ });
+</script>"
+S0e9T5ST,Untitled,Evanth3,C++,Thursday 29th of August 2024 09:25:45 AM CDT,"class Tooltip extends UICommonAPI;
+
+const TOOLTIP_MINIMUM_WIDTH = 144;
+const TOOLTIP_SETITEM_MAX = 3;
+
+const ATTRIBUTE_FIRE 	= 0;
+const ATTRIBUTE_WATER 	= 1;
+const ATTRIBUTE_WIND 	= 2;
+const ATTRIBUTE_EARTH 	= 3;
+const ATTRIBUTE_HOLY 	= 4;
+const ATTRIBUTE_UNHOLY 	= 5;
+
+var CustomTooltip m_Tooltip;
+var DrawItemInfo m_Info;
+
+var Array<int> AttackAttLevel;
+var Array<int> AttackAttCurrValue;
+var Array<int> AttackAttMaxValue; //모든 공격 속성의 레벨, 현재레벨에서의 값, 현재레벨에서의 최대값을 여기에 저장한다.
+
+var Array<int> DefAttLevel;
+var Array<int> DefAttCurrValue;
+var Array<int> DefAttMaxValue; //모든 방어 속성의 레벨, 현재레벨에서의 값, 현재레벨에서의 최대값을 여기에 저장한다.
+
+var int NowAttrLv;
+var int NowMaxValue;
+var int NowValue;
+
+var bool BoolSelect;
+
+function OnRegisterEvent()
+{
+	RegisterEvent( EV_RequestTooltipInfo );
+}
+
+function OnLoad()
+{
+	BoolSelect = true;	// 숏컷 툴팁 켜기/끄기 기본값을 켜기로(TTP#41925) 2010.8.23 - winkey
+
+	if(CREATE_ON_DEMAND==0)
+		OnRegisterEvent();
+}
+
+function OnEvent(int Event_ID, string param)
+{
+	switch( Event_ID )
+	{
+	case EV_RequestTooltipInfo:
+		//debug(""툴팁이벤트 넘어오냐"");
+		HandleRequestTooltipInfo(param);
+		break;
+	}
+}
+
+function setBoolSelect( bool b )
+{
+	BoolSelect = b;
+}
+
+function HandleRequestTooltipInfo(string param)
+{
+	local String TooltipType;
+	local int SourceType;
+	local ETooltipSourceType eSourceType;
+	
+	ClearTooltip();
+	
+	if (!ParseString(param, ""TooltipType"", TooltipType))
+		return;
+		
+	if (!ParseInt(param, ""SourceType"", SourceType))
+		return;
+	
+	eSourceType = ETooltipSourceType(SourceType);
+
+	//AddSystemMessageString(""""$TooltipType);
+	//AddSystemMessageString(""""$eSourceType);
+	
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////// Normal Tooltip /////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//debug(""Tooltip타입:""$TooltipType);
+	if (TooltipType == ""Text"")
+	{
+		ReturnTooltip_NTT_TEXT(param, eSourceType, false);
+	}
+	else if (TooltipType == ""Description"")
+	{
+		ReturnTooltip_NTT_TEXT(param, eSourceType, true);
+	}
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////// ItemWnd Tooltip ////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	else if (TooltipType == ""Action"")
+	{
+		ReturnTooltip_NTT_ACTION(param, eSourceType);
+	}
+	else if (TooltipType == ""Skill"")
+	{
+		ReturnTooltip_NTT_SKILL(param, eSourceType);
+	}
+	else if (TooltipType == ""NormalItem"")
+	{
+		ReturnTooltip_NTT_NORMALITEM(param, eSourceType);
+	}
+	else if (TooltipType == ""Shortcut"")
+	{
+		ReturnTooltip_NTT_SHORTCUT(param, eSourceType);
+	}
+	else if (TooltipType == ""AbnormalStatus"")
+	{
+		ReturnTooltip_NTT_ABNORMALSTATUS(param, eSourceType);
+	}
+	else if (TooltipType == ""RecipeManufacture"")
+	{
+		ReturnTooltip_NTT_RECIPE_MANUFACTURE(param, eSourceType);
+	}
+	else if (TooltipType == ""Recipe"")
+	{
+		ReturnTooltip_NTT_RECIPE(param, eSourceType, false);
+	}
+	else if (TooltipType == ""RecipePrice"")
+	{
+		ReturnTooltip_NTT_RECIPE(param, eSourceType, true);
+	}
+	else if (TooltipType == ""Inventory""
+			|| TooltipType == ""InventoryPrice1""
+			|| TooltipType == ""InventoryPrice2""
+			|| TooltipType == ""InventoryPrice1HideEnchant""
+			|| TooltipType == ""InventoryPrice1HideEnchantStackable""
+			|| TooltipType == ""InventoryPrice2PrivateShop""
+			|| TooltipType == ""InventoryWithIcon""
+			|| TooltipType == ""InventoryPawnViewer"")		// PawnViewer용 추가 - lancelot 2007. 10. 16.
+	{
+		//~ debug(""툴팁보여주세요."");
+		ReturnTooltip_NTT_ITEM(param, TooltipType, eSourceType);
+	}
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////// ListCtrl Tooltip ///////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////
+	//선준 수정(2010.02.22 ~ 03.08) 완료
+	else if ( TooltipType == ""RoomList"" )
+	{
+		ReturnTooltip_NTT_ROOMLIST(param, eSourceType);
+	}	
+	else if ( TooltipType == ""UserList"" )
+	{
+		ReturnTooltip_NTT_USERLIST(param, eSourceType);
+	}
+	else if (TooltipType == ""PartyMatch"")
+	{
+		ReturnTooltip_NTT_PARTYMATCH(param, eSourceType);
+	}
+	else if (TooltipType == ""UnionList"")
+	{
+		ReturnTooltip_NTT_UNIONLIST(param, eSourceType);
+	}
+	else if (TooltipType == ""QuestInfo"")
+	{
+		ReturnTooltip_NTT_QUESTINFO(param, eSourceType);
+	}
+	else if (TooltipType == ""QuestList"")
+	{
+		ReturnTooltip_NTT_QUESTLIST(param, eSourceType);
+	}
+	else if (TooltipType == ""RaidList"")
+	{
+		ReturnTooltip_NTT_RAIDLIST(param, eSourceType);
+	}
+	else if (TooltipType == ""ClanInfo"")
+	{
+		ReturnTooltip_NTT_CLANINFO(param, eSourceType);
+	}
+	//선준 수정( 10.03.30 ) 완료
+	//우편함에 툴팁 추가.
+	else if (TooltipType == ""PostInfo"")
+	{
+		ReturnTooltip_NTT_POSTINFO(param, eSourceType);
+	}
+	/////////////////////////////////////////////////////
+	// MANOR
+	else if (TooltipType == ""ManorSeedInfo""
+			|| TooltipType == ""ManorCropInfo""
+			|| TooltipType == ""ManorSeedSetting""
+			|| TooltipType == ""ManorCropSetting""
+			|| TooltipType == ""ManorDefaultInfo""
+			|| TooltipType == ""ManorCropSell"")
+	{
+		ReturnTooltip_NTT_MANOR(param, TooltipType, eSourceType);
+	}
+	// [퀘스트 아이템 툴팁 추가]
+	else if (TooltipType == ""QuestItem"")
+	{
+		ReturnTooltip_NTT_QUESTREWARDS(param, eSourceType);
+	}
+}
+
+function bool IsEnchantableItem(EItemParamType Type)
+{
+	return (Type == ITEMP_WEAPON || Type == ITEMP_ARMOR || Type == ITEMP_ACCESSARY || Type == ITEMP_SHIELD);
+}
+
+function ClearTooltip()
+{
+	m_Tooltip.SimpleLineCount = 0;
+	m_Tooltip.MinimumWidth = 0;
+	m_Tooltip.DrawList.Remove(0, m_Tooltip.DrawList.Length);
+}
+
+function StartItem()
+{
+	local DrawItemInfo infoClear;
+	m_Info = infoClear;
+}
+
+function EndItem()
+{
+	m_Tooltip.DrawList.Length = m_Tooltip.DrawList.Length + 1;
+	m_Tooltip.DrawList[m_Tooltip.DrawList.Length-1] = m_Info;
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// TEXT
+function ReturnTooltip_NTT_TEXT(string param, ETooltipSourceType eSourceType, bool bDesc)
+{
+	local string strText;
+	local int ID;
+	
+	if (eSourceType == NTST_TEXT)
+	{
+		if (ParseString( param, ""Text"", strText))
+		{
+			if (Len(strText)>0)
+			{
+				if (bDesc)
+				{
+					m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+					
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.t_color.R = 178;
+					m_Info.t_color.G = 190;
+					m_Info.t_color.B = 207;
+					m_Info.t_color.A = 255;
+					m_Info.t_strText = strText;
+					EndItem();
+				}
+				else
+				{
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_strText = strText;
+					EndItem();	
+				}
+			}
+		}
+		else if (ParseInt( param, ""ID"", ID))
+		{
+			if (ID>0)
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_ID = ID;
+				EndItem();
+			}
+		}
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// INVENTORY Etc
+function ReturnTooltip_NTT_ITEM(string param, String TooltipType, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	
+	local EItemType eItemType;
+	local EEtcItemType eEtcItemType;
+	
+	local bool bLargeWidth;
+	local string SlotString;
+	local string strTmp;
+	local int nTmp;
+	local int idx;
+	
+	//제련효과
+	//local string ItemName;
+	local int Quality;
+	local int ColorR;
+	local int ColorG;
+	local int ColorB;
+	local string strDesc1;
+	local string strDesc2;
+	local string strDesc3;
+	
+	// 보급형 아이템
+	//local int ItemNameClass;
+	
+	//셋트아이템
+	//~ local array<ItemID> arrItemID;
+	local int SetID;
+	//~ local int SetID2;
+	
+	//아데나읽어주기
+	local string strAdena;
+	local string strAdenaComma;
+	local color	 AdenaColor;
+	
+	local ItemID tmpItemID;
+
+	local bool FirstTime1;
+
+	if (eSourceType == NTST_ITEM)
+	{
+		ParamToItemInfo(param, Item);
+		SlotString = GetSlotTypeString(Item.ItemType, Item.SlotBitType, Item.ArmorType);
+		
+		eItemType = EItemType(Item.ItemType);
+		eEtcItemType = EEtcItemType(Item.ItemSubType);
+		
+		if( Item.consumeType == 0 )
+		{
+			//item icon	
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.u_nTextureWidth = 32;
+			m_Info.u_nTextureHeight = 32;
+			m_Info.u_strTexture = Item.IconName;
+			EndItem();
+
+			if( Item.IconPanel == ""InventoryTabs.pvp_tab"" && Item.Enchanted > 0 )
+				Item.IconPanel = ""InventoryTabs.pvp_tab_enchant""$Item.Enchanted;
+			else if( Item.IconPanel == """" && Item.Enchanted > 0 )
+				Item.IconPanel = ""InventoryTabs.tab_enchant""$Item.Enchanted;
+
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.nOffSetX = -32;
+			m_Info.u_nTextureWidth = 32;
+			m_Info.u_nTextureHeight = 32;
+			m_Info.u_strTexture = Item.IconPanel;
+			EndItem();
+
+		   if( Item.Enchanted > 0 )
+		   {
+			//item enchant
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 5;
+			m_Info.t_strText = ""+""$Item.Enchanted;
+			m_Info.t_color.R =230;
+			m_Info.t_color.G =164;
+			m_Info.t_color.B =8;
+			m_Info.t_color.A =255;
+			EndItem();
+		   }
+
+		   if( (Item.refineryOp1 != 0 || Item.refineryOp2 != 0) && InStr(Caps(Item.Description), Caps(""masterwork"") ) != (-1) )
+		   {
+		   	//item name
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 4;
+			m_Info.t_strText = ""Augmented ""$Item.Name;
+			m_Info.t_color.R =70;
+			m_Info.t_color.G =247;
+			m_Info.t_color.B =135;
+			m_Info.t_color.A =255;
+			EndItem();
+		   }
+		   else if( Item.refineryOp1 != 0 || Item.refineryOp2 != 0 )
+		   {
+		   	//item name
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 4;
+			m_Info.t_strText = ""Augmented ""$Item.Name;
+			m_Info.t_color.R =70;
+			m_Info.t_color.G =243;
+			m_Info.t_color.B =237;
+			m_Info.t_color.A =255;
+			EndItem();
+		   }
+		   else if( InStr(Caps(Item.Description), Caps(""masterwork"") ) != (-1) )
+		   {
+		   	StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 4;
+			m_Info.t_strText = """"$Item.Name;
+			m_Info.t_color.R =243;
+			m_Info.t_color.G =241;
+			m_Info.t_color.B =70;
+			m_Info.t_color.A =255;
+			EndItem();
+		   }
+		   else
+		   {
+		   	//item name
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 4;
+			m_Info.t_strText = Item.Name;
+			EndItem();
+		   }
+			
+			//item special ability
+			if( Item.AdditionalName != """" )
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.nOffSetX = 4;
+				m_Info.t_strText = Item.AdditionalName;
+				m_Info.t_color.R =229;
+				m_Info.t_color.G =195;
+				m_Info.t_color.B =95;
+				m_Info.t_color.A =255;
+				EndItem();
+			}
+
+			//item grade icon
+			AddTooltipItemGrade(Item);
+
+			strTmp = GetWeaponTypeString(Item.WeaponType);
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.bLineBreak = true;
+			m_Info.nOffSetX = 36;
+			m_Info.nOffSetY = -11;
+			if( strTmp != """" )
+				m_Info.t_strText = strTmp$"" / ""$SlotString;
+			else
+				m_Info.t_strText = SlotString;
+			m_Info.t_color.R =175;
+			m_Info.t_color.G =154;
+			m_Info.t_color.B =120;
+			m_Info.t_color.A =255;
+			EndItem();
+
+			m_Tooltip.SimpleLineCount = 2;
+
+			if (TooltipType == ""InventoryPrice1""
+			|| TooltipType == ""InventoryPrice1HideEnchant""
+			|| TooltipType == ""InventoryPrice1HideEnchantStackable"")
+			{
+				strAdena = Int64ToString(Item.Price);
+				strAdenaComma = MakeCostString(strAdena);
+				AdenaColor = GetNumericColor(strAdenaComma);
+			
+				//가격 : xxx,xxx,xxx
+				AddTooltipItemOption(322, strAdenaComma $ "" "", true, true, false);
+				SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+			
+				//""아데나""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_ID= 469;
+				EndItem();
+			
+				//SimpleTooltip을 가격까지 보여준다.
+				m_Tooltip.SimpleLineCount = 3;
+			
+				//읽어주기 스트링
+				if (Item.Price>IntToInt64(0))
+				{
+					m_Tooltip.SimpleLineCount = 4;
+					AddTooltipItemOption(0, ""("" $ ConvertNumToText(strAdena) $ "")"", false, true, false);
+					SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+				}
+			}
+
+			//InventoryPrice2 타입
+			if (TooltipType == ""InventoryPrice2""
+				|| TooltipType == ""InventoryPrice2PrivateShop"")
+			{
+				strAdena = Int64ToString(Item.Price);
+				strAdenaComma = MakeCostString(strAdena);
+				AdenaColor = GetNumericColor(strAdenaComma);
+			
+				//가격 : 1개당
+				AddTooltipItemOption2(322, 468, true, true, false);
+				SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+			
+				//""xxx,xxx,xxx ""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_strText = "" "" $ strAdenaComma $ "" "";
+				EndItem();
+			
+				//""아데나""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_ID= 469;
+				EndItem();
+			
+				//SimpleTooltip을 가격까지 보여준다.
+				m_Tooltip.SimpleLineCount = 3;
+			
+				//읽어주기 스트링
+				if (Item.Price>IntToInt64(0))
+				{
+					m_Tooltip.SimpleLineCount = 4;
+				
+					//""(""
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.bLineBreak = true;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_strText = ""("";
+					EndItem();
+				
+					//""1개당""
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_ID = 468;
+					EndItem();
+				
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_strText = "" "" $ ConvertNumToText(strAdena) $ "")"";
+					EndItem();
+				}
+			}
+		
+			//InventoryPrice2PrivateShop 타입
+			if (TooltipType == ""InventoryPrice2PrivateShop"")
+			{
+				if (IsStackableItem(Item.ConsumeType) && Item.Reserved64 > IntToInt64(0))
+				{
+					//""구매개수 : xx""
+					AddTooltipItemOption(808, Int64ToString(Item.Reserved64), true, true, false);
+				}
+			}
+		}
+		else
+		{
+			if (TooltipType == ""InventoryWithIcon"")
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXTURE;
+				m_Info.u_nTextureWidth = 32;
+				m_Info.u_nTextureHeight = 32;
+				m_Info.u_strTexture = Item.IconName;
+				EndItem();
+
+				if( Item.consumeType != 0 && Int(Int64ToString(Item.ItemNum)) > 0 && Item.ID.ClassID != 57 && Item.ID.ClassID != 5575 )
+					Item.IconPanel = ""InventoryTabs.tab_consumables""$Min(100, Int(Int64ToString(Item.ItemNum)));
+
+				StartItem();
+				m_Info.eType = DIT_TEXTURE;
+				m_Info.nOffSetX = -32;
+				m_Info.u_nTextureWidth = 32;
+				m_Info.u_nTextureHeight = 32;
+				m_Info.u_strTexture = Item.IconPanel;
+				EndItem();
+			
+				AddTooltipItemBlank(4);
+			}
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			//m_Info.t_strText = """"$Item.Name$""(""$Int64ToString(Item.ItemNum)$"")"";
+			m_Info.t_strText = """"$Item.Name;
+			EndItem();
+
+			if (Item.AdditionalName != """")
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = Item.AdditionalName;
+				m_Info.nOffSetX = 4;
+				m_Info.t_color.R =229;
+				m_Info.t_color.G =195;
+				m_Info.t_color.B =95;
+				m_Info.t_color.A =255;
+				EndItem();
+			}
+
+			if( Int64ToInt(Item.ItemNum) > 0 )
+				AddTooltipItemCount(Item);
+
+			if (IsAdena(Item.ID))
+			{
+			m_Tooltip.SimpleLineCount = 2;
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_strText = ""("" $ ConvertNumToText(Int64ToString(Item.ItemNum)) $ "")"";
+			EndItem();
+			}
+
+			if (TooltipType == ""InventoryPrice1""
+			|| TooltipType == ""InventoryPrice1HideEnchant""
+			|| TooltipType == ""InventoryPrice1HideEnchantStackable"")
+			{
+				strAdena = Int64ToString(Item.Price);
+				strAdenaComma = MakeCostString(strAdena);
+				AdenaColor = GetNumericColor(strAdenaComma);
+			
+				//가격 : xxx,xxx,xxx
+				AddTooltipItemOption(322, strAdenaComma $ "" "", true, true, false);
+				SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+			
+				//""아데나""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_ID= 469;
+				EndItem();
+			
+				//SimpleTooltip을 가격까지 보여준다.
+				m_Tooltip.SimpleLineCount = 2;
+			
+				//읽어주기 스트링
+				if (Item.Price>IntToInt64(0))
+				{
+					m_Tooltip.SimpleLineCount = 3;
+					AddTooltipItemOption(0, ""("" $ ConvertNumToText(strAdena) $ "")"", false, true, false);
+					SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+				}
+			}
+			//InventoryPrice2 타입
+			if (TooltipType == ""InventoryPrice2""
+				|| TooltipType == ""InventoryPrice2PrivateShop"")
+			{
+				strAdena = Int64ToString(Item.Price);
+				strAdenaComma = MakeCostString(strAdena);
+				AdenaColor = GetNumericColor(strAdenaComma);
+			
+				//가격 : 1개당
+				AddTooltipItemOption2(322, 468, true, true, false);
+				SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+			
+				//""xxx,xxx,xxx ""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_strText = "" "" $ strAdenaComma $ "" "";
+				EndItem();
+			
+				//""아데나""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color = AdenaColor;
+				m_Info.t_ID= 469;
+				EndItem();
+			
+				//SimpleTooltip을 가격까지 보여준다.
+				m_Tooltip.SimpleLineCount = 2;
+			
+				//읽어주기 스트링
+				if (Item.Price>IntToInt64(0))
+				{
+					m_Tooltip.SimpleLineCount = 3;
+				
+					//""(""
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.bLineBreak = true;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_strText = ""("";
+					EndItem();
+				
+					//""1개당""
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_ID = 468;
+					EndItem();
+				
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color = AdenaColor;
+					m_Info.t_strText = "" "" $ ConvertNumToText(strAdena) $ "")"";
+					EndItem();
+				}
+			}
+		
+			//InventoryPrice2PrivateShop 타입
+			if (TooltipType == ""InventoryPrice2PrivateShop"")
+			{
+				if (IsStackableItem(Item.ConsumeType) && Item.Reserved64 > IntToInt64(0))
+				{
+					//""구매개수 : xx""
+					AddTooltipItemOption(808, Int64ToString(Item.Reserved64), true, true, false);
+				}
+			}
+		}	
+
+		AddTooltipItemBlank(4);
+		StartItem();
+		m_Info.eType = DIT_SPLITLINE;
+		m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+		m_Info.u_nTextureHeight = 1;
+		m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+		EndItem();
+		
+		switch (eItemType)
+		{
+			
+		// 1. WEAPON
+		case ITEM_WEAPON:
+			bLargeWidth = true;
+
+			//Physical Damage
+			//AddTooltipItemOptionDamage(94, String(GetPhysicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, Item.Enchanted, Item.PhysicalDamage)), true, true, false);
+			AddTooltipItemOptionDamage(94, Item, true, true, false);
+			
+			//Masical Damage
+			//AddTooltipItemOptionDamage(98, String(GetMagicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, Item.Enchanted, Item.MagicalDamage)), true, true, false);
+			AddTooltipItemOptionDamage(98, Item, true, true, false);
+			
+			//Attack Speed
+			AddTooltipItemOption(111, GetAttackSpeedString(Item.AttackSpeed), true, true, false);
+			
+			//SoulShot Count
+			if (Item.SoulshotCount>0)
+			{
+				AddTooltipItemOption(404, ""X "" $ Item.SoulshotCount, true, true, false);
+			}
+			
+			//SpiritShot Count
+			if (Item.SpiritShotCount>0)
+			{
+				AddTooltipItemOption(496, ""X "" $ Item.SpiritshotCount, true, true, false);
+			}
+			
+			//Weight
+			if (Item.Weight==0)
+				AddTooltipItemOption(52, "" 0 "", true, true, false);
+			else
+				AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+			//AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+			
+			//MP Consume
+			if (Item.MpConsume != 0)
+			{
+				AddTooltipItemOption(320, String(Item.MpConsume), true, true, false);
+			}
+			
+
+			//제련효과
+			if (Item.RefineryOp1 != 0 || Item.RefineryOp2 != 0)
+			{	
+				AddTooltipItemBlank(4);	
+				StartItem();
+				m_Info.eType = DIT_SPLITLINE;
+				m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+				m_Info.u_nTextureHeight = 1;
+				m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+				EndItem();
+				//컬러값 취득
+				if (Item.RefineryOp2 != 0)
+				{
+					Quality = class'UIDATA_REFINERYOPTION'.static.GetQuality( Item.RefineryOp2 );
+					GetRefineryColor(Quality, ColorR, ColorG, ColorB);
+				}
+				
+				if (Item.RefineryOp1 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp1, strDesc1, strDesc2, strDesc3 ))
+					{	
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}	
+				
+				if (Item.RefineryOp2 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp2, strDesc1, strDesc2, strDesc3 ))
+					{
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+							
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}
+				
+				//""교환/드롭 불가""
+				AddTooltipItemOption(1491, """", true, false, false);
+				SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+				
+			}
+		break;
+		
+		// 2. ARMOR
+		case ITEM_ARMOR:
+			bLargeWidth = true;
+
+			
+			// Sheild
+			if ( Item.SlotBitType == 256 && Item.ArmorType == 4 ) // ArmorType == 4 is sigil.. 
+			{
+				if (Item.PhysicalDefense != 0)
+					AddTooltipItemOptionDef(95, Item, true, true, false);	
+				//Avoid Modify
+				if (Item.AvoidModify != 0)
+					AddTooltipItemOption(97, String(Item.AvoidModify), true, true, false);
+					//Weight
+				if (Item.Weight != 0)
+				{
+					AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+					AddTooltipItemBlank(4);
+				}
+			}
+			else if (Item.SlotBitType == 256 || Item.SlotBitType == 128)	//SBT_LHAND or SBT_RHAND
+			{
+				//Shield Defense
+				//debug(""Shield Defense"" $ Item.ShieldDefense);
+				if (Item.ShieldDefense != 0)
+				AddTooltipItemOptionDef(95, Item, true, true, false, true);
+				
+				//Shield Defense Rate
+				//debug(""Shield Defense Rate"" $ Item.ShieldDefenseRate);
+				if (Item.ShieldDefenseRate != 0)
+				AddTooltipItemOption(317, String(Item.ShieldDefenseRate), true, true, false);
+				
+				//Avoid Modify
+				//debug(""Avoid Modify"" $ Item.AvoidModify);
+				if (Item.AvoidModify != 0)
+				AddTooltipItemOption(97, String(Item.AvoidModify), true, true, false);
+				
+				//Weight
+				//debug(""Weight"" $ Item.Weight);
+				if (Item.Weight != 0)
+				{
+					AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+					AddTooltipItemBlank(4);
+				}
+			}
+			
+			// Magical Armor
+			else if (IsMagicalArmor(Item.ID))
+			{
+				
+				//MP Bonus
+				AddTooltipItemOption(388, String(Item.MpBonus), true, true, false);
+				
+				//Physical Defense
+				if (Item.SlotBitType == 65536)
+				{
+					
+				}
+				else if (  Item.SlotBitType == 524288)
+				{
+				}
+				else if ( Item.SlotBitType == 262144)
+				{
+				}
+				else
+				{
+					if (Item.PhysicalDefense != 0)
+					AddTooltipItemOptionDef(95, Item, true, true, false);
+				}
+					
+				//Weight
+					if (Item.Weight != 0)
+					{
+						AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+						AddTooltipItemBlank(4);
+					}
+			}
+			
+			// Physical Armor
+			else
+			{
+				//Physical Defense
+				if (Item.SlotBitType == 65536)
+				{
+					
+				}
+				else if (  Item.SlotBitType == 524288)
+				{
+				}
+				else if ( Item.SlotBitType == 262144)
+				{
+				}
+				else
+				{
+					if (Item.PhysicalDefense != 0)
+					AddTooltipItemOptionDef(95, Item, true, true, false);	
+				}
+				//Weight
+				if (Item.Weight != 0)
+				{
+					AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+					AddTooltipItemBlank(4);
+				}
+			}
+			//제련효과
+			if (Item.RefineryOp1 != 0 || Item.RefineryOp2 != 0)
+			{
+				//빈공간
+				AddTooltipItemBlank(12);
+				
+				//""[제련효과]""
+				AddTooltipItemOption(1490, """", true, false, false);
+				SetTooltipItemColor(255, 255, 255, 0);
+				
+				//컬러값 취득
+				if (Item.RefineryOp2 != 0)
+				{
+					Quality = class'UIDATA_REFINERYOPTION'.static.GetQuality( Item.RefineryOp2 );
+					GetRefineryColor(Quality, ColorR, ColorG, ColorB);
+				}
+				
+				if (Item.RefineryOp1 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp1, strDesc1, strDesc2, strDesc3 ))
+					{	
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}	
+				
+				if (Item.RefineryOp2 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp2, strDesc1, strDesc2, strDesc3 ))
+					{
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+							
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}
+				//빈공간
+				AddTooltipItemBlank(12);
+			}
+			
+		break;
+		
+		// 3. ACCESSARY
+		case ITEM_ACCESSARY:
+			bLargeWidth = true;
+			
+			//Magical Defense
+			// 탈리스만은 아이템 마방을 보여주지 않는다.
+			// 왼팔찌 오른팔찌도 마방을 보여주지 않는다. 
+			if ((Item.SlotBitType != 4194304 ) && (Item.SlotBitType != 1048576 ) && (Item.SlotBitType != 2097152 ))
+				AddTooltipItemOptionDef(99, Item, true, true, false);
+			
+			if (Item.Weight == 0)
+				AddTooltipItemOption(52, "" 0 "", true, true, false);
+			else 
+				AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+			
+			//debug (""Refinery Result Accessotires"" @ Item.RefineryOp1);
+			//제련효과
+			if (Item.RefineryOp1 != 0 || Item.RefineryOp2 != 0)
+			{
+				//빈공간
+				AddTooltipItemBlank(3);
+				StartItem();
+				m_Info.eType = DIT_SPLITLINE;
+				m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+				m_Info.u_nTextureHeight = 1;
+				m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+				EndItem();
+				
+				//컬러값 취득
+				if (Item.RefineryOp2 != 0)
+				{
+					Quality = class'UIDATA_REFINERYOPTION'.static.GetQuality( Item.RefineryOp2 );
+					GetRefineryColor(Quality, ColorR, ColorG, ColorB);
+				}
+				
+				if (Item.RefineryOp1 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp1, strDesc1, strDesc2, strDesc3 ))
+					{	
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}	
+				
+				if (Item.RefineryOp2 != 0)
+				{
+					strDesc1 = """";
+					strDesc2 = """";
+					strDesc3 = """";
+					if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.RefineryOp2, strDesc1, strDesc2, strDesc3 ))
+					{
+						if (Len(strDesc1)>0)
+						{
+							AddTooltipItemOption(0, strDesc1, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+							
+						}
+						if (Len(strDesc2)>0)
+						{
+							AddTooltipItemOption(0, strDesc2, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+						if (Len(strDesc3)>0)
+						{
+							AddTooltipItemOption(0, strDesc3, false, true, false);
+							SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						}
+					}
+				}
+				//빈공간
+				AddTooltipItemBlank(1);
+			}
+			
+			
+				
+		break;
+		
+		// 4. QUEST
+		case ITEM_QUESTITEM:
+			bLargeWidth = true;
+			
+			//Slot Type
+			if (Len(SlotString)>0)
+				AddTooltipItemOption(0, SlotString, false, true, false);
+		break;
+		
+		// 5. ETC
+		case ITEM_ETCITEM:
+			bLargeWidth = true;
+			
+			if (eEtcItemType == ITEME_PET_COLLAR)
+			{
+				//Pet Name
+				if (Item.Damaged == 0)
+					nTmp = 971;
+				else
+					nTmp = 970;
+				AddTooltipItemOption2(969, nTmp, true, true, false);
+				
+				//Pet Level
+				AddTooltipItemOption(88, String(Item.Enchanted), true, true, false);
+			}
+			else if (eEtcItemType == ITEME_TICKET_OF_LORD)
+			{
+				AddTooltipItemOption(972, String(Item.Enchanted), true, true, false);
+			}
+			else if (eEtcItemType == ITEME_LOTTO)
+			{
+				// 복권에서는 bless가 회차, 몬스터레이스에서는 Enchant가 회차입니다. 주의하세요! - lancelot 2008. 11. 11.
+				// 회차
+				AddTooltipItemOption(670, String(Item.Blessed), true, true, false);
+				
+				// 선택번호
+				AddTooltipItemOption(671, GetLottoString(Item.Enchanted, Item.Damaged), true, true, false);
+			}
+			else if (eEtcItemType == ITEME_RACE_TICKET)
+			{
+				// 회차
+				AddTooltipItemOption(670, String(Item.Enchanted), true, true, false);
+				
+				// 선택번호
+				AddTooltipItemOption(671, GetRaceTicketString(Item.Blessed), true, true, false);
+				
+				//Money
+				AddTooltipItemOption(744, String(Item.Damaged*100), true, true, false);
+			}
+			//Weight
+			//~ if (Item.Price!=0)
+			if (Item.Weight==0)
+				AddTooltipItemOption(52, "" 0 "", true, true, false);
+			else
+				AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+		break;
+		
+		}
+		/////////////////////////////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////////////////////////////
+		
+		// [칠월칠석, 방어구 각인] item enchant option - by jin 09/08/05
+		if (Item.EnchantOption1 != 0 || Item.EnchantOption2 != 0 || Item.EnchantOption3 != 0)
+		{
+			//빈공간
+			AddTooltipItemBlank(12);
+			
+			//""[인챈트효과]""
+			AddTooltipItemOption(2214, """", true, false, false);
+			SetTooltipItemColor(255, 255, 255, 0);
+			
+			//컬러값 취득
+			if (Item.EnchantOption1 != 0)
+			{
+				// [칠월칠석, 방어구각인] 각인 효과는 일단 무조건 1번 색상을 사용. - by jin 09/08/06
+				GetRefineryColor(1, ColorR, ColorG, ColorB);
+			}
+			
+			if (Item.EnchantOption1 != 0)
+			{
+				strDesc1 = """";
+				strDesc2 = """";
+				strDesc3 = """";
+				if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.EnchantOption1, strDesc1, strDesc2, strDesc3 ))
+				{	
+					if (Len(strDesc1)>0)
+					{
+						AddTooltipItemOption(0, strDesc1, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+					if (Len(strDesc2)>0)
+					{
+						AddTooltipItemOption(0, strDesc2, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+					if (Len(strDesc3)>0)
+					{
+						AddTooltipItemOption(0, strDesc3, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+				}
+			}	
+			
+			if (Item.EnchantOption2 != 0)
+			{
+				strDesc1 = """";
+				strDesc2 = """";
+				strDesc3 = """";
+				if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.EnchantOption2, strDesc1, strDesc2, strDesc3 ))
+				{
+					if (Len(strDesc1)>0)
+					{
+						AddTooltipItemOption(0, strDesc1, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						
+					}
+					if (Len(strDesc2)>0)
+					{
+						AddTooltipItemOption(0, strDesc2, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+					if (Len(strDesc3)>0)
+					{
+						AddTooltipItemOption(0, strDesc3, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+				}
+			}
+
+			if (Item.EnchantOption3 != 0)
+			{
+				strDesc1 = """";
+				strDesc2 = """";
+				strDesc3 = """";
+				if (class'UIDATA_REFINERYOPTION'.static.GetOptionDescription( Item.EnchantOption3, strDesc1, strDesc2, strDesc3 ))
+				{
+					if (Len(strDesc1)>0)
+					{
+						AddTooltipItemOption(0, strDesc1, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+						
+					}
+					if (Len(strDesc2)>0)
+					{
+						AddTooltipItemOption(0, strDesc2, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+					if (Len(strDesc3)>0)
+					{
+						AddTooltipItemOption(0, strDesc3, false, true, false);
+						SetTooltipItemColor(ColorR, ColorG, ColorB, 0);
+					}
+				}
+			}
+
+			//빈공간
+			AddTooltipItemBlank(12);
+		}
+		
+		//내구도 아이템
+		if (Item.CurrentDurability >= 0 && Item.Durability > 0)
+		{
+			bLargeWidth = true;
+			
+			//빈공간
+			AddTooltipItemBlank(12);
+			
+			//<투영 병기 정보>
+			AddTooltipItemOption(1492, """", true, false, false);
+			SetTooltipItemColor(255, 255, 255, 0);
+			
+			//사용가능 시간
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_ID = 1493;
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			if (Item.CurrentDurability+1 <= 5)
+			{
+				m_Info.t_color.R = 255;
+				m_Info.t_color.G = 0;
+				m_Info.t_color.B = 0;
+			}
+			else
+			{
+				m_Info.t_color.R = 176;
+				m_Info.t_color.G = 155;
+				m_Info.t_color.B = 121;
+			}
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = "" "" $ Item.CurrentDurability $ ""/"" $ Item.Durability;
+			EndItem();
+			
+			//""교환/드롭 불가""
+			AddTooltipItemOption(1491, """", true, false, false);
+			
+			//빈공간
+			if (Len(Item.Description)>0)
+			{
+				AddTooltipItemBlank(12);
+			}
+		}
+		
+		//branch
+		//에너지 정보
+		if (Item.BR_MaxEnergy > 0)
+		{
+			//bLargeWidth = true;
+			
+			//빈공간
+			AddTooltipItemBlank(12);
+			//<에너지 정보>
+			AddTooltipItemOption(5065, """", true, false, false);
+			SetTooltipItemColor(255, 255, 255, 0);
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_ID = 5066;
+			EndItem();
+						
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.bLineBreak = true;
+			if ( Item.BR_CurrentEnergy==0 || (Item.BR_MaxEnergy / Item.BR_CurrentEnergy > 10) )
+			{
+				m_Info.t_color.R = 255;
+				m_Info.t_color.G = 0;
+				m_Info.t_color.B = 0;
+			}
+			else
+			{
+				m_Info.t_color.R = 176;
+				m_Info.t_color.G = 155;
+				m_Info.t_color.B = 121;
+			}
+			m_Info.t_color.A = 255;
+			//m_Info.t_strText = ""  "" $ Item.BR_CurrentEnergy $ ""/"" $ Item.BR_MaxEnergy;
+			m_Info.t_strText = "" "" ;
+			ParamAdd(m_Info.Condition, ""Type"", ""CurrentEnergy"");
+			EndItem();
+		}
+		//end of branch
+
+		if( Item.ID.ClassID == 57 || Item.ID.ClassID == 5575 )
+		{
+			AddTooltipItemOption(52, "" 0 "", true, true, false);
+		}
+
+		//설명
+		if (Len(Item.Description)>0)
+		{
+				AddTooltipItemBlank(3);
+				StartItem();
+				m_Info.eType = DIT_SPLITLINE;
+				m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+				m_Info.u_nTextureHeight = 1;
+				m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+				EndItem();
+
+				bLargeWidth = true;
+			
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.bLineBreak = true;
+				m_Info.t_color.R = 178;
+				m_Info.t_color.G = 190;
+				m_Info.t_color.B = 207;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = Item.Description;
+				EndItem();
+
+				AddTooltipItemBlank(4);
+		}
+		
+		/////////////////////////////////////////////////////////////////////////////////////////
+		// 셋트 아이템 정보
+		if (IsValidItemID(Item.ID))
+		{
+			for (idx=0; idx<TOOLTIP_SETITEM_MAX; idx++)
+			{
+				//셋트아이템 리스트
+				
+				for (SetID=0; SetID<class'UIDATA_ITEM'.static.GetSetItemNum(Item.ID, idx); SetID++) //0,1,2번 세트아이템효과 에 대해서 각각 몇가지의 세트가 완비되야하나..
+				{ 					
+					bLargeWidth = true;
+					if (!class'UIDATA_ITEM'.static.IsExistSetItem(Item.ID, idx, SetID))
+					{	
+
+						if( !FirstTime1 )
+						{
+							if( Len(Item.Description)==0 )
+								AddTooltipItemBlank(0);
+
+							AddTooltipItemBlank(0);
+							StartItem();
+							m_Info.eType = DIT_SPLITLINE;
+							m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+							m_Info.u_nTextureHeight = 1;
+							m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+							EndItem();
+
+							FirstTime1=true;
+						}
+
+						tmpItemID.classID = class'UIDATA_ITEM'.static.GetSetItemFirstID(Item.ID, idx, SetID);
+				
+						if (tmpItemID.classID > 0)
+						{
+							StartItem();
+							m_Info.eType = DIT_TEXTURE;
+							m_Info.u_strTexture = class'UIDATA_ITEM'.static.GetItemTextureName(tmpItemID);
+							m_Info.u_nTextureWidth = 16;
+							m_Info.u_nTextureHeight = 16;
+							m_Info.u_nTextureUWidth = 32;
+							m_Info.u_nTextureUHeight = 32;
+							m_Info.nOffSetY = 5;
+							m_Info.bLineBreak = true;
+							m_Info.t_bDrawOneLine = true;
+							EndItem();
+
+							strTmp = class'UIDATA_ITEM'.static.GetItemName(tmpItemID);
+							StartItem();
+							m_Info.eType = DIT_TEXT;
+							m_Info.nOffSetY = 6;
+							m_Info.nOffSetX = 4;
+							m_Info.t_bDrawOneLine = true;
+							m_Info.t_color.R = 112;
+							m_Info.t_color.G = 115;
+							m_Info.t_color.B = 123;
+							m_Info.t_color.A = 255;
+							m_Info.t_strText = strTmp;
+							ParamAdd(m_info.Condition, ""SetItemNum"", string(idx));
+							ParamAdd(m_Info.Condition, ""Type"", ""Equip"");
+							ParamAddItemID(m_Info.Condition, Item.ID);						
+							ParamAdd(m_Info.Condition, ""CurTypeID"", string(SetID));		//비교할 아이템의 Type 예(0번:흉갑 1번:각반 2번:헬멧 3번:팔 4번 다리 ..ItemName.txt에 들어있는순서
+							ParamAdd(m_Info.Condition, ""NormalColor"", ""112,115,123"");
+							ParamAdd(m_Info.Condition, ""EnableColor"", ""176,185,205"");
+							EndItem();
+						}
+					}
+				}			
+		
+				//셋트효과
+				strTmp = class'UIDATA_ITEM'.static.GetSetItemEffectDescription(Item.ID, idx);
+				if (Len(strTmp)>0)
+				{
+					bLargeWidth = true;
+					
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetY = 6;
+					m_Info.bLineBreak = true;
+					m_Info.t_color.R = 128;
+					m_Info.t_color.G = 127;
+					m_Info.t_color.B = 103;
+					m_Info.t_color.A = 255;
+					m_Info.t_strText = strTmp;
+					ParamAdd(m_Info.Condition, ""Type"", ""SetEffect"");
+					ParamAddItemID(m_Info.Condition, Item.ID);
+					ParamAdd(m_Info.Condition, ""EffectID"", String(idx));
+					ParamAdd(m_Info.Condition, ""NormalColor"", ""128,127,103"");
+					ParamAdd(m_Info.Condition, ""EnableColor"", ""183,178,122"");
+					EndItem();	
+				}
+			}
+			//인첸트 셋트효과
+			strTmp = class'UIDATA_ITEM'.static.GetSetItemEnchantEffectDescription(Item.ID);
+			if (Len(strTmp)>0)
+			{
+				bLargeWidth = true;
+				
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.nOffSetY = 6;
+				m_Info.bLineBreak = true;
+				m_Info.t_color.R = 74;
+				m_Info.t_color.G = 92;
+				m_Info.t_color.B = 104;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = strTmp;
+				ParamAdd(m_Info.Condition, ""Type"", ""EnchantEffect"");
+				ParamAddItemID(m_Info.Condition, Item.ID);
+				ParamAdd(m_Info.Condition, ""NormalColor"", ""74,92,104"");
+				ParamAdd(m_Info.Condition, ""EnableColor"", ""111,146,169"");
+				EndItem();
+				AddTooltipItemBlank(3);
+			}
+		}
+		
+		//퀘스트 정보를 표시한다.
+		AddTooltipItemQuestList(Item);
+		
+		// 속성 게이지를 그려준다. 
+		AddTooltipItemAttributeGage(Item);
+		
+		// 기간제 아이템
+		if ( Item.CurrentPeriod > 0)
+		{
+			//빈공간
+			AddTooltipItemBlank(12);
+			
+			//<기간제 아이템>
+			AddTooltipItemOption(1739, """", true, false, false);
+			SetTooltipItemColor(255, 255, 255, 0);
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_ID = 1199;
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = "" : "";
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = """" $ MakeTimeStr(Item.CurrentPeriod);
+			ParamAdd(m_Info.Condition, ""Type"", ""PeriodTime"");
+			EndItem();
+		}
+	}
+	else
+	{
+		return;
+	}
+	
+	if (bLargeWidth)
+		m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+
+	if(TooltipType == ""InventoryPawnViewer"")				// PawnViewer용 추가 - lancelot 2007. 10. 16.
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.nOffSetY = 6;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.bLineBreak = true;
+		m_Info.t_strText =""ID : ""$string(Item.Id.classID);
+		EndItem();
+	}
+
+	AddTooltipToBuilderPC(Item);
+	
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+function AddTooltipToBuilderPC(ItemInfo Item)
+{
+    if (!IsBuilderPC())
+        return;
+
+    StartItem();
+    m_Info.eType = DIT_BLANK;
+    m_Info.b_nHeight = 8;
+    EndItem();
+    
+    StartItem();
+    m_Info.eType = DIT_TEXTURE;
+    m_Info.nOffSetX = 2;
+    m_Info.nOffSetY = 0;
+    m_Info.t_bDrawOneLine = true;
+    m_Info.bLineBreak = true;
+    m_Info.u_nTextureWidth = 16;
+    m_Info.u_nTextureHeight = 16;
+    m_Info.u_nTextureUWidth = 16;
+    m_Info.u_nTextureUHeight = 16;
+    m_Info.u_strTexture = ""PrologCustomIcons.ItemID"";
+    EndItem();
+    
+    StartItem();
+    m_Info.eType = DIT_TEXT;
+    m_Info.nOffSetX = 6;
+    m_Info.nOffSetY = 2;
+    m_Info.t_color.R = 178;
+    m_Info.t_color.G = 190;
+    m_Info.t_color.B = 207;
+    m_Info.t_color.A = 255;
+    m_Info.t_strText = String(Item.ID.ClassID);
+    EndItem();
+}
+/////////////////////////////////////////////////////////////////////////////////
+// ACTION
+function ReturnTooltip_NTT_ACTION(string param, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	local ItemInfo TheItemInfo;
+	local MacroInfo TheMacroInfo;
+	local int i;
+	
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""Description"", Item.Description);
+		ParamToItemInfo(param, TheItemInfo);
+		
+		//액션 이름
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = Item.Name;
+		m_Info.t_color.R = 202;
+		m_Info.t_color.G = 174;
+		m_Info.t_color.B = 115;
+		m_Info.t_color.A = 255;
+		EndItem();
+		
+		//액션 설명
+		if (Len(Item.Description)>0)
+		{
+			m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = false;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();
+		}
+
+		if( class'UIDATA_MACRO'.static.GetMacroInfo(TheItemInfo.ID, TheMacroInfo) )
+		{
+			for( i=0; i<12; i++ )
+			{	
+				if( TheMacroInfo.CommandList[i] == """" )
+					break;
+
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.bLineBreak = true;
+				m_Info.t_strText = TheMacroInfo.CommandList[i];
+				m_Info.t_color.R =169;
+				m_Info.t_color.G =149;
+				m_Info.t_color.B =117;
+				m_Info.t_color.A =255;
+				EndItem();
+			}
+		}
+	}		
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// SKILL
+function ReturnTooltip_NTT_SKILL(string param, ETooltipSourceType eSourceType)
+{
+	
+	local ItemInfo Item;
+	
+	local EItemParamType eItemParamType;
+	local EShortCutItemType eShortCutType;
+	local int nTmp;
+	local int SkillLevel;
+	
+	debug(""툴팁들어오나"");
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseItemID( param, Item.ID );
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""AdditionalName"", Item.AdditionalName);
+		ParseString( param, ""Description"", Item.Description);
+		ParseInt( param, ""Level"", Item.Level);
+		
+		eShortCutType = EShortCutItemType(Item.ItemSubType);
+		eItemParamType = EItemParamType(Item.ItemType);
+		SkillLevel = Item.Level;
+		
+		m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+		
+		//아이템 이름
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = Item.Name;
+		EndItem();
+		
+		// 인챈트시 변환된 레벨을 원래 레벨로 변환시켜준다. 
+		if (Len(Item.AdditionalName)>0)
+		{			
+			SkillLevel = class'UIDATA_SKILL'.static.GetEnchantSkillLevel( Item.ID, Item.Level );
+		}
+		
+		//ex) "" Lv ""
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = "" "";
+		EndItem();
+		
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = 88;
+		EndItem();
+		
+		//스킬 레빌
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = "" "" $ SkillLevel;
+		EndItem();
+		
+		// 인챈트 내용을 뿌려주는 곳은 이곳
+		if (Len(Item.AdditionalName)>0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetX = 5;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 255;
+			m_Info.t_color.G = 217;
+			m_Info.t_color.B = 105;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.AdditionalName;
+			EndItem();
+		}
+		
+		//Operate Type
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.nOffSetY = 6;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = class'UIDATA_SKILL'.static.GetOperateType( Item.ID, Item.Level );
+		EndItem();
+		
+		//소모HP
+		nTmp = class'UIDATA_SKILL'.static.GetHpConsume( Item.ID, Item.Level );
+		if (nTmp>0)
+		{
+			AddTooltipItemOption(1195, String(nTmp), true, true, false);
+		}
+		
+		//소모MP
+		nTmp = class'UIDATA_SKILL'.static.GetMpConsume( Item.ID, Item.Level );
+		if (nTmp>0)
+		{
+			AddTooltipItemOption(320, String(nTmp), true, true, false);
+		}
+		
+		//유효거리
+		nTmp = class'UIDATA_SKILL'.static.GetCastRange( Item.ID, Item.Level );
+		if (nTmp>=0)
+		{
+			AddTooltipItemOption(321, String(nTmp), true, true, false);
+		}
+		
+		//설명
+		if (Len(Item.Description)>0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();	
+		}		
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// ABNORMALSTATUS
+function ReturnTooltip_NTT_ABNORMALSTATUS(string param, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	local int ShowLevel;
+	
+	local EItemParamType eItemParamType;
+	local EShortCutItemType eShortCutType;
+	
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseItemID( param, Item.ID );
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""AdditionalName"", Item.AdditionalName);
+		ParseString( param, ""Description"", Item.Description);
+		ParseInt( param, ""Level"", Item.Level);
+		ParseInt( param, ""Reserved"", Item.Reserved);
+		
+		eShortCutType = EShortCutItemType(Item.ItemSubType);
+		eItemParamType = EItemParamType(Item.ItemType);
+		
+		m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+		
+		//아이템 이름
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = Item.Name;
+		EndItem();
+		
+		ShowLevel = Item.Level;
+		if (Len(Item.AdditionalName)>0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetX = 5;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 255;
+			m_Info.t_color.G = 217;
+			m_Info.t_color.B = 105;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.AdditionalName;
+			EndItem();
+			
+			ShowLevel = class'UIDATA_SKILL'.static.GetEnchantSkillLevel( Item.ID, Item.Level );
+		}
+		
+		//ex) "" Lv ""
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = "" "";
+		EndItem();
+		
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = 88;
+		EndItem();
+		
+		//스킬 레벨
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = "" "" $ ShowLevel;
+		EndItem();
+		
+		//남은시간
+		if (!IsDeBuff(Item.ID, Item.Level) && Item.Reserved>=0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_ID = 1199;
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = "" : "";
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 176;
+			m_Info.t_color.G = 155;
+			m_Info.t_color.B = 121;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = MakeBuffTimeStr(Item.Reserved);
+			ParamAdd(m_Info.Condition, ""Type"", ""RemainTime"");
+			EndItem();
+		}
+		
+		//설명
+		if (Len(Item.Description)>0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();	
+		}		
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// NORMALITEM
+function ReturnTooltip_NTT_NORMALITEM(string param, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""Description"", Item.Description);
+		ParseString( param, ""AdditionalName"", Item.AdditionalName);
+		ParseInt( param, ""CrystalType"", Item.CrystalType);
+		
+		//아이템 이름
+		AddTooltipItemName(Item.Name, Item, 1);
+		
+		//Grade Mark
+		AddTooltipItemGrade(Item);
+		
+		//설명
+		if (Len(Item.Description)>0)
+		{
+			m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();	
+		}		
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// RECIPE
+function ReturnTooltip_NTT_RECIPE(string param, ETooltipSourceType eSourceType, bool bShowPrice)
+{
+	local ItemInfo Item;
+	
+	local string strAdena;
+	local string strAdenaComma;
+	local color	 AdenaColor;
+	
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""Description"", Item.Description);
+		ParseString( param, ""AdditionalName"", Item.AdditionalName);
+		ParseInt( param, ""CrystalType"", Item.CrystalType);
+		ParseInt( param, ""Weight"", Item.Weight);
+		ParseINT64( param, ""Price"", Item.Price);
+		
+		//아이템 이름
+		AddTooltipItemName(Item.Name, Item, 1);
+		
+		//Grade Mark
+		AddTooltipItemGrade(Item);
+		
+		//가격
+		if (bShowPrice)
+		{
+			strAdena = Int64ToString(Item.Price);
+			strAdenaComma = MakeCostString(strAdena);
+			AdenaColor = GetNumericColor(strAdenaComma);
+			
+			//가격 : xxx,xxx,xxx
+			AddTooltipItemOption(641, strAdenaComma $ "" "", true, true, false);
+			SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+			
+			//""아데나""
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color = AdenaColor;
+			m_Info.t_ID= 469;
+			EndItem();
+			
+			//읽어주기 스트링
+			AddTooltipItemOption(0, ""("" $ ConvertNumToText(strAdena) $ "")"", false, true, false);
+			SetTooltipItemColor(AdenaColor.R, AdenaColor.G, AdenaColor.B, 0);
+		}
+		
+		//Weight
+		AddTooltipItemOption(52, String(Item.Weight), true, true, false);
+		
+		//설명
+		if (Len(Item.Description)>0)
+		{
+			m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();	
+		}		
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// SHORTCUT
+function ReturnTooltip_NTT_SHORTCUT(string param, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	
+	local EItemParamType eItemParamType;
+	local EShortCutItemType eShortCutType;
+	local string ItemName;
+	local ShortcutCommandItem commandItem;
+	local int shortcutID;
+	local string strShort;
+	local int i;
+	local ItemInfo TheItemInfo;
+	local MacroInfo TheMacroInfo;
+
+	local ShortcutAssignWnd Script;
+
+
+	Script = ShortcutAssignWnd( GetScript( ""OptionWnd.ShortcutTab"" ) );
+
+	strShort = ""<"" $ GetSystemString(1523) $ "": "";
+	
+	if (eSourceType == NTST_ITEM)
+	{   
+		if( BoolSelect )
+		{
+			ParseInt( param, ""ItemSubType"", Item.ItemSubType);
+			ParseString( param, ""Name"", Item.Name);
+			ParseInt( param, ""RefineryOp1"", Item.RefineryOp1);
+			ParseInt( param, ""RefineryOp2"", Item.RefineryOp2);
+			eShortCutType = EShortCutItemType(Item.ItemSubType);
+			//아이템 이름 취득
+			ItemName = class'UIDATA_ITEM'.static.GetRefineryItemName( Item.Name, Item.RefineryOp1, Item.RefineryOp2 );
+			switch (eShortCutType)
+			{
+			case SCIT_ITEM:
+				ReturnTooltip_NTT_ITEM(param, ""inventory"", eSourceType);
+				break;
+			case SCIT_SKILL:			
+				ReturnTooltip_NTT_SKILL(param, eSourceType);
+				break;
+			case SCIT_ACTION:
+			case SCIT_MACRO:
+				if (eSourceType == NTST_ITEM)
+				{
+					ParseString( param, ""Name"", Item.Name);
+					ParseString( param, ""Description"", Item.Description);
+					ParamToItemInfo(param, TheItemInfo);
+					
+					m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+
+					//액션 이름
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_strText = Item.Name;
+					m_Info.t_color.R =202;
+					m_Info.t_color.G =174;
+					m_Info.t_color.B =115;
+					m_Info.t_color.A =255;
+					EndItem();
+					
+					//액션 설명
+
+				 if( class'UIDATA_MACRO'.static.GetMacroInfo(TheItemInfo.ID, TheMacroInfo) )
+				 {
+					for( i=0; i<12; i++ )
+					{	
+						if( TheMacroInfo.CommandList[i] == """" )
+							break;
+
+						StartItem();
+						m_Info.eType = DIT_TEXT;
+						m_Info.t_bDrawOneLine = true;
+						m_Info.bLineBreak = true;
+						m_Info.t_strText = TheMacroInfo.CommandList[i];
+						m_Info.t_color.R =169;
+						m_Info.t_color.G =149;
+						m_Info.t_color.B =117;
+						m_Info.t_color.A =255;
+						EndItem();
+					}
+				 }
+				}
+				else
+				{
+					return;
+				}
+					
+				ReturnTooltipInfo(m_Tooltip);
+				break;
+			case SCIT_RECIPE:
+			case SCIT_BOOKMARK:
+				//아이템 이름
+				m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				//m_Info.bLineBreak = true;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = ItemName;
+				EndItem();
+				break;
+			default:
+				break;
+			}
+			ParseINT(param, ""ShortcutID"", shortcutID);
+			if( GetOptionBool( ""Game"", ""EnterChatting"" ) )
+			{
+				class'ShortcutAPI'.static.GetAssignedKeyFromCommand(""TempStateShortcut"", ""UseShortcutItem Num="" $ shortcutID, commandItem);
+			}
+			else
+			{
+				class'ShortcutAPI'.static.GetAssignedKeyFromCommand(""GamingStateShortcut"", ""UseShortcutItem Num="" $ shortcutID, commandItem);
+			}
+			
+			
+			//단축키 설명...
+			if( commandItem.subkey1 != """" )
+			{
+				strShort = strShort $ Script.GetUserReadableKeyName( commandItem.subkey1 ) $ ""+"";
+			}
+			if( commandItem.subkey2 != """" )
+			{
+				strShort = strShort $ Script.GetUserReadableKeyName( commandItem.subkey2 ) $ ""+"";
+			}
+			if( commandItem.Key != """" )
+			{
+				strShort = strShort $ Script.GetUserReadableKeyName( commandItem.Key ) $ "">"";
+			}
+
+			if( commandItem.subkey1 == """" && commandItem.subkey2 == """" && commandItem.Key == """" )
+			{
+				strShort = strShort $ GetSystemString(27) $"">"";
+			}
+			
+			//줄추가~
+			AddTooltipItemBlank(2);		
+
+			StartItem();
+			m_Info.eType = DIT_SPLITLINE;
+			m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+			m_Info.u_nTextureHeight = 1;
+			m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+			EndItem();
+
+			if( ItemName != """" )
+			{
+				AddTooltipItemBlank(5);
+				
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_strText = strShort;
+				EndItem();
+				
+				AddTooltipItemBlank(4);
+				
+				ReturnTooltipInfo(m_Tooltip);				
+			}
+			return;
+		}
+		else
+		{
+			ParseItemID( param, Item.ID );
+			ParseString( param, ""Name"", Item.Name);
+			ParseString( param, ""AdditionalName"", Item.AdditionalName);
+			ParseInt( param, ""Level"", Item.Level);
+			ParseInt( param, ""Reserved"", Item.Reserved);
+			ParseInt( param, ""Enchanted"", Item.Enchanted);
+			ParseInt( param, ""ItemType"", Item.ItemType);
+			ParseInt( param, ""ItemSubType"", Item.ItemSubType);
+			ParseInt( param, ""CrystalType"", Item.CrystalType);
+			ParseInt( param, ""ConsumeType"", Item.ConsumeType);
+			ParseInt( param, ""RefineryOp1"", Item.RefineryOp1);
+			ParseInt( param, ""RefineryOp2"", Item.RefineryOp2);
+			ParseINT64( param, ""ItemNum"", Item.ItemNum);
+			ParseInt( param, ""MpConsume"", Item.MpConsume);
+			//branch
+			ParseInt ( param, ""IsBRPremium"", Item.IsBRPremium);
+			//end of branch
+
+			eShortCutType = EShortCutItemType(Item.ItemSubType);
+			eItemParamType = EItemParamType(Item.ItemType);
+
+			//아이템 이름 취득
+			ItemName = class'UIDATA_ITEM'.static.GetRefineryItemName( Item.Name, Item.RefineryOp1, Item.RefineryOp2 );
+
+			switch (eShortCutType)
+			{
+			case SCIT_ITEM:
+				//branch
+				AddPrimeItemSymbol(Item);
+				//end of branch
+				//인첸트 ex) ""+10""
+				AddTooltipItemEnchant(Item);
+
+				//아이템 이름
+				AddTooltipItemName(ItemName, Item, 1);
+
+				//Grade Mark
+				AddTooltipItemGrade(Item);
+
+				//아이템 갯수
+				AddTooltipItemCount(Item);
+				break;
+			case SCIT_SKILL:			
+				//아이템 이름
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = ItemName;
+				EndItem();
+
+				if (Len(Item.AdditionalName)>0)
+				{
+					StartItem();
+					m_Info.eType = DIT_TEXT;
+					m_Info.nOffSetX = 5;
+					m_Info.t_bDrawOneLine = true;
+					m_Info.t_color.R = 255;
+					m_Info.t_color.G = 217;
+					m_Info.t_color.B = 105;
+					m_Info.t_color.A = 255;
+					m_Info.t_strText = Item.AdditionalName;
+					EndItem();
+
+					Item.Level = class'UIDATA_SKILL'.static.GetEnchantSkillLevel( Item.ID, Item.Level );
+				}
+
+				//ex) "" Lv ""
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = "" "";
+				EndItem();
+
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 163;
+				m_Info.t_color.G = 163;
+				m_Info.t_color.B = 163;
+				m_Info.t_color.A = 255;
+				m_Info.t_ID = 88;
+				EndItem();
+
+				//스킬 레빌
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 176;
+				m_Info.t_color.G = 155;
+				m_Info.t_color.B = 121;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = "" "" $ Item.Level;
+				EndItem();
+
+				//MP소모량
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = "" ("";
+				EndItem();
+
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_ID = 91;
+				EndItem();
+
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = "":"" $ Item.MpConsume $ "")"";
+				EndItem();
+				break;
+
+			case SCIT_ACTION:
+			case SCIT_MACRO:
+			case SCIT_RECIPE:
+			case SCIT_BOOKMARK:
+				//아이템 이름
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_strText = ItemName;
+				EndItem();
+				break;
+			}
+		}
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// RECIPE_MANUFACTURE
+function ReturnTooltip_NTT_RECIPE_MANUFACTURE(string param, ETooltipSourceType eSourceType)
+{
+	local ItemInfo Item;
+	
+	if (eSourceType == NTST_ITEM)
+	{
+		ParseString( param, ""Name"", Item.Name);
+		ParseString( param, ""Description"", Item.Description);
+		ParseString( param, ""AdditionalName"", Item.AdditionalName);
+		ParseINT64( param, ""Reserved64"", Item.Reserved64);
+		ParseInt( param, ""CrystalType"", Item.CrystalType);
+		ParseINT64( param, ""ItemNum"", Item.ItemNum);
+		
+		m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+		
+		//아이템 이름
+		AddTooltipItemName(Item.Name, Item, 1);
+		
+		//Grade Mark
+		AddTooltipItemGrade(Item);
+		
+		//ex) ""필요수 : 2""
+		AddTooltipItemOption(736, Int64ToString(Item.Reserved64), true, true, false);
+		
+		//ex) ""보유수 : 0""
+		AddTooltipItemOption(737, Int64ToString(Item.ItemNum), true, true, false);
+		
+		//설명
+		if (Len(Item.Description)>0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_color.R = 178;
+			m_Info.t_color.G = 190;
+			m_Info.t_color.B = 207;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Item.Description;
+			EndItem();	
+		}
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// PLEDGEINFO
+function ReturnTooltip_NTT_CLANINFO(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//ex) ""직업 : 엘븐메이지""
+		AddTooltipItemOption(391, GetClassType(int(record.LVDataList[2].szData)), true, true, true);
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+//선준 수정(2010.03.30) 완료
+function ReturnTooltip_NTT_POSTINFO(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+
+		//ex) ""직업 : 엘븐메이지""
+		AddTooltipItemOption(391, GetClassType(int(record.LVDataList[1].szData)), true, true, true);
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+
+//선준 수정(2010.02.22 ~ 03.08) 완료
+/////////////////////////////////////////////////////////////////////////////////
+// ROOMLIST
+function ReturnTooltip_NTT_ROOMLIST(string param, ETooltipSourceType eSourceType)
+{
+	local int i;
+	local LVDataRecord record;
+	local int len;
+	
+	m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH + 40;
+
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		len = int( record.LVDataList[6].szData );
+
+		for( i = 0 ; i < len ; i++ )
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.u_nTextureWidth = 11;
+			m_Info.u_nTextureHeight = 11;
+			m_Info.u_strTexture = GetClassIconName( record.LVDataList[7 + i].nReserved1 );
+			EndItem();
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.t_bDrawOneLine = false;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = "" "" $ record.LVDataList[7 + i].szData;
+			EndItem();
+			if( i != len - 1 )
+			{
+				AddTooltipItemBlank(2);
+			}
+		}
+
+		//ex) ""직업 : 엘븐메이지""
+		//AddTooltipItemOption(391, GetClassType(int(record.LVDataList[2].szData)), true, true, true);
+	}
+	else
+	{
+		return;
+	}
+
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// USERLIST
+function ReturnTooltip_NTT_USERLIST(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH + 80;
+
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//ex) ""직업 : 엘븐메이지""
+		AddTooltipItemOption(391, GetClassType(int(record.LVDataList[1].szData)), true, true, true);
+		
+		AddTooltipItemBlank(0);
+		//ex)귀속 지역 : 
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = GetSystemString( 2276 ) $ "" : "";
+		EndItem();
+		
+		//설명
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		if( record.LVDataList[5].szData == """" )
+		{			
+			m_Info.t_strText = GetSystemString( 27 );
+		}
+		else
+		{			
+			m_Info.t_strText = record.LVDataList[5].szData;
+		}
+		EndItem();
+		
+		
+	}
+	else
+	{
+		return;
+	}
+	
+	
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+// PARTYMATCH
+function ReturnTooltip_NTT_PARTYMATCH(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH + 80;
+
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//ex) ""직업 : 엘븐메이지""
+		AddTooltipItemOption(391, GetClassType(int(record.LVDataList[1].szData)), true, true, true);
+		
+		//선준 수정(2010.02.22 ~ 03.08) 완료
+		//ex)현재 위치 : 글루디오
+		AddTooltipItemOption(471, GetZoneNameWithZoneID(int(record.LVDataList[3].szReserved)), true, true, true);
+		
+		/*
+		AddTooltipItemBlank(0);
+		//귀속지역
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = false;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = GetSystemString( 2276 ) @ "":"";
+		EndItem();		
+		
+		//설명
+		
+		StartItem();
+		m_Info.eType = DIT_TEXT;		
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		if( record.LVDataList[4].szData == """" )
+		{
+			//m_Info.bLineBreak = true;
+			m_Info.t_strText = """" @ GetSystemString( 27 );
+		}
+		else
+		{
+			m_Info.bLineBreak = true;
+			m_Info.t_strText = record.LVDataList[4].szData;
+		}
+		EndItem();
+		*/
+
+		
+		AddTooltipItemBlank(0);
+		//ex)귀속 지역 : 
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = GetSystemString( 2276 ) $ "" : "";
+		//m_Info.t_strText = ""귀속 지역 : "";
+		EndItem();
+		
+		//설명
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		if( record.LVDataList[4].szReserved == """" )
+		{			
+			m_Info.t_strText = GetSystemString( 27 );
+		}
+		else
+		{			
+			m_Info.t_strText = record.LVDataList[4].szReserved;
+		}
+		EndItem();
+		
+		
+	}
+	else
+	{
+		return;
+	}
+	
+	
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+//선준 추가 UNION 예전 직업만 나오는 경우.
+/////////////////////////////////////////////////////////////////////////////////
+// UINONLIST
+function ReturnTooltip_NTT_UNIONLIST(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//ex) ""직업 : 엘븐메이지""
+		AddTooltipItemOption(391, GetClassType(int(record.LVDataList[1].szData)), true, true, true);
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// QUESTLIST
+function ReturnTooltip_NTT_QUESTLIST(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	local int nTmp;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//퀘스트 이름
+		AddTooltipItemOption(1200, record.LVDataList[0].szData, true, true, true);
+		
+		//반복성
+		switch(record.LVDataList[3].nReserved1)
+		{
+		case 0:
+		case 2:
+			nTmp = 861;
+			break;
+		case 1:
+		case 3:
+			nTmp = 862;
+			break;
+		}
+		AddTooltipItemOption2(1202, nTmp, true, true, false);
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// RAIDLIST
+function ReturnTooltip_NTT_RAIDLIST(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		if (Len(record.szReserved)<1)
+			return;
+		
+		m_Tooltip.MinimumWidth = TOOLTIP_MINIMUM_WIDTH;
+		
+		//레이드 설명
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = false;
+		m_Info.t_color.R = 178;
+		m_Info.t_color.G = 190;
+		m_Info.t_color.B = 207;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = record.szReserved;
+		EndItem();
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// QUESTINFO
+function ReturnTooltip_NTT_QUESTINFO(string param, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	local int nTmp;
+	local int Width1;
+	local int Width2;
+	local int Height;
+		
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		//퀘스트 이름
+		AddTooltipItemOption(1200, record.LVDataList[0].szData, true, true, true);
+		
+		//수행조건
+		AddTooltipItemOption(1201, record.LVDataList[1].szData, true, true, false);
+		
+		//Width결정!
+		GetTextSizeDefault(GetSystemString(1200) $ "" : "" $ record.LVDataList[0].szData, Width1, Height);
+		GetTextSizeDefault(GetSystemString(1201) $ "" : "" $ record.LVDataList[1].szData, Width2, Height);
+		if (Width2>Width1)
+			Width1 = Width2;
+		if (TOOLTIP_MINIMUM_WIDTH>Width1)
+			Width1 = TOOLTIP_MINIMUM_WIDTH;
+		m_Tooltip.MinimumWidth = Width1 + 30;
+		
+		//추천레벨
+		AddTooltipItemOption(922, record.LVDataList[2].szData, true, true, false);
+		
+		//반복성
+		switch(record.LVDataList[3].nReserved1)
+		{
+		case 0:
+		case 2:
+			nTmp = 861;
+			break;
+		case 1:
+		case 3:
+			nTmp = 862;
+			break;
+		}
+		AddTooltipItemOption2(1202, nTmp, true, true, false);
+		
+		//퀘스트설명
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.nOffSetY = 6;
+		m_Info.t_bDrawOneLine = false;
+		m_Info.bLineBreak = true;
+		m_Info.t_color.R = 178;
+		m_Info.t_color.G = 190;
+		m_Info.t_color.B = 207;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = record.szReserved;
+		EndItem();
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// MANOR
+function ReturnTooltip_NTT_MANOR(string param, string TooltipType, ETooltipSourceType eSourceType)
+{
+	local LVDataRecord record;
+	
+	local int idx1;
+	local int idx2;
+	local int idx3;
+	
+	if (eSourceType == NTST_LIST)
+	{
+		ParamToRecord( param, record );
+		
+		if (TooltipType == ""ManorSeedInfo"")
+		{
+			idx1 = 4;
+			idx2 = 5;
+			idx3 = 6;
+		}
+		else if (TooltipType == ""ManorCropInfo"")
+		{
+			idx1 = 5;
+			idx2 = 6;
+			idx3 = 7;
+		}
+		else if (TooltipType == ""ManorSeedSetting"")
+		{
+			idx1 = 7;
+			idx2 = 8;
+			idx3 = 9;
+		}
+		else if (TooltipType == ""ManorCropSetting"")
+		{
+			idx1 = 9;
+			idx2 = 10;
+			idx3 = 11;
+		}
+		else if (TooltipType == ""ManorDefaultInfo"")
+		{
+			idx1 = 1;
+			idx2 = 4;
+			idx3 = 5;
+		}
+		else if (TooltipType == ""ManorCropSell"")
+		{
+			idx1 = 7;
+			idx2 = 8;
+			idx3 = 9;
+		}
+		
+		// 씨앗 or 작물 이름
+		AddTooltipItemOption(0, record.LVDataList[0].szData, false, true, true);
+		
+		// 레벨
+		AddTooltipItemOption(537, record.LVDataList[idx1].szData, true, true, false);
+
+		// 보상 타입1
+		AddTooltipItemOption(1134, record.LVDataList[idx2].szData, true, true, false);
+		
+		// 보상 타입2
+		AddTooltipItemOption(1135, record.LVDataList[idx3].szData, true, true, false);
+	}
+	else
+	{
+		return;
+	}
+		
+	ReturnTooltipInfo(m_Tooltip);
+}
+
+// [퀘스트 아이템 툴팁 추가]
+function ReturnTooltip_NTT_QUESTREWARDS(string param, ETooltipSourceType eSourceType)
+{
+	// [퀘스트 아이템 툴팁 추가] 이 부분에 퀘스트 아이템 툴팁에 걸맞는 코드가 들어가면 될 것 같습니다.
+	// 2009.10.14
+	// ReturnTooltip_NTT_ITEM(param, ""Inventoty"", eSourceType);
+	ReturnTooltip_NTT_ITEM(param, ""QuestReward"", eSourceType);
+}
+
+//""XXX : YYYY"" 형태의 TooltipItem을 편하게 추가해 준다.
+function AddTooltipItemOption(int TitleID, string Content, bool bTitle, bool bContent, bool IamFirst)
+{
+	if (bTitle)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		if (!IamFirst)
+			m_Info.nOffSetY = 6;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = TitleID;
+		EndItem();
+	}
+	
+	if (Content != ""0"")
+	{
+		if (bContent)
+		{
+			if (bTitle)
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				if (!IamFirst)
+					m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 163;
+				m_Info.t_color.G = 163;
+				m_Info.t_color.B = 163;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = "" : "";
+				EndItem();
+			}
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			if (!IamFirst)
+				m_Info.nOffSetY = 6;
+			if (!bTitle)
+				m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 176;
+			m_Info.t_color.G = 155;
+			m_Info.t_color.B = 121;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = Content;
+			EndItem();
+		}
+	}
+}
+
+function AddTooltipItemOptionDef(int TitleID, ItemInfo Item, bool bTitle, bool bContent, bool IamFirst, optional bool isShield)
+{
+	local int FullDamage, DefaultDamage, Diffirence;
+
+	if( isShield )
+	{
+		FullDamage = GetShieldDefense(Item.CrystalType, Item.Enchanted, Item.ShieldDefense);
+		DefaultDamage = GetShieldDefense(Item.CrystalType, 0, Item.ShieldDefense);
+		Diffirence = FullDamage - DefaultDamage;
+	}
+	else if( TitleID == 95 )
+	{
+		FullDamage = GetPhysicalDefense(Item.CrystalType, Item.Enchanted, Item.PhysicalDefense);
+		DefaultDamage = GetPhysicalDefense(Item.CrystalType, 0, Item.PhysicalDefense);
+		Diffirence = FullDamage - DefaultDamage;
+	}
+	else
+	{
+		FullDamage = GetMagicalDefense(Item.CrystalType, Item.Enchanted, Item.MagicalDefense);
+		DefaultDamage = GetMagicalDefense(Item.CrystalType, 0, Item.MagicalDefense);
+		Diffirence = FullDamage - DefaultDamage;
+	}
+
+	if (bTitle)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		if (!IamFirst)
+			m_Info.nOffSetY = 6;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 255;
+		m_Info.t_color.B = 255;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = TitleID;
+		EndItem();
+	}
+	
+	if (FullDamage != 0)
+	{
+		if (bContent)
+		{
+			if (bTitle)
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				if (!IamFirst)
+					m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 255;
+				m_Info.t_color.G = 255;
+				m_Info.t_color.B = 255;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = "" : "";
+				EndItem();
+			}
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			if (!IamFirst)
+				m_Info.nOffSetY = 6;
+			if (!bTitle)
+				m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 207;
+			m_Info.t_color.G = 148;
+			m_Info.t_color.B = 11;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = """"$FullDamage;
+			EndItem();
+
+			if( Diffirence != 0 )
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				if (!IamFirst)
+					m_Info.nOffSetY = 6;
+				if (!bTitle)
+					m_Info.bLineBreak = true;
+				m_Info.nOffSetX = 4;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 208;
+				m_Info.t_color.G = 180;
+				m_Info.t_color.B = 119;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = ""(""$DefaultDamage$"" + ""$Diffirence$"")"";
+				EndItem();
+			}
+		}
+	}
+}
+
+function AddTooltipItemOptionDamage(int TitleID, ItemInfo Item, bool bTitle, bool bContent, bool IamFirst)
+{
+	local int FullDamage, DefaultDamage, Diffirence;
+
+	if( TitleID == 94 )
+	{
+		FullDamage = GetPhysicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, Item.Enchanted, Item.PhysicalDamage);
+		DefaultDamage = GetPhysicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, 0, Item.PhysicalDamage);
+		Diffirence = FullDamage - DefaultDamage;
+	}
+	else
+	{
+		FullDamage = GetMagicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, Item.Enchanted, Item.MagicalDamage);
+		DefaultDamage = GetMagicalDamage(Item.WeaponType, Item.SlotBitType, Item.CrystalType, 0, Item.MagicalDamage);
+		Diffirence = FullDamage - DefaultDamage;
+	}
+
+	if (bTitle)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		if (!IamFirst)
+			m_Info.nOffSetY = 6;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 255;
+		m_Info.t_color.B = 255;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = TitleID;
+		EndItem();
+	}
+	
+	if (FullDamage != 0)
+	{
+		if (bContent)
+		{
+			if (bTitle)
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				if (!IamFirst)
+					m_Info.nOffSetY = 6;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 255;
+				m_Info.t_color.G = 255;
+				m_Info.t_color.B = 255;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = "" : "";
+				EndItem();
+			}
+			
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			if (!IamFirst)
+				m_Info.nOffSetY = 6;
+			if (!bTitle)
+				m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 207;
+			m_Info.t_color.G = 148;
+			m_Info.t_color.B = 11;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = """"$FullDamage;
+			EndItem();
+
+			if( Diffirence != 0 )
+			{
+				StartItem();
+				m_Info.eType = DIT_TEXT;
+				if (!IamFirst)
+					m_Info.nOffSetY = 6;
+				if (!bTitle)
+					m_Info.bLineBreak = true;
+				m_Info.nOffSetX = 4;
+				m_Info.t_bDrawOneLine = true;
+				m_Info.t_color.R = 208;
+				m_Info.t_color.G = 180;
+				m_Info.t_color.B = 119;
+				m_Info.t_color.A = 255;
+				m_Info.t_strText = ""(""$DefaultDamage$"" + ""$Diffirence$"")"";
+				EndItem();
+			}
+		}
+	}
+}
+
+//""XXX : YYYY"" 형태의 TooltipItem을 편하게 추가해 준다.
+//SYSSTRING : SYSSTRING
+function AddTooltipItemOption2(int TitleID, int ContentID, bool bTitle, bool bContent, bool IamFirst)
+{
+	if (bTitle)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		if (!IamFirst)
+			m_Info.nOffSetY = 6;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 163;
+		m_Info.t_color.G = 163;
+		m_Info.t_color.B = 163;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = TitleID;
+		EndItem();
+	}
+	
+	if (bContent)
+	{	
+		if (bTitle)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			if (!IamFirst)
+				m_Info.nOffSetY = 6;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.t_strText = "" : "";
+			EndItem();
+		}		
+		
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		if (!IamFirst)
+			m_Info.nOffSetY = 6;
+		if (!bTitle)
+			m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		m_Info.t_ID = ContentID;
+		EndItem();
+	}
+}
+
+//아이템의 색상을 다시 설정해준다.
+function SetTooltipItemColor(int R, int G, int B, int Offset)
+{
+	local int idx;
+	idx = m_Tooltip.DrawList.Length-1-Offset;
+	m_Tooltip.DrawList[idx].t_color.R = R;
+	m_Tooltip.DrawList[idx].t_color.G = G;
+	m_Tooltip.DrawList[idx].t_color.B = B;
+	m_Tooltip.DrawList[idx].t_color.A = 255;
+}
+
+//빈공간의 TooltipItem을 추가한다.
+function AddTooltipItemBlank(int Height)
+{
+	StartItem();
+	m_Info.eType = DIT_BLANK;
+	m_Info.b_nHeight = Height;
+	EndItem();
+}
+
+//인첸트
+function AddTooltipItemEnchant(ItemInfo Item)
+{
+	local EItemParamType eItemParamType;
+	
+	eItemParamType = EItemParamType(Item.ItemType);
+	if (Item.Enchanted>0 && IsEnchantableItem(eItemParamType))
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 176;
+		m_Info.t_color.G = 155;
+		m_Info.t_color.B = 121;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = ""+"" $ Item.Enchanted $ "" "";
+		EndItem();
+	}	
+}
+
+//아이템 이름 + AdditionalName
+function AddTooltipItemName(string Name, ItemInfo Item, int AddTooltipItemName)
+{
+	StartItem();
+	m_Info.eType = DIT_TEXT;
+	m_Info.t_bDrawOneLine = true;
+	switch (AddTooltipItemName)
+	{
+		case 0:
+		m_Info.t_color.R = 137;
+		m_Info.t_color.G = 137;
+		m_Info.t_color.B = 137;
+		m_Info.t_color.A = 255;
+		break;
+		case 1:
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 255;
+		m_Info.t_color.B = 255;
+		m_Info.t_color.A = 255;
+		break;
+		case 2:
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 251;
+		m_Info.t_color.B = 4;
+		m_Info.t_color.A = 255;
+		break;
+		case 3:
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 0;
+		m_Info.t_color.B = 255;
+		m_Info.t_color.A = 255;
+		break;
+	}
+	m_Info.t_strText = Name;
+	EndItem();
+	
+	//Additional Name
+	if (Len(Item.AdditionalName)>0)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_color.R = 255;
+		m_Info.t_color.G = 217;
+		m_Info.t_color.B = 105;
+		m_Info.t_color.A = 255;
+		m_Info.t_strText = "" "" $ Item.AdditionalName;
+		EndItem();
+	}
+}
+
+//Grade Mark
+function AddTooltipItemGrade(ItemInfo Item)
+{
+    local string TextureName;
+ 
+    if(Item.CrystalType > 0)
+    {
+        StartItem();
+        m_Info.eType = DIT_TEXTURE;
+        m_Info.nOffSetX = 2;
+        m_Info.nOffSetY = 0;
+     
+        switch (Item.CrystalType)
+        {
+            case 1: // D grade_d
+            TextureName = ""symbol.grade_d"";
+            break;
+     
+            case 2: // C grade_c
+            TextureName = ""symbol.grade_c"";
+            break;
+ 
+            case 3: // B grade_b
+            TextureName = ""symbol.grade_b"";
+            break;
+     
+            case 4: // A grade_a
+            TextureName = ""symbol.grade_a"";
+            break;
+     
+            case 5: // S grade_s
+            TextureName = ""symbol.grade_s"";
+            break;
+     
+            case 6: // S80 Grade_S80
+            TextureName = ""symbol.Grade_S80"";
+            break;
+     
+            case 7: // S84 Grade_S84
+            TextureName = ""symbol.Grade_S84"";
+            break;
+     
+            case 8: // R Grade_R
+            TextureName = ""symbol.Grade_R"";
+            break;
+     
+            case 9: // R95 Grade_R95
+            TextureName = ""symbol.Grade_R95"";
+            break;
+     
+            case 10: // R99 Grade_R99
+            TextureName = ""symbol.Grade_R99"";
+            break;
+           
+            case 11: // R110 Grade_R110
+            TextureName = ""symbol.Grade_R110"";
+            break;
+        }
+     
+        if (Item.CrystalType == 6 || Item.CrystalType == 7 || Item.CrystalType == 9 || Item.CrystalType == 10 || Item.CrystalType == 11)
+        {
+            m_Info.u_nTextureWidth = 32;
+            m_Info.u_nTextureHeight = 16;
+         
+            m_Info.u_nTextureUWidth = 32;
+            m_Info.u_nTextureUHeight = 16;
+        }
+        else
+        {
+            m_Info.u_nTextureWidth = 16;
+            m_Info.u_nTextureHeight = 16;
+         
+            m_Info.u_nTextureUWidth = 16;
+            m_Info.u_nTextureUHeight = 16;
+        }
+ 
+ 
+        m_Info.u_strTexture = TextureName;
+        EndItem();
+    }
+}
+
+//Stackable Count
+function AddTooltipItemCount(ItemInfo Item)
+{
+	if (IsStackableItem(Item.ConsumeType))
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = "" ("" $ MakeCostString(Int64ToString(Item.ItemNum)) $ "")"";
+		EndItem();
+	}	
+}
+
+//제련 색상
+function GetRefineryColor(int Quality, out int R, out int G, out int B)
+{
+	switch (Quality)
+	{
+	case 1:
+		R = 187;
+		G = 181;
+		B = 138;
+	break;
+	case 2:
+		R = 132;
+		G = 174;
+		B = 216;
+	break;
+	case 3:
+		R = 193;
+		G = 112;
+		B = 202;
+	break;
+	case 4:
+		R = 225;
+		G = 109;
+		B = 109;
+	break;
+	default:
+		R = 187;
+		G = 181;
+		B = 138;
+	break;
+	}
+}
+
+//속성 게이지 그려주기
+function AddTooltipItemAttributeGage(ItemInfo Item)
+{
+	local int i;
+	//local int highAttrValue[6];
+	local Array<string> textureName, tooltipStr;
+	local bool FirstTime;
+	
+	for(i = 0; i < 6; i++)
+	{
+		textureName[i] = """";
+		tooltipStr[i] = """";
+	}
+	
+	NowAttrLv =0;
+	NowMaxValue =0;
+	NowValue =0;
+
+	
+	// 공격 아이템 속성
+	if (Item.AttackAttributeValue  > 0)
+	{
+
+		//AddSystemMessageString(""1"");
+		
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_FIRE);
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_WATER);
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_WIND);
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_EARTH);
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_HOLY);
+		SetAttackAttribute(Item.AttackAttributeValue,ATTRIBUTE_UNHOLY); //레벨과 현제값등을 구한다.
+		
+		switch(Item.AttackAttributeType)
+		{
+			case ATTRIBUTE_FIRE:
+				textureName[ATTRIBUTE_FIRE] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_FIRE"";
+				tooltipStr[ATTRIBUTE_FIRE] =GetSystemString(1622) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_FIRE]) $ "" (""$ GetSystemString(1622) $ "" "" $ GetSystemString(55) $ "" "" $ String(Item.AttackAttributeValue) $"")"";
+				break;
+			case ATTRIBUTE_WATER:
+				textureName[ATTRIBUTE_WATER] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_WATER"";
+				tooltipStr[ATTRIBUTE_WATER] =GetSystemString(1623) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_WATER]) $ "" (""$ GetSystemString(1623) $ "" "" $ GetSystemString(55) $ "" "" $String(Item.AttackAttributeValue) $ "")"";
+				break;
+			case ATTRIBUTE_WIND:
+				textureName[ATTRIBUTE_WIND] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_WIND"";
+				tooltipStr[ATTRIBUTE_WIND] =GetSystemString(1624) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_WIND]) $ "" (""$ GetSystemString(1624) $ "" "" $ GetSystemString(55) $ "" "" $String(Item.AttackAttributeValue) $ "")"";
+				break;
+			case ATTRIBUTE_EARTH:
+				textureName[ATTRIBUTE_EARTH] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_EARTH"";
+				tooltipStr[ATTRIBUTE_EARTH] =GetSystemString(1625) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_EARTH]) $ "" (""$ GetSystemString(1625) $ "" "" $ GetSystemString(55) $ "" "" $ String(Item.AttackAttributeValue) $"")"";
+				break;
+			case ATTRIBUTE_HOLY:
+				textureName[ATTRIBUTE_HOLY] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_DIVINE"";
+				tooltipStr[ATTRIBUTE_HOLY] =GetSystemString(1626) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_HOLY]) $ "" (""$ GetSystemString(1626) $ "" "" $ GetSystemString(55) $ "" "" $String(Item.AttackAttributeValue) $ "")"";
+				break;
+			case ATTRIBUTE_UNHOLY:
+				textureName[ATTRIBUTE_UNHOLY] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_DARK"";
+				tooltipStr[ATTRIBUTE_UNHOLY] =GetSystemString(1627) $ "" Lv "" $ String(AttackAttLevel[ATTRIBUTE_UNHOLY]) $ "" (""$ GetSystemString(1627) $ "" "" $ GetSystemString(55) $ "" "" $String(Item.AttackAttributeValue) $ "")"";
+				break;
+		}
+	}
+	else	// 방어 아이템 속성
+	{	
+		//AddSystemMessageString(""2"");
+		SetDefAttribute(Item.DefenseAttributeValueFire,ATTRIBUTE_FIRE);
+		SetDefAttribute(Item.DefenseAttributeValueWater,ATTRIBUTE_WATER);
+		SetDefAttribute(Item.DefenseAttributeValueWind,ATTRIBUTE_WIND);
+		SetDefAttribute(Item.DefenseAttributeValueEarth,ATTRIBUTE_EARTH);
+		SetDefAttribute(Item.DefenseAttributeValueHoly,ATTRIBUTE_HOLY);
+		SetDefAttribute(Item.DefenseAttributeValueUnholy,ATTRIBUTE_UNHOLY); //레벨과 현제값등을 구한다.
+
+		if(Item.DefenseAttributeValueFire != 0) //파이어 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_FIRE] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_FIRE"";
+			tooltipStr[ATTRIBUTE_FIRE] =GetSystemString(1623) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_FIRE]) $ "" (""$ GetSystemString(1622) $ "" "" $ GetSystemString(54) $ "" "" $ String(Item.DefenseAttributeValueFire) $"")"";
+		}
+		if(Item.DefenseAttributeValueWater != 0) //물 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_WATER] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_WATER"";
+			tooltipStr[ATTRIBUTE_WATER] =GetSystemString(1622) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_WATER]) $ "" (""$ GetSystemString(1623) $ "" "" $ GetSystemString(54) $ "" "" $String(Item.DefenseAttributeValueWater) $ "")"";
+		}
+		if(Item.DefenseAttributeValueWind != 0) //바람 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_WIND] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_WIND"";
+			tooltipStr[ATTRIBUTE_WIND] =GetSystemString(1625) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_WIND]) $ "" (""$ GetSystemString(1624) $ "" "" $ GetSystemString(54) $ "" "" $String(Item.DefenseAttributeValueWind) $"")"";
+		}
+		if(Item.DefenseAttributeValueEarth != 0) //땅 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_EARTH] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_EARTH"";
+			tooltipStr[ATTRIBUTE_EARTH] =GetSystemString(1624) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_EARTH]) $ "" (""$ GetSystemString(1625) $ "" "" $ GetSystemString(54) $ "" "" $String(Item.DefenseAttributeValueEarth) $ "")"";
+		}
+		if(Item.DefenseAttributeValueHoly != 0) //신성 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_HOLY] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_DIVINE"";
+			tooltipStr[ATTRIBUTE_HOLY] =GetSystemString(1627) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_HOLY]) $ "" (""$ GetSystemString(1626) $ "" "" $ GetSystemString(54) $ "" "" $ String(Item.DefenseAttributeValueHoly) $"")"";
+		}
+		if(Item.DefenseAttributeValueUnholy != 0) //암흑 속성 툴팁 그리기
+		{
+			textureName[ATTRIBUTE_UNHOLY] = ""L2UI_CT1.Gauges.Gauge_DF_Attribute_DARK"";
+			tooltipStr[ATTRIBUTE_UNHOLY] =GetSystemString(1626) $ "" Lv "" $ String(DefAttLevel[ATTRIBUTE_UNHOLY]) $ "" (""$ GetSystemString(1627) $ "" "" $ GetSystemString(54) $ "" "" $String(Item.DefenseAttributeValueUnholy) $ "")"";
+		}
+		// 방어 아이템 속성
+		
+
+	}
+
+	if (Item.AttackAttributeValue  > 0)//공격속성일경우
+	{
+
+
+		for(i = 0; i < 6; i++)
+		{
+			if(tooltipStr[i] == """") continue;	
+
+			AddTooltipItemBlank(0);	
+			StartItem();
+			m_Info.eType = DIT_SPLITLINE;
+			m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+			m_Info.u_nTextureHeight = 1;
+			m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+			EndItem();		
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_strText = tooltipStr[i];
+			EndItem();
+			
+			//텍스쳐 두장을 겹쳐 그려야 한다. 
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 0;
+			m_Info.nOffSetY = 2;
+			m_Info.u_nTextureWidth = 140;
+			m_Info.u_nTextureHeight = 7;
+			m_Info.u_strTexture = textureName[i] $ ""_BG"";
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 0;
+			m_Info.nOffSetY = -7;
+			m_Info.u_nTextureWidth = AttackAttCurrValue[i] * 140 / AttackAttMaxValue[i] ;
+			if( m_Info.u_nTextureWidth > 140) m_Info.u_nTextureWidth = 140;	//넘어가면 걍 140이라는.. ㅋ
+			m_Info.u_nTextureHeight = 7;
+			m_Info.u_strTexture = textureName[i];
+			EndItem();
+
+			AddTooltipItemBlank(4);	
+		}
+	
+	}
+	else{ //방어 속성일 경우
+		for(i = 0; i < 6; i++)
+		{
+			if(tooltipStr[i] == """") continue;
+		   if(!FirstTime)
+		   {
+			AddTooltipItemBlank(0);	
+			StartItem();
+			m_Info.eType = DIT_SPLITLINE;
+			m_Info.u_nTextureWidth = TOOLTIP_MINIMUM_WIDTH;			
+			m_Info.u_nTextureHeight = 1;
+			m_Info.u_strTexture =""L2ui_ch3.tooltip_line"";
+			EndItem();
+			FirstTime=true;	
+		   }
+
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_strText = tooltipStr[i];
+			EndItem();
+			
+			//텍스쳐 두장을 겹쳐 그려야 한다. 
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 0;
+			m_Info.nOffSetY = 2;
+			m_Info.u_nTextureWidth = 140;
+			m_Info.u_nTextureHeight = 7;
+			m_Info.u_strTexture = textureName[i] $ ""_BG"";
+			EndItem();
+			
+			StartItem();
+			m_Info.eType = DIT_TEXTURE;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.nOffSetX = 0;
+			m_Info.nOffSetY = -7;
+			
+			m_Info.u_nTextureWidth = DefAttCurrValue[i] * 140 / DefAttMaxValue[i] ;
+			if( m_Info.u_nTextureWidth > 140) m_Info.u_nTextureWidth = 140;	//넘어가면 걍 140이라는.. ㅋ
+			m_Info.u_nTextureHeight = 7;
+			m_Info.u_strTexture = textureName[i];
+			EndItem();	
+		}
+		if( FirstTime )
+			AddTooltipItemBlank(4);
+	}
+	
+}
+
+// function StartItem()
+// {
+// 	local DrawItemInfo infoClear;
+// 	m_Info = infoClear;
+// }
+// 
+// function EndItem()
+// {
+// 	m_Tooltip.DrawList.Length = m_Tooltip.DrawList.Length + 1;
+// 	m_Tooltip.DrawList[m_Tooltip.DrawList.Length-1] = m_Info;
+// }
+
+//퀘스트 아이템의 퀘스트 이름 표시
+function AddTooltipItemQuestList(ItemInfo Item)
+{
+	local int i;
+	
+	//<관련 퀘스트>
+	if(Item.RelatedQuestID[0] != 0)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXT;
+		m_Info.nOffSetY = 10;
+		m_Info.bLineBreak = true;
+		m_Info.t_bDrawOneLine = true;
+		m_Info.t_strText = GetSystemString(1721);
+		EndItem();
+	}
+	
+	for(i = 0 ; i<MAX_RELATED_QUEST ; i++)
+	{		
+		if(Item.RelatedQuestID[i] != 0)
+		{
+			StartItem();
+			m_Info.eType = DIT_TEXT;
+			m_Info.nOffSetY = 6;
+			m_Info.t_color.R = 163;
+			m_Info.t_color.G = 163;
+			m_Info.t_color.B = 163;
+			m_Info.t_color.A = 255;
+			m_Info.bLineBreak = true;
+			m_Info.t_bDrawOneLine = true;
+			m_Info.t_strText = class'UIDATA_QUEST'.static.GetQuestName(Item.RelatedQuestID[i]);;
+			EndItem();
+		}
+	}
+}
+
+
+// 속성의 레벨값을 전역변수에 저장	//자료가 많아서 전역변수에 집어넣는다. 
+
+function SetAttackAttribute(int Attvalue, int type)
+{
+	if( AttValue >= 375)	// 9렙	375 ~ 450
+	{
+		AttackAttLevel[type] = 9;
+		AttackAttMaxValue[type] = 75;
+		AttackAttCurrValue[type] = AttValue - 375;
+	}
+	else if( AttValue >= 325)	// 8렙	325 ~ 375
+	{
+		AttackAttLevel[type] = 8;
+		AttackAttMaxValue[type] = 50;
+		AttackAttCurrValue[type] = AttValue - 325;
+	}
+	else if( AttValue >= 300)	// 7렙	300 ~ 325
+	{
+		AttackAttLevel[type] = 7;
+		AttackAttMaxValue[type] = 25;
+		AttackAttCurrValue[type] = AttValue - 300;
+	}
+	else if( AttValue >= 225)	// 6렙	225 ~ 300
+	{
+		AttackAttLevel[type] = 6;
+		AttackAttMaxValue[type] = 75;
+		AttackAttCurrValue[type] = AttValue - 225;
+	}
+	else if( AttValue >= 175)	// 5렙	175 ~ 225
+	{
+		AttackAttLevel[type] = 5;
+		AttackAttMaxValue[type] = 50;
+		AttackAttCurrValue[type] = AttValue - 175;
+	}
+	else if( AttValue >= 150)	// 4렙	150 ~ 175
+	{
+		AttackAttLevel[type] = 4;
+		AttackAttMaxValue[type] = 25;
+		AttackAttCurrValue[type] = AttValue - 150;
+	}
+	else if( AttValue >= 75)	// 3렙	75 ~ 150
+	{
+		AttackAttLevel[type] = 3;
+		AttackAttMaxValue[type] = 75;
+		AttackAttCurrValue[type] = AttValue - 75;
+	}
+	else if( AttValue >= 25)	// 2렙	25~ 75
+	{
+		AttackAttLevel[type] = 2;
+		AttackAttMaxValue[type] = 50;
+		AttackAttCurrValue[type] = AttValue - 25;
+	}
+	else	// else 0~ 25
+	{
+		AttackAttLevel[type] = 1;
+		AttackAttMaxValue[type] = 25;
+		AttackAttCurrValue[type] = AttValue;
+	}	
+}
+// 속성의 레벨값을 전역변수에 저장	//자료가 많아서 전역변수에 집어넣는다. 
+
+
+function SetDefAttribute(int Defvalue, int type)
+{
+	if( DefValue >= 150)	// 9렙		150~180
+	{
+		DefAttLevel[type] = 9;
+		DefAttMaxValue[type] = 30;
+		DefAttCurrValue[type] = DefValue - 150;
+	}
+	else if( DefValue >= 132)	// 8렙	132 ~ 150
+	{
+		DefAttLevel[type] = 8;
+		DefAttMaxValue[type] = 18;
+		DefAttCurrValue[type] = DefValue - 132;
+	}
+	else if( DefValue >= 120)	// 7렙	120 ~ 132
+	{
+		DefAttLevel[type] = 7;
+		DefAttMaxValue[type] = 12;
+		DefAttCurrValue[type] = DefValue - 120;
+	}
+	else if( DefValue >= 90)	// 6렙	90 ~ 120
+	{
+		DefAttLevel[type] = 6;
+		DefAttMaxValue[type] = 30;
+		DefAttCurrValue[type] = DefValue - 90;
+	}
+	else if( DefValue >= 72)	// 5렙	72 ~ 90
+	{
+		DefAttLevel[type] = 5;
+		DefAttMaxValue[type] = 18;
+		DefAttCurrValue[type] = DefValue - 72;
+	}
+	else if( DefValue >= 60)	// 4렙	60 ~ 72
+	{
+		DefAttLevel[type] = 4;
+		DefAttMaxValue[type] = 12;
+		DefAttCurrValue[type] = DefValue - 60;
+	}
+	else if( DefValue >= 30)	// 3렙	30 ~ 60
+	{
+		DefAttLevel[type] = 3;
+		DefAttMaxValue[type] = 30;
+		DefAttCurrValue[type] = DefValue - 30;
+	}
+	else if( DefValue >= 12)	// 2렙	// 12 ~ 30
+	{
+		DefAttLevel[type] = 2;
+		DefAttMaxValue[type] = 18;
+		DefAttCurrValue[type] = DefValue - 12;
+	}
+	else	// else				// 0~ 12
+	{
+		DefAttLevel[type] = 1;
+		DefAttMaxValue[type] = 12;
+		DefAttCurrValue[type] = DefValue;
+	}	
+}
+
+//branch
+function AddPrimeItemSymbol(ItemInfo Item)
+{
+	local string TextureName;
+
+	if (Item.IsBRPremium != 2)
+		return;
+
+	TextureName = GetPrimeItemSymbolName();
+	if (Len(TextureName)>0)
+	{
+		StartItem();
+		m_Info.eType = DIT_TEXTURE;
+		m_Info.nOffSetX = 2;
+		m_Info.nOffSetY = 0;
+		
+		m_Info.u_nTextureWidth = 16;
+		m_Info.u_nTextureHeight = 16;
+			
+		m_Info.u_nTextureUWidth = 16;
+		m_Info.u_nTextureUHeight = 16;
+
+		m_Info.u_strTexture = TextureName;
+		EndItem();
+	}
+}
+//end of branch
+defaultproperties
+{
+}
+"
+XumftwQt,LOLLYPOP HUB 🍭 (main skript/daily updates),rrixh,Lua,Thursday 29th of August 2024 09:22:41 AM CDT,"loadstring(game:HttpGet(""https://raw.githubusercontent.com/rrixh/lulaslollipopmobile/main/lollypophubmobilev2"", false))()"
+mdUfKNXN,Python: Default pyproject.toml tool settings,joejoinerr,Python,Thursday 29th of August 2024 09:02:35 AM CDT,"[tool.pytest.ini_options]
+pythonpath = [""src""]
+asyncio_mode = ""auto""
+
+[tool.ruff]
+src = [""src""]
+line-length = 88
+
+[tool.ruff.lint]
+select = [""E"", ""F"", ""I"", ""D"", ""C90"", ""B"", ""N"", ""TRY"", ""PD"", ""RUF200"", ""UP""]
+ignore = [""E501"", ""B904"", ""ANN101"", ""ANN003""]
+
+[tool.ruff.lint.per-file-ignores]
+""__init__.py"" = [""F401"", ""F403"", ""E402""]
+""tests/**.py"" = [""D""]
+
+[tool.ruff.lint.pydocstyle]
+convention = ""google""
+
+[tool.ruff.lint.mccabe]
+# Flag errors (`C901`) whenever the complexity level exceeds 6.
+max-complexity = 6"
+6P0bwNyQ,SoX Music Notes,metalx1000,Bash,Thursday 29th of August 2024 09:00:43 AM CDT,"#play notes
+play -n synth .5 sin A
+play -n synth .5 sin B
+play -n synth .5 sin C
+play -n synth .5 sin D
+play -n synth .5 sin E
+play -n synth .5 sin F
+play -n synth .5 sin G
+
+play -n synth .5 sin A1
+play -n synth .5 sin A2
+play -n synth .5 sin A3
+play -n synth .5 sin A4
+play -n synth .5 sin A5
+play -n synth .5 sin A6
+
+play -n synth .5 pl A2
+play -n synth .5 pl A3
+play -n synth .5 pl A4
+play -n synth .5 pl A5
+play -n synth .5 pl A6
+
+#play chords
+play -n synth 2 sin G2 sin B2 sin D3 sin G3 sin D4 sin G4
+play -n synth 2 pl G2 pl B2 pl D3 pl G3 pl D4 pl G4
+
+#mix channels
+play -n synth 2 sin G2 pl B2 pl D3 pl G3 pl D4 pl G4 remix - norm -1
+
+#delay on each note
+play -n synth 2 sin G2 pl B2 pl D3 pl G3 pl D4 pl G4 delay 0 .05 .1 .15 .2 .25 remix - norm -1
+
+# fade [type] fade-in-length [stop-position(=) [fade-out-length]]
+play -n synth pl G2 pl B2 pl D3 pl G3 pl D4 pl G4 delay 0 .05 .1 .15 .2 .25 remix - fade 2 8 2 norm -1
+
+#saving to file
+sox -n output.wav synth pl G2 pl B2 pl D3 pl G3 pl D4 pl G4 delay 0 .05 .1 .15 .2 .25 remix - fade 2 8 2 norm -1
+play output.wav"
+chbskgWB,07. Moving,Spocoman,Java,Thursday 29th of August 2024 08:54:08 AM CDT,"import java.util.Scanner;
+
+public class Moving {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int width = Integer.parseInt(scanner.nextLine());
+        int length = Integer.parseInt(scanner.nextLine());
+        int height = Integer.parseInt(scanner.nextLine());
+        
+        int freeSpace = width * length * height;
+
+        String input = """";
+        while (freeSpace > 0) {
+            input = scanner.nextLine();
+            if (input.equals(""Done"")) {
+                break;
+            }
+            freeSpace -= Integer.parseInt(input);
+        }
+
+        if (input.equals(""Done"")) {
+            System.out.printf(""%d Cubic meters left.\n"", freeSpace);
+        } else {
+            System.out.printf(""No more free space! You need %d Cubic meters more."", Math.abs(freeSpace));
+        }
+    }
+}"
+bcyJnVzC,Creating Tones with SoX,metalx1000,Bash,Thursday 29th of August 2024 08:43:31 AM CDT,"# Sine Wave Tones
+play -n synth 5 sin 347
+play -n synth 1 sin 347
+play -n synth .1 sin 347
+
+# Random Tones
+for i in {1..10}
+do
+  tone=$(( ( RANDOM % 400 )  + 400 )) #Random number between 400 and 800
+  play -n synth .1 sin $tone
+done
+
+# Two tones - left and right ear
+play -n synth .5 sin 347 sin 357
+play -n synth .5 sin 447 sin 457
+play -n synth .5 sin 447 sin 857
+play -n synth .5 sin 847 sin 457
+
+# Combining tones
+play -n synth .5 sin 347 sin 357 remix -
+play -n synth .5 sin 447 sin 457 remix -
+play -n synth .5 sin 447 sin 857 remix -
+play -n synth .5 sin 847 sin 457 remix -
+
+#Random tones mixed
+for i in {1..10}
+do
+  tone1=$(( ( RANDOM % 400 )  + 400 )) #Random number between 400 and 800
+  tone2=$(($tone1+10)) #tone1 plus 10
+  play -n synth .2 sin $tone1 sin $tone2 remix -
+done
+
+#Moving up
+tone1=400
+for i in {1..10}
+do
+  x=$((i * 50))
+  tone1=$(($tone1 + x))
+  tone2=$(($tone1 + 10)) #tone1 plus 10
+  play -n synth .2 sin $tone1 sin $tone2 remix -
+done
+
+#square waves
+play -n synth .5 square 347 square 357 remix -
+play -n synth .5 square 447 square 457 remix -
+play -n synth .5 square 447 square 857 remix -
+play -n synth .5 square 847 square 457 remix -
+
+#Pitch Changing
+play -n synth 1 sin 200:400 #up
+play -n synth 1 sin 400:200 #down
+play -n synth 1 sin 200:400 sin 400:200 #up in one ear and down in the other
+play -n synth 1 sin 200:400 sin 400:200 remix - #up and down mixed
+play -n synth 1 sin 200:400 sin 400:200 delay 0 1 #up THEN Down left then right
+play -n synth 1 sin 200:400 sin 400:200 delay 0 1 remix - #up THEN Down 
+play -n synth 1 sin 200:400 sin 400:200 delay 0 1 remix - repeat 5 #up then down 5 times
+play -n synth .1 sin 200:400 sin 400:200 delay 0 .1 remix - repeat 50  #50 times - note that delay and length are the same
+
+# saving sounds to files
+sox -n output.wav synth 1 sin 347
+play output.wav
+sox -n output.wav synth .1 sin 200:400 sin 400:200 delay 0 .1 remix - repeat 50
+play output.wav
+
+#static and noise
+play -n synth 1 noise
+play -n synth 1 pinknoise"
+hv5QH2n8,06. Cake,Spocoman,Java,Thursday 29th of August 2024 08:42:21 AM CDT,"import java.util.Scanner;
+
+public class Cake {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int x = Integer.parseInt(scanner.nextLine());
+        int y = Integer.parseInt(scanner.nextLine());
+        int cakePieces = x * y;
+
+        String input = """";
+        while (cakePieces > 0 && !(input = scanner.nextLine()).equals(""STOP"")) {
+            cakePieces -= Integer.parseInt(input);
+        }
+
+        if (cakePieces >= 0) {
+            System.out.printf(""%d pieces are left.\n"", cakePieces);
+        } else {
+            System.out.printf(""No more cake left! You need %d pieces more.\n"", Math.abs(cakePieces));
+        }
+    }
+}"
+3wGnKgVQ,Task 8 - SQL,horozov86,Oracle 11,Thursday 29th of August 2024 08:36:27 AM CDT,"SELECT
+    ATOUR.TOURNUMMER AS ""Tour number"",
+    SHIERARCHIE.BEZEICHNUNG AS ""Organisation"",
+    SKUNDEN.NAME1 AS ""Carrier Name"",
+    SUM(ASDGABRECHNUNG.BETRAG) AS ""Amount"",
+    SUM(ASDGABRECHNUNG.BETRAGSTP) AS ""Amount without TAX"",
+    SUM(ASDGABRECHNUNG.CALCSTATSTEUERBETRAG) AS ""TAX Amount"",
+    SUM(ASDGABRECHNUNG.BETRAG) + SUM(ASDGABRECHNUNG.BETRAGSTP) + SUM(ASDGABRECHNUNG.CALCSTATSTEUERBETRAG) AS ""Total Expenses"",
+    SWAEHRUNG.ISOWAEHRUNGSCODE AS ""Currency""
+
+FROM ATOUR
+
+LEFT JOIN
+    SHIERARCHIE ON SHIERARCHIE.ID = ATOUR.HIERARCHIE
+LEFT JOIN
+    SKUNDEN ON SKUNDEN.NR = ATOUR.UNTERNEHMER
+LEFT JOIN
+    ATASEND ON ATASEND.TOURNR = ATOUR.NR
+LEFT JOIN
+    ASDGABRECHNUNG ON ASDGABRECHNUNG.ATAID = ATASEND.NR
+LEFT JOIN
+    SWAEHRUNG ON SWAEHRUNG.ID = ASDGABRECHNUNG.WAEHRUNGID
+
+WHERE
+    ATOUR.TOURNUMMER IN (288371, 307961, 286635)
+    
+GROUP BY
+    ATOUR.TOURNUMMER,
+    SHIERARCHIE.BEZEICHNUNG,
+    SKUNDEN.NAME1,
+    SWAEHRUNG.ISOWAEHRUNGSCODE;"
+Dhm2Pj2z,05. Coins,Spocoman,Java,Thursday 29th of August 2024 08:31:54 AM CDT,"РЕШЕНИЕ БЕЗ ЦИКЪЛ:
+
+import java.util.Scanner;
+
+public class Coins {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        double input = Double.parseDouble(scanner.nextLine());
+        int change = (int) (input * 100), coinCount = 0;
+
+        if (change >= 200) {
+            coinCount += change / 200;
+            change %= 200;
+        }
+        if (change >= 100) {
+            coinCount += change / 100;
+            change %= 100;
+        }
+        if (change >= 50) {
+            coinCount += change / 50;
+            change %= 50;
+        }
+        if (change >= 20) {
+            coinCount += change / 20;
+            change %= 20;
+        }
+        if (change >= 10) {
+            coinCount += change / 10;
+            change %= 10;
+        }
+        if (change >= 5) {
+            coinCount += change / 5;
+            change %= 5;
+        }
+        if (change >= 2) {
+            coinCount += change / 2;
+            change %= 2;
+        }
+        if (change == 1) {
+            coinCount++;
+            change--;
+        }
+        
+        System.out.println(coinCount);
+    }
+}
+
+РЕШЕНИЕ С WHILE / FOR:
+
+import java.util.Scanner;
+
+public class Coins {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        double input = Double.parseDouble(scanner.nextLine());
+        int change = (int) (input * 100), coinCount = 0;
+
+        while (change > 0) {    // ИЛИ:  for (int i = 0; change > 0; i++) {
+            if (change >= 200) {
+                change -= 200;
+            } else if (change >= 100) {
+                change -= 100;
+            } else if (change >= 50) {
+                change -= 50;
+            } else if (change >= 20) {
+                change -= 20;
+            } else if (change >= 10) {
+                change -= 10;
+            } else if (change >= 5) {
+                change -= 5;
+            } else if (change >= 2) {
+                change -= 2;
+            } else {
+                change--;
+            }
+            coinCount++;
+        }
+
+        System.out.println(coinCount);
+    }
+}
+
+ИЛИ:
+
+РЕШЕНИЕ С ТЕРНАРЕН ОПЕРАТОР:
+
+import java.util.Scanner;
+
+public class Coins {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        double input = Double.parseDouble(scanner.nextLine());
+        int change = (int) (input * 100), coinCount = 0;
+
+        while (change > 0) {    // ИЛИ:  for (int i = 0; change > 0; i++) {
+            while (change != 0) {
+
+                change -=
+                        change >= 200 ? 200 :
+                                change >= 100 ? 100 :
+                                        change >= 50 ? 50 :
+                                                change >= 20 ? 20 :
+                                                        change >= 10 ? 10 :
+                                                                change >= 5 ? 5 :
+                                                                        change >= 2 ? 2 : 1;
+                coinCount++;
+            }
+        }
+        
+        System.out.println(coinCount);
+    }
+}
+
+ОПТИМИЗИРАНО РЕШЕНИЕ:
+
+import java.util.Scanner;
+
+public class Coins {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        double input = Double.parseDouble(scanner.nextLine());
+        int change = (int) (input * 100), coinCount = 0;
+
+        for (int coin : new int[]{200, 100, 50, 20, 10, 5, 2, 1}) {
+            if (change >= coin) {
+                coinCount += change / coin;
+                change %= coin;
+            }
+        }
+
+        System.out.println(coinCount);
+    }
+}"
+LJARDzXJ,.db.env file,z0rg_0n,YAML,Thursday 29th of August 2024 08:22:11 AM CDT,"MYSQL_RANDOM_ROOT_PASSWORD=yes
+MYSQL_USER=firefly
+MYSQL_PASSWORD=fireflyiiidatabase
+MYSQL_DATABASE=firefly
+"
+nSBW9vAj,importer.env,z0rg_0n,YAML,Thursday 29th of August 2024 08:19:38 AM CDT,"# Firefly Data Importer (FIDI) configuration file
+
+# Where is Firefly III?
+#
+# 1) Make sure you ADD http:// or https://
+# 2) Make sure you REMOVE any trailing slash from the end of the URL.
+# 3) In case of Docker, refer to the internal IP of your Firefly III installation.
+#
+# Setting this value is not mandatory. But it is very useful.
+#
+# This variable can be set from a file if you append it with _FILE
+#
+FIREFLY_III_URL=http://app:666
+
+#
+# Imagine Firefly III can be reached at ""http://172.16.0.2:8082"" (internal Docker network or something).
+# But you have a fancy URL: ""https://personal-finances.bill.microsoft.com/""
+#
+# In those cases, you can overrule the URL so when the data importer links back to Firefly III, it uses the correct URL.
+#
+# 1) Make sure you ADD http:// or https://
+# 2) Make sure you REMOVE any trailing slash from the end of the URL.
+#
+# IF YOU SET THIS VALUE, YOU MUST ALSO SET THE FIREFLY_III_URL
+#
+# This variable can be set from a file if you append it with _FILE
+#
+VANITY_URL=http://localhost
+
+#
+# Set your Firefly III Personal Access Token (OAuth)
+# You can create a Personal Access Token on the /profile page:
+# go to the OAuth tab, then Personal Access Token and ""Create token"".
+#
+# - Do not use the ""command line token"". That's the WRONG one.
+# - Do not use ""APP_KEY"" value from your Firefly III installation. That's the WRONG one.
+#
+# Setting this value is not mandatory. Instructions will follow if you omit this field.
+#
+# This variable can be set from a file if you append it with _FILE
+#
+FIREFLY_III_ACCESS_TOKEN=
+
+#
+# You can also use a public client ID. This is available in Firefly III 5.4.0-alpha.3 and higher.
+# This is a number (1, 2, 3). If you use the client ID, you can leave the access token empty and vice versa.
+#
+# This value is not mandatory to set. Instructions will follow if you omit this field.
+#
+# This variable can be set from a file if you append it with _FILE
+#
+FIREFLY_III_CLIENT_ID=
+
+#
+# GoCardless information.
+# The key and ID can be set from a file if you append it with _FILE
+#
+NORDIGEN_ID=
+NORDIGEN_KEY=
+
+#
+# If you want to use the GoCardless sandbox, set this to true.
+#
+NORDIGEN_SANDBOX=false
+
+#
+# GoCardless has a rate limit in place. The data importer can wait it out, or exit.
+# Valid values are ""wait"" or ""exit""
+#
+RESPOND_TO_GOCARDLESS_LIMIT=wait
+
+#
+# The data importer collects account details, which are currently unused.
+# This is disabled, since it costs a lot of API calls.
+# You can enable it if you want to.
+#
+GOCARDLESS_GET_ACCOUNT_DETAILS=false
+
+#
+# The data importer also collects balances, which can be used for (manual)
+# balance verification (""did the import go well?"").
+# This is disabled by default, since it costs a lot of API calls.
+# You can enable it if you want to.
+#
+GOCARDLESS_GET_BALANCE_DETAILS=false
+
+#
+# Spectre information
+#
+# The ID and secret can be set from a file if you append it with _FILE
+SPECTRE_APP_ID=
+SPECTRE_SECRET=
+
+#
+# Use cache. No need to do this.
+#
+USE_CACHE=false
+
+#
+# If set to true, the data import will not complain about running into duplicates.
+# This will give you cleaner import mails if you run regular imports.
+#
+# This means that the data importer will not import duplicates, but it will not complain about them either.
+#
+# This setting has no influence on the settings in your configuration(.json).
+#
+# Of course, if something goes wrong *because* the transaction is a duplicate you will
+# NEVER know unless you start digging in your log files. So be careful with this.
+#
+IGNORE_DUPLICATE_ERRORS=false
+
+#
+# If you set this to true, the importer will not complain about transactions that can't be found after they've
+# been imported. This happens when rule on the Firefly III side deletes the transaction immediately after creating it.
+# This can be useful when you have a rule that immediately deletes GoCardless' ""pending"" transactions. Setting this
+# to true reduces some noise.
+#
+IGNORE_NOT_FOUND_TRANSACTIONS=false
+
+#
+# Auto import settings. Due to security constraints, you MUST enable each feature individually.
+# You must also set a secret. The secret is used for the web routes.
+#
+# The auto-import secret must be a string of at least 16 characters.
+# Visit this page for inspiration: https://www.random.org/passwords/?num=1&len=16&format=html&rnd=new
+#
+# Submit it using ?secret=X
+#
+# This variable can be set from a file if you append it with _FILE
+#
+AUTO_IMPORT_SECRET=
+
+#
+# Is the /autoimport even endpoint enabled?
+# By default it's disabled, and the secret alone will not enable it.
+#
+CAN_POST_AUTOIMPORT=false
+
+#
+# Is the /autoupload endpoint enabled?
+# By default it's disabled, and the secret alone will not enable it.
+#
+CAN_POST_FILES=false
+
+#
+# Import directory white list. You need to set this before the auto importer will accept a directory to import from.
+#
+# This variable can be set from a file if you append it with _FILE
+#
+IMPORT_DIR_ALLOWLIST=
+
+#
+# If you import from a directory, you can save a fallback configuration file in the directory.
+# This file must be called ""_fallback.json"" and will be used when your CSV or CAMT.053 file is not accompanied
+# by a configuration file.
+#
+# This fallback configuration will only be used if this variable is set to true.
+# https://docs.firefly-iii.org/how-to/data-importer/advanced/post/#importing-a-local-directory
+#
+FALLBACK_IN_DIR=false
+
+#
+# When you're running Firefly III under a (self-signed) certificate,
+# the data importer may have trouble verifying the TLS connection.
+#
+# You have a few options to make sure the data importer can connect
+# to Firefly III:
+# - 'true': will verify all certificates. The most secure option and the default.
+# - 'file.pem': refer to a file (you must provide it) to your custom root or intermediate certificates.
+# - 'false': will verify NO certificates. Not very secure.
+VERIFY_TLS_SECURITY=true
+
+#
+# If you want, you can set a directory here where the data importer will look for import configurations.
+# This is a separate setting from the /import directory that the auto-import uses.
+# Setting this variable isn't necessary. The default value is ""storage/configurations"".
+#
+# This variable can be set from a file if you append it with _FILE
+#
+JSON_CONFIGURATION_DIR=
+
+#
+# Time out when connecting with Firefly III.
+# π*10 seconds is usually fine.
+#
+CONNECTION_TIMEOUT=31.41
+
+# The following variables can be useful when debugging the application
+APP_ENV=local
+APP_DEBUG=false
+LOG_CHANNEL=stack
+
+#
+# If you turn this on, expect massive logs with lots of privacy sensitive data
+#
+LOG_RETURN_JSON=false
+
+# Log level. You can set this from least severe to most severe:
+# debug, info, notice, warning, error, critical, alert, emergency
+# If you set it to debug your logs will grow large, and fast. If you set it to emergency probably
+# nothing will get logged, ever.
+LOG_LEVEL=debug
+
+# TRUSTED_PROXIES is a useful variable when using Docker and/or a reverse proxy.
+# Set it to ** and reverse proxies work just fine.
+TRUSTED_PROXIES=
+
+#
+# Time zone
+#
+TZ=Asia/Tokyo
+
+#
+# Email settings.
+# The data importer can send you a message with all errors, warnings and messages
+# after a successful import. This is disabled by default
+#
+ENABLE_MAIL_REPORT=false
+
+#
+# Force Firefly III URL to be secure?
+#
+#
+EXPECT_SECURE_URL=false
+
+# If enabled, define which mailer you want to use.
+# Options include: smtp, mailgun, postmark, sendmail, log, array
+# Amazon SES is not supported.
+# log = drop mails in the logs instead of sending them
+# array = debug mailer that does nothing.
+MAIL_MAILER=
+
+# where to send the report?
+MAIL_DESTINATION=noreply@example.com
+
+# other mail settings
+# These variables can be set from a file if you append it with _FILE
+MAIL_FROM_ADDRESS=noreply@example.com
+MAIL_HOST=smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=username
+MAIL_PASSWORD=password
+MAIL_ENCRYPTION=null
+
+# Extra settings depending on your mail configuration above.
+# These variables can be set from a file if you append it with _FILE
+MAILGUN_DOMAIN=
+MAILGUN_SECRET=
+MAILGUN_ENDPOINT=
+POSTMARK_TOKEN=
+
+#
+# You probably won't need to change these settings.
+#
+BROADCAST_DRIVER=log
+CACHE_DRIVER=file
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+IS_EXTERNAL=false
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+# always use quotes
+REDIS_DB=""0""
+REDIS_CACHE_DB=""1""
+
+#
+# Use ASSET_URL when your data importer webpages are served from a URL with a subfolder path
+# This pre-appends the subfolder path in front of URLs for browser-side assets such as CSS Files.
+# Example: If your webserver (i.e. NGINX) is configured to serve the data importer webpages from
+#    http://localhost/ff3di, set ASSET_URL = /ff3di
+#    and it will pre-append that value to any requests for browser-side assets
+# 1) Make sure you REMOVE any trailing slash from the end of the URL.
+#
+ASSET_URL=
+
+# The only tracker supported is Matomo.
+# This is used on the public instance over at https://data-importer.firefly-iii.org
+TRACKER_SITE_ID=
+TRACKER_URL=
+
+APP_NAME=DataImporter
+
+#
+# The APP_URL environment variable is NOT used anywhere.
+# Don't bother setting it to fix your reverse proxy problems. It won't help.
+# Don't open issues telling me it doesn't help because it's not supposed to.
+# Laravel uses this to generate links on the command line, which is a feature the data importer does not use.
+#
+APP_URL=http://localhost
+"
+7jT3EfmX,docker-compose.yml file,z0rg_0n,YAML,Thursday 29th of August 2024 08:16:22 AM CDT,"#
+# The Firefly III Data Importer will ask you for the Firefly III URL and a ""Client ID"".
+# You can generate the Client ID at http://localhost/profile (after registering)
+# The Firefly III URL is: http://app:8080
+#
+# Other URL's will give 500 | Server Error
+#
+
+services:
+  app:
+    image: fireflyiii/core:latest
+    hostname: app
+    container_name: firefly_iii_core
+    networks:
+      - firefly_iii
+    restart: always
+    volumes:
+      - firefly_iii_upload:/var/www/html/storage/upload
+    env_file: .env
+    ports:
+      - '666:8080'
+    depends_on:
+      - db
+  db:
+    image: mariadb:lts
+    hostname: db
+    container_name: firefly_iii_db
+    networks:
+      - firefly_iii
+    restart: always
+    env_file: .db.env
+    volumes:
+      - firefly_iii_db:/var/lib/mysql
+
+  importer:
+    image: fireflyiii/data-importer:latest
+    hostname: importer
+    restart: always
+    container_name: firefly_iii_importer
+    networks:
+      - firefly_iii
+    ports:
+      - '667:8080'
+    depends_on:
+      - app
+    env_file: .importer.env
+
+  cron:
+    #
+    # To make this work, set STATIC_CRON_TOKEN in your .env file or as an environment variable and replace REPLACEME below
+    # The STATIC_CRON_TOKEN must be *exactly* 32 characters long
+    #
+    image: alpine
+    container_name: firefly_iii_cron
+    restart: always
+    command: sh -c ""echo \""0 3 * * * wget -qO- http://app:8080/api/v1/cron/eSC7pezj63ZdX37gCsQowE7CqLxQomRv\"" | crontab - && crond -f -L /dev/stdout""
+    networks:
+      - firefly_iii
+volumes:
+   firefly_iii_upload:
+   firefly_iii_db:
+
+networks:
+  firefly_iii:
+    driver: bridge
+"
+c9xP4g6P,fireflyiii .env,z0rg_0n,C,Thursday 29th of August 2024 08:10:43 AM CDT,"# You can leave this on ""local"". If you change it to production most console commands will ask for extra confirmation.
+# Never set it to ""testing"".
+APP_ENV=production
+
+# Set to true if you want to see debug information in error screens.
+APP_DEBUG=false
+
+# This should be your email address.
+# If you use Docker or similar, you can set this variable from a file by using SITE_OWNER_FILE
+# The variable is used in some errors shown to users who aren't admin.
+SITE_OWNER=mail@example.com
+
+# The encryption key for your sessions. Keep this very secure.
+# Change it to a string of exactly 32 chars or use something like `php artisan key:generate` to generate it.
+# If you use Docker or similar, you can set this variable from a file by using APP_KEY_FILE
+#
+# Avoid the ""#"" character in your APP_KEY, it may break things.
+#
+APP_KEY=eSC7pezj63ZdX37gCsQowE7CqLxQomRv
+
+# Firefly III will launch using this language (for new users and unauthenticated visitors)
+# For a list of available languages: https://github.com/firefly-iii/firefly-iii/tree/main/resources/lang
+#
+# If text is still in English, remember that not everything may have been translated.
+DEFAULT_LANGUAGE=en_US
+
+# The locale defines how numbers are formatted.
+# by default this value is the same as whatever the language is.
+DEFAULT_LOCALE=equal
+
+# Change this value to your preferred time zone.
+# Example: Europe/Amsterdam
+# For a list of supported time zones, see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+TZ=Asia/Tokyo
+
+# TRUSTED_PROXIES is a useful variable when using Docker and/or a reverse proxy.
+# Set it to ** and reverse proxies work just fine.
+TRUSTED_PROXIES=
+
+# The log channel defines where your log entries go to.
+# Several other options exist. You can use 'single' for one big fat error log (not recommended).
+# Also available are 'syslog', 'errorlog' and 'stdout' which will log to the system itself.
+# A rotating log option is 'daily', creates 5 files that (surprise) rotate.
+# A cool option is 'papertrail' for cloud logging
+# Default setting 'stack' will log to 'daily' and to 'stdout' at the same time.
+LOG_CHANNEL=stack
+
+# Log level. You can set this from least severe to most severe:
+# debug, info, notice, warning, error, critical, alert, emergency
+# If you set it to debug your logs will grow large, and fast. If you set it to emergency probably
+# nothing will get logged, ever.
+APP_LOG_LEVEL=notice
+
+# Audit log level.
+# The audit log is used to log notable Firefly III events on a separate channel.
+# These log entries may contain sensitive financial information.
+# The audit log is disabled by default.
+#
+# To enable it, set AUDIT_LOG_LEVEL to ""info""
+# To disable it, set AUDIT_LOG_LEVEL to ""emergency""
+AUDIT_LOG_LEVEL=emergency
+
+#
+# If you want, you can redirect the audit logs to another channel.
+# Set 'audit_stdout', 'audit_syslog', 'audit_errorlog' to log to the system itself.
+# Use audit_daily to log to a rotating file.
+# Use audit_papertrail to log to papertrail.
+#
+# If you do this, the audit logs may be mixed with normal logs because the settings for these channels
+# are often the same as the settings for the normal logs.
+AUDIT_LOG_CHANNEL=
+
+#
+# Used when logging to papertrail:
+# Also used when audit logs log to papertrail:
+#
+PAPERTRAIL_HOST=
+PAPERTRAIL_PORT=
+
+# Database credentials. Make sure the database exists. I recommend a dedicated user for Firefly III
+# For other database types, please see the FAQ: https://docs.firefly-iii.org/references/faq/install/#i-want-to-use-sqlite
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+# Use ""pgsql"" for PostgreSQL
+# Use ""mysql"" for MySQL and MariaDB.
+# Use ""sqlite"" for SQLite.
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=firefly
+DB_USERNAME=firefly
+DB_PASSWORD=fireflyiiidatabase
+# leave empty or omit when not using a socket connection
+DB_SOCKET=
+
+# MySQL supports SSL. You can configure it here.
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+MYSQL_USE_SSL=false
+MYSQL_SSL_VERIFY_SERVER_CERT=true
+# You need to set at least of these options
+MYSQL_SSL_CAPATH=/etc/ssl/certs/
+MYSQL_SSL_CA=
+MYSQL_SSL_CERT=
+MYSQL_SSL_KEY=
+MYSQL_SSL_CIPHER=
+
+# PostgreSQL supports SSL. You can configure it here.
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+PGSQL_SSL_MODE=prefer
+PGSQL_SSL_ROOT_CERT=null
+PGSQL_SSL_CERT=null
+PGSQL_SSL_KEY=null
+PGSQL_SSL_CRL_FILE=null
+
+# For postgresql 15 and up, setting this to public will no longer work as expected, becasuse the
+# 'public' schema is without grants. This can be worked around by having a super user grant those
+# necessary privileges, but in security conscious setups that's not viable.
+# You will need to set this to the schema you want to use.
+PGSQL_SCHEMA=public
+
+# If you're looking for performance improvements, you could install memcached or redis
+CACHE_DRIVER=file
+SESSION_DRIVER=file
+
+# If you set either of the options above to 'redis', you might want to update these settings too
+# If you use Docker or similar, you can set REDIS_HOST_FILE, REDIS_PASSWORD_FILE or
+# REDIS_PORT_FILE to set the value from a file instead of from an environment variable
+
+# can be tcp or unix. http is not supported
+REDIS_SCHEME=tcp
+
+# use only when using 'unix' for REDIS_SCHEME. Leave empty otherwise.
+REDIS_PATH=
+
+# use only when using 'tcp' or 'http' for REDIS_SCHEME. Leave empty otherwise.
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+# Use only with Redis 6+ with proper ACL set. Leave empty otherwise.
+REDIS_USERNAME=
+REDIS_PASSWORD=
+
+# always use quotes and make sure redis db ""0"" and ""1"" exists. Otherwise change accordingly.
+REDIS_DB=""0""
+REDIS_CACHE_DB=""1""
+
+# Cookie settings. Should not be necessary to change these.
+# If you use Docker or similar, you can set COOKIE_DOMAIN_FILE to set
+# the value from a file instead of from an environment variable
+# Setting samesite to ""strict"" may give you trouble logging in.
+COOKIE_PATH=""/""
+COOKIE_DOMAIN=
+COOKIE_SECURE=false
+COOKIE_SAMESITE=lax
+
+# If you want Firefly III to email you, update these settings
+# For instructions, see: https://docs.firefly-iii.org/how-to/firefly-iii/advanced/notifications/#email
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+MAIL_MAILER=log
+MAIL_HOST=null
+MAIL_PORT=2525
+MAIL_FROM=changeme@example.com
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_SENDMAIL_COMMAND=
+
+# Other mail drivers:
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+MAILGUN_DOMAIN=
+MAILGUN_SECRET=
+
+# If you are on EU region in mailgun, use api.eu.mailgun.net, otherwise use api.mailgun.net
+# If you use Docker or similar, you can set this variable from a file by appending it with _FILE
+MAILGUN_ENDPOINT=api.mailgun.net
+
+# If you use Docker or similar, you can set these variables from a file by appending them with _FILE
+MANDRILL_SECRET=
+SPARKPOST_SECRET=
+
+# Firefly III can send you the following messages.
+SEND_ERROR_MESSAGE=true
+
+# These messages contain (sensitive) transaction information:
+SEND_REPORT_JOURNALS=true
+
+# Set this value to true if you want to set the location of certain things, like transactions.
+# Since this involves an external service, it's optional and disabled by default.
+ENABLE_EXTERNAL_MAP=false
+
+#
+# Enable or disable exchange rate conversion. This function isn't used yet by Firefly III
+#
+ENABLE_EXCHANGE_RATES=false
+
+# Set this value to true if you want Firefly III to download currency exchange rates
+# from the internet. These rates are hosted by the creator of Firefly III inside
+# an Azure Storage Container.
+# Not all currencies may be available. Rates may be wrong.
+ENABLE_EXTERNAL_RATES=false
+
+# The map will default to this location:
+MAP_DEFAULT_LAT=51.983333
+MAP_DEFAULT_LONG=5.916667
+MAP_DEFAULT_ZOOM=6
+
+#
+# Some objects have room for an URL, like transactions and webhooks.
+# By default, the following protocols are allowed:
+# http, https, ftp, ftps, mailto
+#
+# To change this, set your preferred comma separated set below.
+# Be sure to include http, https and other default ones if you need to.
+#
+VALID_URL_PROTOCOLS=
+
+#
+# Firefly III authentication settings
+#
+
+#
+# Firefly III supports a few authentication methods:
+# - 'web' (default, uses built in DB)
+# - 'remote_user_guard' for Authelia etc
+# Read more about these settings in the documentation.
+# https://docs.firefly-iii.org/how-to/firefly-iii/advanced/authentication/
+#
+# LDAP is no longer supported :(
+#
+AUTHENTICATION_GUARD=web
+
+#
+# Remote user guard settings
+#
+AUTHENTICATION_GUARD_HEADER=REMOTE_USER
+AUTHENTICATION_GUARD_EMAIL=
+
+#
+# Firefly III generates a basic keypair for your OAuth tokens.
+# If you want, you can overrule the key with your own (secure) value.
+# It's also possible to set PASSPORT_PUBLIC_KEY_FILE or PASSPORT_PRIVATE_KEY_FILE
+# if you're using Docker secrets or similar solutions for secret management
+#
+PASSPORT_PRIVATE_KEY=
+PASSPORT_PUBLIC_KEY=
+
+#
+# Extra authentication settings
+#
+CUSTOM_LOGOUT_URL=
+
+# You can disable the X-Frame-Options header if it interferes with tools like
+# Organizr. This is at your own risk. Applications running in frames run the risk
+# of leaking information to their parent frame.
+DISABLE_FRAME_HEADER=false
+
+# You can disable the Content Security Policy header when you're using an ancient browser
+# or any version of Microsoft Edge / Internet Explorer (which amounts to the same thing really)
+# This leaves you with the risk of not being able to stop XSS bugs should they ever surface.
+# This is at your own risk.
+DISABLE_CSP_HEADER=false
+
+# If you wish to track your own behavior over Firefly III, set valid analytics tracker information here.
+# Nobody uses this except for me on the demo site. But hey, feel free to use this if you want to.
+# Do not prepend the TRACKER_URL with http:// or https://
+# The only tracker supported is Matomo.
+# You can set the following variables from a file by appending them with _FILE:
+TRACKER_SITE_ID=
+TRACKER_URL=
+
+#
+# Firefly III supports webhooks. These are security sensitive and must be enabled manually first.
+#
+ALLOW_WEBHOOKS=false
+
+#
+# The static cron job token can be useful when you use Docker and wish to manage cron jobs.
+# 1. Set this token to any 32-character value (this is important!).
+# 2. Use this token in the cron URL instead of a user's command line token that you can find in /profile
+#
+# For more info: https://docs.firefly-iii.org/how-to/firefly-iii/advanced/cron/
+#
+# You can set this variable from a file by appending it with _FILE
+#
+STATIC_CRON_TOKEN=
+
+# You can fine tune the start-up of a Docker container by editing these environment variables.
+# Use this at your own risk. Disabling certain checks and features may result in lots of inconsistent data.
+# However if you know what you're doing you can significantly speed up container start times.
+# Set each value to true to enable, or false to disable.
+
+# Set this to true to build all locales supported by Firefly III.
+# This may take quite some time (several minutes) and is generally not recommended.
+# If you wish to change or alter the list of locales, start your Docker container with
+# `docker run -v locale.gen:/etc/locale.gen -e DKR_BUILD_LOCALE=true`
+# and make sure your preferred locales are in your own locale.gen.
+DKR_BUILD_LOCALE=false
+
+# Check if the SQLite database exists. Can be skipped if you're not using SQLite.
+# Won't significantly speed up things.
+DKR_CHECK_SQLITE=true
+
+# Leave the following configuration vars as is.
+# Unless you like to tinker and know what you're doing.
+APP_NAME=FireflyIII
+BROADCAST_DRIVER=log
+QUEUE_DRIVER=sync
+CACHE_PREFIX=firefly
+PUSHER_KEY=
+IPINFO_TOKEN=
+PUSHER_SECRET=
+PUSHER_ID=
+DEMO_USERNAME=
+DEMO_PASSWORD=
+
+#
+# The v2 layout is very experimental. If it breaks you get to keep both parts.
+# Be wary of data loss.
+#
+FIREFLY_III_LAYOUT=v1
+
+#
+# Please make sure this URL matches the external URL of your Firefly III installation.
+# It is used to validate specific requests and to generate URLs in emails.
+#
+APP_URL=http://localhost
+"
+8W9d6pA8,04. Walking,Spocoman,Java,Thursday 29th of August 2024 08:03:21 AM CDT,"import java.util.Scanner;
+
+public class Walking {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int neededSteps = 10000;
+
+        String input;
+        while (neededSteps > 0) {
+            input = scanner.nextLine();
+            if (input.equals(""Going home"")) {
+                neededSteps -= Integer.parseInt(scanner.nextLine());
+                break;
+            }
+            neededSteps -= Integer.parseInt(input);
+        }
+
+        if (neededSteps > 0) {
+            System.out.printf(""%d more steps to reach goal.\n"", neededSteps);
+        } else {
+            System.out.printf(""Goal reached! Good job!\n%d steps over the goal!"", Math.abs(neededSteps));
+        }
+    }
+}"
+ZfWjNkEc,ewqewqewq,sql00,C,Thursday 29th of August 2024 07:34:52 AM CDT,asdasda evolutiongaming asdas
+qGKb46np,03. Vacation,Spocoman,Java,Thursday 29th of August 2024 07:23:48 AM CDT,"import java.util.Scanner;
+
+public class Vacation {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        double neededMoney = Double.parseDouble(scanner.nextLine());
+        double budget = Double.parseDouble(scanner.nextLine());
+        int spendDays = 0, saveDays = 0;
+
+        while (budget < neededMoney && spendDays < 5) {
+            String input = scanner.nextLine();
+            double money = Double.parseDouble(scanner.nextLine());
+            if (input.equals(""spend"")) {
+                spendDays++;
+                if (money >= budget) {
+                    budget = 0;
+                } else {
+                    budget -= money;
+                }
+            } else {
+                budget += money;
+                spendDays = 0;
+            }
+            saveDays++;
+        }
+
+        if (budget < neededMoney) {
+            System.out.printf(""You can't save the money.\n%d\n"", saveDays);
+        } else {
+            System.out.printf(""You saved the money for %d days."", saveDays);
+        }
+    }
+}"
+6fbZFZuy,02. Exam Preparation,Spocoman,Java,Thursday 29th of August 2024 07:01:20 AM CDT,"import java.util.Scanner;
+
+public class ExamPreparation {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int badGrades = Integer.parseInt(scanner.nextLine());
+        String task = """", lastProblem = """";
+        int badGradesCounter = 0, tasksCount = 0;
+        double sumGrades = 0, grade = 0;
+
+        while (!(task = scanner.nextLine()).equals(""Enough"")) {
+            grade = Double.parseDouble(scanner.nextLine());
+            sumGrades += grade;
+            tasksCount++;
+
+            if (grade <= 4) {
+                badGradesCounter++;
+
+                if (badGradesCounter == badGrades) {
+                    System.out.printf(""You need a break, %d poor grades.\n"", badGrades);
+                    break;
+                }
+            }
+
+            lastProblem = task;
+        }
+
+        if (task.equals(""Enough"")) {
+            System.out.printf(""Average score: %.2f\n"", sumGrades / tasksCount);
+            System.out.printf(""Number of problems: %d\n"", tasksCount);
+            System.out.printf(""Last problem: %s\n"", lastProblem);
+        }
+    }
+}
+
+ИЛИ:
+
+import java.util.Scanner;
+
+public class ExamPreparation {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int badGrades = Integer.parseInt(scanner.nextLine());
+        String task = """", lastProblem = """";
+        int badGradesCounter = 0, tasksCount = 0;
+        double sumGrades = 0, grade = 0;
+
+        while (badGradesCounter != badGrades 
+                &&!(task = scanner.nextLine()).equals(""Enough"")) {
+            grade = Double.parseDouble(scanner.nextLine());
+            if (grade <= 4) {
+                badGradesCounter++;
+            }
+            sumGrades += grade;
+            lastProblem = task;
+            tasksCount++;
+        }
+
+        if (badGradesCounter == badGrades) {
+            System.out.printf(""You need a break, %d poor grades.\n"", badGrades);
+        } else {
+            System.out.printf(""Average score: %.2f\n"", sumGrades / tasksCount);
+            System.out.printf(""Number of problems: %d\n"", tasksCount);
+            System.out.printf(""Last problem: %s\n"", lastProblem);
+        }
+    }
+}"
+QzNPzqc3,01. Old Books,Spocoman,Java,Thursday 29th of August 2024 06:48:53 AM CDT,"import java.util.Scanner;
+
+public class OldBooks {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        String book = scanner.nextLine();
+        int counter = 0;
+
+        String input;
+        while (!(input = scanner.nextLine()).equals(""No More Books"") 
+                && !input.equals(book)) {
+            counter++;
+        }
+
+        if (input.equals(book)) {
+            System.out.printf(""You checked %d books and found it.\n"", counter);
+        } else {
+            System.out.println(""The book you search is not here!"");
+            System.out.printf(""You checked %d books.\n"", counter);
+        }
+    }
+}"
+twtGgM0v,G2A Timezone Glitch,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:49 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?vXFaIVRSOF
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+gq9UvPgX,❤️ MAKE $500 IN 15 MINUTES ❤,PhysicsDoctor,JavaScript,Thursday 29th of August 2024 06:16:46 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?uqgPljos3a
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+5a42Vkmx,Amazon Giftcards,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:45 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?1o9n5C6Le6
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+bZPEKFV0,Leaked by Zack,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:42 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?U7tZZtsVjo
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+hLkD6iRY,Private guide,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:39 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?BXuArjCOnh
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+VgNj7gxK,❤️ MAKE $500 IN 15 MINUTES ❤,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:35 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?rNr6eSHdgy
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+ekp7EEyC,This method is now public,PhysicsDoctor,JavaScript,Thursday 29th of August 2024 06:16:34 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?yY2PBYexWo
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+9PPQ57yR,This method is now public,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:17 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?VbiZNpwGFu
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+YsTFbJpT,New 0-day exploit (online marketplace),PhysicsDoctor,JavaScript,Thursday 29th of August 2024 06:16:08 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?tOPm9Wzzp0 leaked by 0-day team
+
+(zerodayleaks on telegram)"
+rvfTaSGz,New 0-day exploit (online marketplace),BM41DI,JavaScript,Thursday 29th of August 2024 06:16:05 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?uQWooKeovC leaked by 0-day team
+
+(zerodayleaks on telegram)"
+YgLL9qSF,⭐Free Giftcards Method⭐August 2024,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:03 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?bSl8ePO2ev
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+GKCUCwkR,G2A Timezone Glitch,BM41DI,JavaScript,Thursday 29th of August 2024 06:16:00 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Tgl2SvUL8a
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+B2wrzv6v,Amazon Giftcards,BM41DI,JavaScript,Thursday 29th of August 2024 06:15:57 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?hhwOIwojkW
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+9v6hC6ep,⭐Free Giftcards Method⭐August 2024,PhysicsDoctor,JavaScript,Thursday 29th of August 2024 06:15:56 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?kkmfOHcPRf
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+XQm6igJS,Leaked by Zack,BM41DI,JavaScript,Thursday 29th of August 2024 06:15:54 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?qAQuFyADaw
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+icmdyAnq,Private guide,BM41DI,JavaScript,Thursday 29th of August 2024 06:15:51 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Dg5GQzZUMJ
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+ig3z3vPB,❤️ MAKE $500 IN 15 MINUTES ❤,BM41DI,JavaScript,Thursday 29th of August 2024 06:15:48 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?ByCN5Lfxqa
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+5yYaypmP,This method is now public,BM41DI,JavaScript,Thursday 29th of August 2024 06:15:45 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?CuICSBfdor
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+4jQXiSka,❤️ MAKE $500 IN 15 MINUTES ❤,Nanji47,JavaScript,Thursday 29th of August 2024 06:15:43 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Yp5nij6hpy
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
