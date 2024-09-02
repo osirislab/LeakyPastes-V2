@@ -1,0 +1,838 @@
+id,title,username,language,date,content
+1p0PYaiF,🎁 G2A.COM FREE GIFT CARD GUIDE SEP 2024 V2 🎁,jusst2k4,GetText,Monday 2nd of September 2024 12:37:31 AM CDT,"G2A.com free gift card & games updated guide.
+Any item for free on G2A.com including Amazon, Steam, Xbox, Playstation gift cards & everything else offered.
+ 
+This is the most up to date version of this script. Any other one posted will not work!
+ 
+PDF guide here:
+https://drive.google.com/file/d/1thJ3r_goEZ3BA-wE8sNYbGUhGv6gTnXz/view?usp=g2a_refund_exploit_143303.pdf
+ 
+Working as of:
+02 September 2024"
+3KFbikjq,Experience,xcage88,TypeScript,Sunday 1st of September 2024 11:49:13 PM CDT,"import { GetServerSidePropsContext } from 'next';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useDispatch } from 'react-redux';
+
+//* store
+import { setPageTitle } from '@/store/themeConfigSlice';
+
+//* utils
+import { config } from '@/configs';
+import { getData, postData, postFile, putData } from '@/utils/fetch';
+import { notValidMsg, requiredMsg } from '@/utils/regex';
+
+
+//* middleware
+import WithAuth from '@/middlewares/WithAuth';
+
+//* component
+import InputMessage from '@/components/core/Alert/InputMessage';
+import { showMessage } from '@/components/core/Alert/ShowMessage';
+import Button from '@/components/core/Button';
+import TextInput from '@/components/core/TextInput';
+
+//* hook form
+import CKEditorComp from '@/components/core/InputTextEditor/CKEditor';
+import { yupResolver } from '@hookform/resolvers/yup';
+import { useForm } from 'react-hook-form';
+import * as yup from 'yup';
+import TextArea from '@/components/core/TextArea/TextArea';
+import Spinner from '@/components/core/spinner';
+import { CloseIcon } from '@/components/icon/close-icon';
+import SelectInput from '@/components/core/SelectInput';
+import { useTranslation } from 'react-i18next';
+import { EyeIcon } from '@/components/icon/eyes';
+import { EyeOff } from '@/components/icon/eye-off-icon';
+import { yearOption, monthsOptions } from '@/data/fullDate';
+import { regexAllCharacter, regexAlphanumeric, regexAlphabetsNumbers } from '@/utils/regex-message';
+import InputDropdown3 from '@/components/core/InputDropdown3';
+import { FormExperienceType } from '@/types/profile';
+import Checkbox from '@/components/core/Checkbox';
+
+interface IInputExperience {
+    experience: FormExperienceType
+}
+
+const schema = yup.object().shape({
+    company: yup.string().required().matches(regexAlphanumeric.regex, regexAlphabetsNumbers.msg),
+    company_position: yup.string().required().matches(regexAlphanumeric.regex, regexAlphanumeric.msg),
+    address: yup.string().required().matches(regexAllCharacter.regex, regexAllCharacter.msg),
+    position: yup.number().required(),
+    start_date: yup.string(),
+    end_date: yup.string(),
+    description: yup.string().required().matches(regexAllCharacter.regex, regexAllCharacter.msg),
+    // start_month: yup.string().required(requiredMsg('Bulan Masuk')),
+    // start_year: yup.string().required(requiredMsg('Tahun Masuk')),
+    // end_month: yup.string().required(requiredMsg('Bulan Keluar')),
+    // end_year: yup.string().required(requiredMsg('Tahun Keluar')),
+})
+
+function InputExperience({experience}: IInputExperience) {
+
+    const { t } = useTranslation();
+    const router = useRouter()
+    const dispatch = useDispatch()
+
+    const [form, setForm] = useState({
+        company: '' || experience?.company,
+        company_position: '' || experience?.company_position,
+        address: '' || experience?.address,
+        position: '' || experience?.position,
+        start_date: '' || experience?.start_date,
+        end_date: experience?.end_date || '',
+        description: '' || experience?.description,
+        currently_working: experience?.currently_working || false
+    })
+
+    const [select, setSelect] = useState({
+        start_year: '',
+        end_year: '',
+        start_month: '',
+        end_month: '',
+    })
+
+    // schema
+    const {
+        register,
+        handleSubmit,
+        formState: {errors},
+        trigger,
+        setValue
+    } = useForm({
+        resolver: yupResolver(schema)
+    })
+
+    const [isLoading, setIsLoading] = useState<boolean>(false)
+    const [autoField, setAutoField] = useState<any[]>([])
+    const [endYearOptions, setEndYearOptions] = useState(yearOption())
+
+    // const { end_date, ...withoutEndDate } = form
+
+    const handleChangeInput = (e: any) => {
+        const {name, value} = e.target
+        if(!autoField.includes(name)){
+            setForm({...form, [name]: value})
+            trigger(name)
+        }else{
+            setForm({...form, [name]: value})
+        }
+    }
+
+    const handleAutoField = (e: any) => {
+        const {name, value} = e.target
+        setAutoField([...autoField, name])
+        setValue(name, value)
+        if(value != ''){
+            trigger(name)
+        }
+    }
+
+    const handleChangeSelect = (e: any) => {
+        const {name, value} = e.target
+        setSelect({ ...select ,[name]: value})
+        if(name == 'start_year'){
+            updateEndYear(value)
+        }
+
+        if(name == 'end_year' && parseInt(value) <= parseInt(select.start_year)){
+            setSelect({...select, end_year: ''})
+        }
+    }
+
+    const updateEndYear = (startYear: string) => {
+        const updatedEndYearOptions = yearOption().filter(option => parseInt(option.value) >= parseInt(startYear));
+        setEndYearOptions(updatedEndYearOptions);
+
+        // Reset end_year if it is before the start_year
+        if (select.end_year && parseInt(select.end_year) <= parseInt(startYear)) {
+            setSelect(prevSelect => ({ ...prevSelect, end_year: '' }));
+            // setValue('end_year', '');
+        }  
+    }
+
+    const handleCheckbox = (e: any) => {
+        const {name, checked} = e.target
+        setForm({...form, [name]: checked})
+    }
+
+    const convertDate = (date: string) => {
+        const month = date?.split(""-"")[1]
+        const year = date?.split(""-"")[0]
+        return `${month} ${year}`
+    }
+
+    useEffect(() => {
+
+        setSelect({
+            start_month: convertDate(form.start_date).split("" "")[0],
+            start_year: convertDate(form.start_date).split("" "")[1],
+            end_month: form.currently_working
+              ? """"
+              : convertDate(form.end_date).split("" "")[0],
+            end_year: form.currently_working
+              ? """"
+              : convertDate(form.end_date).split("" "")[1],
+        })
+      
+    },[])
+
+    useEffect(() => {
+        const startDate = `${select.start_year}-${select.start_month}`
+        const endDate = form.currently_working ? null :`${select.end_year}-${select.end_month}`
+        setForm((prevForm: any) => ({
+            ...prevForm,
+            start_date: startDate,
+            end_date: endDate,
+        }))
+    },[select])
+
+    const handleSaveAction = async () => {
+        const { company, company_position, position, address, description } = form
+
+        if(company && company_position && position && address && description){
+            const postForm = {
+                ...form,
+                end_date: form.currently_working ? null : form.end_date
+            }
+            if(experience){
+                try {
+                    setIsLoading(true);
+                    await putData(`/experience/${experience.id}`, postForm);
+                    showMessage(`${t(""Successfully updated"")}`);
+                    router.push('./');
+                    setIsLoading(false);
+                } catch (error: any) {
+                    showMessage(`${t(""Failed to update"")}`, 'error');
+                    setIsLoading(false);
+                }
+            } else {
+                //* ADD ACTION
+                try {
+                    setIsLoading(true);
+                    const data = await postData('/experience', postForm);
+                    showMessage(`${t(""Successfully added"")}`);
+                    router.push('./');
+                    console.log(data)
+                    setIsLoading(false);
+                } catch (error: any) {
+                    showMessage(`${t(""Failed to add"")}`, 'error');
+                    setIsLoading(false);
+                }
+            }
+        }
+    }
+
+    return (
+        <>
+            <section className="""">
+                <form 
+                    onSubmit={handleSubmit(handleSaveAction)}
+                >
+                    <div className=""mb-5 flex flex-col gap-5 md:flex-row md:items-center"">
+                        <h5 className=""sm:pb-2 text-lg font-semibold dark:text-white-light"">{experience ? 'Edit' : t(""Create"")} {t(""Experience"")}</h5>
+                    </div>
+                    <div className=""w-full border-b border-b-zinc-300 border-dashed""></div>
+
+                    <div className=""w-full flex flex-col"">
+
+                        {/* Basic Input */}
+                        <div className=""w-full flex flex-col sm:flex-row justify-between gap-y-6 sm:gap-y-0 gap-x-10 py-6 sm:py-8 border-b border-b-zinc-300 border-dashed box-border"">
+                            <div className=""flex flex-col shrink-0 sm:py-6 sm:w-[30%]"">
+                                <label htmlFor=""logo"" className='font-semibold text-lg'>{t(""Basic Info"")}</label>
+                                <div className=""-mt-1"">{t(""Add some basic info about your Experience from here"")}</div>
+                            </div>
+                            <div className=""w-full flex flex-col gap-y-3 bg-white rounded-md drop-shadow p-5 sm:p-7"">
+                                {/* input company */}
+                                <div className=""flex flex-col w-full gap-1"">
+                                    <label htmlFor=""company"" className='font-semibold'>{t(""Company"")}</label>
+                                    <TextInput
+                                        register={register}
+                                        errors={errors}
+                                        id=""company""
+                                        name=""company""
+                                        type=""text""
+                                        placeholder=""""
+                                        value={form.company}
+                                        className=""w-full cursor-auto overflow-hidden rounded-md focus:outline-primary bg-white text-black""
+                                        onChange={handleChangeInput}
+                                        onInput={handleAutoField}
+                                    />
+                                </div>
+
+                                {/* input company_position */}
+                                <div className=""flex flex-col w-full gap-1"">
+                                    <label htmlFor=""company_position"" className='font-semibold'>{t(""Company Position"")}</label>
+                                    <TextInput
+                                        register={register}
+                                        errors={errors}
+                                        id=""company_position""
+                                        name=""company_position""
+                                        type=""text""
+                                        placeholder=""""
+                                        value={form.company_position}
+                                        className=""w-full cursor-auto overflow-hidden rounded-md focus:outline-primary bg-white text-black""
+                                        onChange={handleChangeInput}
+                                        onInput={handleAutoField}
+                                    />
+                                </div>
+
+                                {/* input company */}
+                                <div className=""flex flex-col w-full gap-1"">
+                                    <label htmlFor=""position"" className='font-semibold'>{t(""Position"")}</label>
+                                    <TextInput
+                                        register={register}
+                                        errors={errors}
+                                        id=""position""
+                                        name=""position""
+                                        type=""number""
+                                        placeholder=""""
+                                        value={form.position}
+                                        className=""w-full cursor-auto overflow-hidden rounded-md focus:outline-primary bg-white text-black""
+                                        onChange={handleChangeInput}
+                                        onInput={handleAutoField}
+                                    />
+                                </div>
+
+                                {/* input company */}
+                                <div className=""flex flex-col w-full gap-1"">
+                                    <label htmlFor=""address"" className='font-semibold'>{t(""Address"")}</label>
+                                    <TextArea
+                                        register={register}
+                                        errors={errors}
+                                        id=""address""
+                                        name=""address""
+                                        type=""text""
+                                        placeholder=""""
+                                        value={form.address}
+                                        className=""w-full cursor-auto overflow-hidden rounded-md focus:outline-primary bg-white text-black""
+                                        onChange={handleChangeInput}
+                                        onInput={handleAutoField}
+                                    />
+                                </div>
+
+                                <div className=""flex flex-col w-full gap-1"">
+                                    <label htmlFor=""position"" className='font-semibold'>{t(""Description"")}</label>
+                                    <TextArea
+                                        register={register}
+                                        errors={errors}
+                                        id=""description""
+                                        name=""description""
+                                        type=""text""
+                                        placeholder=""""
+                                        value={form.description}
+                                        className=""w-full cursor-auto overflow-hidden rounded-md focus:outline-primary bg-white text-black""
+                                        onChange={handleChangeInput}
+                                        onInput={handleAutoField}
+                                    />
+                                </div>
+
+                                
+                            </div>
+                        </div>
+
+                        <div className=""w-full flex flex-col sm:flex-row justify-between gap-y-6 sm:gap-y-0 gap-x-10 py-6 sm:py-8 border-b border-b-zinc-300 border-dashed box-border"">
+                            <div className=""flex flex-col shrink-0 sm:py-6 sm:w-[30%]"">
+                                <label htmlFor=""logo"" className='font-semibold text-lg'>{t(""Date"")}</label>
+                                <div className=""-mt-1"">{t(""Add Date from here"")}</div>
+                            </div>
+                            <div className=""w-full flex flex-col gap-y-3 bg-white rounded-md drop-shadow p-5 sm:p-7"">
+                                <div className='flex flex-row items-center w-full gap-2'>
+                                    <Checkbox
+                                        id='currently_working'
+                                        name='currently_working'
+                                        checked={form.currently_working}
+                                        onChange={handleCheckbox}
+                                        disabled={isLoading}
+                                    />
+                                    <div className='font-semibold'>
+                                        {t('Currently Working')}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label htmlFor=""Start"">{t('Start date')}</label>
+                                    <div className='border border-dashed p-4 rounded-md'>
+                                        <div className='flex flex-col w-full gap-1'>
+                                            <label htmlFor=""start_month"" className='font-semibold'>{t('Month')}</label>
+                                            <InputDropdown3
+                                                register={register}
+                                                errors={errors}
+                                                name='start_month'
+                                                placeholder=''
+                                                option={monthsOptions}
+                                                form={select?.start_month}
+                                                onChange={handleChangeSelect}
+                                            />
+                                        </div>
+
+                                        <div className='flex flex-col w-full gap-1'>
+                                            <label htmlFor=""start_year"" className='font-semibold'>{t('Year')}</label>
+                                            <InputDropdown3
+                                                register={register}
+                                                errors={errors}
+                                                name='start_year'
+                                                placeholder=''
+                                                option={yearOption()}
+                                                form={select?.start_year}
+                                                onChange={handleChangeSelect}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className={`mt-4 ${form?.currently_working ? ""opacity-50 cursor-not-allowed "" : """"}`}>
+                                    <label htmlFor=""Start"">{t('End date')}</label>
+                                    <div className='border border-dashed p-4 rounded-md'>
+                                        <div className='flex flex-col w-full gap-1'>
+                                            <label htmlFor=""end_month"" className='font-semibold'>{t('Month')}</label>
+                                            <InputDropdown3
+                                                register={register}
+                                                errors={errors}
+                                                name='end_month'
+                                                placeholder=''
+                                                option={monthsOptions}
+                                                form={select?.end_month}
+                                                onChange={handleChangeSelect}
+                                            />
+                                        </div>
+
+                                        <div className='flex flex-col w-full gap-1'>
+                                            <label htmlFor=""end_year"" className='font-semibold'>{t('Year')}</label>
+                                            <InputDropdown3
+                                                register={register}
+                                                errors={errors}
+                                                name='end_year'
+                                                placeholder=''
+                                                option={endYearOptions}
+                                                form={select?.end_year}
+                                                onChange={handleChangeSelect}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className=""flex gap-3 w-full justify-end mt-7 font-semibold py-5 sticky bottom-0 backdrop-blur-sm bg-white/30"">
+                        <button type=""button"" className=""cursor-pointer border text-primary hover:opacity-70 border-primary px-5 py-4 rounded-md""
+                        onClick={() => router.push('./')}>
+                        {t(""Back"")}</button>
+                        
+                        {
+                        // !form?.icon || 
+                        !form?.company || 
+                        !form?.company_position ||
+                        !form?.address || 
+                        !form?.position ||
+                        !form?.description ? (
+                            <button type=""button"" className=""border border-zinc-200 cursor-not-allowed text-white bg-[#e2e8f0] px-5 py-4 rounded-md""
+                            >{t(""Save"")}</button>
+                        ) : (
+                            <button type='submit' className={`${!isLoading ? 'bg-primary cursor-pointer' : 'bg-[#e2e8f0] cursor-not-allowed'} cursor-pointer border  hover:saturate-50 text-white px-5 py-4 rounded-md`}
+                            disabled={isLoading}>
+                            {!isLoading ? t(""Save"") : (
+                                <Spinner />
+                            )}
+                            </button>
+                        )}
+                    </div>
+                </form>
+            </section>
+        </>
+    )
+}
+
+export default WithAuth(InputExperience)
+
+export async function getServerSideProps({req, query}: GetServerSidePropsContext) {
+    const {id} = query
+
+    if(id){
+        try {
+            const {data} = await getData(`/experience/${id}`, '', '', req)
+            return {
+                props: {
+                    experience: data.experience
+                }
+            }
+        } catch (error: any) {
+            return error
+        }
+    }
+
+    return {
+        props: {}
+    }
+}"
+rFc7dygx,Dehumidifier example,xangin,YAML,Sunday 1st of September 2024 11:45:00 PM CDT,"humidifier:
+ - platform: humidifier_template
+   name: ""Hiatachi RD-22FC""
+   unique_id: rd22fc_dehumidifier
+   switch_id: ""fan.rd22fc_fan""
+   state_template: ""{{ states('fan.rd22fc_fan') }}""
+   mode_template: ""{{ state_attr('fan.rd22fc_fan', 'preset_mode') }}""
+   current_humidity_template: ""{{ states('sensor.rd22fc_humidity_indoor') }}""
+   target_humidity_template: ""{ states('number.rd22fc_relative_humidity') }}""
+   mode_list_template: ""{{ state_attr('fan.rd22fc_fan', 'preset_modes') }}""
+   action_template: ""{{ state_attr('fan.rd22fc_fan', 'preset_mode') }}""
+   
+   max_humidity: 70
+   min_humidity: 40
+   type: dehumidifier
+   
+   modes:
+     - ""normal""
+     - ""home""
+     - ""boost""
+     - ""sleep""
+     - ""eco""
+   
+   set_mode_action:
+     - service: fan.set_preset_mode
+       target:
+         entity_id: fan.rd22fc_fan
+       data:
+         preset_mode: ""{{ mode }}""
+   
+   set_target_humidity_action:
+     - service: number.set_value
+       target:
+         entity_id: number.rd22fc_relative_humidity
+       data:
+         value: ""{{ humidity }}""
+"
+F2pqjCRt,Untitled,permanaj,JSON,Sunday 1st of September 2024 11:40:17 PM CDT,
+BpD8wQnC,Asymptote (HomeWork 1) Pahomov,houseofmath,Asymptote,Sunday 1st of September 2024 11:24:10 PM CDT,"import geometry; 
+defaultpen(fontsize(9pt)); //все графики будут ручкой 12 шрифтом
+dotfactor=4; //размер точек
+size(9cm,0); //ширина и высота
+transform t=rotate(-40)*scale(0.75);
+
+pair A, B, C, Ep, L, K, O; //объявляю точки для дальнейших вычислений
+A=(0,0); B=(3,7); C=(10,0);
+Ep=point(B--C,0.5*length(B--C));
+L=(4.5,0); K=(3,0);
+O=intersectionpoint(line(B,L),line(A,Ep));
+
+draw (B--K);
+draw (A--Ep);
+draw (B--L);
+draw (A--B--C--cycle);
+
+dot(A, UnFill);
+dot(B, UnFill);
+dot(C, UnFill);
+dot(Ep, UnFill);
+dot(L, UnFill);
+dot(K, UnFill);
+dot(O, UnFill);
+
+markrightangle(size=5, A, K, B); //прямой угол
+markangle(n=2, radius=15, space=0.05cm, A, B, L); // угол ABL
+markangle(n=2, radius=10, space=0.05cm, L, B, C); // угол LBC
+markangle(radius=10, C, A, Ep); // угол EAC
+markangle(radius=15, Ep, A, B); // угол BAE
+
+
+label(""$A$"", A, SW);
+label(""$B$"", B, N);
+label(""$C$"", C, SE);
+label(""$E$"", Ep, NE);
+label(""$L$"", L, S);
+label(""$K$"", K, NE);
+label(""$O$"", O, WNW);
+
+draw(Label(""$6a$"", Relative(0.5), align=W, black), A--B, opacity(0));
+draw(Label(""$2b$"", Relative(0.65), align=1.25E, black), B--C, opacity(0));
+
+label(""$3a$"", A--L, S);
+label(""$b$"", L--C, S);
+label(""$2a$"", O--L, E);
+//label(""$2b$"", B--C, E);
+label(""$4a$"", B--O, E);"
+5ZxRg16J,AttributeError: 'NoneType' object has no attribute 'name',basedcount_bot,Python,Sunday 1st of September 2024 10:07:32 PM CDT,"Traceback (most recent call last):
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 46, in wrapper
+    await func(reddit_instance, mongo_client)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 275, in read_comments
+    parent_info = await get_parent_info(comment)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 237, in get_parent_info
+    parent_author = parent_post.author.name
+AttributeError: 'NoneType' object has no attribute 'name'
+"
+LfYx79SF,⭐Free Giftcards Method⭐August 2024,calixto67,JavaScript,Sunday 1st of September 2024 07:55:18 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?HeI0OG50BU
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+MkgEHZFX,G2A Timezone Glitch,calixto67,JavaScript,Sunday 1st of September 2024 07:55:15 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?rBtErDWQta
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+EhKig76C,Amazon Giftcards,calixto67,JavaScript,Sunday 1st of September 2024 07:55:13 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?l8DscoGCta
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+0A2RBu5v,Leaked by Zack,calixto67,JavaScript,Sunday 1st of September 2024 07:55:10 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?NNNfdrF1uv
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Pmjq1Bm6,Private guide,calixto67,JavaScript,Sunday 1st of September 2024 07:55:06 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?HNpFRX6c5L
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+Wy0V151Z,❤️ MAKE $500 IN 15 MINUTES ❤,calixto67,JavaScript,Sunday 1st of September 2024 07:55:03 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?fMuf6j96o3
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+5M5ysi8d,This method is now public,calixto67,JavaScript,Sunday 1st of September 2024 07:55:01 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?v9tUZx22Ta
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+ZCUaiS4a,New 0-day exploit (online marketplace),calixto67,JavaScript,Sunday 1st of September 2024 07:54:58 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?ZL6ecaiepX leaked by 0-day team
+
+(zerodayleaks on telegram)"
+8VZFd1M1,⭐Free Giftcards Method⭐August 2024,calixto67,JavaScript,Sunday 1st of September 2024 07:54:54 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?bi3dBwh06T
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+7YbNMpXg,G2A Timezone Glitch,calixto67,JavaScript,Sunday 1st of September 2024 07:54:16 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?tWIds5y2dB
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+HP5mzNA4,Amazon Giftcards,calixto67,JavaScript,Sunday 1st of September 2024 07:54:14 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?7MlinkMA92
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+qyASPdBL,Leaked by Zack,calixto67,JavaScript,Sunday 1st of September 2024 07:54:11 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?NQ03PY6htn
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+5xhETnYs,Private guide,calixto67,JavaScript,Sunday 1st of September 2024 07:54:07 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?nmMktRP1uQ
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+8uvsSqRW,❤️ MAKE $500 IN 15 MINUTES ❤,calixto67,JavaScript,Sunday 1st of September 2024 07:54:05 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?sD0su9BB2S
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+zuj5nuej,This method is now public,calixto67,JavaScript,Sunday 1st of September 2024 07:54:02 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?MUDgSSwVNk
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+jpqBH1L2,New 0-day exploit (online marketplace),calixto67,JavaScript,Sunday 1st of September 2024 07:54:00 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Ca1xoqncaR leaked by 0-day team
+
+(zerodayleaks on telegram)"
+gD1KDJ10,⭐Free Giftcards Method⭐August 2024,calixto67,JavaScript,Sunday 1st of September 2024 07:53:58 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?s2z29jqdOP
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Zb0GfEeu,❤️ MAKE $500 IN 15 MINUTES ❤,Orffr,JavaScript,Sunday 1st of September 2024 07:53:54 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?vTvZyfXcqB
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+wY7zB85u,This method is now public,Orffr,JavaScript,Sunday 1st of September 2024 07:53:50 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?ShrFId4UL4
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+Am7Fw6dz,New 0-day exploit (online marketplace),Orffr,JavaScript,Sunday 1st of September 2024 07:53:47 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?peTJ5mwytu leaked by 0-day team
+
+(zerodayleaks on telegram)"
+9yujZ3xP,⭐Free Giftcards Method⭐August 2024,Orffr,JavaScript,Sunday 1st of September 2024 07:53:44 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?bSADqhDDIW
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+zgypR4xZ,G2A Timezone Glitch,Orffr,JavaScript,Sunday 1st of September 2024 07:53:40 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?jq6YtoltFv
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+xHq0rT0G,Amazon Giftcards,Orffr,JavaScript,Sunday 1st of September 2024 07:53:38 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?CLb9rE1nPB
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+WRBN4E2A,Leaked by Zack,Orffr,JavaScript,Sunday 1st of September 2024 07:53:35 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?q6pFctGoPF
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+KjFX2z5B,Private guide,Orffr,JavaScript,Sunday 1st of September 2024 07:53:30 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?5FjFXygDMq
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+H5Hwvtp1,❤️ MAKE $500 IN 15 MINUTES ❤,Orffr,JavaScript,Sunday 1st of September 2024 07:53:28 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?PUrdQI9tMR
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Eygg7gW7,This method is now public,Orffr,JavaScript,Sunday 1st of September 2024 07:53:26 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?fAaKCOUQsd
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+weP82rLC,New 0-day exploit (online marketplace),Orffr,JavaScript,Sunday 1st of September 2024 07:53:23 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?PCX1yuwYT7 leaked by 0-day team
+
+(zerodayleaks on telegram)"
+qLXsRV69,⭐Free Giftcards Method⭐August 2024,Orffr,JavaScript,Sunday 1st of September 2024 07:53:21 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?tpnqWeldWd
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+976cCnSK,G2A Timezone Glitch,Orffr,JavaScript,Sunday 1st of September 2024 07:53:18 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?EoaGBljb9P
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+v0Qc5xzR,Amazon Giftcards,Orffr,JavaScript,Sunday 1st of September 2024 07:53:15 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?phDlGxr0bA
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+21Mni8Ti,Leaked by Zack,Orffr,JavaScript,Sunday 1st of September 2024 07:53:12 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?k2ty09ipiY
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Y78sBpBs,Private guide,Orffr,JavaScript,Sunday 1st of September 2024 07:53:09 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Q8y2nIUgGj
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+tDGad1Sm,❤️ MAKE $500 IN 15 MINUTES ❤,Orffr,JavaScript,Sunday 1st of September 2024 07:53:07 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?2qrGxz4FA6
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+x2MbzFAX,This method is now public,Orffr,JavaScript,Sunday 1st of September 2024 07:53:04 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?1kdLoECead
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+y4LpcAfu,New 0-day exploit (online marketplace),Orffr,JavaScript,Sunday 1st of September 2024 07:53:02 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?YzQ6IesTSb leaked by 0-day team
+
+(zerodayleaks on telegram)"
+1CUykRvh,⭐Free Giftcards Method⭐August 2024,Orffr,JavaScript,Sunday 1st of September 2024 07:52:59 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?FRBpEmS6l0
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+wrVnBUP3,❤️ MAKE $500 IN 15 MINUTES ❤,G4exe,JavaScript,Sunday 1st of September 2024 07:52:54 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?E1uOSwQida
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+WTDkJRAS,This method is now public,G4exe,JavaScript,Sunday 1st of September 2024 07:52:47 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?dIna2xiKwO
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+GsBVn0t4,New 0-day exploit (online marketplace),G4exe,JavaScript,Sunday 1st of September 2024 07:52:45 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?ogNzykka9o leaked by 0-day team
+
+(zerodayleaks on telegram)"
+uVwj8j6m,⭐Free Giftcards Method⭐August 2024,G4exe,JavaScript,Sunday 1st of September 2024 07:52:42 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?t82hKXuszE
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+xGxJTbZp,G2A Timezone Glitch,G4exe,JavaScript,Sunday 1st of September 2024 07:52:38 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?h1RKshbRU5
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+9htcJgUn,Amazon Giftcards,G4exe,JavaScript,Sunday 1st of September 2024 07:52:36 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?nNMLogdaVg
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Va31cHHR,Leaked by Zack,G4exe,JavaScript,Sunday 1st of September 2024 07:52:33 PM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Mmdqvb1NyL
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
