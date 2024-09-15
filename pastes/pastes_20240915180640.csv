@@ -1,0 +1,2469 @@
+id,title,username,language,date,content
+YzraYDSJ,TETRIS For ComputerCraft (Coded By me),nonogamer9,Lua,Sunday 15th of September 2024 12:41:05 PM CDT,"local w, h = term.getSize()
+local boardWidth, boardHeight = 10, 20
+local offsetX, offsetY = math.floor((w - boardWidth) / 2), math.floor((h - boardHeight) / 2)
+
+local settings = {
+  plasmaEnabled = true,
+  difficulty = 2
+}
+
+local pieces = {
+  {{{0,0},{1,0},{0,1},{1,1}}},
+  {{{0,0},{1,0},{2,0},{3,0}}, {{0,0},{0,1},{0,2},{0,3}}},
+  {{{0,0},{1,0},{2,0},{2,1}}, {{1,0},{1,1},{1,2},{0,2}}, {{0,0},{0,1},{1,1},{2,1}}, {{0,0},{1,0},{0,1},{0,2}}},
+  {{{0,0},{1,0},{2,0},{0,1}}, {{0,0},{1,0},{1,1},{1,2}}, {{2,0},{0,1},{1,1},{2,1}}, {{0,0},{0,1},{0,2},{1,2}}},
+  {{{1,0},{2,0},{0,1},{1,1}}, {{0,0},{0,1},{1,1},{1,2}}},
+  {{{0,0},{1,0},{1,1},{2,1}}, {{1,0},{0,1},{1,1},{0,2}}},
+  {{{1,0},{0,1},{1,1},{2,1}}, {{0,0},{0,1},{1,1},{0,2}}, {{0,0},{1,0},{2,0},{1,1}}, {{1,0},{0,1},{1,1},{1,2}}}
+}
+
+local pieceColors = {
+  colors.red,
+  colors.blue,
+  colors.green,
+  colors.yellow,
+  colors.magenta,
+  colors.cyan,
+  colors.white
+}
+
+local plasmaColors = {
+  colors.red,
+  colors.orange,
+  colors.yellow,
+  colors.lime,
+  colors.green,
+  colors.cyan,
+  colors.lightBlue,
+  colors.blue,
+  colors.purple,
+  colors.magenta,
+  colors.pink,
+  colors.brown,
+  colors.white,
+  colors.lightGray,
+  colors.gray,
+  colors.black
+}
+
+local board = {}
+local currentPiece = nil
+local currentPieceColor = 1
+local currentRotation = 1
+local currentX, currentY = 0, 0
+local score = 0
+local gameOver = false
+local plasmaBuffer = {}
+
+for y = 1, boardHeight do
+  board[y] = {}
+  for x = 1, boardWidth do
+    board[y][x] = 0
+  end
+end
+
+for y = 1, h do
+  plasmaBuffer[y] = {}
+  for x = 1, w do
+    plasmaBuffer[y][x] = colors.black
+  end
+end
+
+local function calculatePlasma(t)
+  for y = 1, h do
+    for x = 1, w do
+      local v = math.sin(x/4) + math.sin(y/8) + math.sin((x+y+t)/16)
+      local colorIndex = math.floor((v + 3) * 8) % 16 + 1
+      plasmaBuffer[y][x] = plasmaColors[colorIndex]
+    end
+  end
+end
+
+local function drawPiece()
+  if not currentPiece then return end
+  for _, block in ipairs(pieces[currentPiece][currentRotation]) do
+    local x, y = currentX + block[1], currentY + block[2]
+    if x > 0 and x <= boardWidth and y > 0 and y <= boardHeight then
+      term.setCursorPos(x + offsetX, y + offsetY)
+      term.setBackgroundColor(pieceColors[currentPieceColor])
+      term.write("" "")
+    end
+  end
+end
+
+local function checkCollision(pieceType, rotation, testX, testY)
+  if not pieceType or not rotation then return true end
+  for _, block in ipairs(pieces[pieceType][rotation]) do
+    local x, y = (testX or 0) + block[1], (testY or 0) + block[2]
+    if x < 1 or x > boardWidth or y > boardHeight then
+      return true
+    end
+    if y > 0 and board[y] and board[y][x] and board[y][x] ~= 0 then
+      return true
+    end
+  end
+  return false
+end
+
+local function lockPiece()
+  if not currentPiece then return end
+  for _, block in ipairs(pieces[currentPiece][currentRotation]) do
+    local x, y = currentX + block[1], currentY + block[2]
+    if y > 0 and y <= boardHeight and x > 0 and x <= boardWidth then
+      board[y][x] = currentPieceColor
+    end
+  end
+end
+
+local function clearLines()
+  local linesCleared = 0
+  for y = boardHeight, 1, -1 do
+    local full = true
+    for x = 1, boardWidth do
+      if board[y][x] == 0 then
+        full = false
+        break
+      end
+    end
+    if full then
+      linesCleared = linesCleared + 1
+      table.remove(board, y)
+      table.insert(board, 1, {})
+      for x = 1, boardWidth do
+        board[1][x] = 0
+      end
+    end
+  end
+  score = score + linesCleared * 100
+end
+
+local function drawGame()
+  if settings.plasmaEnabled then
+    for y = 1, h do
+      for x = 1, w do
+        term.setCursorPos(x, y)
+        term.setBackgroundColor(plasmaBuffer[y][x])
+        term.write("" "")
+      end
+    end
+  else
+    term.setBackgroundColor(colors.black)
+    term.clear()
+  end
+
+  for y = offsetY - 1, offsetY + boardHeight do
+    term.setCursorPos(offsetX - 1, y)
+    term.setBackgroundColor(colors.lightGray)
+    term.write(""█"")
+    term.setCursorPos(offsetX + boardWidth, y)
+    term.write(""█"")
+  end
+  for x = offsetX - 1, offsetX + boardWidth do
+    term.setCursorPos(x, offsetY - 1)
+    term.setBackgroundColor(colors.lightGray)
+    term.write(""█"")
+    term.setCursorPos(x, offsetY + boardHeight)
+    term.write(""█"")
+  end
+
+  for y = 1, boardHeight do
+    for x = 1, boardWidth do
+      term.setCursorPos(x + offsetX, y + offsetY)
+      if board[y][x] ~= 0 then
+        term.setBackgroundColor(pieceColors[board[y][x]])
+      else
+        term.setBackgroundColor(colors.black)
+      end
+      term.write("" "")
+    end
+  end
+
+  drawPiece()
+
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.black)
+  term.setTextColor(colors.white)
+  term.write(""Score: "" .. score)
+end
+
+local function plasmaProcess()
+  local t = 0
+  while not gameOver do
+    calculatePlasma(t)
+    t = t + 0.1
+    sleep(0.05)
+  end
+end
+
+local function gameProcess()
+  local difficultySpeed = {0.8, 0.5, 0.3}
+  while not gameOver do
+    if currentPiece and not checkCollision(currentPiece, currentRotation, currentX, (currentY or 0) + 1) then
+      currentY = (currentY or 0) + 1
+    else
+      if currentPiece then
+        lockPiece()
+        clearLines()
+      end
+      currentPiece = math.random(1, #pieces)
+      currentPieceColor = math.random(1, #pieceColors)
+      currentRotation = 1
+      currentX = math.floor(boardWidth / 2) - 1
+      currentY = 0
+      if checkCollision(currentPiece, currentRotation, currentX, currentY) then
+        gameOver = true
+      end
+    end
+
+    drawGame()
+    sleep(difficultySpeed[settings.difficulty])
+  end
+end
+
+local function inputProcess()
+  while not gameOver do
+    local event, key = os.pullEvent(""key"")
+    if currentPiece then
+      if key == keys.left and not checkCollision(currentPiece, currentRotation, (currentX or 0) - 1, currentY) then
+        currentX = (currentX or 0) - 1
+      elseif key == keys.right and not checkCollision(currentPiece, currentRotation, (currentX or 0) + 1, currentY) then
+        currentX = (currentX or 0) + 1
+      elseif key == keys.up then
+        local newRotation = currentRotation % #pieces[currentPiece] + 1
+        if not checkCollision(currentPiece, newRotation, currentX, currentY) then
+          currentRotation = newRotation
+        end
+      elseif key == keys.down then
+        while not checkCollision(currentPiece, currentRotation, currentX, (currentY or 0) + 1) do
+          currentY = (currentY or 0) + 1
+        end
+      end
+      drawGame()
+    end
+  end
+end
+
+local function drawTitleScreen()
+  term.clear()
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.black)
+  term.setTextColor(colors.white)
+  
+  local title = {
+    "" _____ _____ ___________ _____ _____ "",
+    ""|_   _|  ___|_   _| ___ \\_   _/  ___|"",
+    ""  | | | |__   | | | |_/ / | | \\ `--. "",
+    ""  | | |  __|  | | |    /  | |  `--. \\"",
+    ""  | | | |___  | | | |\\ \\ _| |_/\\__/ /"",
+    ""  \\_/ \\____/  \\_/ \\_| \\_\\___/\\____/ ""
+  }
+  
+  local startY = math.floor((h - #title) / 2) - 5
+  for i, line in ipairs(title) do
+    term.setCursorPos(math.floor((w - #line) / 2), startY + i)
+    term.write(line)
+  end
+  
+  term.setCursorPos(math.floor(w/2) - 6, startY + #title + 3)
+  term.write(""[ Press ENTER to Start ]"")
+  
+  term.setCursorPos(math.floor(w/2) - 8, startY + #title + 5)
+  term.write(""[ Press L for Leaderboard ]"")
+  
+  term.setCursorPos(math.floor(w/2) - 7, startY + #title + 7)
+  term.write(""[ Press S for Settings ]"")
+  
+  term.setCursorPos(math.floor(w/2) - 6, startY + #title + 9)
+  term.write(""[ Press C for Credits ]"")
+  
+  term.setCursorPos(math.floor(w/2) - 5, startY + #title + 11)
+  term.write(""[ Press Q to Quit ]"")
+end
+
+local leaderboard = {}
+
+local function saveScore(name, score)
+  table.insert(leaderboard, {name = name or ""Unknown"", score = score or 0})
+  table.sort(leaderboard, function(a, b)
+    return (a.score or 0) > (b.score or 0)
+  end)
+  if #leaderboard > 10 then
+    table.remove(leaderboard, 11)
+  end
+  
+  local file = fs.open(""tetris_leaderboard"", ""w"")
+  if file then
+    for _, entry in ipairs(leaderboard) do
+      local entryName = entry.name or ""Unknown""
+      local entryScore = entry.score or 0
+      file.writeLine(entryName .. "","" .. tostring(entryScore))
+    end
+    file.close()
+  else
+    print(""Error: Unable to open file for writing"")
+  end
+end
+
+local function loadLeaderboard()
+  if fs.exists(""tetris_leaderboard"") then
+    local file = fs.open(""tetris_leaderboard"", ""r"")
+    if file then
+      while true do
+        local line = file.readLine()
+        if not line then break end
+        local name, score = line:match(""([^,]+),(%d+)"")
+        table.insert(leaderboard, {name = name, score = tonumber(score)})
+      end
+      file.close()
+    else
+      print(""Error: Unable to open leaderboard file for reading"")
+    end
+  end
+end
+
+local function drawLeaderboard()
+  term.clear()
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.black)
+  term.setTextColor(colors.white)
+  
+  term.setCursorPos(math.floor(w/2) - 5, 2)
+  term.write(""LEADERBOARD"")
+  
+  for i, entry in ipairs(leaderboard) do
+    term.setCursorPos(math.floor(w/2) - 10, i + 4)
+    local name = entry.name or ""Unknown""
+    local score = entry.score or 0
+    term.write(string.format(""%2d. %-10s %5d"", i, name, score))
+  end
+  
+  term.setCursorPos(math.floor(w/2) - 11, h - 2)
+  term.write(""[ Press any key to return ]"")
+  
+  os.pullEvent(""key"")
+end
+
+local function drawSettingsMenu()
+  local function toggleSetting(setting)
+    settings[setting] = not settings[setting]
+  end
+  
+  local function changeDifficulty()
+    settings.difficulty = (settings.difficulty % 3) + 1
+  end
+  
+  while true do
+    term.clear()
+    term.setCursorPos(1, 1)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    
+    term.setCursorPos(math.floor(w/2) - 4, 2)
+    term.write(""SETTINGS"")
+    
+    term.setCursorPos(2, 5)
+    term.write(""1. Plasma Effect: "" .. (settings.plasmaEnabled and ""ON"" or ""OFF""))
+    
+    term.setCursorPos(2, 7)
+    local difficultyText = {""Easy"", ""Normal"", ""Hard""}
+    term.write(""2. Difficulty: "" .. difficultyText[settings.difficulty])
+    
+    term.setCursorPos(2, 9)
+    term.write(""3. Back to Main Menu"")
+    
+    term.setCursorPos(2, h-1)
+    term.write(""Enter your choice (1-3): "")
+    
+    local _, key = os.pullEvent(""key"")
+    if key == keys.one then
+      toggleSetting(""plasmaEnabled"")
+    elseif key == keys.two then
+      changeDifficulty()
+    elseif key == keys.three then
+      break
+    end
+  end
+end
+
+local function drawCredits()
+  term.clear()
+  term.setCursorPos(1, 1)
+  term.setBackgroundColor(colors.black)
+  term.setTextColor(colors.white)
+  
+  term.setCursorPos(math.floor(w/2) - 3, 2)
+  term.write(""CREDITS"")
+  
+  local credits = {
+    ""Inspired from XIXIT (effects)"",
+    ""Based on the classic Tetris game"",
+    ""For ComputerCraft"",
+    ""Special Thanks For the ComputerCraft Community"",
+    ""© 2024 nonogamer9""
+  }
+  
+  local startY = math.floor((h - #credits) / 2)
+  for i, line in ipairs(credits) do
+    term.setCursorPos(math.floor((w - #line) / 2), startY + i)
+    term.write(line)
+  end
+  
+  term.setCursorPos(math.floor(w/2) - 11, h - 2)
+  term.write(""[ Press any key to return ]"")
+  
+  os.pullEvent(""key"")
+end
+
+loadLeaderboard()
+
+local running = true
+while running do
+  drawTitleScreen()
+  
+  local event, key = os.pullEvent(""key"")
+  if key == keys.enter then
+    currentPiece = math.random(1, #pieces)
+    currentPieceColor = math.random(1, #pieceColors)
+    currentRotation = 1
+    currentX = math.floor(boardWidth / 2) - 1
+    currentY = 0
+    score = 0
+    gameOver = false
+    
+    for y = 1, boardHeight do
+      for x = 1, boardWidth do
+        board[y][x] = 0
+      end
+    end
+    
+    parallel.waitForAll(plasmaProcess, gameProcess, inputProcess)
+    
+    term.clear()
+    term.setCursorPos(1, h/2 - 1)
+    term.setTextColor(colors.white)
+    term.setBackgroundColor(colors.black)
+    term.write(""Game Over! Final Score: "" .. score)
+    term.setCursorPos(1, h/2 + 1)
+    term.write(""Enter your name: "")
+    local name = read()
+    saveScore(name, score)
+  elseif key == keys.l then
+    drawLeaderboard()
+  elseif key == keys.s then
+    drawSettingsMenu()
+  elseif key == keys.c then
+    drawCredits()
+  elseif key == keys.q then
+    term.clear()
+    term.setCursorPos(1, h/2)
+    term.setTextColor(colors.white)
+    term.setBackgroundColor(colors.black)
+    term.write(""Thanks for playing Tetris! Goodbye!"")
+    sleep(2)
+    running = false
+  end
+end
+
+term.clear()
+term.setCursorPos(1, 1)"
+p30r5LeW,Untitled,Tim328,Python,Sunday 15th of September 2024 12:39:28 PM CDT,"1)
+4 1
+5 6
+
+2)
+П
+П
+Ш
+
+3)
+bee
+
+4)
+True
+False
+5) 
+1 4 16
+
+6)
+a = (i ** 2 for i in range (10) if i % 3 != 0)
+print(next(a))
+print(next(a))
+print(next(a))
+
+7)
+cards = []
+suits = (""Черви"", ""Пики"", ""Бубны"", ""Трефы"")
+nums_cards = (""6"", '7', '8', '9', '10', 'Валет', 'Дама', 'Король', 'Туз')
+for suit in suits:
+    for num_cards in nums_cards:
+        cards.append(f""{suit} + {num_cards}"")
+
+cards_iter = iter(cards)
+
+for x in range(36):
+    print(next(cards_iter))
+
+"
+SX7n5tyD,Cleed Bash Update,mlot,Bash,Sunday 15th of September 2024 12:18:45 PM CDT,"#!/bin/bash
+
+# Requires curl (https://curl.se/)
+
+# Downloads the latest Linux x86_64 version of Cleed to ~/Downloads,
+# extracts the download, moves the cleed binary to /usr/local/bin,
+# modifies the cleed binary permissions for execution, and
+# removes the extra files.
+
+(command \
+    cd ~/Downloads &&
+    curl -L https://github.com/radulucut/cleed/releases/latest/download/cleed_Linux_x86_64.tar.gz -o cleed_Linux_x86_64.tar.gz && 
+    tar -xvf cleed_Linux_x86_64.tar.gz &&
+    sudo mv -f cleed /usr/local/bin && 
+    chmod +x /usr/local/bin/cleed &&
+    rm README.md LICENSE cleed_Linux_x86_64.tar.gz
+)"
+H53VFqUs,Claude's Torch Helper,civilwargeeky,Lua,Sunday 15th of September 2024 12:18:43 PM CDT,"-- Configuration
+local TORCH_INTERVAL = 5  -- Place a torch every X blocks
+
+-- Function to refuel the turtle
+local function refuel()
+    if turtle.getFuelLevel() < 500 then
+        print(""Fuel level low. Please insert fuel items."")
+        while turtle.getFuelLevel() < 1000 do
+            print(""Current fuel level: "" .. turtle.getFuelLevel())
+            os.pullEvent(""turtle_inventory"")
+            for i = 1, 16 do
+                turtle.select(i)
+                if turtle.refuel(1) then
+                    print(""Refueled. New fuel level: "" .. turtle.getFuelLevel())
+                    break
+                end
+            end
+        end
+    end
+    print(""Fuel level sufficient. Continuing..."")
+end
+
+-- Function to check if an item is a torch
+local function isTorch(item)
+    return item and string.find(item.name:lower(), ""torch"")
+end
+
+-- Function to check for torches and filler blocks
+local function checkInventory()
+    local hasTorches, hasFillerBlocks = false, false
+    
+    while not (hasTorches and hasFillerBlocks) do
+        print(""Please insert torches in slot 1 and filler blocks (non-torch items) in slot 2."")
+        os.pullEvent(""turtle_inventory"")
+        
+        turtle.select(1)
+        local torchItem = turtle.getItemDetail()
+        if isTorch(torchItem) then
+            hasTorches = true
+        else
+            print(""Slot 1 does not contain torches. Please add torches to slot 1."")
+        end
+        
+        turtle.select(2)
+        local fillerItem = turtle.getItemDetail()
+        if fillerItem and not isTorch(fillerItem) then
+            hasFillerBlocks = true
+        else
+            if isTorch(fillerItem) then
+                print(""Slot 2 contains torches. Please add non-torch items as filler blocks to slot 2."")
+            else
+                print(""Slot 2 is empty. Please add filler blocks to slot 2."")
+            end
+        end
+    end
+    print(""Inventory ready. Starting torch placement..."")
+end
+
+-- Function to place a torch
+local function placeTorch()
+    -- Wait until there's no block in front
+    while turtle.detect() do
+        print(""Block detected in front. Waiting 2 seconds..."")
+        os.sleep(2)
+    end
+
+    turtle.select(1)
+    if not turtle.placeUp() then
+        print(""Failed to place torch. Attempting to place filler block..."")
+        if turtle.up() then
+            turtle.turnRight()
+            turtle.select(2)
+            if turtle.place() then
+                turtle.turnLeft()
+                turtle.down()
+                turtle.select(1)
+                if not turtle.placeUp() then
+                    print(""Failed to place torch even after placing filler block."")
+                    return false
+                end
+            else
+                print(""Failed to place filler block. Returning to original position."")
+                turtle.turnLeft()
+                turtle.down()
+                return false
+            end
+        else
+            print(""Failed to move up to place filler block. Cannot place torch here."")
+            return false
+        end
+    end
+    return true
+end
+
+-- Main function
+local function main()
+    refuel()
+    checkInventory()
+    
+    local blocksMoved = 0
+    
+    while true do
+        if not turtle.forward() then
+            print(""Obstacle detected. Waiting 1 second..."")
+            os.sleep(1)
+        else
+            blocksMoved = blocksMoved + 1
+            
+            if blocksMoved % TORCH_INTERVAL == 0 then
+                if not placeTorch() then
+                    -- Check for more torches in inventory
+                    local foundTorches = false
+                    for i = 2, 16 do
+                        turtle.select(i)
+                        local item = turtle.getItemDetail()
+                        if isTorch(item) then
+                            turtle.transferTo(1)
+                            foundTorches = true
+                            break
+                        end
+                    end
+                    
+                    if not foundTorches then
+                        print(""Out of torches. Terminating program."")
+                        return
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Run the program
+main()"
+PPQWP0at,Untitled,Josif_tepe,C++,Sunday 15th of September 2024 11:56:10 AM CDT,"#include <iostream>
+#include <queue>
+#include <vector>
+using namespace std;
+
+int main() {
+    int n, m;
+    cin >> n >> m;
+    char mat[n][m];
+    
+    int si, sj, ei, ej;
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < m; j++) {
+            cin >> mat[i][j];
+            if(mat[i][j] == 'S') {
+                si = i;
+                sj = j;
+            }
+            if(mat[i][j] == 'E') {
+                ei = i;
+                ej = j;
+            }
+        }
+    }
+    queue<int> q;
+    q.push(si);
+    q.push(sj);
+    q.push(0);
+    
+    int di[] = {-1, 1, 0, 0};
+    int dj[] = {0, 0, -1, 1};
+    vector<vector<bool>> visited(n, vector<bool>(m, false));
+    
+    vector<vector<int>> dist_from_S(n, vector<int>(m, -1));
+    vector<vector<int>> dist_from_E(n, vector<int>(m, -1));
+    while(!q.empty()) {
+        int ci = q.front();
+        q.pop();
+        int cj = q.front();
+        q.pop();
+        int dist = q.front();
+        q.pop();
+        
+        
+        if(ci == ei and cj == ej) {
+            cout << dist << endl;
+            return 0;
+        }
+        if(mat[ci][cj] == '#') {
+            dist_from_S[ci][cj] = dist;
+            continue;
+        }
+        for(int i = 0; i < 4; i++) {
+            int ti = ci + di[i];
+            int tj = cj + dj[i];
+            if(ti >= 0 and ti < n and tj >= 0 and tj < m and !visited[ti][tj]) {
+                q.push(ti);
+                q.push(tj);
+                q.push(dist + 1);
+                visited[ti][tj] = true;
+            }
+        }
+        
+    }
+    
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < m; j++) {
+            visited[i][j] = false;
+        }
+    }
+    q.push(ei);
+    q.push(ej);
+    q.push(0);
+    while(!q.empty()) {
+        int ci = q.front();
+        q.pop();
+        int cj = q.front();
+        q.pop();
+        int dist = q.front();
+        q.pop();
+        
+        if(mat[ci][cj] == '#') {
+            dist_from_E[ci][cj] = dist;
+            continue;
+        }
+        for(int i = 0; i < 4; i++) {
+            int ti = ci + di[i];
+            int tj = cj + dj[i];
+            if(ti >= 0 and ti < n and tj >= 0 and tj < m and !visited[ti][tj]) {
+                q.push(ti);
+                q.push(tj);
+                q.push(dist + 1);
+                visited[ti][tj] = true;
+            }
+        }
+    }
+    
+    int res = -1;
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < m; j++) {
+            if(mat[i][j] == '#' and dist_from_S[i][j] != -1 and dist_from_E[i][j] != -1) {
+                res = max(res, dist_from_S[i][j] + dist_from_E[i][j]);
+            }
+        }
+    }
+    cout << res << endl;
+    return 0;
+}
+/*
+ 
+ P.#K#
+ .##.#
+ .....
+ .....
+ 
+ **/
+"
+PEQZVz7C,Village Manager,CheikoAsami,Batch,Sunday 15th of September 2024 11:32:09 AM CDT,"@echo off
+title Village Manager
+setlocal enabledelayedexpansion
+color 0e
+
+:header
+cls
+echo ------------------------
+echo   Head of the Village
+echo ------------------------
+echo 1- Start Game
+echo 2- Exit
+echo ------------------------
+choice /c 12 /n >nul
+
+if %errorlevel% == 1 (
+    call :data
+    goto game
+)
+if %errorlevel% == 2 exit
+goto header
+
+:data
+set name=Nameless Village
+set gold=100
+set pop=0
+set villagers=5
+set militia=5
+set livestock=0
+set grain=0
+set grainSkill=0
+set grainLoss=0
+set deathTollVillagers=0
+set deathTollMilitia=0
+
+set tax=1
+set resourceActs=0
+
+set fleeChances=0
+set fleeChance=15
+set raids=0
+set raidChance=0
+set raidType=0
+set raidToggle=0
+set daysUntilRaid=0
+set days=0
+set years=0
+set time=0
+set timeRate=9999
+
+rem Caravan variables
+set caravanActive=0
+set caravanTimer=0
+set caravanGold=0
+set caravanGrain=0
+set caravanType=0
+
+set friendlyCaravanActive=0
+set /a daysUntilFriendlyCaravan=%random% %% 30 + 10
+
+set confirm=
+set state=Start
+goto:eof
+
+:status
+set /a pop=%militia%+%villagers%
+if %pop% LEQ 0 (
+    goto gameover
+)
+if %resourceActs% EQU 0 set acting=No Actions being Taken, Have the Village do something in Management!
+if %resourceActs% EQU 1 set acting=The Villagers are Growing Grain
+if %resourceActs% EQU 2 set acting=The Villagers are Raising Livestock
+if %resourceActs% EQU 3 set acting=The Villagers are Expanding Population
+
+if %days% GEQ 365 (
+    set days=0
+    set /a years+=1
+)
+goto:eof
+
+:gameover
+cls
+echo ------------------------------------------------------------------------
+echo     Pity, your village is now desolate! Everyone is dead and rotting.
+echo ------------------------------------------------------------------------
+echo You lasted %years% Years and %days% Days, surviving %raids% Raids on your village.
+echo ------------------------------------------------------------------------
+echo Press any Key to Return to Menu...
+pause>nul
+goto header
+
+:game
+call :status
+cls
+echo -----------------------------------------
+echo Village Name: %name% /\ Gold: %gold% /\ Population: %pop%
+echo -
+echo Villagers: %villagers%
+echo Militia: %militia%
+echo -----------------------------------------
+echo Time Since Establishment: Day: %days% Year: %years%
+echo -
+echo Behavior: %acting%
+echo -
+echo Grain: %grain%
+echo Livestock: %livestock%
+if %daysUntilRaid% GTR 0 echo -
+if %daysUntilRaid% GTR 0 echo Days Remaining Until Raid: %daysUntilRaid%
+if %friendlyCaravanActive% EQU 0 (
+    echo Days until next friendly caravan: %daysUntilFriendlyCaravan%
+)
+echo -
+echo Raid Roll: %raidChance%/50
+echo -----------------------------------------
+echo 1- %state% Time
+echo 2- Management
+echo 3- Options
+echo -----------------------------------------
+if %caravanTimer% GTR 0 (
+    echo Caravan Timer: %caravanTimer% days remaining
+)
+choice /d 4 /t %timeRate% /c 1234 /n >nul
+if %errorlevel% == 1 (
+    if %raidToggle% EQU 1 (
+        if %daysUntilRaid% EQU 0 (
+        goto raidOutcome
+        )
+    )
+    if %time% EQU 1 (
+        set time=0
+        set timeRate=9999
+        set state=Start
+    ) else (
+        set state=Stop
+        set time=1
+        set timeRate=2
+    )
+)
+if %errorlevel% == 2 goto management
+if %errorlevel% == 3 goto options
+if %errorlevel% == 4 (
+    if %time% EQU 1 call :progress
+)
+goto game
+
+:friendlyCaravanArrives
+echo A friendly caravan has arrived at the village!
+set /a goldBonus=%random% %% 50 + 50
+set /a grainBonus=%random% %% 200 + 100
+set /a gold+=%goldBonus%
+set /a grain+=%grainBonus%
+echo +%goldBonus% gold and +%grainBonus% grain have been added to your stocks!
+set /a daysUntilFriendlyCaravan=%random% %% 30 + 10
+set friendlyCaravanActive=0
+pause
+goto :eof
+
+:raided
+set /a raidType=%random%%%2+1
+if %militia% GTR 0 (
+    set /a fleeChances=%random% %% 100 + 1
+    set /a fleeChance=%militia% * 2
+    if %fleeChance% GTR 70 set fleeChance=70
+    if %fleeChances% LEQ %fleeChance% (
+        set /a raidType=3
+    )
+)
+set /a halfGrain=%grain% / 2
+set /a halfPop=%villagers% / 2
+set /a halfMil=%militia% / 3
+
+set /a deathTollVillagers=%random%%%%halfPop%+1
+set /a deathTollMilitia=%random%%%%halfMil%+1
+set /a grainLoss=%random%%%%halfGrain%+1
+
+call :raidTypes
+
+set /a raids+=1
+set raidToggle=0
+goto:eof
+
+:raidTypes
+if %raidType% EQU 1 (
+    set raidedType=They didn't want your goods they wanted death! %deathTollVillagers% Villagers and %deathTollMilitia% Militia lives had been lost in the Raid!
+    set /a villagers-=%deathTollVillagers%
+    set /a militia-=%deathTollMilitia%
+)
+if %raidType% EQU 2 (
+    set raidedType=To not hurt anyone, the Raiders were quite hungry and stole %grainLoss% grain from the village!
+    set /a grain-=%grainLoss%
+)
+if %raidType% EQU 3 (
+    set raidedType=To flee your borders, your militia force dissuaded them from attacking! %fleeChances%/%fleeChance%
+)
+goto:eof
+
+:raidOutcome
+call :raided
+cls
+echo -------------------------------------
+echo The Village of %name% is being Raided!
+echo The Raiders decided, %raidedType%
+echo -------------------------------------
+echo
+pause>nul
+goto game
+
+:raidTimer
+if %raidChance% GTR 50 (
+    set raidToggle=1
+    set /a daysUntilRaid=%random%%%120+1
+)
+goto:eof
+
+:caravanState
+ if %caravanType% EQU 1 (
+            echo Caravan has been raided! All resources lost.
+            set caravanGold=0
+            set caravanGrain=0
+        ) else (
+            echo Caravan returned safely with %caravanGold% Gold and %caravanGrain% Grain.
+        )
+        echo Press any key to continue...
+        pause>nul
+        set caravanActive=0
+goto:eof
+
+:progress
+if %raidToggle% EQU 0 (
+    set /a days+=1
+    set /a gold+=%pop%+%tax%
+    set /a raidChance=%random%%%65+1
+    call :raidTimer
+)
+if %friendlyCaravanActive% EQU 0 (
+    set /a daysUntilFriendlyCaravan-=1
+    if %daysUntilFriendlyCaravan% LEQ 0 (
+        set friendlyCaravanActive=1
+        call :friendlyCaravanArrives
+    )
+)
+
+rem Caravan operations progress
+if %caravanTimer% GTR 0 (
+    set /a caravanTimer-=1
+    if %caravanTimer% EQU 0 (
+        set /a caravanType=%random%%%2+1
+			call :caravanState
+    )
+) else (
+    set /a caravanGold+=3
+    set /a caravanGrain+=3
+)
+
+::echo Raid Toggle 1 If Remaining Days until Raid is 0 pause time and set the village state to raid haulting everything
+::pause>nul
+if %raidToggle% EQU 1 (
+    if %daysUntilRaid% EQU 0 (
+        set time=0
+        set timeRate=9999
+        set state=Raid
+    )
+    if %daysUntilRaid% GTR 0 (
+        set /a days+=1
+        set /a gold+=%pop%+%tax%
+        set /a daysUntilRaid-=1
+    )
+)
+::echo Raid Toggle 2 
+::pause>nul
+if %resourceActs% EQU 1 (
+    set /a grain+=%pop%+%grainSkill%
+)
+if %resourceActs% EQU 2 (
+    if %grain% GEQ 15 (
+        set /a grain-=15
+        set /a livestock+=1
+    ) else (
+        set resourceActs=1
+    )
+)
+::echo Resource Act 1 and 2
+::pause>nul
+if %resourceActs% EQU 3 (
+    if %grain% GEQ 15 (
+        if %livestock% GEQ 1 (
+            set /a grain-=15
+            set /a livestock-=1
+            set /a villagers+=2
+        ) else (
+            set resourceActs=1
+        )
+    ) else (
+        set resourceActs=1
+    )
+)
+::echo Resource Act 3
+::pause>nul
+
+
+goto:eof
+
+:management
+cls
+echo ----------------------------------
+echo            Management
+echo ----------------------------------
+echo 1- Actions
+echo 2- Stock
+echo 3- Citizen Management
+echo 4- Return
+echo ----------------------------------
+choice /c 1234 /n >nul
+if %errorlevel% == 1 goto villageActions
+if %errorlevel% == 2 call :stock
+if %errorlevel% == 3 goto citizenManagement
+if %errorlevel% == 4 goto game
+goto management
+
+:villageActions
+cls
+echo ------------------------------------
+echo             Actions
+echo ------------------------------------
+echo 1- Resource Management
+echo 2- Caravan Operations
+echo 3- Return
+echo ------------------------------------
+choice /c 123 /n >nul
+if %errorlevel% == 1 goto resourceManagement
+if %errorlevel% == 2 goto caravanOperations
+if %errorlevel% == 3 goto game
+goto villageActions
+
+:resourceManagement
+cls
+echo ------------------------------------
+echo          Resource Management
+echo ------------------------------------
+echo 1- Grow Grain
+echo 2- Raise Livestock -15 Grain
+echo 3- Grow Population -1 Livestock, -15 Grain
+echo 4- Return
+echo ------------------------------------
+choice /c 1234 /n >nul
+if %errorlevel% == 1 (
+    set /a resourceActs=1
+)
+if %errorlevel% == 2 (
+    set /a resourceActs=2
+)
+if %errorlevel% == 3 (
+    set /a resourceActs=3
+)
+if %errorlevel% == 4 goto villageActions
+call :actionTaken
+goto resourceManagement
+
+:actionTaken
+if %resourceActs% EQU 1 echo The Village will now Grow Grain.
+if %resourceActs% EQU 2 echo The Village will now Raise Livestock.
+if %resourceActs% EQU 3 echo The Village will now Expand Population.
+echo.
+pause
+goto:eof
+
+:caravanOperations
+cls
+echo ------------------------------------
+echo             Caravan Operations
+echo ------------------------------------
+echo 1- Send Out Caravan
+echo 2- Recall Caravan
+echo 3- Check Caravan Status
+echo 4- Return to Actions Menu
+echo ------------------------------------
+choice /c 1234 /n >nul
+
+if %errorlevel% == 1 (
+    if %caravanActive% EQU 1 (
+        echo A caravan is already out.
+        pause
+    ) else (
+        rem Check if enough resources to send caravan
+        if %gold% GEQ 20 if %grain% GEQ 10 (
+            echo Confirm sending a caravan, it will cost 20 gold and 10 grain. [1/2]
+            set /p confirm=1 Yes or 2 No:
+            if /I ""!confirm!""==""1"" (
+                call :sendCaravan
+            )
+        ) else (
+            echo Not enough resources to send a caravan! Need at least 20 gold and 10 grain.
+            pause
+        )
+    )
+)
+
+if %errorlevel% == 2 (
+    if %caravanActive% EQU 1 (
+        echo Confirm you want to recall the caravan? [1/2]
+        set /p confirm=1 Yes or 2 No:
+        if /I ""!confirm!""==""1"" (
+            call :recallCaravan
+        )
+    ) else (
+        echo No caravan is currently out.
+        pause
+    )
+)
+
+if %errorlevel% == 3 (
+    if %caravanActive% EQU 1 (
+        echo Caravan currently out: %caravanGold% gold and %caravanGrain% grain collected so far.
+        echo Days remaining until return: %caravanTimer%
+    ) else (
+        echo No caravan is currently out.
+    )
+    pause
+)
+
+if %errorlevel% == 4 goto villageActions
+
+goto caravanOperations
+
+:sendCaravan
+cls
+echo Sending out a caravan...
+set /a gold-=20
+set /a grain-=10
+set /a caravanTimer=%random% %% 20 + 10
+set /a caravanGold=0
+set /a caravanGrain=0
+set caravanActive=1
+echo Caravan has been dispatched and will return in %caravanTimer% days.
+pause
+goto caravanOperations
+
+:recallCaravan
+cls
+echo Recalling the caravan...
+set /a gold+=%caravanGold%
+set /a grain+=%caravanGrain%
+echo Caravan has returned safely with %caravanGold% Gold and %caravanGrain% Grain.
+set caravanTimer=0
+set caravanActive=0
+pause
+goto caravanOperations
+
+:actionTaken
+if %resourceActs% EQU 0 echo The Village will take no action
+if %resourceActs% EQU 1 echo The Village will now Grow Grain.
+if %resourceActs% EQU 2 echo The Village will now Raise Livestock.
+if %resourceActs% EQU 3 echo The Village will now consume to flourish.
+pause>nul
+goto:eof
+
+:stock
+cls
+echo ---------------------------------
+echo            Stock
+echo ---------------------------------
+echo Grain: %grain%
+echo Livestock: %livestock%
+echo ---------------------------------
+pause>nul
+goto management
+
+:citizenManagement
+cls
+echo ------------------------------------
+echo         Citizen Management
+echo ------------------------------------
+echo 1- Food Production Upgrade - Cost: 50 Gold
+echo 2- Gold Production Upgrade - Cost: 50 Gold
+echo 3- Increase Tax Rate
+echo 4- Decrease Tax Rate
+echo 5- Return
+echo ------------------------------------
+choice /c 12345 /n >nul
+if %errorlevel% == 1 call :foodProductionUpgrade
+if %errorlevel% == 2 call :goldProductionUpgrade
+if %errorlevel% == 3 call :increaseTaxRate
+if %errorlevel% == 4 call :decreaseTaxRate
+if %errorlevel% == 5 goto management
+goto citizenManagement
+
+:foodProductionUpgrade
+if %gold% GEQ 50 (
+    set /a grainSkill+=1
+    set /a gold-=50
+    echo Food Production has been upgraded. Grain skill is now %grainSkill%.
+) else (
+    echo Not enough gold to upgrade food production.
+)
+pause>nul
+goto citizenManagement
+
+:goldProductionUpgrade
+if %gold% GEQ 50 (
+    set /a tax+=1
+    set /a gold-=50
+    echo Gold Production has been upgraded. Tax rate is now %tax%.
+) else (
+    echo Not enough gold to upgrade gold production.
+)
+pause>nul
+goto citizenManagement
+
+:increaseTaxRate
+set /a tax+=1
+echo Tax rate has been increased. Current tax rate is %tax%.
+pause>nul
+goto citizenManagement
+
+:decreaseTaxRate
+if %tax% GEQ 1 (
+    set /a tax-=1
+    echo Tax rate has been decreased. Current tax rate is %tax%.
+) else (
+    echo Tax rate cannot be decreased further.
+)
+pause>nul
+goto citizenManagement
+
+:options
+cls
+echo -----------------------------------------
+echo                Options
+echo -----------------------------------------
+echo 1- Village Name
+echo 2- Reset Game
+echo 3- Return
+echo -----------------------------------------
+choice /c 123 /n >nul
+if %errorlevel% == 1 goto name
+if %errorlevel% == 2 goto reset
+if %errorlevel% == 3 goto game
+goto options
+
+:name
+cls
+echo ------------------------------
+echo Current Village Name: %name%
+echo ------------------------------
+echo Enter New Village Name:
+set /p name=
+goto options
+
+:reset
+cls
+echo ------------------------
+echo   Reset Game Data
+echo ------------------------
+echo 1- Yes
+echo 2- No
+echo ------------------------
+choice /c 12 /n >nul
+if %errorlevel% == 1 (
+    call :data
+    goto game
+)
+if %errorlevel% == 2 goto game
+goto options
+"
+e9KjnNgu,Untitled,Josif_tepe,C++,Sunday 15th of September 2024 11:14:15 AM CDT,"#include <iostream>
+#include <queue>
+#include <vector>
+using namespace std;
+
+int main() {
+    int n, m;
+    cin >> n >> m;
+    char mat[n][m];
+    
+    int si, sj, ei, ej;
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < m; j++) {
+            cin >> mat[i][j];
+            
+            if(mat[i][j] == 'P') {
+                si = i;
+                sj = j;
+            }
+            if(mat[i][j] == 'K') {
+                ei = i;
+                ej = j;
+            }
+        }
+    }
+    
+    int di[] = {-1, 1, 0, 0};
+    int dj[] = {0, 0, -1, 1};
+    
+    int di2[] = {-2, 2, 0, 0};
+    int dj2[] = {0, 0, -2, 2};
+    
+    int di3[] = {-3, 3, 0, 0};
+    int dj3[] = {0, 0, -3, 3};
+    vector<vector<bool>> visited(n, vector<bool>(m, false));
+    vector<vector<bool>> visited2(n, vector<bool>(m, false));
+    vector<vector<bool>> visited3(n, vector<bool>(m, false));
+    
+    queue<int> q;
+    q.push(si);
+    q.push(sj);
+    q.push(0);
+    q.push(1); // dali ke odime 1, 2 ili 3 cekori
+    
+    while(!q.empty()) {
+        int ci = q.front();
+        q.pop();
+        int cj = q.front();
+        q.pop();
+        int dist = q.front();
+        q.pop();
+        int direction = q.front();
+        q.pop();
+        if(ci == ei and cj == ej) {
+            cout << dist << endl;
+            return 0;
+        }
+        
+        
+    
+        if(direction == 1) {
+            for(int i = 0; i < 4; i++) {
+                int ti = ci + di[i];
+                int tj = cj + dj[i];
+                
+                if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#' and !visited[ti][tj]) {
+                    q.push(ti);
+                    q.push(tj);
+                    q.push(dist + 1);
+                    q.push(2);
+                    visited[ti][tj] = true;
+                    
+                }
+            }
+        }
+        else if(direction == 2) {
+            for(int i = 0; i < 4; i++) {
+                int ti = ci + di[i];
+                int tj = cj + dj[i];
+              
+                if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#') {
+                  
+                    ti = ci + di2[i];
+                    tj = cj + dj2[i];
+                    
+                    if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#' and !visited2[ti][tj]) {
+                        
+                        q.push(ti);
+                        q.push(tj);
+                        q.push(dist + 1);
+                        q.push(3);
+                        visited2[ti][tj] = true;
+                    }
+                }
+            }
+        }
+        else if(direction == 3) {
+            for(int i = 0; i < 4; i++) {
+                int ti = ci + di[i];
+                int tj = cj + dj[i];
+                if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#') {
+                    ti = ci + di2[i];
+                    tj = cj + dj2[i];
+                    if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#') {
+                        ti = ci + di3[i];
+                        tj = cj + dj3[i];
+                        if(ti >= 0 and ti < n and tj >= 0 and tj < m and mat[ti][tj] != '#' and !visited3[ti][tj]) {
+                            q.push(ti);
+                            q.push(tj);
+                            q.push(dist + 1);
+                            q.push(1);
+                            visited3[ti][tj] = true;
+                            
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return 0;
+}
+/*
+ 
+ P.#K#
+ .##.#
+ .....
+ .....
+ 
+ **/
+"
+e8n2yBAG,03_extract_countries_population,partsunev,Python,Sunday 15th of September 2024 11:00:26 AM CDT,"import os
+import json
+import requests
+import pandas as pd
+
+from bs4 import BeautifulSoup
+from io import StringIO
+
+URL = ""https://en.wikipedia.org/wiki/List_of_European_Union_member_states_by_population""
+DATA_FILE = ""eu_population_data.json""
+
+def get_soup(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup_data = BeautifulSoup(response.text, ""lxml"")
+        return soup_data
+    except requests.exceptions.RequestException as e:
+        print(f""Error fetching data from {url}: {e}"")
+        return None
+
+
+def countries_population(df):
+    country_dict = {}
+
+    country_column = ""Country""
+    population_column = [col for col in df.columns if 'Population' in col][0]
+    df[population_column] = df[population_column].astype(str).str.replace(',', '').astype(int)
+
+    for _, row in df.iterrows():
+        country = row[country_column]
+        population = row[population_column]
+
+        country_dict[country] = {""country_population"": population}
+
+    return country_dict
+
+
+def population_percentage(data):
+    total_population = sum([pop[""country_population""] for pop in data.values()])
+
+    for country_data in data.values():
+        percentage = (country_data[""country_population""] / total_population) * 100
+        country_data[""country_population_percentage""] = round(percentage, 1)
+
+    return data
+
+
+def load_saved_data(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, ""r"") as file:
+            return json.load(file)
+    return None
+
+
+def save_data_to_file(data, file_path):
+    with open(file_path, ""w"") as file:
+        json.dump(data, file, indent=4)
+
+
+def is_data_updated(old_data, new_data):
+    return old_data != new_data
+
+
+soup = get_soup(URL)
+
+if soup is not None:
+    table = soup.find(""table"")
+    if table is None:
+        raise ValueError(""No table found on the webpage."")
+
+    df = pd.read_html(StringIO(str(table)))[0]
+    df = df[df[""Country""] != ""European Union""]
+
+    countries_population_dict = countries_population(df)
+    countries_population_percentage = population_percentage(countries_population_dict)
+
+    saved_data = load_saved_data(DATA_FILE)
+
+    if saved_data is None or is_data_updated(saved_data, countries_population_percentage):
+        print(""New data found. Saving to file..."")
+        save_data_to_file(countries_population_percentage, DATA_FILE)
+    else:
+        print(""No new data. File not updated."")
+else:
+    print(""Failed to retrieve webpage data."")"
+NPhZtCsk,02_search_device,partsunev,Python,Sunday 15th of September 2024 10:09:54 AM CDT,"import time
+
+
+def device_search(devices_list, clnt_inpt):
+    result = None
+
+    for device in devices_list:
+        if device.lower() == clnt_inpt.lower():
+            result = device
+            break
+
+    return result
+
+
+client_input = input(""Enter device name:"")
+devices = [""iphone"", ""android"", ""radio"", ""tv"", ""tablet"", ""pc"", ""laptop""]
+
+start_time = time.time()
+
+searched_device = device_search(devices, client_input)
+
+end_time = time.time()
+execution_time = end_time - start_time
+
+if searched_device:
+    print(f""Device {searched_device} found.\nExecution time:{execution_time:10f}s"")
+else:
+    print(f""No device with this name is found\nExecution time:{execution_time:10f}s"")"
+7yMibXsH,Untitled,WarPie90,Delphi,Sunday 15th of September 2024 10:07:27 AM CDT,"program new;
+{$DEFINE SRL_USE_REMOTEINPUT}
+{$I SRL/osr.simba}
+
+var
+  NativeClient: PtrInt;
+  RSW: TRSWalker;
+
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// WIN API stuff
+
+const WINAPI_CC  = {$IFDEF CPU386}' stdcall'{$ELSE}' win64'{$ENDIF};
+const ffi_winapi = {$IFDEF CPU386}ffi_stdcall{$ELSE}ffi_win64{$ENDIF};
+
+type
+  _EnumWindowsProc = function(wnd:DWORD; Param:Pointer): LongBool;
+  TEnumWindowsProc = native(_EnumWindowsProc, ffi_winapi);
+
+function GetAsyncKeyState(vKey: Int32): Int16; external 'GetAsyncKeyState@user32.dll' + WINAPI_CC;
+function GetForegroundWindow(): PtrUInt; external 'GetForegroundWindow@user32.dll' + WINAPI_CC;
+function GetWindowThreadProcessId(wnd: PtrUInt; out dwProcessId: DWORD): DWORD; external 'GetWindowThreadProcessId@user32.dll' + WINAPI_CC;
+function EnumChildWindows(hWndParent: DWORD; func: TEnumWindowsProc; Param: Pointer): LongBool; external 'EnumChildWindows@user32.dll' + WINAPI_CC;
+
+function GetKeyDown(): Char;
+var
+  key: Word;
+  keys: array of Word;
+begin
+  keys := [VK_A..VK_Z];
+  keys += [VK_0..VK_9];
+  keys += [VK_OEM_PERIOD, VK_OEM_MINUS]; //add more keys if you need
+  for Key in keys do
+    if GetAsyncKeyState(key) and $8000 <> 0 then
+    begin
+      while GetAsyncKeyState(key) and $8000 <> 0 do Wait(10);
+      if key = VK_OEM_PERIOD then key := Ord('.');
+      if key = VK_OEM_MINUS  then key := Ord('-');
+      Exit(Char(key));
+    end;
+end;
+
+function IsKeyDown2(vKey: Word): Boolean;
+begin
+  Result := GetAsyncKeyState(vKey) and $8000 <> 0;
+end;
+
+function GetRSAppletWnd(PID: DWORD): DWORD;
+  function GetLastChild(Handle: DWORD; Param: Pointer): LongBool; static;
+  begin
+    if handle <> 0 then
+    begin
+      DWORD(Param^) := handle;
+      Result := True;
+    end;
+  end;
+var
+  p: TSysProc;
+  client: DWORD;
+begin
+  for p in GetProcesses() do
+    if p.Pid = PID then
+      Break;
+  EnumChildWindows(p.Handle, @GetLastChild, @Result);
+  if Result = 0 then
+    Result := NativeClient;
+end;
+
+
+
+
+// ---------
+// ---------
+// ---------
+
+function WorldToMSTile(Me, ObjLoc: TPoint; Height:Double=0; Offx,Offy:Double=0): TRectangle;
+var
+  Angle: Double;
+begin
+  ObjLoc := Point(Minimap.Center.X, Minimap.Center.Y) + (ObjLoc - Me);
+  Angle  := Minimap.GetCompassAngle(False);
+  ObjLoc := ObjLoc.Rotate(Angle, Point(Minimap.Center.X, Minimap.Center.Y));
+  Result := Minimap.VecToMSRect(Vec3(ObjLoc.x - offx, ObjLoc.y - offy, Height), Angle);
+end;
+
+procedure Setup();
+var
+  r: String;
+  DefaultBox: TBox = [75,40, 425,140];
+  client2: TClient;
+
+type
+  TButtonBox = record
+    TextTPA: TPointArray;
+    Bounds: TBox;
+  end;
+
+  procedure WaitReleaseMouse(key:Int32);
+  begin
+    while client2.GetIOManager.IsMouseButtonDown(key) do Wait(10);
+  end;
+
+  function GetClick(out p: TPoint): Boolean;
+  begin
+    if not EIOS_HasFocus(RSClient.RemoteInput.EIOS) then Exit();
+
+    if client2.GetIOManager.IsMouseButtonDown(1) then
+    begin
+      client2.GetIOManager.GetMousePos(p.x,p.y);
+      Result := p.InBox(GetClientBounds);
+      WaitReleaseMouse(1);
+    end;
+  end;
+
+  function GetButton(txt: String): TButtonBox;
+  begin
+    Result.TextTPA := TPAFromText(txt, 'StatChars07');
+    Result.Bounds  := GetTPABounds(Result.TextTPA).Expand(8);
+  end;
+
+  function DrawButton(p: TPoint; var Button: TButtonBox): TButtonBox;
+  var tmp: TButtonBox;
+  begin
+    Button.TextTPA := Button.TextTPA.Offset(p);
+    Button.Bounds  := Button.Bounds.Offset(p);
+    RSClient.Image.DrawBoxFilled(Button.Bounds, False, 2502198);
+    RSClient.Image.DrawBoxFilled(Button.Bounds.Expand(-1), False, 4607315);
+    RSClient.Image.DrawTPA(Button.TextTPA, $FFFFFF);
+  end;
+
+  function MessageBox(Text: String; Area:TBox=[]): string;
+  var
+    xstart: Int32;
+    TPA: TPointArray;
+    box: TBox;
+  begin
+    if (Area.x1 = Area.x2) then Area := chat.Bounds();
+    RSClient.Image.DrawBox(Area.Expand(-0), $1F2F33);
+    RSClient.Image.DrawBox(Area.Expand(-1), $3F4A5A);
+    RSClient.Image.DrawBox(Area.Expand(-2), $1F2F33);
+    RSClient.Image.DrawBoxFilled(Area.Expand(-3), False,  $171D20);
+
+    TPA := TPAFromText(Text, 'SmallChars07');
+    box := GetTPABounds(TPA);
+    xstart := (box.Width + Area.Width) div 2 - box.Width;
+    OffsetTPA(TPA, Point(Area.x1+xstart, Area.y1+20));
+    RSClient.Image.DrawTPA(TPA, $FFFFFF);
+  end;
+
+  function Query(Text: String; Alts:TStringArray; Area:TBox=[]): string;
+  var
+    i,xstart,CurrWidth: Int32;
+    p: TPoint;
+    Buttons: array of TButtonBox;
+    xOffset: TIntegerArray;
+  begin
+    if (Area.x1 = Area.x2) then Area := chat.Bounds;
+
+    // query
+    MessageBox(Text, Area);
+
+    // buttons
+    for i:=0 to High(Alts) do
+    begin
+      Buttons   += GetButton(Alts[i]);
+      xOffset   += CurrWidth;
+      CurrWidth += Buttons[i].Bounds.X2+20;
+    end;
+    CurrWidth -= 20;
+
+    xstart := (CurrWidth + Area.Width) div 2 - CurrWidth;
+    for i:=0 to High(Buttons) do
+    begin
+      DrawButton(Point(Area.x1+xstart+xOffset[i], Area.y1+50), Buttons[i]);
+    end;
+
+    // handling
+    while True do
+    begin
+      if GetClick(p) then
+      begin
+        for i:=0 to High(Buttons) do
+          if PointInBox(p, Buttons[i].Bounds) then
+          begin
+            RSClient.Image.DrawBoxFilled(Area, False, 0);
+            Exit(Alts[i]);
+          end;
+      end;
+      Wait(1);
+    end;
+  end;
+
+  function QueryStr(Text: String; Area:TBox=[]): string;
+  var
+    i: Int32;
+    pt, p: TPoint;
+    chr: Char;
+    B: TBox;
+    TPA: TPointArray;
+    Button: TButtonBox;
+    textArea: Tbox;
+  begin
+    if (Area.x1 = Area.x2) then
+      Area := Chat.Bounds;
+
+    // query
+    RSClient.Image.DrawBox(Area.Expand(-0), $1F2F33);
+    RSClient.Image.DrawBox(Area.Expand(-1), $3F4A5A);
+    RSClient.Image.DrawBox(Area.Expand(-2), $1F2F33);
+    RSClient.Image.DrawBoxFilled(Area.Expand(-3), False, $171D20);
+
+    TPA := TPAFromText(Text, 'SmallChars07');
+    OffsetTPA(TPA, Point(Area.x1+40, Area.y1+20));
+    RSClient.Image.DrawTPA(TPA, $FFFFFF);
+    B := GetTPABounds(TPA);
+
+    // button
+    Button := GetButton('OK');
+    DrawButton(Point(Area.x1+48, Area.y1+50), Button);
+
+    // handling
+    pt.x := B.x2+5;
+    pt.y := Area.y1+25;
+    repeat
+      while not EIOS_HasFocus(RSClient.RemoteInput.EIOS) do Wait(10);
+
+      if GetClick(p) then
+        if PointInBox(p, Button.Bounds) then
+        begin
+          RSClient.Image.DrawBoxFilled(Area, False, 0);
+          Exit(Result);
+        end;
+
+      chr := GetKeyDown();
+      if chr <> #0 then
+      begin
+        Result += Lowercase(chr);
+        PressKey(VK_BACK); //ensure deletion if bugged input blocking
+        RSClient.Image.DrawText(Result, pt, $FFCCAA);
+      end;
+
+      if IsKeyDown2(VK_BACK) and (Result <> '') then
+      begin
+        textArea := [pt.X, pt.y, RSClient.Image.TextWidth(Result)+pt.x, RSClient.Image.TextHeight(Result)+pt.y];
+        RSClient.Image.DrawBoxFilled(textArea, False, $171D20);
+        while IsKeyDown2(VK_BACK) do Wait(50);
+        SetLength(Result, Length(Result)-1);
+        RSClient.Image.DrawText(Result, pt, $FFCCAA);
+      end;
+    until False;
+  end;
+
+  function SetupLocations(): TPointArray;
+  var
+    p, me, worldPt: TPoint;
+    rect: TRectangle;
+  begin
+    me := RSW.GetMyPos();
+
+    while True do
+    begin
+      if GetClick(p) then
+      begin
+        worldPt := (MainScreen.PointToMM(p).ToPoint() - Point(Minimap.Center.X, Minimap.Center.Y)) + me;
+
+        Mouse.Move(p);
+        Sleep(100);
+        WriteLn('Uptext recorded: ', MainScreen.GetUpText().Before('/'));
+
+        rect := WorldToMSTile(me, worldPt);
+        if Mainscreen.Bounds.Contains(rect.Bounds) then
+        begin
+          RSClient.Image.DrawRect(rect, $FFFF);
+          case Query('Are you happy?', ['Add more', 'Retry', 'Yes']) of
+            'Retry':    RSClient.Image.DrawRect(rect, 0);
+            'Add more': Result += worldPt;
+            'Yes':      begin Result += worldPt; Break; end;
+          end;
+        end;
+      end;
+      Wait(1);
+    end;
+    RSClient.Image.Clear();
+  end;
+
+label
+  START, QUERY_CONFIG;
+
+begin
+  client2.Init(PluginPath);
+  client2.GetIOManager.SetTarget2(GetRSAppletWnd(RSClient.RemoteInput.PID));
+
+  RSClient.Image.setFontSize(10);
+  RSClient.Image.setFontAntialiasing(False);
+
+START:
+  r := Query('Do you wish to run setup?', ['Yes','No'], DefaultBox);
+  WriteLn(r);
+
+
+  r := MessageBox('Preparing, please stand by...', DefaultBox);
+  minimap.SetCompassAngle(0);
+  RSW.Setup('world');
+
+  Query('Click the rocks you wish to mine...', ['OK'], DefaultBox);
+  WriteLn SetupLocations();
+
+  Writeln QueryStr('Save config as: ', DefaultBox);
+
+
+  client2.Free();
+end;
+
+
+
+
+begin
+  NativeClient := GetNativeWindow();
+
+  if EIOS_IsMouseInputEnabled(RSClient.RemoteInput.EIOS) then
+    EIOS_SetMouseInputEnabled(RSClient.RemoteInput.EIOS, False);
+  if EIOS_IsKeyboardInputEnabled(RSClient.RemoteInput.EIOS) then
+    EIOS_SetKeyboardInputEnabled(RSClient.RemoteInput.EIOS, False);
+
+  Setup();
+
+  EIOS_SetMouseInputEnabled(RSClient.RemoteInput.EIOS, True);
+  EIOS_SetKeyboardInputEnabled(RSClient.RemoteInput.EIOS, True);
+end."
+n8TzGH4L,BWR - Changelog 15/09/24,SSilver,Diff,Sunday 15th of September 2024 10:02:47 AM CDT,"Flamethrowers
++ Increased temperature build rate to be 25% faster
+The build up in temperature awas considerably slower in more accurate fire to make it not as rewarding as previously. This increase should restore that while remaining less effective at further ranges and while spraying.
+
+Air Blast
++ Fixed pressure not being rewarded when extinguishing teammates
++ Added: Reflecting projectiles restores pressure to 50%
++ Decreased base pressure recharge speed to 6s (was 8s)
+- Reduced pressure restored from extinguishing teammates to 50%
+The increased pressure downtime was too punishing in trying to curb mobility, and made it more reliant on enemy pyros. Increasing the recharge speed a fair bit, and adding the opportunity to get pressure recharge from reflects should reduce the downtime enough to be manangeable but not spammable. The refund in pressure now has been decreased to just 50% to make up for the increased opportunity.
+
+The Degreaser
+- Decreaesd pressure recharge bonus to 25% faster (was 40% faster)
+The recharge speed was reduced such that it wouldn't be too spammable with the universal decrease.
+
+Dragon's Fury
+~ Re-pressurization of primary and alt-fire no longer impacts airblast pressure
+The alt-fire already being made slower made the pressure recharge as well impacted by your fire rate unnecessary.
+
+Thermal Thruster
++ Increased Mini-Boost height by 33%
+- Decreased Mini-Boost momentum by -15%
+The trajectory was not useful enough for traversal with the boost while being potentially too easy to juke enemies with. These tweaks should help make it's mobility more useful for utility and being easier for enemies to counter.
+
+Loch-n-Load
++ Added: 20% faster reload speed
+An additional reload bonus was added to reduce your vulnerability introduced by the downsides of the weapon, giving you less downtime between shots without being too spammable."
+9Dq61r9K,01_extract_dates,partsunev,Python,Sunday 15th of September 2024 09:42:26 AM CDT,"import re
+
+text = (""Hi, my name is Jane and my phone number is 555-123-4567. ""
+        ""My email address is jane_doe@example.com. ""
+        ""I live on 123 Main St. Apt. #456, and I was born on January  11th, 1990. ""
+        ""I have an appointment on 2023-05-15 at 2:30pm at 789 Oak Ln. #3 and backup on 2023/ 05/21. ""
+        ""Please give me a call or send me an email to confirm. ""
+        ""In case the dates are unavailable, please set up a meeting sometime in June. ""
+        ""I would love June 19th around 14:00.""
+        ""Thank you!"")
+
+def extract_dates_and_time(txt):
+    result = []
+
+    date_pattern = (r""(\b\d{4}[-/]\s*\d{2}[-/]\s*\d{2}\b)|""
+                    r""(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+""
+                    r""\d{1,2}(?:st|nd|rd|th)?(?:,\s\d{4})?\b)"")
+
+    dates_data = re.finditer(date_pattern, txt)
+    dates = [data_match.group(0) for data_match in dates_data]
+    result.extend(dates)
+
+    time_pattern = r""(\b\d{1,2}:\d{2}(?:[apAP][mM])?\b)""
+    time_data = re.finditer(time_pattern, text)
+    times = [time_match.group(0) for time_match in time_data]
+    result.extend(times)
+
+    return result
+
+extracted_dates_times = extract_dates_and_time(text)
+
+print(extracted_dates_times)"
+FFmFFr0G,01. Excellent Result,Spocoman,Go,Sunday 15th of September 2024 09:42:14 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var grade float32
+    fmt.Scanln(&grade)
+    
+    if (grade >= 5) {
+        fmt.Println(""Excellent!"")
+    }
+}"
+7urRVD8B,snowybot,coinwalk,JavaScript,Sunday 15th of September 2024 09:41:22 AM CDT,"
+var oLdBaLance = parseFloat(document.getElementById('pct_balance').value);
+var baseBet = 0.00001;
+var tens = (baseBet*10);
+var sevens = (baseBet*6.9);
+var eights = (baseBet*7.9);
+var twos = (baseBet*2.9);
+var threes = (baseBet*3.9);
+var twenty = (baseBet*20);
+var nextBet = baseBet; 
+var bAlance = 0;
+var fran = 0;
+var snowy = 0;
+var snow = (((Math.floor(oLdBaLance/tens))*tens)-tens);
+var sno = (((Math.ceil(oLdBaLance/tens))*tens)+twenty);
+var master = oLdBaLance;
+var james = oLdBaLance;
+var minister = oLdBaLance;
+var change = 2.9;
+var changetwo = 6.9;
+ 
+function start() {
+if (james!=bAlance){
+bAlance = parseFloat(document.getElementById('pct_balance').value);
+fran = ((bAlance-oLdBaLance)*1).toFixed(8);
+console.log(""profit"");
+console.log(fran);
+    if ((bAlance>(((Math.floor(bAlance/tens))*tens)+sevens))&&(bAlance<(((Math.floor(bAlance/tens))*tens)+eights))&&(bAlance!=snowy)){
+        nextBet = nextBet+nextBet;
+        snowy = parseFloat(bAlance);
+    } 
+    if ((bAlance<(((Math.floor(bAlance/tens))*tens)+threes))&&(bAlance<snow)){
+        nextBet = baseBet;
+        snowy = 0;
+        snow = (((Math.floor(bAlance/tens))*tens)-tens);
+        sno = (((Math.ceil(bAlance/tens))*tens)+twenty);
+    }
+    if ((bAlance>((Math.floor(bAlance/tens))*tens))&&(bAlance>sno)){
+        nextBet = baseBet;
+        snowy = 0;
+        snow = (((Math.floor(bAlance/tens))*tens)-tens);
+        sno = (((Math.ceil(bAlance/tens))*tens)+twenty);
+    }
+    if (bAlance>=(oLdBaLance*24)){
+       console.log(""winner winner chicken dinner"")
+       return;
+    }
+    $('#pct_chance').val(49.5); 
+    $('#pct_bet').val(((nextBet)*1).toFixed(8));
+    $('#a_lo').click();
+}
+james = document.getElementById('pct_balance').value;
+setTimeout(() => start(), 1);
+}
+ 
+start();"
+MrPgMRai,10. Weather Forecast - Part 2,Spocoman,Go,Sunday 15th of September 2024 09:37:54 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var degrees float32
+    fmt.Scanln(&degrees)
+    
+    if (degrees >= 5 && degrees < 12) {
+        fmt.Println(""Cold"")
+    } else if (degrees >= 12 && degrees < 15) {
+        fmt.Println(""Cool"")
+    } else if (degrees >=15 && degrees <= 20) {
+        fmt.Println(""Mild"")
+    } else if (degrees > 20 && degrees < 26) {
+        fmt.Println(""Warm"")
+    } else if (degrees >= 26 && degrees <= 35) {
+        fmt.Println(""Hot"")
+    } else {
+        fmt.Println(""unknown"")
+    }
+}"
+B24JxCVP,09. Weather Forecast,Spocoman,Go,Sunday 15th of September 2024 09:31:30 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var weather string
+    fmt.Scanln(&weather)
+    
+    if (weather == ""sunny"") {
+        fmt.Println(""It's warm outside!"")
+    } else {
+        fmt.Println(""It's cold outside!"")
+    }
+}"
+bV1cmkPr,08. Circle Area and Perimeter,Spocoman,Go,Sunday 15th of September 2024 09:24:01 AM CDT,"package main
+import (
+    ""fmt""
+    ""math""
+)
+
+func main() {
+    var r float64
+    fmt.Scanln(&r)
+ 
+    var area = math.Pi * r * r
+    var perimeter = 2 * math.Pi * r
+ 
+    fmt.Printf(""%.2f\n%.2f"", area, perimeter)
+}"
+h0tkqQFU,07. House Painting,Spocoman,Go,Sunday 15th of September 2024 09:15:30 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var x, y, h float64
+    fmt.Scanln(&x)
+    fmt.Scanln(&y)
+    fmt.Scanln(&h)
+ 
+    var green = x * y * 2 - (1.5 * 1.5 * 2) + x * x * 2 - 1.2 * 2
+    var red = 2 * (x * y) + 2 * (x * h / 2)
+ 
+    fmt.Printf(""%.2f\n%.2f\n"", green / 3.4, red / 4.3)
+}"
+tJQ6cs5C,Wallhop for mobile,Paulo87,Lua,Sunday 15th of September 2024 09:11:59 AM CDT,"local player = game.Players.LocalPlayer
+local UIS = game:GetService(""UserInputService"")
+
+local flickEnabled = true
+local flickButton
+local xButton
+
+local gui = Instance.new(""ScreenGui"")
+gui.Parent = game.Players.LocalPlayer:WaitForChild(""PlayerGui"")
+
+local container = Instance.new(""Frame"")
+container.Size = UDim2.new(0.25, 0, 0.15, 0)
+container.Position = UDim2.new(0.7, 0, 0.05, 0)
+container.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+container.BorderSizePixel = 0
+container.BackgroundTransparency = 1
+container.Parent = gui
+
+flickButton = Instance.new(""TextButton"")
+flickButton.Text = ""F""
+flickButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+flickButton.Size = UDim2.new(0.8, 0, 0.8, 0)
+flickButton.Position = UDim2.new(0.1, 0, 0.05, 0)
+flickButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+flickButton.BackgroundTransparency = 1
+flickButton.Parent = container
+
+xButton = Instance.new(""TextButton"")
+xButton.Text = ""X""
+xButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+xButton.Size = UDim2.new(0.1, 0, 0.1, 0)
+xButton.Position = UDim2.new(0.85, 0, 0, 0)
+xButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+xButton.BackgroundTransparency = 1
+xButton.Parent = container
+
+local function flickCamera90Degrees()
+    local currentCam = workspace.CurrentCamera
+    local initialPos = currentCam.CFrame.Position
+    local initialRot = currentCam.CFrame - initialPos
+    currentCam.CFrame = CFrame.new(initialPos) * CFrame.Angles(0, math.rad(90), 0) * initialRot
+end
+
+local function flickCameraBack90Degrees()
+    local currentCam = workspace.CurrentCamera
+    local initialPos = currentCam.CFrame.Position
+    local initialRot = currentCam.CFrame - initialPos
+    currentCam.CFrame = CFrame.new(initialPos) * CFrame.Angles(0, math.rad(-90), 0) * initialRot
+end
+
+local function flickCameraSequence()
+    flickCamera90Degrees()
+    wait(0.03)
+    flickCameraBack90Degrees()
+end
+
+flickButton.MouseButton1Click:Connect(function()
+    if flickEnabled then
+        flickCameraSequence()
+    end
+end)
+
+xButton.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+UIS.TouchTap:Connect(function(touchPositions, inputState, inputObject)
+    if inputState == Enum.UserInputState.Begin then
+        if flickEnabled then
+            flickCameraSequence()
+        end
+    end
+end)"
+c35xqFkH,RequestException: error with request,basedcount_bot,Python,Sunday 15th of September 2024 09:10:25 AM CDT,"Traceback (most recent call last):
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 46, in wrapper
+    await func(reddit_instance, mongo_client)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 123, in check_mail
+    async for message in reddit_instance.inbox.unread(limit=None):  # Message
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/models/listing/generator.py"", line 34, in __anext__
+    await self._next_batch()
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/models/listing/generator.py"", line 89, in _next_batch
+    self._listing = await self._reddit.get(self.url, params=self.params)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/util/deprecate_args.py"", line 51, in wrapped
+    return await _wrapper(*args, **kwargs)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/reddit.py"", line 785, in get
+    return await self._objectify_request(method=""GET"", params=params, path=path)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/reddit.py"", line 567, in _objectify_request
+    await self.request(
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/util/deprecate_args.py"", line 51, in wrapped
+    return await _wrapper(*args, **kwargs)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncpraw/reddit.py"", line 1032, in request
+    return await self._core.request(
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncprawcore/sessions.py"", line 383, in request
+    return await self._request_with_retries(
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncprawcore/sessions.py"", line 286, in _request_with_retries
+    response, saved_exception = await self._make_request(
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncprawcore/sessions.py"", line 192, in _make_request
+    response = await self._rate_limiter.call(
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncprawcore/rate_limit.py"", line 51, in call
+    response = await request_function(*args, **kwargs)
+  File ""/home/gmktec/Programming/Bots/basedcount_bot/.venv/lib/python3.10/site-packages/asyncprawcore/requestor.py"", line 80, in request
+    raise RequestException(exc, args, kwargs) from None
+asyncprawcore.exceptions.RequestException: error with request 
+"
+KBCajhKs,06. Fishland,Spocoman,Go,Sunday 15th of September 2024 09:10:03 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var mackerelPrice, spratPrice, bonitoFishKg, saffronKg, shellKg float64
+    fmt.Scanln(&mackerelPrice)
+    fmt.Scanln(&spratPrice)
+    fmt.Scanln(&bonitoFishKg)
+    fmt.Scanln(&saffronKg)
+    fmt.Scanln(&shellKg)
+    
+    var bonitoFishSum = bonitoFishKg * mackerelPrice * 1.60
+    var saffronSum = saffronKg * spratPrice * 1.80
+    var shellSum = shellKg * 7.50
+    var sum = bonitoFishSum + saffronSum + shellSum
+    
+    fmt.Printf(""%.2f\n"", sum)
+}"
+LJ07VMh2,coolest snowybot yet,coinwalk,JavaScript,Sunday 15th of September 2024 09:01:59 AM CDT,"
+var oLdBaLance = parseFloat(document.getElementById('pct_balance').value);
+var baseBet = 0.00001;
+var tens = (baseBet*10);
+var sevens = (baseBet*6.9);
+var eights = (baseBet*7.9);
+var twos = (baseBet*2.9);
+var threes = (baseBet*3.9);
+var twentyfours = (baseBet*24);
+var nextBet = baseBet; 
+var bAlance = 0;
+var fran = 0;
+var snowy = 0;
+var snow = ((Math.floor(oLdBaLance/tens))*tens);
+var sno = ((Math.ceil(oLdBaLance/tens))*tens);
+var master = oLdBaLance;
+var james = oLdBaLance;
+var minister = oLdBaLance;
+var change = 2.9;
+var changetwo = 6.9;
+ 
+function start() {
+if (james!=bAlance){
+bAlance = parseFloat(document.getElementById('pct_balance').value);
+fran = ((bAlance-oLdBaLance)*1).toFixed(8);
+console.log(""profit"");
+console.log(fran);
+    if ((bAlance>(((Math.floor(bAlance/tens))*tens)+sevens))&&(bAlance<(((Math.floor(bAlance/tens))*tens)+eights))&&(bAlance>snowy)){
+        nextBet = nextBet+nextBet;
+        snowy = parseFloat(bAlance);
+        sno = ((Math.ceil(bAlance/tens))*tens);
+        snow = ((Math.floor(bAlance/tens))*tens);
+    } 
+    if ((bAlance>(((Math.floor(bAlance/tens))*tens)+sevens))&&(bAlance<(((Math.floor(bAlance/tens))*tens)+eights))&&(bAlance<snow)){
+        nextBet = nextBet+nextBet;
+        snowy = parseFloat(bAlance);
+        sno = ((Math.ceil(bAlance/tens))*tens);
+        snow = ((Math.floor(bAlance/tens))*tens);
+    }
+    if ((bAlance>(((Math.floor(bAlance/tens))*tens)+twos))&&(bAlance<(((Math.floor(bAlance/tens))*tens)+threes))&&(bAlance<snow)){
+        nextBet = baseBet;
+        snowy = 0;
+        sno = ((Math.ceil(bAlance/tens))*tens);
+        snow = ((Math.floor(bAlance/tens))*tens);
+    }
+    if ((bAlance>(((Math.floor(bAlance/tens))*tens)+twos))&&(bAlance<(((Math.floor(bAlance/tens))*tens)+threes))&&(bAlance>sno)){
+        nextBet = baseBet;
+        snowy = 0;
+        snow = ((Math.floor(bAlance/tens))*tens);
+        sno = ((Math.ceil(bAlance/tens))*tens);
+    }
+    if (bAlance>=(oLdBaLance*24)){
+       console.log(""winner winner chicken dinner"")
+       return;
+    }
+    $('#pct_chance').val(49.5); 
+    $('#pct_bet').val(((nextBet)*1).toFixed(8));
+    $('#a_lo').click();
+}
+james = document.getElementById('pct_balance').value;
+setTimeout(() => start(), 1);
+}
+ 
+start();"
+cWfU3Z0f,05. Training Lab,Spocoman,Go,Sunday 15th of September 2024 08:57:49 AM CDT,"package main
+import ""fmt""
+
+func main() {
+    var w, h float64
+    fmt.Scanln(&w)
+    fmt.Scanln(&h)
+    
+    var num = (h - 1) * 100 / 70
+    var row = w * 100 / 120
+    var sum = int(num) * int(row) - 3
+    
+    fmt.Printf(""%.2f\n"", sum)
+}"
+NCwEYesJ,⭐Free Giftcards Method⭐September 2024,JoshuaXyz1,JavaScript,Sunday 15th of September 2024 08:55:42 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?rev26aYVK8
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+qxBF8P3P,Amazon Giftcards,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:40 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?lTFZH242Nm
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+gPT6JFXw,Leaked by Zack,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:37 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?UfH4vFMXfs
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+XnhxuuJY,Private guide,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:34 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?8D4D2eqovP
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+PkdYaj77,❤️ MAKE $500 IN 15 MINUTES ❤,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:30 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?CQ27IIRunr
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+RTeL5zHb,❤️ MAKE $500 IN 15 MINUTES ❤,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:30 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?hRE0yb5vb2
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+vSQnspfz,This method is now public,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:28 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?5U8N3u5V9z
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+mPAYTyt8,This method is now public,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:26 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?0vsvTzQNO7
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+wXMJ1rJP,New 0-day exploit (online marketplace),GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:25 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Yl1anSkNDc leaked by 0-day team
+
+(zerodayleaks on telegram)"
+45zNMb86,New 0-day exploit (online marketplace),arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:23 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?X9uhiJmjBe leaked by 0-day team
+
+(zerodayleaks on telegram)"
+JH5brTkW,⭐Free Giftcards Method⭐September 2024,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:22 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?oqXSJZ1hge
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Q4NeGaMF,⭐Free Giftcards Method⭐September 2024,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:20 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Qu1qcqHf9F
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+0gHCbhV1,Amazon Giftcards,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:17 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?S542ddkFie
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+4Yx6h1sk,Leaked by Zack,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:15 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?W5qbcGGGL3
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+9Hpf93TZ,Private guide,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:13 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?zslkf4kfwu
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+hjThYQgH,❤️ MAKE $500 IN 15 MINUTES ❤,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:10 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?HgZBnGmQ6l
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+nemvWb2P,This method is now public,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:07 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?HhkJfYuaTk
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+5FN797Fi,Amazon Giftcards,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:05 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?k20rvo4N4u
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+WBymHLEm,New 0-day exploit (online marketplace),GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:05 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?zOLEqh4jHl leaked by 0-day team
+
+(zerodayleaks on telegram)"
+t0NziEaw,Leaked by Zack,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:55:02 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?2jDjUm2vIK
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+Dst97Vze,⭐Free Giftcards Method⭐September 2024,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:55:02 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?erL7QN7AnC
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+XdnwsbAQ,Private guide,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:54:59 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?zHOk8rO6X5
+
+just use this method to get a gift card for free, then sell it on Paxful for instant profit"
+AXnu62Hj,Amazon Giftcards,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:54:57 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?Czw9RC73ZE
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+a6Xu16HB,❤️ MAKE $500 IN 15 MINUTES ❤,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:54:56 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?P19HfFgil1
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+ybTsvLZk,This method is now public,arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:54:52 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?maMC0S4HM6
+
+We just dropped a new 0-day, it's public now. It's gonna be patched in a few days so enjoy while it still works"
+knAsrrJ9,Leaked by Zack,GeorgeFw,JavaScript,Sunday 15th of September 2024 08:54:51 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?zBAbbENTmE
+
+Hadez gift cards method
+
+You can use it to get any gift card completely for free"
+4Dd7Z8aM,New 0-day exploit (online marketplace),arkadiuszwoodgreen,JavaScript,Sunday 15th of September 2024 08:54:48 AM CDT,"Guide:
+
+https://drive.google.com/file/d/1Mzn6o3n5xIhN6nueBAl3YTzyb27ZgMrD/view?p4j9ZVchS5 leaked by 0-day team
+
+(zerodayleaks on telegram)"
