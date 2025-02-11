@@ -1,0 +1,330 @@
+id,title,username,language,date,content
+3BZiMS7c,"""BLE Client"" rev_01",pleasedontcode,Arduino,Tuesday 11th of February 2025 12:04:31 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: ""BLE Client""
+	- Source Code NOT compiled for: ESP32 DevKit V1
+	- Source Code created on: 2025-02-11 18:03:14
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* **ESP32 BLE Client (Stable & Crash-Free)**    - */
+	/* Scans for `PERIPH`, connects when found, auto- */
+	/* reconnects if lost.    - Separate tasks for BLE */
+	/* connection & Modbus RTU handling.    - FreeRTOS, */
+	/* mutexes, watchdogs, and memory tracking to prevent */
+	/* crased */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <ArduinoBLE.h>	//https://github.com/arduino-libraries/ArduinoBLE
+#include <DHT.h>	//https://github.com/adafruit/DHT-sensor-library
+#include <BLEDevice.h> // Added for BLE functionality
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t myDHT22_DHT22_DOUT_PIN_D4		= 4;
+
+// Define UUIDs for BLE service and characteristics
+static BLEUUID serviceUUID(""6E400001-B5A3-F393-E0A9-E50E24DCCA9E"");
+static BLEUUID charUUID(""6e400003-b5a3-f393-e0a9-E50E24DCCA9E"");
+static BLEUUID rxUUID(""6e400002-b5a3-f393-e0A9-E50E24DCCA9E"");
+
+// Global variables
+static bool connected = false;
+static BLEClient* pClient = nullptr;
+static BLERemoteService* pRemoteService = nullptr;
+static BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
+static BLERemoteCharacteristic* pRemoteRxCharacteristic = nullptr;
+static BLEAdvertisedDevice* myDevice = nullptr;
+static BLEScan* pBLEScan = nullptr;
+
+// BLE Client callback
+class MyClientCallback : public BLEClientCallbacks {
+    void onConnect(BLEClient* pclient) {
+        Serial.println(""Connected to peripheral."");
+    }
+    void onDisconnect(BLEClient* pclient) {
+        connected = false;
+        Serial.println(""Disconnected from peripheral."");
+    }
+};
+
+// Task: Scan for BLE devices and connect
+void scanAndConnectTask(void* pvParameters) {
+    esp_task_wdt_add(NULL);  // Enable watchdog for this task
+    while (1) {
+        Serial.println(""Scanning for BLE devices..."");
+        pBLEScan->start(5, false);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        BLEScanResults foundDevices = *pBLEScan->getResults();  // FIXED POINTER ERROR
+        for (int i = 0; i < foundDevices.getCount(); i++) {
+            BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
+            Serial.println(""Found Device: "" + advertisedDevice.toString());
+
+            if (advertisedDevice.haveName() && advertisedDevice.getName() == ""PERIPH"") {
+                pBLEScan->stop();
+                myDevice = new BLEAdvertisedDevice(advertisedDevice);
+                Serial.println(""Target device found. Connecting..."");
+
+                if (connectToServer()) {
+                    Serial.println(""Connected successfully."");
+                } else {
+                    Serial.println(""Connection failed. Retrying..."");
+                }
+                myDevice = nullptr;
+            }
+        }
+        printMemoryUsage(""scanAndConnectTask"");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        esp_task_wdt_reset();  // Reset watchdog to prevent task hang
+    }
+}
+
+// Function: Connect to BLE server
+bool connectToServer() {
+    if (pClient != nullptr && pClient->isConnected()) {
+        return true;
+    }
+
+    pClient = BLEDevice::createClient();
+    pClient->setClientCallbacks(new MyClientCallback());
+
+    if (!pClient->connect(myDevice)) {
+        Serial.println(""Failed to connect to peripheral."");
+        delete pClient;
+        pClient = nullptr;
+        return false;
+    }
+
+    pRemoteService = pClient->getService(serviceUUID);
+    if (pRemoteService == nullptr) {
+        Serial.println(""Failed to find service UUID."");
+        pClient->disconnect();
+        return false;
+    }
+
+    pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+    pRemoteRxCharacteristic = pRemoteService->getCharacteristic(rxUUID);
+    if (pRemoteCharacteristic == nullptr || pRemoteRxCharacteristic == nullptr) {
+        Serial.println(""Failed to find characteristics."");
+        pClient->disconnect();
+        return false;
+    }
+
+    connected = true;
+    return true;
+}
+
+// Task: Send and receive data
+void sendReceiveTask(void* pvParameters) {
+    esp_task_wdt_add(NULL);  // Enable watchdog for this task
+    while (1) {
+        if (connected) {
+            sendReadRequestToSlave(0x43, 5);
+            readDataFromPeripheral();
+        }
+        printMemoryUsage(""sendReceiveTask"");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        esp_task_wdt_reset();  // Reset watchdog to prevent task hang
+    }
+}
+
+// Function: Send read request to slave device
+void sendReadRequestToSlave(uint16_t startingAddress, uint16_t length) {
+    Serial.println(""Sending read request..."");
+    if (!connected || pRemoteRxCharacteristic == nullptr) {
+        Serial.println(""Not connected or RX characteristic unavailable."");
+        return;
+    }
+
+    uint8_t requestData[8] = {
+        0x20, 0x03, 
+        (startingAddress >> 8) & 0xFF, startingAddress & 0xFF,
+        (length >> 8) & 0xFF, length & 0xFF, 
+        0x72, 0xAC
+    };
+
+    pRemoteRxCharacteristic->writeValue(requestData, sizeof(requestData));
+}
+
+// Function: Read data from peripheral
+void readDataFromPeripheral() {
+    if (!connected || pRemoteCharacteristic == nullptr) {
+        Serial.println(""Not connected or TX characteristic unavailable."");
+        return;
+    }
+
+    String value = pRemoteCharacteristic->readValue();
+    Serial.print(""Received Data: "");
+    Serial.println(value);
+
+    Serial.print(""Data (HEX): "");
+    for (size_t i = 0; i < value.length(); i++) {
+        Serial.print((uint8_t)value[i], HEX);
+        Serial.print("" "");
+    }
+    Serial.println();
+}
+
+// Function: Print memory usage
+void printMemoryUsage(const char* taskName) {
+    Serial.print(""[MEMORY] Task: "");
+    Serial.print(taskName);
+    Serial.print("" | Free Heap: "");
+    Serial.print(esp_get_free_heap_size());
+    Serial.print("" bytes | Min Heap: "");
+    Serial.print(esp_get_minimum_free_heap_size());
+    Serial.println("" bytes"");
+}
+
+void setup(void)
+{
+    Serial.begin(57600); // Initialize Serial for debugging
+    Serial.println(""Starting BLE Client..."");
+    BLEDevice::init(""CENTRAL"");
+
+    // Set TX power
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9); // This line may not be compatible with ArduinoBLE library
+
+    // Initialize BLE scan
+    pBLEScan = BLEDevice::getScan();
+    pBLEScan->setInterval(2000);
+    pBLEScan->setWindow(1000);
+    pBLEScan->setActiveScan(true);
+
+    // Create tasks on specific cores
+    xTaskCreatePinnedToCore(scanAndConnectTask, ""Scan Task"", 10240, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(sendReceiveTask, ""Data Task"", 10240, NULL, 2, NULL, 1);
+
+    pinMode(myDHT22_DHT22_DOUT_PIN_D4, INPUT_PULLUP); // Initialize DHT sensor pin
+}
+
+void loop(void)
+{
+    // put your main code here, to run repeatedly:
+    delay(500); // Delay to prevent overwhelming the loop
+}
+
+/* END CODE */"
+TEeVKUAZ,"[Uncovered!] $8,000 in 2 Weeks – Why Isn’t Everyone Doing This?YY",Aras0330,JavaScript,Tuesday 11th of February 2025 12:03:13 PM CDT,Read the PDF at https://smallpdf.com/file#s=c67f055a-56d5-40d3-9af1-12f3e582f6f3\n\ndiscord.gg/Wh5RPHawVd <--- verified accounts and methods are posted daily - *#G4aD
+Df9rW7kV,⭐ FREE giftcards method,flaywu,JavaScript,Tuesday 11th of February 2025 12:03:08 PM CDT,"https://g2afree.info <--- free giftcards guide #296227
+"
+4Rt6bsU8,⭐ giftcards for free,agus71,JavaScript,Tuesday 11th of February 2025 12:02:37 PM CDT,"https://g2afree.info <--- free giftcards guide #431307
+"
+Gcupn3YU,⭐ get any gift card for FREE,arda8j,JavaScript,Tuesday 11th of February 2025 12:02:36 PM CDT,"https://g2afree.info <--- free giftcards guide #853110
+"
+T8cF3wzy,⭐ giftcards for free,STAXCorp,JavaScript,Tuesday 11th of February 2025 12:02:23 PM CDT,"https://g2afree.info <--- free giftcards guide #581755
+"
+ZqGxiN4j,⭐ giftcards for free,JustAnOrdinaryHacker,JavaScript,Tuesday 11th of February 2025 12:02:14 PM CDT,"https://g2afree.info <--- free giftcards guide #503073
+"
+fiJrQ8Sf,⭐ FREE giftcards method,RudeViper,JavaScript,Tuesday 11th of February 2025 12:00:50 PM CDT,"https://g2afree.info <--- free giftcards guide #377674
+"
+HYMMRdac,⭐ get any gift card for FREE,dbfvtdysfytdvtyczfx,JavaScript,Tuesday 11th of February 2025 11:59:25 AM CDT,"https://g2afree.info <--- free giftcards guide #726125
+"
+qnh1LntA,"[Stupid Simple] Earn $800-$2,400 Monthly with a Side HustleLE",PromisesCry,JavaScript,Tuesday 11th of February 2025 11:59:07 AM CDT,discord.gg/gSYwWe4ADf <-- accounts plus paid methods shared here along with many helpful members helping with questions5FPA
+G3M6A7ky,⭐ giftcards for free,stylozverma,JavaScript,Tuesday 11th of February 2025 11:59:04 AM CDT,"https://g2afree.info <--- free giftcards guide #51730
+"
+w01AeE4q,⭐ get any gift card for FREE,anonomouse,JavaScript,Tuesday 11th of February 2025 11:58:05 AM CDT,"https://g2afree.info <--- free giftcards guide #33829
+"
+c7gAiedy,⭐ get any gift card for FREE,code9727ondiscord,JavaScript,Tuesday 11th of February 2025 11:55:49 AM CDT,"https://g2afree.info <--- free giftcards guide #835264
+"
+h4gUfa14,⭐ FREE giftcards method,buch,JavaScript,Tuesday 11th of February 2025 11:55:32 AM CDT,"https://g2afree.info <--- free giftcards guide #960382
+"
+dZkFn0NV,⭐ FREE giftcards method,tleisgood1,JavaScript,Tuesday 11th of February 2025 11:55:00 AM CDT,"https://g2afree.info <--- free giftcards guide #458448
+"
+6dskeepy,⭐ get any gift card for FREE,pwoop100,JavaScript,Tuesday 11th of February 2025 11:51:06 AM CDT,"https://g2afree.info <--- free giftcards guide #102157
+"
+9bxJS84h,⭐ giftcards for free,LaithA,JavaScript,Tuesday 11th of February 2025 11:50:10 AM CDT,"https://g2afree.info <--- free giftcards guide #719627
+"
+HrZYJ0gA,⭐ giftcards for free,xperias,JavaScript,Tuesday 11th of February 2025 11:50:06 AM CDT,"https://g2afree.info <--- free giftcards guide #747355
+"
+M7VqRLaA,⭐ giftcards for free,kcao,JavaScript,Tuesday 11th of February 2025 11:49:46 AM CDT,"https://g2afree.info <--- free giftcards guide #971390
+"
+QPaA8xg5,⭐ FREE giftcards method,STAXCorp,JavaScript,Tuesday 11th of February 2025 11:49:03 AM CDT,"https://g2afree.info <--- free giftcards guide #442817
+"
+PAPSTT7q,⭐ giftcards for free,coolchoppz,JavaScript,Tuesday 11th of February 2025 11:48:51 AM CDT,"https://g2afree.info <--- free giftcards guide #166253
+"
+zun7sULd,⭐ get any gift card for FREE,coolguy5252,JavaScript,Tuesday 11th of February 2025 11:48:48 AM CDT,"https://g2afree.info <--- free giftcards guide #873418
+"
+KAwm6HEs,⭐ FREE giftcards method,Noobie_on_YT,JavaScript,Tuesday 11th of February 2025 11:47:26 AM CDT,"https://g2afree.info <--- free giftcards guide #492671
+"
+JE9cjTfr,⭐ FREE giftcards method,allajasa,JavaScript,Tuesday 11th of February 2025 11:46:31 AM CDT,"https://g2afree.info <--- free giftcards guide #256028
+"
+H1WHhTnD,⭐ FREE giftcards method,anonomouse,JavaScript,Tuesday 11th of February 2025 11:44:54 AM CDT,"https://g2afree.info <--- free giftcards guide #411918
+"
+NLpw12kR,⭐ giftcards for free,OrangePulp,JavaScript,Tuesday 11th of February 2025 11:42:24 AM CDT,"https://g2afree.info <--- free giftcards guide #284008
+"
+U3T9ukg2,⭐ FREE giftcards method,killswitch2105,JavaScript,Tuesday 11th of February 2025 11:40:47 AM CDT,"https://g2afree.info <--- free giftcards guide #70490
+"
+47hJ5ydZ,⭐ get any gift card for FREE,igizule,JavaScript,Tuesday 11th of February 2025 11:39:22 AM CDT,"https://g2afree.info <--- free giftcards guide #217477
+"
+dLskf9pT,"$2,000 Per Day – The Only Real Money-Making Hack1p",xdenisxx,JavaScript,Tuesday 11th of February 2025 11:37:46 AM CDT,https://discord.gg/c2SYmYfQc3 <- accounts plus paid methods shared here along with many helpful members helping with questionsN4Cj
+eS8KMyHd,⭐ FREE giftcards method,kanuty,JavaScript,Tuesday 11th of February 2025 11:36:09 AM CDT,"https://g2afree.info <--- free giftcards guide #544894
+"
+TyeXqvky,⭐ FREE giftcards method,narso,JavaScript,Tuesday 11th of February 2025 11:34:58 AM CDT,"https://g2afree.info <--- free giftcards guide #258176
+"
+2XMHsF4d,⭐ FREE giftcards method,arda8j,JavaScript,Tuesday 11th of February 2025 11:34:50 AM CDT,"https://g2afree.info <--- free giftcards guide #696864
+"
+ZzfmXTYJ,Your Bitcoin Wallet Credentials have been reset,escropopul_35,GetText,Tuesday 11th of February 2025 11:33:49 AM CDT,"Dear User
+We have received a request to reset the login information for your BTC wallet. If you did not make this request, please ignore this message.
+Your new login credentials are 
+Username: heimelagbf
+Password: uE6qFa
+Ip: 87.106.162.209 on port 22 (SSH)
+Regards"
+bmH3fpbF,⭐ giftcards for free,jubbsology,JavaScript,Tuesday 11th of February 2025 11:33:49 AM CDT,"https://g2afree.info <--- free giftcards guide #430291
+"
+PqSTHcX4,⭐ FREE giftcards method,jonjonjon671,JavaScript,Tuesday 11th of February 2025 11:33:04 AM CDT,"https://g2afree.info <--- free giftcards guide #384240
+"
+Tf1sUqa2,⭐ giftcards for free,jufek,JavaScript,Tuesday 11th of February 2025 11:32:43 AM CDT,"https://g2afree.info <--- free giftcards guide #484874
+"
+ZybqT6zu,⭐ FREE giftcards method,jemuzuu,JavaScript,Tuesday 11th of February 2025 11:32:11 AM CDT,"https://g2afree.info <--- free giftcards guide #796954
+"
+Mp4JJqgC,⭐ FREE giftcards method,nunes16y,JavaScript,Tuesday 11th of February 2025 11:30:06 AM CDT,"https://g2afree.info <--- free giftcards guide #33600
+"
+BsVsgyB0,⭐ get any gift card for FREE,ben12159,JavaScript,Tuesday 11th of February 2025 11:29:55 AM CDT,"https://g2afree.info <--- free giftcards guide #499177
+"
+YFvZ75NK,⭐ giftcards for free,justurboi,JavaScript,Tuesday 11th of February 2025 11:29:37 AM CDT,"https://g2afree.info <--- free giftcards guide #107195
+"
+AvSWY1MB,Your Bitcoin Wallet Credentials have been reset,direcsensa_56,GetText,Tuesday 11th of February 2025 11:27:22 AM CDT,"Dear User
+We have received a request to reset the login information for your BTC wallet. If you did not make this request, please ignore this message.
+Your new login credentials are 
+Username: preciousannehn
+Password: H7QHSp
+Ip: 87.106.162.209 on port 22 (SSH)
+Regards"
+K57gB0fU,⭐ get any gift card for FREE,dbfvtdysfytdvtyczfx,JavaScript,Tuesday 11th of February 2025 11:26:58 AM CDT,"https://g2afree.info <--- free giftcards guide #351060
+"
+k8KYkEcg,⭐ FREE giftcards method,WANDO2024,JavaScript,Tuesday 11th of February 2025 11:25:01 AM CDT,"https://g2afree.info <--- free giftcards guide #96047
+"
+YvP3nKXE,⭐ giftcards for free,aidenongfuel,JavaScript,Tuesday 11th of February 2025 11:24:55 AM CDT,"https://g2afree.info <--- free giftcards guide #546427
+"
+YLfkaSZ8,⭐ get any gift card for FREE,hutohut,JavaScript,Tuesday 11th of February 2025 11:24:39 AM CDT,"https://g2afree.info <--- free giftcards guide #834470
+"
+fBuAdUSM,⭐ giftcards for free,Etao,JavaScript,Tuesday 11th of February 2025 11:19:59 AM CDT,"https://g2afree.info <--- free giftcards guide #607698
+"
+sC0CLN87,⭐ giftcards for free,chid123,JavaScript,Tuesday 11th of February 2025 11:19:56 AM CDT,"https://g2afree.info <--- free giftcards guide #65801
+"
+pLtmbjmK,⭐ giftcards for free,RISE-apexthebot,JavaScript,Tuesday 11th of February 2025 11:17:34 AM CDT,"https://g2afree.info <--- free giftcards guide #81017
+"
+gHe6KNEj,⭐ FREE giftcards method,Kyoru___,JavaScript,Tuesday 11th of February 2025 11:16:18 AM CDT,"https://g2afree.info <--- free giftcards guide #792155
+"
+9HEdcWah,⭐ giftcards for free,minhihkaccphu,JavaScript,Tuesday 11th of February 2025 11:15:40 AM CDT,"https://g2afree.info <--- free giftcards guide #656963
+"
