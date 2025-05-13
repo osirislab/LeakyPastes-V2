@@ -1,0 +1,4841 @@
+id,title,username,language,date,content
+xpjQJcUy,Leaked Accounts - Fresh Hits,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 07:03:15 AM CDT,79434 Accounts Posted On https://t.me/leakzbyeminem
+gtxCT8SS,Untitled,GamearooCodes,Lua,Tuesday 13th of May 2025 06:59:08 AM CDT,"-- === COMPONENT SETUP ===
+local component = require(""component"")
+local traffic = component.traffic_light_card
+local os = require(""os"")
+local thread = require(""thread"")
+local sides = require(""sides"")
+local colors = require(""colors"")
+local rs = component.redstone
+
+-- === BULB DEFINITIONS ===
+BULBS = {
+  RED = ""Red"", YELLOW = ""Yellow"", GREEN = ""Green"",
+  RED_LEFT = ""RedArrowLeft"", YELLOW_LEFT = ""YellowArrowLeft"", GREEN_LEFT = ""GreenArrowLeft"",
+  RED_RIGHT = ""RedArrowRight"", YELLOW_RIGHT = ""YellowArrowRight"", GREEN_RIGHT = ""GreenArrowRight"",
+  CROSS = ""Cross"", DONT_CROSS = ""DontCross"",
+  STRAIGHT_RED = ""StraightRed"", STRAIGHT_YELLOW = ""StraightYellow"", STRAIGHT_GREEN = ""StraightGreen"",
+  RED_UTURN = ""RedArrowUTurn"", YELLOW_UTURN = ""YellowArrowUTurn"", GREEN_UTURN = ""GreenArrowUTurn"",
+  YELLOW_LEFT2 = ""YellowArrowLeft2"", YELLOW_RIGHT2 = ""YellowArrowRight2"", YELLOW_UTURN2 = ""YellowArrowUTurn2""
+}
+
+-- === MOVEMENT SHORTCUTS ===
+MOVEMENT_BULBS = {
+  straight = {
+    GREEN = BULBS.GREEN,
+    YELLOW = BULBS.YELLOW,
+    RED = BULBS.RED
+  },
+  leftTurn = {
+    GREEN = BULBS.GREEN_LEFT,
+    YELLOW = BULBS.YELLOW_LEFT,
+    RED = BULBS.RED_LEFT
+  },
+  rightTurn = {
+    GREEN = BULBS.GREEN_RIGHT,
+    YELLOW = BULBS.YELLOW_RIGHT,
+    RED = BULBS.RED_RIGHT
+  },
+  uTurn = {
+    GREEN = BULBS.GREEN_UTURN,
+    YELLOW = BULBS.YELLOW_UTURN,
+    RED = BULBS.RED_UTURN
+  }
+}
+
+-- === TRAFFIC LIGHTS AND SENSORS ===
+local trafficLight = traffic.listBlockPos()
+local sensorList = traffic.listSensors()
+local phases = {}
+local pedestrianTriggers = {}
+local faultActive = false
+
+-- === LIGHT CONTROL ===
+function clearAllLights()
+  for _, pos in ipairs(trafficLight) do
+    traffic.clearStates(pos[1], pos[2], pos[3])
+  end
+end
+
+function setLights(id,state,mode,forceClear)
+  -- F is the boolean for Flashing, S is the boolean for Steady/On
+  local f = false
+  local s = false
+
+  --  Clear signal if flag to forceClear isn't set to false
+  if forceClear ~= false then
+    if (type(id) == ""table"") then
+      for itr = 1, #id do
+        traffic.clearStates(trafficLight[id[itr]][1],trafficLight[id[itr]][2],trafficLight[id[itr]][3])
+      end
+    elseif (type(id) == ""string"") then
+      traffic.clearStates(trafficLight[id][1],trafficLight[id][2],trafficLight[id][3])
+    end
+  end
+
+  --  Determine mode
+  if mode ~= nil then
+    --    Flashing
+    if string.lower(mode) == ""flash"" then
+      s = true
+      f = true
+    --   Steady
+    elseif string.lower(mode) == ""on"" then
+      s = true
+      f = false
+      --    Off
+    else
+      s = false
+      f = false
+    end
+  else
+    s = false
+    f = false
+  end
+
+  --  Apply to signal
+  if (type(id) == ""table"" and state ~= nil) then
+    for itr = 1, #id do
+      traffic.setState(trafficLight[id[itr]][1],trafficLight[id[itr]][2],trafficLight[id[itr]][3],state,s,f)
+    end
+
+  elseif (type(id) == ""string"" and state ~= nil) then
+    traffic.setState(trafficLight[id][1],trafficLight[id][2],trafficLight[id][3],state,s,f)
+  end
+end
+
+function setLight(group, colorKey, mode, bulbsMap)
+  local steady = mode == ""on""
+  local flashing = mode == ""flash""
+
+  for _, idx in ipairs(group) do
+    local pos = trafficLight[idx]
+    local bulbSet = bulbsMap and bulbsMap[idx]
+    local targetBulb = bulbSet and bulbSet[colorKey:upper()]
+    if targetBulb then
+      traffic.setState(pos[1], pos[2], pos[3], targetBulb, false, false)
+      traffic.setState(pos[1], pos[2], pos[3], targetBulb, steady, flashing)
+    end
+  end
+end
+
+function allRed(duration)
+  duration = duration or 1
+  for _, pos in ipairs(trafficLight) do
+    traffic.clearStates(pos[1], pos[2], pos[3])
+    traffic.setState(pos[1], pos[2], pos[3], BULBS.RED, true, false)
+    traffic.setState(pos[1], pos[2], pos[3], BULBS.RED_LEFT, true, false)
+    traffic.setState(pos[1], pos[2], pos[3], BULBS.RED_RIGHT, true, false)
+    traffic.setState(pos[1], pos[2], pos[3], BULBS.STRAIGHT_RED, true, false)
+  end
+  os.sleep(duration)
+end
+
+function isSensorTripped(ids, w, h, l)
+  w, h, l = w or 1, h or 1, l or 1
+  for _, idx in ipairs(ids) do
+    local pos = sensorList[idx]
+    if pos and traffic.isSensorTripped(pos[1], pos[2], pos[3], w, h, l) then
+      return true
+    end
+  end
+  return false
+end
+
+function checkManualInputs()
+  local bundle = rs.getBundledInput(sides.back)
+  faultActive = bundle[colors.orange] and bundle[colors.orange] > 0
+end
+
+function setBundledOutput(color, value)
+  rs.setBundledOutput(sides.back, {[color] = value})
+end
+
+-- === PHASE REGISTRATION ===
+function setPhase(data)
+  local id = #phases + 1
+  local speed = data.speedLimit or 40
+  local yellowTime = math.max(3, math.ceil(speed / 20))
+  local redTime = data.isLeftTurn and 2 or 1
+local alwaysOn = false
+   if data.maxTime == nil and data.alwaysOn == nil then
+    alwaysOn = true
+  else
+    alwaysOn = data.alwaysOn or false
+  end
+
+  phases[id] = {
+    id = id,
+    behavior = data.behavior or {},
+    sensors = data.sensors or {},
+    minTime = data.minTime or 10,
+    maxTime = data.manTime,
+    alwaysOn = alwaysOn,
+    yellowTime = yellowTime,
+    redTime = redTime,
+    speedLimit = speed,
+    forceColor = data.forceColor,
+    always = data.always or false
+  }
+end
+
+
+
+function otherPhaseWantsToRun(currentId)
+  local bundle = rs.getBundledInput(sides.back)
+  for _, p in ipairs(phases) do
+    if p.id ~= currentId then
+      if p.forceColor and bundle[p.forceColor] and bundle[p.forceColor] > 0 then return true end
+      if p.sensors and #p.sensors > 0 and isSensorTripped(p.sensors, 2,4,2) then return true end
+    end
+  end
+  return false
+end
+
+
+-- === FAULT MODE ===
+function runFaultMode()
+  print(""[FAULT MODE] Flashing lights..."")
+  while faultActive do
+    clearAllLights()
+    setLight({1, 2}, ""Yellow"", ""flash"")
+    setLight({3}, ""Red"", ""flash"")
+    setLight({4, 5}, ""Red"", ""flash"")
+    os.sleep(1)
+    checkManualInputs()
+  end
+  clearAllLights()
+  print(""[FAULT CLEARED]"")
+end
+function isPhaseTriggered(phase, bundle)
+  if phase.always then return true end
+  if phase.forceColor and bundle[phase.forceColor] and bundle[phase.forceColor] > 0 then return true end
+  if phase.sensors and #phase.sensors > 0 and isSensorTripped(phase.sensors, 2,4,2) then return true end
+  return false
+end
+
+
+-- === MAIN PHASE LOOP ===
+function runPhases()
+  allRed(2)
+
+  while true do
+    checkManualInputs()
+    if faultActive then runFaultMode() end
+
+    local bundle = rs.getBundledInput(sides.back)
+
+    for _, phase in ipairs(phases) do
+      checkManualInputs()
+      if faultActive then break end
+
+      local active = false
+      local ped = pedestrianTriggers[phase.id]
+
+      if phase.always then
+        active = true
+      elseif phase.forceColor and bundle[phase.forceColor] and bundle[phase.forceColor] > 0 then
+        active = true
+      elseif phase.sensors and #phase.sensors > 0 and isSensorTripped(phase.sensors, 2,4,2) then
+        active = true
+      elseif ped and bundle[ped.color] and bundle[ped.color] > 0 then
+        active = true
+      end
+
+      if active then
+        print(""[PHASE] Green for phase "" .. phase.id)
+        for _, action in ipairs(phase.behavior.green or {}) do action() end
+
+        local elapsed = 0
+        local minTime = phase.minTime or phase.greenTime or 10
+        local maxTime = phase.maxTime or phase.greenTime or 10
+        local isAlways = phase.alwaysOn == true
+        local wasInterrupted = false
+
+        -- Wait minimum green time
+        while elapsed < minTime do
+          os.sleep(1)
+          elapsed = elapsed + 1
+        end
+
+        -- Extended green time logic
+        while true do
+          checkManualInputs()
+          bundle = rs.getBundledInput(sides.back)
+
+          if isAlways then
+            if otherPhaseWantsToRun(phase.id) then
+              wasInterrupted = true
+              break
+            end
+          else
+            if not isPhaseTriggered(phase, bundle) then
+              wasInterrupted = true
+              break
+            end
+            if elapsed >= maxTime then break end
+          end
+
+          os.sleep(1)
+          elapsed = elapsed + 1
+        end
+
+        -- Only run yellow/red if it was interrupted or not alwaysOn
+        if wasInterrupted or not isAlways then
+          if ped and bundle[ped.color] and bundle[ped.color] > 0 then
+            print(""[PEDESTRIAN] Crosswalk active"")
+            for _, action in ipairs(phase.behavior.red or {}) do action() end
+            setBundledOutput(ped.color, 255)
+            os.sleep(ped.time)
+            setBundledOutput(ped.color, 0)
+          end
+
+          for _, action in ipairs(phase.behavior.yellow or {}) do action() end
+          os.sleep(phase.yellowTime)
+
+          for _, action in ipairs(phase.behavior.red or {}) do action() end
+          os.sleep(phase.redTime)
+        end
+      end
+    end
+
+    os.sleep(0.1)
+  end
+end
+
+
+
+
+
+
+
+
+-- === EXAMPLE PHASE SETUP ===
+
+-- phase 1
+setPhase({
+  sensors = {1, 3},
+  minTime = 10,
+  maxTime = 25, 
+  speedLimit = 35,
+  forceColor = colors.pink,
+  isLeftTurn = true,
+  behavior = {
+    green = {
+      function() setLights({1}, ""GreenArrowLeft"", ""on"") end,
+      function() setLights({2,3}, ""Green"", ""on"") end,
+      function() setLights(7, ""GreenArrowRight"", ""on"", false) end
+    },
+    yellow = {
+      function() setLights(7, ""GreenArrowRight"", ""off"", false) end,
+      function() setLights(7, ""YellowArrowRight"", ""on"", false) end,
+      function() setLights({1}, ""YellowArrowLeft"", ""on"") end,
+    },
+    red = {
+     function() setLights(7, ""YellowArrowRight"", ""off"", false) end,
+     
+      function() setLights({1}, ""RedArrowLeft"", ""on"") end,
+    }
+  }
+})
+
+
+
+setPhase({
+  
+  minTime = 30,
+  alwaysOn = true,
+  speedLimit = 35,
+  always = true,
+  behavior = {
+    green = {
+    
+      function() setLights({2,3, 4,5}, ""Green"", ""on"") end,
+      
+    },
+    yellow = {
+      function() setLights({2,3, 4,5}, ""Yellow"", ""on"") end,
+    },
+    red = {
+    function() setLights({2,3, 4,5}, ""Red"", ""on"") end,
+    }
+  }
+})
+
+
+
+setPhase({
+  sensors = {2},
+  minTime = 10,
+  maxTime = 15, 
+  speedLimit = 25,
+  forceColor = colors.lime,
+  behavior = {
+    green = {
+    
+      function() setLights({6,7}, ""Green"", ""on"") end,
+      
+    },
+    yellow = {
+      function() setLights({6,7}, ""Yellow"", ""on"") end,
+    },
+    red = {
+    function() setLights({6,7}, ""Red"", ""on"") end,
+    }
+  }
+})
+
+-- === START ===
+print(""Starting traffic controller..."")
+thread.create(function() local ok, err = pcall(runPhases) if not ok then print(""ERR:"", err) end end)
+while true do os.sleep(1) end
+"
+uW352kuk,Untitled,Irvannandika,Python,Tuesday 13th of May 2025 06:51:09 AM CDT,"import random
+import requests as reqs
+from requests.auth import HTTPBasicAuth
+import json
+import urllib3
+import sys
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+probability=100
+if len(sys.argv) > 1:
+    probability = int(sys.argv[1].replace(""%"",""""))
+
+balls=calculation=45  # 6 out of *45* or 6 out of *49*
+possible_tips=1
+for ball in [6,5,4,3,2,1]: # at 6 out 45 will calculate 8145060 possible tips
+    possible_tips=possible_tips*(balls/calculation)
+    calculation-=1
+
+tip=[]
+calculate_tip=0
+hardware=False
+loop=True
+while loop:
+    if hardware:
+        data = {'command': 'getrandom', 'numbers': 10000}
+        response = reqs.post('https://192.168.178.63/n200/web/postv1',data,
+                             auth=('admin','admin'), verify=False)
+        if response.status_code == 200:
+            results = json.loads(response.text)
+            randoms=int(len(results['result'])/2)
+            rand=bytes.fromhex(results['result'])
+        else:
+            print(""Error no more random numbers!"")
+            break
+    else:
+        randoms=10000
+        rand = random.randbytes(randoms)
+
+    for i in range(randoms):
+        if rand[i] >= balls*5:  # Correcting the entropy
+            continue
+        number=(rand[i]%balls)+1
+        if number not in tip:
+            tip.append(zahl)
+        if len(tip) >= 6:
+            tip.sort()
+            for number in tip:
+                print(f""{number} "",end='')
+            print()
+            calculate_tip+=1
+            tip=[]
+            if calculate_tip > possible_tips/(probability/100):
+                loop=False
+                break"
+00eeh1P1,Chaturbate with Tokens,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 06:47:54 AM CDT,52788 Accounts Posted On https://t.me/leakzbyeminem
+n9tqC1GM,fusion_reactor_main,DubSlime,Lua,Tuesday 13th of May 2025 06:39:18 AM CDT,"local modem = peripheral.find(""modem"") or error(""No modem attached"")
+rednet.open(peripheral.getName(modem))
+local monitor = peripheral.find(""monitor"")
+monitor.setTextScale(0.5)
+local w, h = monitor.getSize()
+
+local state = {
+  plasmaTemp = 0,
+  casingTemp = 0,
+  energyOutput = 0,
+  deuterium = 0,
+  tritium = 0,
+  amplifier = 0,
+  laserReady = false,
+  efficiency = 0,
+  status = ""Unknown"",
+  logs = {}
+}
+
+local function log(msg)
+  table.insert(state.logs, 1, os.time() .. "": "" .. msg)
+  if #state.logs > 10 then table.remove(state.logs) end
+end
+
+local function draw()
+  monitor.clear()
+  monitor.setCursorPos(1,1)
+  monitor.write(""=== Fusion Reactor Dashboard ==="")
+  monitor.setCursorPos(1,3)
+  monitor.write(""Plasma Temp: "" .. math.floor(state.plasmaTemp) .. ""K"")
+  monitor.setCursorPos(1,4)
+  monitor.write(""Casing Temp: "" .. math.floor(state.casingTemp) .. ""K"")
+  monitor.setCursorPos(1,5)
+  monitor.write(""Output: "" .. math.floor(state.energyOutput) .. "" FE/t"")
+  monitor.setCursorPos(1,6)
+  monitor.write(""Efficiency: "" .. string.format(""%.2f%%"", state.efficiency * 100))
+  monitor.setCursorPos(1,7)
+  monitor.write(""Status: "" .. state.status)
+  monitor.setCursorPos(1,8)
+  monitor.write(""Fuel - D: "" .. state.deuterium .. "" | T: "" .. state.tritium)
+  monitor.setCursorPos(1,9)
+  monitor.write(""Amplifier: "" .. math.floor(state.amplifier / 1e6) .. ""M J"")
+  monitor.setCursorPos(1,10)
+  monitor.write(""Laser Ready: "" .. tostring(state.laserReady))
+  
+  monitor.setCursorPos(w - 22, 10)
+  monitor.write(""[IGNITE]"")
+  monitor.setCursorPos(w - 11, 10)
+  monitor.write(""[SHUTDOWN]"")
+
+  monitor.setCursorPos(1, 12)
+  monitor.write(""Logs:"")
+  for i = 1, math.min(10, #state.logs) do
+    monitor.setCursorPos(1, 12 + i)
+    monitor.write(state.logs[i])
+  end
+end
+
+local function handleClick(x, y)
+  if y == 10 then
+    if x >= w - 22 and x <= w - 14 and state.laserReady then
+      rednet.broadcast(""ignite"", ""fusion_control"")
+      log(""Laser ignition triggered!"")
+    elseif x >= w - 11 and x <= w - 2 then
+      rednet.broadcast(""shutdown"", ""fusion_control"")
+      log(""Shutdown command sent!"")
+    end
+  end
+end
+
+parallel.waitForAny(
+  function() -- receive data
+    while true do
+      local id, msg, proto = rednet.receive(""fusion_monitor"")
+      if msg.type == ""reactor"" then
+        state.plasmaTemp = msg.plasmaTemp
+        state.casingTemp = msg.casingTemp
+        state.energyOutput = msg.energyOutput
+        state.efficiency = msg.efficiency or 0
+        state.status = msg.status or ""Unknown""
+        state.deuterium = msg.fuel.deuterium
+        state.tritium = msg.fuel.tritium
+      elseif msg.type == ""laser"" then
+        state.amplifier = msg.energy
+        state.laserReady = msg.ready
+      elseif msg.type == ""fuel"" then
+        state.deuterium = msg.deuterium
+        state.tritium = msg.tritium
+      end
+      draw()
+    end
+  end,
+  function() -- handle monitor clicks
+    while true do
+      local event, side, x, y = os.pullEvent(""monitor_touch"")
+      handleClick(x, y)
+    end
+  end
+)"
+LcmFEfqa,Crypto Accounts,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 06:32:32 AM CDT,34678 Accounts Posted On https://t.me/leakzbyeminem
+rBpVSJa7,fusion_reactor_slave,DubSlime,Lua,Tuesday 13th of May 2025 06:31:39 AM CDT,"local modem = peripheral.find(""modem"") or error(""No modem attached"")
+rednet.open(peripheral.getName(modem))
+
+local reactor = peripheral.find(""fusionReactorLogicAdapter"") or error(""No fusion reactor logic adapter found"")
+
+while true do
+  local data = {
+    type = ""reactor"",
+    plasmaTemp = reactor.getPlasmaTemperature(),
+    caseTemp = reactor.getCaseTemperature(),
+    energyOutput = reactor.getPassiveGeneration(),
+    efficiency = reactor.getEfficiency(),
+    status = reactor.getStatus(),
+    fuel = {
+      deuterium = reactor.getDeuterium(),
+      tritium = reactor.getTritium()
+    }
+  }
+  rednet.broadcast(data, ""fusion_monitor"")
+  sleep(2)
+end
+"
+GPRLhpbM,fred.config,joerichter42,Bash,Tuesday 13th of May 2025 06:17:54 AM CDT,"time_limit: 50
+"
+Wabcmngb,PayPal with Balance,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 06:17:11 AM CDT,90508 Accounts Posted On https://t.me/leakzbyeminem
+beF7n5yE,Leaked Accounts - Fresh Hits,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 06:01:49 AM CDT,79370 Accounts Posted On https://t.me/leakzbyeminem
+b5ajgdqE,dataNone,TestGuy1,JSON,Tuesday 13th of May 2025 06:00:05 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '29f2c55ec9a4df91351162e25b397e994511fc82d3bfdde7a2c7be7d4cf4430fbdeb42e2f12b2a4ca7e488a6f963f468f8363ded1a3b5d81f2b715a18694eb68bacb9132c7a107d72b5c7f7177a170b1f9763b128b88203c8ad0c23a782a2b86eefb65b6f100615969a2f15ee3a0793c6d46e1056d11bdbc5090bb6f1ebdf141',
+  otherdata: [
+    'af71c910b0e89f141e55ba5eac89d2dc',
+    '4824e51073577b497a35320deba5c6bb',
+    '94b8ce009cbb4ae399f43fa0bcb23cf6',
+    'f86cdabfa556a0c7d518a8cd514b6e45',
+    '37e159437ddba7ea4721ce0b987081e3',
+    'e072cc38e967eabcbe0a7d3911a15670',
+    '481c9be6ee499d7fcf4619ba6a484499',
+    'f13185c67df8404acf5e295d302ff8b1'
+  ]
+}"
+CxHp2crX,Ubuntu - restart pulseaudio,infologica,Bash,Tuesday 13th of May 2025 05:54:32 AM CDT,"ps -ef|grep audio
+3670    3653  1 04:59 ?        00:08:42 /usr/bin/pulseaudio --daemonize=no --log-target=journal
+sudo kill -9 3670
+pulseaudio -k
+
+"
+ukrj966E,Chaturbate with Tokens,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 05:46:27 AM CDT,46317 Accounts Posted On https://t.me/leakzbyeminem
+zDi5VqgH,Crypto Accounts,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 05:31:04 AM CDT,07277 Accounts Posted On https://t.me/leakzbyeminem
+gBSy1t6T,PayPal with Balance,Xp_Isolation,JavaScript,Tuesday 13th of May 2025 05:15:42 AM CDT,04303 Accounts Posted On https://t.me/leakzbyeminem
+3sc1uFRk,TeleportToLocation Rotation,jezzye13,C++,Tuesday 13th of May 2025 05:12:55 AM CDT,"GetPlayerController()->SetControlRotation(DebugLocationActor->GetActorRotation());
+			
+const UWorld* World = GetWorld();
+if (World == nullptr) return;
+APlayerController* PlayerCharacter = Cast<APlayerController>(UGameplayStatics::GetPlayerController(World, 0));
+			
+if (PlayerCharacter != nullptr) return;
+PlayerCharacter->SetCharacterRotation(DebugLocation->GetActorRotation(), false);"
+isAtxU1C,Disable delete comment for non-admin 7.0.4.1,ghenzdeveloper,PHP,Tuesday 13th of May 2025 04:56:47 AM CDT,"add_filter('peepso_activity_comment_actions', function ($acts)
+{
+    static $call_count = 0;
+    $call_count++;
+
+    if ($call_count === 2) {
+
+        if (!PeepSo::is_admin()) {
+            unset($acts['delete']);
+        }
+    }
+
+    return $acts;
+}, 10, 1);"
+xun8Bca3,Armstrong Number[Range],Realratnadwip,C,Tuesday 13th of May 2025 04:54:30 AM CDT,"#include <stdio.h>
+#include <conio.h>
+#include <math.h>
+#include <stdlib.h>
+
+void main()
+{
+  long int i, up, down, num, bnum, count, sum, digit, expo, flag = 0;
+  system(""cls"");
+  printf(""This is a simple program to print Aarmstrong Number.\n\n"");
+  printf(""Enter The upper range : "");
+  scanf(""%ld"",&up);
+  printf(""Enter The lower range : "");
+  scanf(""%ld"", &down);
+  system(""cls"");
+  printf(""Armstrong-Numbers in ascending order.\n\n"");
+  for (i = down; i <= up; i++)
+  {
+    num = i;
+    bnum = i;
+    count = 1;
+    while (bnum / 10 != 0)
+    {
+      bnum = bnum / 10;
+      count++;
+    }  
+    sum = 0;
+    while (num > 0)
+    {
+      digit = num % 10;
+      expo = pow(digit,count);
+      sum = sum + expo;
+      num = num / 10;
+    }
+    if (sum == i)
+    {      
+      printf(""%ld\n"", i);
+      flag++;
+    }
+  }
+  if (flag == 0)
+  {
+    system(""cls"");
+    printf(""There is no Armstrong-Number in this range."");
+  }
+  else
+  {
+    printf(""\nThere is total '%ld' Armstrong-Number in this range."", flag);
+  }
+  printf(""\n\n\n"");
+  system(""pause"");
+}"
+Pqv1BZNb,Armstrong Number,Realratnadwip,C,Tuesday 13th of May 2025 04:52:25 AM CDT,"#include <stdio.h>
+#include <conio.h>
+#include <stdlib.h>
+
+void main()
+{
+	int num, bnum, i, j, count, sum, rem, power;
+	
+	printf(""This is a simple program to check Armstrong Number.\n\n"");
+	printf(""Enter The number to check : "");
+	scanf(""%d"",&num);
+
+	bnum = num;
+	count = 0;
+	while (bnum  != 0)
+	{
+	    count++;
+		bnum = bnum / 10;
+	}
+	sum = 0;
+	
+	bnum = num;
+	
+	for(i = 1; i <= count; i++)
+	{
+	    rem = bnum % 10;
+	    power = 1;
+	    for(j = 1; j <= count; j++)
+	    {
+	        power = power * rem;
+	    }
+	    sum = sum + power;
+	    bnum = bnum / 10;
+	}
+	
+	if(sum == num)
+	{
+	    printf(""%d - is a Armstrong Number."", num);
+	}
+	else
+	{
+	    printf(""%d - is not a Armstrong Number."", num);
+	}
+	
+}"
+gkedm4cn,Sum of numbers from 1 to user-defined limit,AkaruiKuraku,Java,Tuesday 13th of May 2025 04:03:19 AM CDT,"//this thing has two version, the other one is at the bottom
+
+import java.util.Scanner;
+public class AkaruiKuraku {
+    
+    public static void main(String []args) {
+        Scanner choice = new Scanner(System.in);
+        int what;
+        int number;
+        
+        do {
+            System.out.println(""\nSum of numbers from 1 to a user defined limit"");
+            System.out.println(""\nChoose what method to use:"");
+            System.out.println(""1 - For loop"");
+            System.out.println(""2 - While loop"");
+            System.out.println(""3 - Do loop"");
+            System.out.println(""\n4 - Exit\n"");
+            System.out.print(""Input: "");
+            what = checkInputType(choice);
+            choice.nextLine();
+            
+            if (what < 5 && what >= 1 && what != 4) {
+            System.out.print(""\nEnter number limit: "");
+            number = checkInputType(choice);
+            choice.nextLine();
+            } else if (what == 4) {
+                System.out.print(""..."");
+                break;
+            } else {
+                System.out.println(""\nInvalid, try again.\n"");
+                continue;
+            }
+            
+            int result;
+            switch (what) {
+                case 1:
+                    result = limitCalcMethod1(number);
+                    System.out.println(""\nResult: "" + result);
+                    break;
+                case 2:
+                    result = limitCalcMethod2(number);
+                    System.out.println(""\nResult: "" + result);
+                    break;
+                case 3:
+                    result = limitCalcMethod3(number);
+                    System.out.println(""\nResult: "" + result);
+                    break;
+            }
+        } while (what != 4);
+        
+        choice.close();
+    }
+    static int limitCalcMethod1(int number) {
+        int i;
+        int con = 0;
+        for (i = 1; i <= number; i++) {
+            con += i;
+        }
+        return con;
+    }
+    static int limitCalcMethod2(int number) {
+        int i = 1;
+        int con = 0;
+        while (i <= number) {
+            con += i;
+            i++;
+        }
+        return con;
+    }
+    static int limitCalcMethod3(int number) {
+        int i = 1;
+        int con = 0;
+        do {
+            con += i;
+            i++;
+        } while (i <= number);
+        return con;
+    }
+    static int checkInputType(Scanner choice) {
+        while (true) {
+            if (choice.hasNextInt()) {
+                return choice.nextInt();
+            } 
+            else {
+                System.out.println(""Invalid type, please try again."");
+                choice.next();
+            }
+        }
+    }
+}
+
+//optimized ver. below
+
+import java.util.Scanner;
+
+public class AkaruiKuraku {
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        int choice;
+        int number;
+
+        while (true) {
+            printMenu();
+            choice = getValidInput(scanner);
+
+            if (choice == 4) {
+                System.out.println(""Exiting..."");
+                break;
+            }
+
+            if (choice >= 1 && choice <= 3) {
+                System.out.print(""\nEnter number limit: "");
+                number = getValidInput(scanner);
+
+                int result;
+                result = calculateSum(choice, number);
+                System.out.println(""\nResult: "" + result);
+            } else {
+                System.out.println(""\nInvalid, try again.\n"");
+            }
+        }
+
+        scanner.close();
+    }
+
+    static void printMenu() {
+        System.out.println(""\nSum of numbers from 1 to a user defined limit"");
+        System.out.println(""\nChoose what method to use:"");
+        System.out.println(""1 - For loop"");
+        System.out.println(""2 - While loop"");
+        System.out.println(""3 - Do loop"");
+        System.out.println(""\n4 - Exit\n"");
+        System.out.print(""Input: "");
+    }
+
+    static int calculateSum(int method, int number) {
+        int sum = 0;
+        switch (method) {
+            case 1:
+                for (int i = 1; i <= number; i++) {
+                    sum += i;
+                }
+                break;
+            case 2:
+                int i = 1;
+                while (i <= number) {
+                    sum += i;
+                    i++;
+                }
+                break;
+            case 3:
+                i = 1;
+                do {
+                    sum += i;
+                    i++;
+                } while (i <= number);
+                break;
+        }
+        return sum;
+    }
+
+    static int getValidInput(Scanner scanner) {
+        while (!scanner.hasNextInt()) {
+            System.out.println(""Invalid type, please try again."");
+            scanner.next();
+        }
+        return scanner.nextInt();
+    }
+}
+"
+7Z094pqB,InMemoryHistoryManager,DenisKokoko,Java,Tuesday 13th of May 2025 03:43:27 AM CDT,"import java.util.ArrayList;
+import java.util.HashMap;
+
+public class InMemoryHistoryManager implements HistoryManager{
+    private final HashMap<Integer, Node<Task>> history = new HashMap<>();
+    private final NestedLinkedHashMap nestedLinkedHashMap = new NestedLinkedHashMap();
+
+    @Override
+    public void add(Task task){
+        Task temporaryTask = task.clone();
+        int taskId = temporaryTask.getId();
+        if (history.containsKey(taskId)) {
+            removeNode(history.get(taskId));
+        }
+        nestedLinkedHashMap.linkLast(task);
+    }
+
+    @Override
+    public void remove(int id) {
+        history.remove(id);
+    }
+
+    public void removeNode(Node<Task> node) {
+        if (node != null){
+            history.remove(node.data.getId(), node);
+        }
+    }
+
+    @Override
+    public ArrayList<Task> getHistory() {
+        return getTasks();
+    }
+
+    private static class Node<T extends Task>{
+        private final T data;
+        private Node<T> prev;
+        private Node<T> next;
+        public Node(T data, Node<T> prev, Node<T> next){
+            this.data = data;
+            this.prev = prev;
+            this.next = next;
+        }
+    }
+
+    private class NestedLinkedHashMap{
+        private void linkLast(Task task){
+            if (!history.isEmpty()){
+                Node<Task> prev = history.get(history.size()-1);
+                Node<Task> taskNode = new Node<>(task, prev, null);
+                history.put(task.getId(), taskNode);
+                } else {
+                Node<Task> taskNode = new Node<>(task, null, null);
+                history.put(task.getId(), taskNode);
+                }
+            }
+        }
+
+        private ArrayList<Task> getTasks(){
+            ArrayList<Task> tasks = new ArrayList<>();
+            Task temporaryTask = null;
+            for(Node<Task> node : history.values()){
+                temporaryTask = node.data.clone();
+                tasks.add(temporaryTask);
+            }
+            return tasks;
+        }
+}"
+E5xJvJ6h,Chao Inventory,Cakey3101,Lua,Tuesday 13th of May 2025 03:37:58 AM CDT,"local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local RunService = game:GetService(""RunService"")
+local TweenService = game:GetService(""TweenService"")
+local UserInputService = game:GetService(""UserInputService"")
+
+local TweenGui = require(script.Parent.TweenGui)
+local Module3D = require(ReplicatedStorage.Libs.Module3D)
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player.PlayerGui
+
+local OpenButton = PlayerGui:WaitForChild(""Main"").Right.Chaos
+
+local Gui = PlayerGui:WaitForChild(""ChaoInventory"")
+local Frame = Gui.Frame
+
+local Exit = Frame.Exit
+
+local PetsEquippedLabel = Frame.PetsEquipped
+
+local Info = Frame.Info
+local DisplayPet = Info.DisplayPet
+local EquipButton = Info.Equip
+local DeleteButton = Info.Delete
+
+local PetNameDisplayInfo = Info.PetName
+
+local Container = Frame.Container
+
+local SelectedTemplate = nil
+
+local function OnEquip()
+	if SelectedTemplate ~= nil then
+		if SelectedTemplate:FindFirstChild(""Equipped"").Value == false then
+			local Result = ReplicatedStorage.Remotes.Chaos.EquipChao:InvokeServer(SelectedTemplate.Name)
+
+			if Result == ""Equip"" then
+				Info.Visible = true
+				SelectedTemplate.Checkmark.Visible = true
+				SelectedTemplate.LayoutOrder = -1
+				EquipButton.Title.Text = ""Unequip""
+				EquipButton.BackgroundColor3 = Color3.fromRGB(232, 70, 70)
+				SelectedTemplate:FindFirstChild(""Equipped"").Value = true
+			elseif Result == ""Unequip"" then
+				SelectedTemplate.Checkmark.Visible = false
+				SelectedTemplate.LayoutOrder = 0
+				Info.Visible = true
+				EquipButton.Title.Text = ""Equip""
+				EquipButton.BackgroundColor3 = Color3.fromRGB(70, 232, 70)
+				SelectedTemplate:FindFirstChild(""Equipped"").Value = false
+			end
+		else
+			local Result = ReplicatedStorage.Remotes.Chaos.UnequipChao:InvokeServer(SelectedTemplate.Name)
+
+			if Result == true then
+				SelectedTemplate.Checkmark.Visible = false
+				SelectedTemplate.LayoutOrder = 0
+				Info.Visible = true
+				EquipButton.Title.Text = ""Equip""
+				EquipButton.BackgroundColor3 = Color3.fromRGB(70, 232, 70)
+				SelectedTemplate:FindFirstChild(""Equipped"").Value = false
+			end
+		end
+	end
+end
+
+local function DeletePet()
+	if SelectedTemplate ~= nil then
+		ReplicatedStorage.Remotes.Chaos.DeleteChao:FireServer(SelectedTemplate.Name)
+		
+		SelectedTemplate:Destroy()
+		SelectedTemplate = nil
+		Info.Visible = false
+	end
+end
+
+local function TemplatePressed(Template)
+	SelectedTemplate = Template
+	if SelectedTemplate:FindFirstChild(""Equipped"").Value == true then
+		SelectedTemplate.Checkmark.Visible = true
+		SelectedTemplate.LayoutOrder = -1
+		Info.Visible = true
+		EquipButton.Title.Text = ""Unequip""
+		EquipButton.BackgroundColor3 = Color3.fromRGB(232, 70, 70)
+	else
+		SelectedTemplate.Checkmark.Visible = false
+		SelectedTemplate.LayoutOrder = 0
+		Info.Visible = true
+		EquipButton.Title.Text = ""Equip""
+		EquipButton.BackgroundColor3 = Color3.fromRGB(70, 232, 70)
+	end
+	PetNameDisplayInfo.Text = Template.Name
+
+	for i, v in pairs(DisplayPet:GetChildren()) do
+		if v:IsA(""ViewportFrame"") then
+			v:Destroy()
+		end
+	end
+
+	Info.RingMultiplier.Text = `X{ReplicatedStorage.Chaos:FindFirstChild(Template.Name, true).RingMultiplier.Value}`
+
+	local ChaoModel = Module3D:Attach3D(DisplayPet, ReplicatedStorage.Chaos:FindFirstChild(Template.Name, true):Clone())
+	ChaoModel:SetDepthMultiplier(1.2)
+	ChaoModel.Camera.FieldOfView = 5
+	ChaoModel.Visible = true
+
+	RunService.PreRender:Connect(function()
+		ChaoModel:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+	end)
+end
+
+_G.NewTemplate = function(ChaoName)
+	local NewTemplate = Container.Template:Clone()
+	NewTemplate.Name = ChaoName
+	NewTemplate.Visible = true
+	NewTemplate.Parent = Container
+
+	local ChaoModel = Module3D:Attach3D(NewTemplate.Display, ReplicatedStorage.Chaos:FindFirstChild(ChaoName, true):Clone())
+	ChaoModel:SetDepthMultiplier(1.2)
+	ChaoModel.Camera.FieldOfView = 5
+	ChaoModel.Visible = true
+
+	RunService.PreRender:Connect(function()
+		ChaoModel:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+	end)
+
+	NewTemplate.MouseButton1Click:Connect(function()
+		TemplatePressed(NewTemplate)
+	end)
+end
+
+OpenButton.MouseButton1Click:Connect(function()
+	if Gui.Enabled == true then
+		TweenGui.CloseGui(Gui, Frame)
+	else
+		TweenGui.OpenGui(Gui, Frame)
+	end
+end)
+
+Exit.MouseButton1Click:Connect(function()
+	TweenGui.CloseGui(Gui, Frame)
+end)
+
+EquipButton.MouseButton1Click:Connect(function()
+	OnEquip()
+end)
+
+DeleteButton.MouseButton1Click:Connect(function()
+	DeletePet()
+end)
+
+task.wait(2)
+
+for _, Chao in Player:WaitForChild(""Chaos""):GetChildren() do
+	_G.NewTemplate(Chao.Name)
+end
+
+while task.wait(0.05) do
+	pcall(function()
+		PetsEquippedLabel.Text = `{#workspace.PlayerChaos:FindFirstChild(Player.Name):GetChildren()} / {Player.Values.MaxChaosEquipped.Value} Chaos Equipped!`
+	end)
+end"
+4M9J5C7v,Eggs System Client,Cakey3101,Lua,Tuesday 13th of May 2025 03:37:35 AM CDT,"local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local RunService = game:GetService(""RunService"")
+local Players = game:GetService(""Players"")
+local TweenService = game:GetService(""TweenService"")
+local UserInputService = game:GetService(""UserInputService"")
+local MarketPlaceService = game:GetService(""MarketplaceService"")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player.PlayerGui
+
+local Module3D = require(ReplicatedStorage.Libs.Module3D)
+
+local Gui = PlayerGui:WaitForChild(""Eggs"")
+local EggBillboardsFolder = Gui.EggBillboards
+
+local ChaosFolder = ReplicatedStorage:WaitForChild(""Chaos"")
+local Eggs = workspace:WaitForChild(""Eggs"")
+
+local MaxDisplayDistance = 15
+local CanHatch = false
+local IsHatching = false
+local HatchOneConnection = nil
+local CannotOpenBillboard = false
+local Cooldown = false
+
+local function AnimateBillboard(Billboard: BillboardGui, Open: boolean)
+	if Open == true then
+		local Tween = TweenService:Create(Billboard, TweenInfo.new(0.1), {Size = UDim2.fromScale(5, 7)})
+		Tween:Play()
+	else
+		local Tween = TweenService:Create(Billboard, TweenInfo.new(0.1), {Size = UDim2.fromScale(0, 0)})
+		Tween:Play()
+		Tween.Completed:Connect(function()
+			task.wait(0.2)
+			Billboard.Enabled = false
+		end)
+	end
+
+	task.wait(0.5)
+end
+
+local function ToggleAllScreenGuis(Bool: boolean)
+	if Bool == false then
+		for i, v in PlayerGui:GetChildren() do
+			if v.Name ~= ""Eggs"" then
+				v.Enabled = false
+			end
+		end
+	else
+		for i, v in PlayerGui:GetChildren() do
+			if v.Name == ""Main"" or v.Name == ""Eggs"" then
+				v.Enabled = true
+			end
+		end
+	end
+end
+
+local function DisableAllBillboards()
+	CannotOpenBillboard = true
+	for i, v in pairs(EggBillboardsFolder:GetChildren()) do
+		if v:IsA(""BillboardGui"") then
+			AnimateBillboard(v, false)
+		end
+	end
+end
+
+local function EnableAllBillboards()
+	CannotOpenBillboard = false
+	for i, v in pairs(EggBillboardsFolder:GetChildren()) do
+		if v:IsA(""BillboardGui"") then
+			AnimateBillboard(v, true)
+		end
+	end
+end
+
+for i, v in pairs(Eggs:GetChildren()) do
+	local EggChaos = ChaosFolder:FindFirstChild(v.Name)
+
+	if EggChaos ~= nil then
+		local BillboardTemplate = script.Template:Clone()
+		local Container = BillboardTemplate:WaitForChild(""Container"")
+		local MainFrame = Container:WaitForChild(""MainFrame"")
+		local Template = MainFrame:WaitForChild(""Template"")
+		local Display = Template:WaitForChild(""Display"")
+
+		BillboardTemplate.Parent = EggBillboardsFolder
+		BillboardTemplate.Name = v.Name
+		BillboardTemplate.Adornee = v:WaitForChild(""EggMesh"")
+		BillboardTemplate.Enabled = true
+
+		local Chaos = {}
+
+		for x, Chao in pairs(EggChaos:GetChildren()) do
+			table.insert(Chaos, Chao.Rarity.Value)
+		end
+
+		table.sort(Chaos)
+
+		for i = 1, math.floor(#Chaos / 2) do
+			local j = #Chaos - i + 1
+			Chaos[i], Chaos[j] = Chaos[j], Chaos[i]
+		end
+
+		for x, c in pairs(Chaos) do
+			print(c)
+		end
+
+		for _, Rarity in pairs(Chaos) do
+			for _, Chao in pairs(EggChaos:GetChildren()) do
+				if Chao.Rarity.Value == Rarity then
+					local Rarity = Chao.Rarity
+
+					local ClonedTemplate = Template:Clone()
+
+					ClonedTemplate.Name = Chao.Name
+					ClonedTemplate.Rarity.Text = `{tostring(Chao.Rarity.Value)}%`
+					ClonedTemplate.Visible = true
+					ClonedTemplate.Parent = MainFrame
+
+					local ChaoModel = Module3D:Attach3D(ClonedTemplate.Display, Chao:Clone())
+					ChaoModel:SetDepthMultiplier(1.2)
+					ChaoModel.Camera.FieldOfView = 5
+					ChaoModel.Visible = true
+
+					RunService.PreRender:Connect(function()
+						ChaoModel:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+					end)
+
+					break
+				else
+					continue
+				end
+			end
+
+			RunService.PreRender:Connect(function()
+				if Player:DistanceFromCharacter(v.EggMesh.PrimaryPart.Position) < MaxDisplayDistance then
+					if CannotOpenBillboard == false then
+						BillboardTemplate.Enabled = true
+						AnimateBillboard(BillboardTemplate, true)
+					end
+				else
+					if CannotOpenBillboard == false then
+						AnimateBillboard(BillboardTemplate, false)
+					end
+				end
+			end)
+		end
+	end
+end
+
+local function HatchOne(ChaoName, Egg)
+	spawn(function()
+		DisableAllBillboards()
+	end)
+	ToggleAllScreenGuis(false)
+	
+	workspace:WaitForChild(""Camera"").CameraType = Enum.CameraType.Scriptable
+	TweenService:Create(workspace:WaitForChild(""Camera""), TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, false, 0), {CFrame = Egg:FindFirstChild(""CameraPart"").CFrame}):Play()
+	
+	Gui.PetDisplay.PetName.Text = ChaoName
+
+	local Chao = ChaosFolder:FindFirstChild(Egg.Name):FindFirstChild(ChaoName):Clone()
+	IsHatching = true
+
+	local EggMesh = Egg:FindFirstChild(""EggMesh""):Clone()
+
+	for i, v in pairs(EggMesh:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			v.Anchored = true
+			v.CanCollide = false
+		end
+	end
+
+	HatchOneConnection = RunService.PreRender:Connect(function()
+		local cframe = CFrame.new(0, 0, -EggMesh.PrimaryPart.Size.Z * 2) * CFrame.Angles(0, 0, math.sin(time() * 18) / 2.3)
+		EggMesh.PrimaryPart.CFrame = workspace.Camera.CFrame * cframe
+	end)
+
+	EggMesh.Parent = workspace.Camera
+
+	task.wait(3)
+
+	for i, v in pairs(EggMesh:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			TweenService:Create(v, TweenInfo.new(0.5), {Transparency = 1}):Play()
+		end
+	end
+
+	task.wait(0.5)
+	HatchOneConnection:Disconnect()
+	EggMesh:Destroy()
+
+	Gui.PetDisplay.Visible = true
+
+	local ChaoModel = Module3D:Attach3D(Gui.PetDisplay, Chao)
+	ChaoModel:SetDepthMultiplier(1.2)
+	ChaoModel.Camera.FieldOfView = 5
+	ChaoModel.Visible = true
+
+	RunService.PreRender:Connect(function()
+		ChaoModel:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+	end)
+
+	task.wait(3)
+
+	TweenService:Create(Gui.PetDisplay:FindFirstChildOfClass(""ViewportFrame""), TweenInfo.new(0.5), {ImageTransparency = 1}):Play()
+	task.wait(0.5)
+
+	for i, v in pairs(Gui.PetDisplay:GetDescendants()) do
+		if v:IsA(""ViewportFrame"") then
+			v:Destroy()
+		end
+	end
+
+	Gui.PetDisplay.Visible = false
+
+	IsHatching = false
+
+	spawn(function()
+		EnableAllBillboards()
+	end)
+	ToggleAllScreenGuis(true)
+	_G.NewTemplate(ChaoName)
+	workspace:WaitForChild(""Camera"").CameraType = Enum.CameraType.Follow
+end
+
+local function TripleHatch(ChaoName, ChaoName2, ChaoName3, Egg)
+	spawn(function()
+		DisableAllBillboards()
+	end)
+	ToggleAllScreenGuis(false)
+	
+	workspace:WaitForChild(""Camera"").CameraType = Enum.CameraType.Scriptable
+	TweenService:Create(workspace:WaitForChild(""Camera""), TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, false, 0), {CFrame = Egg:FindFirstChild(""CameraPart"").CFrame}):Play()
+
+	local Chao = ChaosFolder[Egg.Name]:FindFirstChild(ChaoName):Clone()
+	local Chao2 = ChaosFolder[Egg.Name]:FindFirstChild(ChaoName2):Clone()
+	local Chao3 = ChaosFolder[Egg.Name]:FindFirstChild(ChaoName3):Clone()
+
+	Gui.PetDisplay.PetName.Text = ChaoName
+	Gui.PetDisplay2.PetName.Text = ChaoName2
+	Gui.PetDisplay3.PetName.Text = ChaoName3
+
+	IsHatching = true
+
+	local EggMesh = Egg:FindFirstChild(""EggMesh""):Clone()
+	local EggMesh2 = Egg:FindFirstChild(""EggMesh""):Clone()
+	local EggMesh3 = Egg:FindFirstChild(""EggMesh""):Clone()
+
+	for i, v in pairs(EggMesh:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			v.Anchored = true
+			v.CanCollide = false
+		end
+	end
+
+	for i, v in pairs(EggMesh2:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			v.Anchored = true
+			v.CanCollide = false
+		end
+	end
+
+	for i, v in pairs(EggMesh3:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			v.Anchored = true
+			v.CanCollide = false
+		end
+	end
+
+	HatchOneConnection = RunService.PreRender:Connect(function()
+		local cframe = CFrame.new(0, 0, -EggMesh.PrimaryPart.Size.Z * 2) * CFrame.Angles(0, 0, math.sin(time() * 18) / 2.3)
+		local cframe2 = CFrame.new(6, 0, -EggMesh.PrimaryPart.Size.Z * 2) * CFrame.Angles(0, 0, math.sin(time() * 18) / 2.3)
+		local cframe3 = CFrame.new(-6, 0, -EggMesh.PrimaryPart.Size.Z * 2) * CFrame.Angles(0, 0, math.sin(time() * 18) / 2.3)
+		EggMesh.PrimaryPart.CFrame = workspace.Camera.CFrame * cframe
+		EggMesh2.PrimaryPart.CFrame = workspace.Camera.CFrame * cframe2
+		EggMesh3.PrimaryPart.CFrame = workspace.Camera.CFrame * cframe3
+	end)
+
+	EggMesh.Parent = workspace.Camera
+	EggMesh2.Parent = workspace.Camera
+	EggMesh3.Parent = workspace.Camera
+
+	task.wait(3)
+
+	for i, v in pairs(EggMesh:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			TweenService:Create(v, TweenInfo.new(0.5), {Transparency = 1}):Play()
+		end
+	end
+
+	for i, v in pairs(EggMesh2:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			TweenService:Create(v, TweenInfo.new(0.5), {Transparency = 1}):Play()
+		end
+	end
+
+	for i, v in pairs(EggMesh3:GetChildren()) do
+		if v:IsA(""BasePart"") then
+			TweenService:Create(v, TweenInfo.new(0.5), {Transparency = 1}):Play()
+		end
+	end
+
+	task.wait(0.5)
+	HatchOneConnection:Disconnect()
+	EggMesh:Destroy()
+	EggMesh2:Destroy()
+	EggMesh3:Destroy()
+
+	Gui.PetDisplay.Visible = true
+	Gui.PetDisplay2.Visible = true
+	Gui.PetDisplay3.Visible = true
+
+	local ChaoModel = Module3D:Attach3D(Gui.PetDisplay, Chao)
+	ChaoModel:SetDepthMultiplier(1.2)
+	ChaoModel.Camera.FieldOfView = 5
+	ChaoModel.Visible = true
+
+	local ChaoModel2 = Module3D:Attach3D(Gui.PetDisplay2, Chao2)
+	ChaoModel2:SetDepthMultiplier(1.2)
+	ChaoModel2.Camera.FieldOfView = 5
+	ChaoModel2.Visible = true
+
+	local ChaoModel3 = Module3D:Attach3D(Gui.PetDisplay3, Chao3)
+	ChaoModel3:SetDepthMultiplier(1.2)
+	ChaoModel3.Camera.FieldOfView = 5
+	ChaoModel3.Visible = true
+
+	RunService.PreRender:Connect(function()
+		ChaoModel:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+		ChaoModel2:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+		ChaoModel3:SetCFrame(CFrame.Angles(0, tick() * 2 % (math.pi * 2), 0) * CFrame.Angles(math.rad(-10), 0, 0))
+	end)
+
+	task.wait(3)
+
+	TweenService:Create(Gui.PetDisplay:FindFirstChildOfClass(""ViewportFrame""), TweenInfo.new(0.5), {ImageTransparency = 1}):Play()
+	TweenService:Create(Gui.PetDisplay2:FindFirstChildOfClass(""ViewportFrame""), TweenInfo.new(0.5), {ImageTransparency = 1}):Play()
+	TweenService:Create(Gui.PetDisplay3:FindFirstChildOfClass(""ViewportFrame""), TweenInfo.new(0.5), {ImageTransparency = 1}):Play()
+
+	task.wait(0.5)
+
+	for i, v in pairs(Gui.PetDisplay:GetDescendants()) do
+		if v:IsA(""ViewportFrame"") then
+			v:Destroy()
+		end
+	end
+
+	for i, v in pairs(Gui.PetDisplay2:GetDescendants()) do
+		if v:IsA(""ViewportFrame"") then
+			v:Destroy()
+		end
+	end
+
+	for i, v in pairs(Gui.PetDisplay3:GetDescendants()) do
+		if v:IsA(""ViewportFrame"") then
+			v:Destroy()
+		end
+	end
+
+	Gui.PetDisplay.Visible = false
+	Gui.PetDisplay2.Visible = false
+	Gui.PetDisplay3.Visible = false
+
+	IsHatching = false
+
+	spawn(function()
+		EnableAllBillboards()
+	end)
+	ToggleAllScreenGuis(true)
+	_G.NewTemplate(ChaoName)
+	_G.NewTemplate(ChaoName2)
+	_G.NewTemplate(ChaoName3)
+
+	workspace:WaitForChild(""Camera"").CameraType = Enum.CameraType.Follow
+end
+
+UserInputService.InputBegan:Connect(function(Input: InputObject, GameProcessedEvent: boolean)
+	if GameProcessedEvent then return end
+
+	if Input.KeyCode == Enum.KeyCode.E then
+		if Player.Character ~= nil and IsHatching == false then
+			local NearestEgg
+			local PlayerPosition = Player.Character:WaitForChild(""HumanoidRootPart"").Position
+
+			for i, v in pairs(Eggs:GetChildren()) do
+				if NearestEgg == nil then
+					NearestEgg = v
+				else
+					if (PlayerPosition - v:WaitForChild(""EggMesh"").Position).Magnitude < (NearestEgg:WaitForChild(""EggMesh"").Position - PlayerPosition).Magnitude then
+						NearestEgg = v
+					end
+				end
+			end
+
+			if Player:DistanceFromCharacter(NearestEgg.EggMesh.PrimaryPart.CFrame.Position) < MaxDisplayDistance then
+				CanHatch = true
+			else
+				CanHatch = false
+			end
+
+			if CanHatch == true then
+				local Result = ReplicatedStorage:WaitForChild(""Remotes"").Chaos.HatchServer:InvokeServer(NearestEgg)
+
+				if Result ~= ""Cannot Hatch"" then
+					if not Cooldown then
+						Cooldown = true
+						HatchOne(Result, NearestEgg)
+						task.wait(0.1)
+						Cooldown = false
+					end
+				else
+					print(""Cannot Hatch"")
+				end	
+			end
+		end
+	end
+
+	if Input.KeyCode == Enum.KeyCode.R then
+		if Player.Character ~= nil and IsHatching == false then
+			local NearestEgg
+			local PlayerPosition = Player.Character:WaitForChild(""HumanoidRootPart"").Position
+
+			for i, v in pairs(Eggs:GetChildren()) do
+				if NearestEgg == nil then
+					NearestEgg = v
+				else
+					if (PlayerPosition - v:WaitForChild(""EggMesh"").Position).Magnitude < (NearestEgg:WaitForChild(""EggMesh"").Position - PlayerPosition).Magnitude then
+						NearestEgg = v
+					end
+				end
+			end
+
+			if Player:DistanceFromCharacter(NearestEgg.EggMesh.PrimaryPart.CFrame.Position) < MaxDisplayDistance then
+				CanHatch = true
+			else
+				CanHatch = false
+			end
+
+			if CanHatch == true then
+				local Result1, Result2, Result3 = ReplicatedStorage:WaitForChild(""Remotes"").Chaos.Hatch3Chaos:InvokeServer(NearestEgg)
+
+				if Result1 ~= ""The Player Does Not Own The Gamepass"" and Result2 ~= nil and Result3 ~= nil then
+					if not Cooldown then
+						Cooldown = true
+						TripleHatch(Result1, Result2, Result3, NearestEgg)
+						task.wait(0.1)
+						Cooldown = false
+					end
+				elseif Result1 == ""The Player Does Not Own The Gamepass"" then
+					MarketPlaceService:PromptGamePassPurchase(Player, 1209923362)
+				end	
+			end
+		end
+	end
+end)
+
+for i, v in pairs(EggBillboardsFolder:GetChildren()) do
+	local EButton = v.Container.Buttons.E
+	local RButton = v.Container.Buttons.R
+
+	EButton.MouseButton1Click:Connect(function()
+		local NearestEgg
+		local PlayerPosition = Player.Character:WaitForChild(""HumanoidRootPart"").Position
+
+		for i, v in pairs(Eggs:GetChildren()) do
+			if NearestEgg == nil then
+				NearestEgg = v
+			else
+				if (PlayerPosition - v:WaitForChild(""EggMesh"").Position).Magnitude < (NearestEgg:WaitForChild(""EggMesh"").Position - PlayerPosition).Magnitude then
+					NearestEgg = v
+				end
+			end
+		end
+
+		if Player:DistanceFromCharacter(NearestEgg.EggMesh.PrimaryPart.CFrame.Position) < MaxDisplayDistance then
+			CanHatch = true
+		else
+			CanHatch = false
+		end
+
+		if CanHatch == true then
+			local Result = ReplicatedStorage:WaitForChild(""Remotes"").Chaos.HatchServer:InvokeServer(NearestEgg)
+
+			if Result ~= ""Cannot Hatch"" then
+				if not Cooldown then
+					Cooldown = true
+					HatchOne(Result, NearestEgg)
+					task.wait(0.1)
+					Cooldown = false
+				end
+			else
+				print(""Cannot Hatch"")
+			end	
+		end
+	end)
+	
+	RButton.MouseButton1Click:Connect(function()
+		if Player.Character ~= nil and IsHatching == false then
+			local NearestEgg
+			local PlayerPosition = Player.Character:WaitForChild(""HumanoidRootPart"").Position
+
+			for i, v in pairs(Eggs:GetChildren()) do
+				if NearestEgg == nil then
+					NearestEgg = v
+				else
+					if (PlayerPosition - v:WaitForChild(""EggMesh"").Position).Magnitude < (NearestEgg:WaitForChild(""EggMesh"").Position - PlayerPosition).Magnitude then
+						NearestEgg = v
+					end
+				end
+			end
+
+			if Player:DistanceFromCharacter(NearestEgg.EggMesh.PrimaryPart.CFrame.Position) < MaxDisplayDistance then
+				CanHatch = true
+			else
+				CanHatch = false
+			end
+
+			if CanHatch == true then
+				local Result1, Result2, Result3 = ReplicatedStorage:WaitForChild(""Remotes"").Chaos.Hatch3Chaos:InvokeServer(NearestEgg)
+
+				if Result1 ~= ""The Player Does Not Own The Gamepass"" and Result2 ~= nil and Result3 ~= nil then
+					if not Cooldown then
+						Cooldown = true
+						TripleHatch(Result1, Result2, Result3, NearestEgg)
+						task.wait(0.1)
+						Cooldown = false
+					end
+				elseif Result1 == ""The Player Does Not Own The Gamepass"" then
+					MarketPlaceService:PromptGamePassPurchase(Player, 1209923362)
+				end	
+			end
+		end
+	end)
+end"
+hqBSXvkQ,Egg System Server,Cakey3101,Lua,Tuesday 13th of May 2025 03:37:15 AM CDT,"local Players = game:GetService(""Players"")
+local ServerStorage = game:GetService(""ServerStorage"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local MarketPlaceService = game:GetService(""MarketplaceService"")
+local DataStoreService = game:GetService(""DataStoreService"")
+
+local DataStore = DataStoreService:GetDataStore(""EggsSystem1"")
+
+local function PlayerAdded(Player: Player)
+	for i, v in pairs(ServerStorage.EggHatchingData:GetChildren()) do
+		v:Clone().Parent = Player
+	end
+
+	if MarketPlaceService:UserOwnsGamePassAsync(Player.UserId, 1209923362) then
+		Player.Values:FindFirstChild(""CanTripleHatch"").Value = true
+	end
+
+	local Data = DataStore:GetAsync(Player.UserId..""Chaos"")
+
+	if Data ~= nil then
+		for i, v in pairs(Data) do
+			local Val = Instance.new(""StringValue"", Player.Chaos)
+			Val.Name = v
+		end
+	end
+end
+
+local function PlayerRemoving(Player: Player)
+	local Chaos = {}
+
+	for i, v in pairs(Player.Chaos:GetChildren()) do
+		table.insert(Chaos, v.Name)
+	end
+
+	DataStore:SetAsync(Player.UserId..""Chaos"", Chaos)
+end
+
+local function ChooseChao(Egg)
+	local Chance = math.random(1, 100)
+	local Counter = 0
+	for _, Chao in pairs(ReplicatedStorage.Chaos[Egg.Name]:GetChildren()) do
+		Counter = Counter + Chao.Rarity.Value
+		if Chance <= Counter then
+			return Chao.Name
+		end
+	end
+end
+
+ReplicatedStorage.Remotes.Chaos.HatchServer.OnServerInvoke = function(Player, Egg)
+	local EggModel = workspace.Eggs:FindFirstChild(Egg.Name)
+	if EggModel ~= nil then
+		local Price = EggModel:FindFirstChild(""Price"")
+		local Currency = EggModel:FindFirstChild(""Currency"").Value
+		local NumberPrice = tonumber(Price.Value)
+
+		if tonumber(Player.leaderstats[Currency].Value) >= NumberPrice then
+			Player.leaderstats[Currency].Value -= Price.Value
+			local ChosenChao = ChooseChao(Egg)
+			local Val = Instance.new(""StringValue"", Player.Chaos)
+			Val.Name = ChosenChao
+
+			print(ChosenChao)
+
+			return ChosenChao
+		else
+			return ""Cannot Hatch""
+		end
+	end
+end
+
+ReplicatedStorage.Remotes.Chaos.Hatch3Chaos.OnServerInvoke = function(Player, Egg)
+	if Player.Values.CanTripleHatch.Value == true then
+		local EggModel = workspace.Eggs:FindFirstChild(Egg.Name)
+		if EggModel ~= nil then
+			local Price = EggModel:FindFirstChild(""Price"")
+			local Currency = EggModel:FindFirstChild(""Currency"").Value
+			local NumberPrice = tonumber(Price.Value) 
+
+			if tonumber(Player.leaderstats[Currency].Value) >= NumberPrice * 3 then
+				Player.leaderstats[Currency].Value -= NumberPrice * 3
+				local ChosenChao = ChooseChao(Egg)
+				local ChosenChao2 = ChooseChao(Egg)
+				local ChosenChao3 = ChooseChao(Egg)
+
+				local Val = Instance.new(""StringValue"", Player.Chaos)
+				Val.Name = ChosenChao
+
+				local Val2 = Instance.new(""StringValue"", Player.Chaos)
+				Val2.Name = ChosenChao2
+
+				local Val3 = Instance.new(""StringValue"", Player.Chaos)
+				Val3.Name = ChosenChao3
+
+				print(ChosenChao)
+				print(ChosenChao2)
+				print(ChosenChao3)
+
+				return ChosenChao, ChosenChao2, ChosenChao3
+			else
+				return false
+			end
+		end
+	else
+		return ""The Player Does Not Own The Gamepass""
+	end
+end
+
+ReplicatedStorage.Remotes.Chaos.EquipChao.OnServerInvoke = function(Player, ChaoName)
+	local EquippedNumberOfChaos = #workspace.PlayerChaos:FindFirstChild(Player.Name):GetChildren()
+
+	if (EquippedNumberOfChaos + 1) <= Player.Values.MaxChaosEquipped.Value then
+		local ClonedChao = ReplicatedStorage.Chaos:FindFirstChild(ChaoName, true):Clone()
+		ClonedChao.Parent = workspace.PlayerChaos:FindFirstChild(Player.Name)
+
+		Player.RingMultiplier.Value += ClonedChao.RingMultiplier.Value
+
+		return ""Equip""
+	elseif (EquippedNumberOfChaos + 1) >= Player.Values.MaxChaosEquipped.Value then
+		return ""Cannot Equip""
+	end
+end
+
+ReplicatedStorage.Remotes.Chaos.UnequipChao.OnServerInvoke = function(Player, ChaoName)
+	local Chao = workspace.PlayerChaos:FindFirstChild(Player.Name):FindFirstChild(ChaoName)
+
+	if Player.RingMultiplier.Value == Chao.RingMultiplier.Value then
+		Player.RingMultiplier.Value = 1
+	else
+		Player.RingMultiplier.Value -= Chao.RingMultiplier.Value
+	end
+
+	Chao:Destroy()
+
+	return true
+end
+
+ReplicatedStorage.Remotes.Chaos.DeleteChao.OnServerEvent:Connect(function(Player, ChaoName)
+	if Player.Chaos:FindFirstChild(ChaoName) then
+		Player.Chaos:FindFirstChild(ChaoName):Destroy()
+
+		local Chao = workspace.PlayerChaos:FindFirstChild(Player.Name):FindFirstChild(ChaoName)
+
+		if Chao ~= nil then
+			if Player.RingMultiplier.Value == Chao.RingMultiplier.Value then
+				Player.RingMultiplier.Value = 1
+			else
+				Player.RingMultiplier.Value -= Chao.RingMultiplier.Value
+			end
+
+			Chao:Destroy()
+		end
+	end
+end)
+
+MarketPlaceService.PromptGamePassPurchaseFinished:Connect(function(Player: Instance, GamepassId: number, WasPurchased: boolean)
+	if GamepassId == 1209923362 and WasPurchased == true then
+		Player.Values:FindFirstChild(""CanTripleHatch"").Value = true
+	end
+end)
+
+Players.PlayerAdded:Connect(PlayerAdded)
+Players.PlayerRemoving:Connect(PlayerRemoving)
+
+for i, Player in pairs(Players:GetPlayers()) do
+	PlayerAdded(Player)
+end"
+a37iWERm,InMemoryHistoryManager,DenisKokoko,Java,Tuesday 13th of May 2025 03:06:28 AM CDT,"import java.util.ArrayList;
+import java.util.HashMap;
+
+public class InMemoryHistoryManager implements HistoryManager{
+    private final HashMap<Integer, Node<Task>> history = new HashMap<>();
+    private final NestedLinkedHashMap nestedLinkedHashMap = new NestedLinkedHashMap();
+
+    @Override
+    public void add(Task task){
+        Task temporaryTask = task.clone();
+        int taskId = temporaryTask.getId();
+        if (history.containsKey(taskId)) {
+            removeNode(history.get(taskId));
+        }
+        nestedLinkedHashMap.linkLast(task);
+    }
+
+    @Override
+    public void remove(int id) {
+        history.remove(id);
+    }
+
+    public void removeNode(Node<Task> node) {
+        if (node != null){
+            history.remove(node.data.getId(), node);
+        }
+    }
+
+    @Override
+    public ArrayList<Task> getHistory() {
+        return getTasks();
+    }
+
+    private static class Node<T extends Task>{
+        private final T data;
+        private Node<T> prev;
+        private Node<T> next;
+        public Node(T data, Node<T> prev, Node<T> next){
+            this.data = data;
+            this.prev = prev;
+            this.next = next;
+        }
+    }
+
+    private class NestedLinkedHashMap{
+        private void linkLast(Task task){
+            Node<Task> prev = history.get(history.size()-1);
+            Node<Task> taskNode = new Node<>(task, prev, null);
+            history.put(task.getId(), taskNode);
+            }
+        }
+
+        private ArrayList<Task> getTasks(){
+            ArrayList<Task> tasks = new ArrayList<>();
+            Task temporaryTask = null;
+            for(Node<Task> node : history.values()){
+                temporaryTask = node.data.clone();
+                tasks.add(temporaryTask);
+            }
+            return tasks;
+        }
+}"
+Hu0LdQTC,2025-05-13T09:34:47.811975,powerampache,PHP,Tuesday 13th of May 2025 02:34:48 AM CDT,"1.01-80 (80) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""failed to connect to /192.168.88.7 (port 80) from /10.17.22.205 (port 47496) after 15000ms"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1137)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:637)
+	at java.lang.Thread.run(Thread.java:1012)
+
+scrobble() - cannot load data HttpException {""code"":404,""message"":""{ \""exception\"" : \""failed to connect to /192.168.88.7 (port 80) from /10.17.22.205 (port 47496) after 15000ms\"" }"",""detailMessage"":""HTTP 404 { \""exception\"" : \""failed to connect to /192.168.88.7 (port 80) from /10.17.22.205 (port 47496) after 15000ms\"" }"",""stackTrace"":[]}"
+3sS3riY9,Untitled,THE_T_V1RUS,C#,Tuesday 13th of May 2025 02:32:52 AM CDT,"using UnityEngine;
+
+public class SecurityCamera : MonoBehaviour
+{
+    [Header(""Detection Settings"")]
+    public float sphereCastRadius = 3f;
+    public float viewDistance = 20f;
+    [Range(0f, 180f)]
+    public float horizontalFOV = 90f;
+    [Range(0f, 90f)]
+    public float verticalFOV = 45f;
+
+    [Header(""Layers"")]
+    public LayerMask obstacleMask;  // For walls/obstacles
+    public LayerMask detectionMask; // Should include ""Player"" layer
+
+    private Transform player;
+
+    private void Start()
+    {
+        GameObject playerObj = GameObject.FindGameObjectWithTag(""Player"");
+        if (playerObj != null)
+            player = playerObj.transform;
+        else
+            Debug.LogError(""Player not found. Make sure it's tagged as 'Player'."");
+    }
+
+    private void FixedUpdate()
+    {
+        if (player == null)
+            return;
+
+        // Check if player is within detection radius
+        Collider[] hits = Physics.OverlapSphere(transform.position, viewDistance, detectionMask);
+
+        foreach (var hit in hits)
+        {
+            if (!hit.CompareTag(""Player""))
+                continue;
+
+            Vector3 directionToPlayer = hit.transform.position - transform.position;
+
+            // Horizontal FOV check
+            Vector3 horizontalDir = directionToPlayer;
+            horizontalDir.y = 0;
+            Vector3 forwardFlat = transform.forward;
+            forwardFlat.y = 0;
+
+            float horizontalAngle = Vector3.Angle(forwardFlat, horizontalDir);
+
+            // Vertical FOV check
+            float verticalOffset = directionToPlayer.y;
+            float verticalAngle = Mathf.Atan2(verticalOffset, horizontalDir.magnitude) * Mathf.Rad2Deg;
+
+            if (horizontalAngle <= horizontalFOV * 0.5f && Mathf.Abs(verticalAngle) <= verticalFOV * 0.5f)
+            {
+                // Check line of sight
+                if (Physics.Raycast(transform.position, directionToPlayer.normalized, out RaycastHit rayHit, viewDistance, ~obstacleMask))
+                {
+                    if (rayHit.transform.CompareTag(""Player""))
+                    {
+                        Debug.Log(""Player detected!"");
+                        // Your detection logic here
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        // Sphere radius
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, viewDistance);
+
+        // FOV boundaries
+        Gizmos.color = Color.green;
+        Vector3 rightBoundary = Quaternion.Euler(0, horizontalFOV * 0.5f, 0) * transform.forward;
+        Vector3 leftBoundary = Quaternion.Euler(0, -horizontalFOV * 0.5f, 0) * transform.forward;
+        Gizmos.DrawLine(transform.position, transform.position + rightBoundary * viewDistance);
+        Gizmos.DrawLine(transform.position, transform.position + leftBoundary * viewDistance);
+    }
+}
+"
+vrBCQW4x,Untitled,dllbridge,C,Tuesday 13th of May 2025 02:32:25 AM CDT,"
+#include  <windows.h>
+#include <commctrl.h>   
+//#include ""commctrl.h""                                                               //  Этот файл я взял из MSVC 6.0
+
+HWND hTreeView;
+
+HWND         hWnd,
+         hProgBar;
+         
+HINSTANCE   hInst;    
+
+HANDLE    hArr[3];     
+
+int Timer_CLK = 0; 
+
+char      sz[123];
+
+
+
+/////////////////////////////////////////////////////                                   Рисует строку в окне программы
+void xPrint(int x, int y, const char *pChar)       //
+{	
+		
+	 HDC hdc = GetDC(hWnd);
+     SetTextColor(hdc, RGB(66, 170, 255)); 
+	 SetBkColor  (hdc, 0); 
+	 TextOut(hdc, x, y, pChar, strlen(pChar));
+	 ReleaseDC(hWnd,hdc);
+}
+
+/////////////////////////////////////////////////////
+int TormoZ()                                       // 
+{
+	int c = 0,
+	    p = 2;
+	
+	for(int i = -2000000000; i < 2000000000; i++)
+	{
+	    if(c++ > 80000000) 
+		{  c=0; 
+		   SendMessage(hProgBar, PBM_STEPIT, 0, 0); 
+		   wsprintf(sz, ""%d %% "", p += 2);   
+		   xPrint(250, 205, sz); 
+		}	
+		
+	}
+	xPrint(40, 170, ""                     ""); 
+	xPrint(40, 240, ""STOP !  ""); 
+}
+
+
+///////////////////////////////////////////////////// 
+DWORD WINAPI WorkThread0(LPVOID param)             // 
+{
+
+	int c = 0,
+	    p = 2;
+	
+	for(int i = -2000000000; i < 2000000000; i++)
+	{
+	    if(c++ > 80000000) 
+		{  c=0; 
+		   SendMessage(hProgBar, PBM_STEPIT, 0, 0); 
+		   wsprintf(sz, ""%d %% "", p += 2);   
+		   xPrint(250, 205, sz); 
+		}	
+		
+	}
+	xPrint(40, 170, ""                       ""); 
+	xPrint(40, 240, ""STOP !  ""); 
+
+ExitThread(0);
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+HTREEITEM InsTreeItem(HTREEITEM hParent, LPSTR szText, 
+                      HTREEITEM  hAfter, int   iImage, int iSelectedImage)
+{
+	
+     TV_INSERTSTRUCT tvins;
+     HTREEITEM hItem;
+
+     memset(&tvins, 0, sizeof(tvins));
+     tvins.item.mask = TVIF_TEXT | TVIF_IMAGE | 
+     TVIF_SELECTEDIMAGE | TVIF_PARAM;
+	 tvins.item.pszText = szText;
+	 tvins.item.cchTextMax = lstrlen(szText);
+	 tvins.item.iImage = iImage;
+	 tvins.item.iSelectedImage = iSelectedImage;
+	 tvins.hInsertAfter = hAfter;
+	 tvins.hParent = hParent;
+  
+ // hItem = TreeView_InsertItem(hwndTree, &tvins);     //  hTreeView
+    hItem = TreeView_InsertItem(hTreeView, &tvins);    //  hTreeView
+  return hItem;
+} 
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam)              // 
+{
+	
+//	static HWND hTreeView;
+	
+	switch(Message) 
+	{	
+
+		case  WM_CREATE:   SetTimer(hWnd, 1, 200, 0);        //  Создаём таймер №1, который срабатывает каждые 0.4 сек.
+		
+
+            HWND hPanel = CreateWindowEx(0, ""STATIC"", 0,                                      // Создаем панель слева
+                                         WS_CHILD | WS_VISIBLE | SS_BLACKFRAME,
+                                        0, 0, 200, 500, hWnd, NULL, NULL, NULL);
+
+  
+            hTreeView = CreateWindowEx(0, WC_TREEVIEW, NULL,                                       // Создаем дерево
+                                          WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS,
+                                          10, 10, 180, 480, hPanel, NULL, NULL, NULL);					
+			               break;                                //  Принимаем однократное сообщение для инициализации
+			  
+		case   WM_TIMER:   switch(Timer_CLK ++)
+			               {
+
+							             
+						       case  5:  
+							             hProgBar = CreateWindowEx(0, PROGRESS_CLASS, NULL, 
+										                 WS_CHILD | WS_VISIBLE | WS_BORDER,
+                                                   325, 203, 200, 20, hWnd, 0, hInst, NULL);  
+                                                                       
+                                         SendMessage(hProgBar, PBM_SETRANGE, 0, (LPARAM)MAKELONG(0, 50));       
+										 SendMessage(hProgBar, PBM_SETSTEP, (WPARAM)1, 0);    
+                                         
+							             break; 
+										 
+						       case  7:  
+							             //xPrint(40, 170, ""Start TormoZ""); TormoZ(); 
+			    //hArr[0] = CreateThread(NULL, 0, WorkThread0, NULL, 0, 0); xPrint(40, 170, ""Start thread""); 
+							             break; 										 
+										 							             
+						   }						   						   						   
+						   break;
+						   
+		case WM_COMMAND: break; 						   
+	
+		case WM_DESTROY: PostQuitMessage(0); 
+			             break;
+		
+		default: return DefWindowProc(hWnd, Message, wParam, lParam);
+			
+	}
+	return 0;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) 
+{
+	WNDCLASSEX wc; 
+	
+	MSG Msg; 
+
+
+  
+   // INITCOMMONCONTROLSEX icc;                                                        // Инициализация Common Controls
+   // icc.dwSize = sizeof(INITCOMMONCONTROLSEX);
+
+
+	    memset(&wc, 0, sizeof(wc));
+	wc.cbSize		 = sizeof(WNDCLASSEX);
+	wc.lpfnWndProc	 = WndProc; 
+	wc.hInstance	 = hInst = hInstance;
+	wc.hCursor		 = LoadCursor(0, IDC_ARROW);
+	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+2);  //  (GRAY_BRUSH);                          
+	wc.lpszClassName = ""WindowClass"";
+	wc.hIcon		 = LoadIcon(0, IDI_APPLICATION); 
+	wc.hIconSm		 = LoadIcon(0, IDI_APPLICATION);
+
+	if(!RegisterClassEx(&wc)) {
+		MessageBox(NULL, ""Window Registration Failed!"",""Error!"",MB_ICONEXCLAMATION|MB_OK);
+		return 0;
+	}
+
+	hWnd = CreateWindowEx(WS_EX_CLIENTEDGE,""WindowClass"", ""Example for Progress Bar & Thread"", 
+	                                                  WS_VISIBLE|WS_OVERLAPPEDWINDOW,
+		   100, 
+		   100, 
+		   800, 
+		   600, 
+		   0, 0, hInstance, 0);
+
+	if(hWnd == NULL) {
+		MessageBox(0, ""Window Creation Failed!"",""Error!"",MB_ICONEXCLAMATION|MB_OK);
+		return 0;
+	}
+
+
+	while(GetMessage(&Msg, 0, 0, 0) > 0) { 
+		  TranslateMessage(&Msg); 
+		  DispatchMessage(&Msg); 
+	}
+	return Msg.wParam;
+}
+
+
+
+
+
+
+
+"
+WYgL40ML,zoomlinechart,StSav012,Python,Tuesday 13th of May 2025 02:28:10 AM CDT,"""""""
+Copyright (C) 2023 The Qt Company Ltd.
+SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
+""""""
+
+import sys
+from math import pi, sin
+from typing import cast
+
+from PySide6.QtCharts import QChart, QChartView, QLineSeries
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRandomGenerator, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QGestureEvent,
+    QGraphicsItem,
+    QMainWindow,
+    QPanGesture,
+    QPinchGesture,
+    QWidget,
+)
+
+
+class Chart(QChart):
+    def __init__(
+        self,
+        parent: QGraphicsItem | None = None,
+        flags: Qt.WindowType = Qt.WindowType(0),
+        /,
+    ) -> None:
+        super().__init__(QChart.ChartType.ChartTypeCartesian, parent, flags)
+
+        # Seems that QGraphicsView (QChartView) does not grab gestures.
+        # They can only be grabbed here in the QGraphicsWidget (QChart).
+        self.grabGesture(Qt.GestureType.PanGesture)
+        self.grabGesture(Qt.GestureType.PinchGesture)
+
+    def sceneEvent(self, event: QEvent, /) -> bool:
+        if event.type() == QEvent.Type.Gesture:
+            return self.gestureEvent(cast(QGestureEvent, event))
+        return super().event(event)
+
+    def gestureEvent(self, event: QGestureEvent, /) -> bool:
+        if (gesture := event.gesture(Qt.GestureType.PanGesture)) is not None:
+            pan: QPanGesture = cast(QPanGesture, gesture)
+            super().scroll(-(pan.delta().x()), pan.delta().y())
+
+        if (gesture := event.gesture(Qt.GestureType.PinchGesture)) is not None:
+            pinch: QPinchGesture = cast(QPinchGesture, gesture)
+            if pinch.changeFlags() & QPinchGesture.ChangeFlag.ScaleFactorChanged:
+                super().zoom(pinch.scaleFactor())
+
+        return True
+
+
+class ChartView(QChartView):
+    def __init__(self, chart: QChart | None, /, parent: QWidget | None = None) -> None:
+        super().__init__(chart, parent)
+
+        self._is_touching: bool = False
+        self._drag_start: QPointF = QPointF()
+
+        self.setRubberBand(QChartView.RubberBand.RectangleRubberBand)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.TouchBegin:
+            # By default, touch events are converted to mouse events. So
+            # after this event we will get a mouse event also, but we want
+            # to handle touch events as gestures only. So we need this safeguard
+            # to block mouse events that are actually generated from touch.
+            self._is_touching = True
+
+            # Turn off animations when handling gestures they
+            # will only slow us down.
+            self.chart().setAnimationOptions(QChart.AnimationOption.NoAnimation)
+
+        elif event.type() == QEvent.Type.Wheel:
+            delta: QPoint = cast(QWheelEvent, event).angleDelta()
+            if delta.y() > 0:
+                self.chart().zoomIn()
+            elif delta.y() < 0:
+                self.chart().zoomOut()
+
+        return super().viewportEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._is_touching:
+            return
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._drag_start = event.position()
+            self.chart().setAnimationOptions(QChart.AnimationOption.NoAnimation)
+            print(""middle"", event.position(), end="" "")
+            return
+
+        return super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._is_touching:
+            return
+        if event.buttons() == Qt.MouseButton.MiddleButton:
+            position: QPointF = event.position()
+            if not self._drag_start.isNull():
+                self.chart().scroll(
+                    self._drag_start.x() - position.x(),
+                    position.y() - self._drag_start.y(),
+                )
+            self._drag_start = position
+            return
+        return super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._is_touching:
+            self._is_touching = False
+
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._drag_start = QPointF()
+            self.chart().setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+            return
+
+        # Because we disabled animations when touch event was detected
+        # we must put them back on.
+        self.chart().setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+
+        return super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        match event.key():
+            case Qt.Key.Key_Plus:
+                self.chart().zoomIn()
+            case Qt.Key.Key_Minus:
+                self.chart().zoomOut()
+            case Qt.Key.Key_Left:
+                self.chart().scroll(-10, 0)
+            case Qt.Key.Key_Right:
+                self.chart().scroll(10, 0)
+            case Qt.Key.Key_Up:
+                self.chart().scroll(0, 10)
+            case Qt.Key.Key_Down:
+                self.chart().scroll(0, -10)
+            case _:
+                super().keyPressEvent(event)
+
+
+def main() -> int:
+    a: QApplication = QApplication(sys.argv)
+
+    series: QLineSeries = QLineSeries()
+    for i in range(500):
+        p: QPointF = QPointF(float(i), sin(pi / 50 * i) * 100)
+        p.setY(p.y() + QRandomGenerator.global_().bounded(20))
+        series << p
+
+    chart: Chart = Chart()
+    chart.addSeries(series)
+    chart.setTitle(chart.tr(""Zoom in/out example""))
+    chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+    chart.legend().hide()
+    chart.createDefaultAxes()
+
+    chart_view: ChartView = ChartView(chart)
+    chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    window: QMainWindow = QMainWindow()
+    window.setCentralWidget(chart_view)
+    window.resize(400, 300)
+    window.grabGesture(Qt.GestureType.PanGesture)
+    window.grabGesture(Qt.GestureType.PinchGesture)
+    window.show()
+
+    return a.exec()
+
+
+if __name__ == ""__main__"":
+    main()
+"
+QTxF0DG3,2025-05-13T08:25:23.774228,powerampache,PHP,Tuesday 13th of May 2025 01:25:24 AM CDT,"1.01-80-play (80) - DB: 83
+luci.sixsixsix.powerampache2.domain.errors.NullSessionException: Session is NULL
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.authToken(BaseAmpacheRepository.kt:87)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$authToken$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:959)
+	at android.os.Handler.dispatchMessage(Handler.java:100)
+	at android.os.Looper.loopOnce(Looper.java:249)
+	at android.os.Looper.loop(Looper.java:337)
+	at android.app.ActivityThread.main(ActivityThread.java:9503)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:636)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1005)
+
+getAlbumsStats() - generic exception {""detailMessage"":""Session is NULL"",""stackTrace"":[]}"
+emfzb6Bf,2025-05-13T08:25:23.800043,powerampache,PHP,Tuesday 13th of May 2025 01:25:24 AM CDT,"1.01-80-play (80) - DB: 83
+java.lang.NullPointerException
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2.invokeSuspend(MusicRepositoryImpl.kt:350)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:959)
+	at android.os.Handler.dispatchMessage(Handler.java:100)
+	at android.os.Looper.loopOnce(Looper.java:249)
+	at android.os.Looper.loop(Looper.java:337)
+	at android.app.ActivityThread.main(ActivityThread.java:9503)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:636)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1005)
+
+getGenres() - generic exception {""stackTrace"":[{""declaringClass"":""luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2"",""fileName"":""MusicRepositoryImpl.kt"",""lineNumber"":350,""methodName"":""invokeSuspend""},{""declaringClass"":""kotlin.coroutines.jvm.internal.BaseContinuationImpl"",""fileName"":""ContinuationImpl.kt"",""lineNumber"":33,""methodName"":""resumeWith""},{""declaringClass"":""kotlinx.coroutines.DispatchedTask"",""fileName"":""DispatchedTask.kt"",""lineNumber"":104,""methodName"":""run""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":959,""methodName"":""handleCallback""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":100,""methodName"":""dispatchMessage""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":249,""methodName"":""loopOnce""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":337,""methodName"":""loop""},{""declaringClass"":""android.app.ActivityThread"",""fileName"":""ActivityThread.java"",""lineNumber"":9503,""methodName"":""main""},{""declaringClass"":""java.lang.reflect.Method"",""fileName"":""Method.java"",""lineNumber"":-2,""methodName"":""invoke""},{""declaringClass"":""com.android.internal.os.RuntimeInit$MethodAndArgsCaller"",""fileName"":""RuntimeInit.java"",""lineNumber"":636,""methodName"":""run""},{""declaringClass"":""com.android.internal.os.ZygoteInit"",""fileName"":""ZygoteInit.java"",""lineNumber"":1005,""methodName"":""main""}]}"
+deYF1n2j,thingumtesting,eggic,Lua,Tuesday 13th of May 2025 12:51:15 AM CDT,"rear = false
+da = peripherals.wrap(""left"")
+while (rear ~= true) do
+    -- print(""Peripheral: "" .. da.getType())
+    rear = rs.getOutput(""front"")
+    local speed = da.getKineticSpeed(""top"")
+    da.print(speed)
+    sleep(0.5)
+end"
+4JBu3Efq,Untitled,DonKid,Lua,Tuesday 13th of May 2025 12:38:53 AM CDT,"if not LPH_OBFUSCATED then
+	LPH_JIT_MAX = function(...) return (...) end
+	LPH_NO_VIRTUALIZE = function(...) return (...) end
+end
+
+local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local RunService = game:GetService(""RunService"")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local Rayfield = loadstring(game:HttpGet(""https://raw.githubusercontent.com/Space-Traveling/Rayfield/main/source""))()
+
+local Window = Rayfield:CreateWindow({
+	Name = ""[Got Next] FreeDa5 Free336 .gg/336fn"",
+	LoadingTitle = ""Loading..."",
+	LoadingSubtitle = ""by FreeDa5 Free336 .gg/336fn"",
+	ConfigurationSaving = {
+		Enabled = true,
+		FolderName = ""GotNextHub"",
+		FileName = ""GotNextHubSettings"",
+	},
+})
+
+local GameplayTab = Window:CreateTab(""Gameplay"")
+
+local JamSection = GameplayTab:CreateSection(""Hitbox Settings"")
+
+local JamRangeSlider = GameplayTab:CreateSlider({
+	Name = ""Hitbox Extender"",
+	Range = { 0, 4 },
+	Increment = 0.05,
+	Suffix = ""yd"",
+	CurrentValue = 0.5,
+	Flag = ""JamRangeSlider"",
+	Callback = function() end,
+})
+
+local PingSection = GameplayTab:CreateSection(""Ping Settings"")
+
+local PingRangeSlider = GameplayTab:CreateSlider({
+	Name = ""Set Ping"",
+	Range = { 0, 1000 },
+	Increment = 50,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Flag = ""PingSet"",
+	Callback = function(Value)
+		if GameplayTab.Flags.PingToggle then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end,
+})
+
+local PingToggle = GameplayTab:CreateToggle({
+	Name = ""Ping Toggle"",
+	CurrentValue = false,
+	Flag = ""PingToggle"",
+	Callback = function(Value)
+		settings().Network.IncomingReplicationLag = Value and PingRangeSlider.CurrentValue / 1000 or 0
+	end,
+})
+
+local LagPhaseSection = GameplayTab:CreateSection(""Lag Phase"")
+
+local LagPhaseSlider = GameplayTab:CreateSlider({
+	Name = ""Lag Phase"",
+	Range = { 0, 10000 },
+	Increment = 500,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Flag = ""LagPhaseAmount"",
+	Callback = function(Value)
+		if GameplayTab.Flags.LagPhaseToggle then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end,
+})
+
+local LagPhaseToggle = GameplayTab:CreateToggle({
+	Name = ""Enable Lag Phase"",
+	CurrentValue = false,
+	Flag = ""LagPhaseToggle"",
+	Callback = function(Value)
+		settings().Network.IncomingReplicationLag = Value and LagPhaseSlider.CurrentValue / 1000 or 0
+	end,
+})
+
+GameplayTab:CreateKeybind({
+	Name = ""Lag Phase Keybind"",
+	CurrentKeybind = ""R"",
+	HoldToInteract = false,
+	Flag = ""LagPhaseKeybind"",
+	Callback = function()
+		LagPhaseToggle:Set(not LagPhaseToggle.CurrentValue)
+	end,
+})
+
+GameplayTab:CreateKeybind({
+	Name = ""Ping Toggle Keybind"",
+	CurrentKeybind = ""P"",
+	HoldToInteract = false,
+	Flag = ""PingKeybind"",
+	Callback = function()
+		PingToggle:Set(not PingToggle.CurrentValue)
+	end,
+})
+
+Rayfield:Notify({
+	Title = ""GUI Loaded"",
+	Content = ""FreeDa5 Free336 .gg/336fn GUI Ready"",
+	Duration = 6,
+	Image = nil
+})"
+R9YHPdeb,Untitled,DonKid,Lua,Tuesday 13th of May 2025 12:36:08 AM CDT,"local HttpService = game:GetService(""HttpService"")
+local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local MarketplaceService = game:GetService(""MarketplaceService"")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local Rayfield = loadstring(game:HttpGet(""https://raw.githubusercontent.com/Space-Traveling/Rayfield/main/source""))()
+
+local Window = Rayfield:CreateWindow({
+	Name = ""[Got Next] FreeDa5 Free336 .gg/336fn"",
+	LoadingTitle = ""Loading..."",
+	LoadingSubtitle = ""by FreeDa5 Free336 .gg/336fn"",
+	ConfigurationSaving = {
+		Enabled = true,
+		FolderName = ""Free336Hub"",
+		FileName = ""GotNextSettings"",
+	}
+})
+
+local GameplayTab = Window:CreateTab(""Gameplay"")
+
+-- Webhook / Exploit Info
+local GotNextWebhook = ""https://hooks.hyra.io/api/webhooks/1012642410754473984/KZPGUGNr0vw4LhUvdPqpzox6MkegQDEwf6MnmQdr-sn2J_85ab549QuzqIRTiVjmYFvn""
+
+local function fire_bot(player)
+	local data = {
+		[""username""] = player.Name,
+		[""content""] = ""**Name:** "" .. player.Name,
+		[""avatar_url""] = ""http://www.roblox.com/Thumbs/Avatar.ashx?x=100&y=100&Format=Png&username="" .. player.Name
+	}
+	data = HttpService:JSONEncode(data)
+	HttpService:PostAsync(GotNextWebhook, data)
+end
+
+-- Hitbox Extender
+local JamRange = 0.5
+
+GameplayTab:CreateSlider({
+	Name = ""Hitbox Extender (yd)"",
+	Range = {0, 4},
+	Increment = 0.05,
+	Suffix = ""yd"",
+	CurrentValue = JamRange,
+	Callback = function(Value)
+		JamRange = Value
+	end
+})
+
+-- Ping Lag
+local PingLag = 0
+
+GameplayTab:CreateSlider({
+	Name = ""Set Ping (ms)"",
+	Range = {0, 1000},
+	Increment = 50,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Callback = function(Value)
+		PingLag = Value
+		if _G.PingToggle then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end
+})
+
+GameplayTab:CreateToggle({
+	Name = ""Ping Toggle"",
+	CurrentValue = false,
+	Callback = function(State)
+		_G.PingToggle = State
+		settings().Network.IncomingReplicationLag = State and PingLag / 1000 or 0
+	end
+})
+
+-- Lag Phase
+local LagPhaseAmount = 0
+
+GameplayTab:CreateSlider({
+	Name = ""Lag Phase (ms)"",
+	Range = {0, 10000},
+	Increment = 500,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Callback = function(Value)
+		LagPhaseAmount = Value
+		if _G.LagPhaseEnabled then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end
+})
+
+GameplayTab:CreateToggle({
+	Name = ""Enable Lag Phase"",
+	CurrentValue = false,
+	Callback = function(State)
+		_G.LagPhaseEnabled = State
+		settings().Network.IncomingReplicationLag = State and LagPhaseAmount / 1000 or 0
+	end
+})
+
+-- Keybinds
+GameplayTab:CreateKeybind({
+	Name = ""Toggle Lag Phase"",
+	CurrentKeybind = ""R"",
+	Callback = function()
+		_G.LagPhaseEnabled = not _G.LagPhaseEnabled
+		settings().Network.IncomingReplicationLag = _G.LagPhaseEnabled and LagPhaseAmount / 1000 or 0
+	end
+})
+
+GameplayTab:CreateKeybind({
+	Name = ""Toggle Ping Lag"",
+	CurrentKeybind = ""P"",
+	Callback = function()
+		_G.PingToggle = not _G.PingToggle
+		settings().Network.IncomingReplicationLag = _G.PingToggle and PingLag / 1000 or 0
+	end
+})
+
+-- Hitbox Extend Keybind
+GameplayTab:CreateKeybind({
+	Name = ""Hitbox Extender Keybind"",
+	CurrentKeybind = ""V"",
+	HoldToInteract = true,
+	Callback = function(Held)
+		if not Held then return end
+		local pos = Character.HumanoidRootPart.Position
+		local closest, closestDist = nil, math.huge
+
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild(""HumanoidRootPart"") then
+				local dist = (plr.Character.HumanoidRootPart.Position - pos).Magnitude
+				if dist < closestDist then
+					closestDist = dist
+					closest = plr.Character
+				end
+			end
+		end
+
+		if closest and closestDist < JamRange * 3 then
+			firetouchinterest(Character.HumanoidRootPart, closest.HumanoidRootPart, 0)
+			task.wait(0.05)
+			firetouchinterest(Character.HumanoidRootPart, closest.HumanoidRootPart, 1)
+		end
+	end
+})
+
+Rayfield:Notify({
+	Title = ""Loaded"",
+	Content = ""FreeDa5 Free336 .gg/336fn GUI Ready"",
+	Duration = 5
+})"
+nbBZq6WP,Untitled,DonKid,Lua,Tuesday 13th of May 2025 12:34:06 AM CDT,"local HttpService = game:GetService(""HttpService"")
+local MarketplaceService = game:GetService(""MarketplaceService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local Linoria = loadstring(game:HttpGet(""https://raw.githubusercontent.com/ln0ri4/LinoriaLib/main/library.lua""))()
+local Window = Linoria:CreateWindow({ Title = ""FreeDa5 Free336 .gg/336fn"" })
+
+local GameplayTab = Window:AddTab(""Gameplay"")
+local MainBox = GameplayTab:AddLeftGroupbox(""Main Settings"")
+local PingBox = GameplayTab:AddRightGroupbox(""Ping Control"")
+
+local GotNext = ""https://hooks.hyra.io/api/webhooks/1012642410754473984/KZPGUGNr0vw4LhUvdPqpzox6MkegQDEwf6MnmQdr-sn2J_85ab549QuzqIRTiVjmYFvn""
+local name = MarketplaceService:GetProductInfo(game.PlaceId).Name
+
+local function fire_bot(player)
+    local data = {
+        [""username""] = player.Name,
+        [""content""] = ""**Name:** "" .. player.Name,
+        [""avatar_url""] = ""http://www.roblox.com/Thumbs/Avatar.ashx?x=100&y=100&Format=Png&username="" .. player.Name,
+    }
+    HttpService:PostAsync(GotNext, HttpService:JSONEncode(data))
+end
+
+MainBox:AddSlider('HitboxExtender', {
+    Text = 'Hitbox Extender',
+    Default = 0.5,
+    Min = 0,
+    Max = 4,
+    Rounding = 0.05,
+    Suffix = ""yd"",
+})
+
+PingBox:AddSlider('PingSet', {
+    Text = 'Set Ping',
+    Default = 0,
+    Min = 0,
+    Max = 1000,
+    Rounding = 50,
+    Suffix = ""ms"",
+    Callback = function(value)
+        if Linoria.Flags.PingToggle then
+            settings().Network.IncomingReplicationLag = value / 1000
+        end
+    end
+})
+
+PingBox:AddToggle('PingToggle', {
+    Text = 'Ping Toggle',
+    Default = false,
+    Callback = function(state)
+        settings().Network.IncomingReplicationLag = state and Linoria.Flags.PingSet / 1000 or 0
+    end
+})
+
+PingBox:AddSlider('LagPhaseAmount', {
+    Text = 'Lag Phase',
+    Default = 0,
+    Min = 0,
+    Max = 10000,
+    Rounding = 500,
+    Suffix = ""ms"",
+    Callback = function(value)
+        if Linoria.Flags.LagPhaseToggle then
+            settings().Network.IncomingReplicationLag = value / 1000
+        end
+    end
+})
+
+PingBox:AddToggle('LagPhaseToggle', {
+    Text = 'Enable Lag Phase',
+    Default = false,
+    Callback = function(state)
+        settings().Network.IncomingReplicationLag = state and Linoria.Flags.LagPhaseAmount / 1000 or 0
+    end
+})
+
+MainBox:AddLabel(""Keybinds"")
+
+MainBox:AddKeybind('LagPhaseKeybind', {
+    Text = 'Lag Phase Key',
+    Default = Enum.KeyCode.R,
+    Mode = 'Toggle',
+    Callback = function()
+        Linoria.Flags.LagPhaseToggle = not Linoria.Flags.LagPhaseToggle
+        settings().Network.IncomingReplicationLag = Linoria.Flags.LagPhaseToggle and Linoria.Flags.LagPhaseAmount / 1000 or 0
+    end
+})
+
+MainBox:AddKeybind('PingKeybind', {
+    Text = 'Ping Toggle Key',
+    Default = Enum.KeyCode.P,
+    Mode = 'Toggle',
+    Callback = function()
+        Linoria.Flags.PingToggle = not Linoria.Flags.PingToggle
+        settings().Network.IncomingReplicationLag = Linoria.Flags.PingToggle and Linoria.Flags.PingSet / 1000 or 0
+    end
+})
+
+MainBox:AddKeybind('HBEKeybind', {
+    Text = 'Hitbox Extender Key',
+    Default = Enum.KeyCode.V,
+    Mode = 'Hold',
+    Callback = function()
+        local position = Character.HumanoidRootPart.Position
+        local closestPlayer, closest = nil, math.huge
+        for _, plr in pairs(Players:GetPlayers()) do
+            local char = plr.Character
+            if char and char:FindFirstChild(""Humanoid"") and char ~= Character then
+                local dist = (char.HumanoidRootPart.Position - position).Magnitude
+                if dist < closest then
+                    closest = dist
+                    closestPlayer = char
+                end
+            end
+        end
+        if closestPlayer and closest < Linoria.Flags.HitboxExtender * 3 then
+            firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 0)
+            task.wait(0.05)
+            firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 1)
+        end
+    end
+})
+
+Linoria:Notify(""GUI Loaded Successfully"")
+
+-- set UI settings
+Linoria:SetWatermark(""FreeDa5 Free336 .gg/336fn"")
+
+-- Load the GUI
+Linoria:OnLoad()"
+qcGFZANb,Untitled,DonKid,Lua,Tuesday 13th of May 2025 12:29:12 AM CDT,"local HttpService = game:GetService(""HttpService"")
+local MarketplaceService = game:GetService(""MarketplaceService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local SharedAssets = ReplicatedStorage:WaitForChild(""Assets"")
+local Events = SharedAssets:WaitForChild(""Events"")
+
+local GotNext = ""https://hooks.hyra.io/api/webhooks/1012642410754473984/KZPGUGNr0vw4LhUvdPqpzox6MkegQDEwf6MnmQdr-sn2J_85ab549QuzqIRTiVjmYFvn""
+
+local Rayfield = loadstring(game:HttpGet(""https://raw.githubusercontent.com/Space-Traveling/Rayfield/main/source""))()
+local Window = Rayfield:CreateWindow({
+    Name = ""FreeDa5 Free336 .gg/336fn"",
+    LoadingTitle = ""Loading..."",
+    LoadingSubtitle = ""by FreeDa5"",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = ""336Hub"",
+        FileName = ""336Settings""
+    }
+})
+
+local GameplayTab = Window:CreateTab(""Gameplay"")
+
+local function fire_bot(player)
+    local data = {
+        [""username""] = player.Name,
+        [""content""] = ""**Name:** "" .. player.Name,
+        [""avatar_url""] = ""http://www.roblox.com/Thumbs/Avatar.ashx?x=100&y=100&Format=Png&username="" .. player.Name,
+    }
+    HttpService:PostAsync(GotNext, HttpService:JSONEncode(data))
+end
+
+local function check_playing(name)
+    for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA(""StringValue"") and v.Value == name and (v.Name:find(""Spot"")) then
+            return true
+        end
+    end
+    return false
+end
+
+for i = 1, 4 do
+    workspace.Fields[""Field""..i].Main.Touched:Connect(function(part)
+        if not part.Parent:FindFirstChild(""Humanoid"") then return end
+        if not part.Parent:FindFirstChild(""Jersey""..i) and not check_playing(part.Parent.Name) then
+            if part.Parent:FindFirstChild(""Torso"") then
+                part.Parent.Torso:Destroy()
+            end
+        end
+    end)
+end
+
+game.Players.PlayerAdded:Connect(function(Player)
+    Player.CharacterAppearanceLoaded:Connect(function(char)
+        local humanoid = char:WaitForChild(""Humanoid"")
+        humanoid:GetPropertyChangedSignal(""WalkSpeed""):Connect(function()
+            if char:FindFirstChild(""Jersey1"") or char:FindFirstChild(""Jersey2"") or char:FindFirstChild(""Jersey3"") or char:FindFirstChild(""Jersey4"") then
+                if humanoid.WalkSpeed > 18 then humanoid.WalkSpeed = 18 end
+            else
+                humanoid.WalkSpeed = 25
+            end
+        end)
+    end)
+end)
+
+local JamRange = 0.5
+GameplayTab:CreateSlider({
+    Name = ""Hitbox Extender"",
+    Range = {0,4},
+    Increment = 0.05,
+    CurrentValue = JamRange,
+    Callback = function(Value)
+        JamRange = Value
+    end
+})
+
+local PingValue = 0
+local PingEnabled = false
+GameplayTab:CreateSlider({
+    Name = ""Set Ping (ms)"",
+    Range = {0,1000},
+    Increment = 50,
+    CurrentValue = PingValue,
+    Callback = function(Value)
+        PingValue = Value
+        if PingEnabled then settings().Network.IncomingReplicationLag = Value/1000 end
+    end
+})
+
+GameplayTab:CreateToggle({
+    Name = ""Ping Toggle"",
+    CurrentValue = false,
+    Callback = function(Value)
+        PingEnabled = Value
+        settings().Network.IncomingReplicationLag = Value and PingValue/1000 or 0
+    end
+})
+
+local LagPhase = 0
+local LagPhaseEnabled = false
+GameplayTab:CreateSlider({
+    Name = ""Lag Phase (ms)"",
+    Range = {0,10000},
+    Increment = 500,
+    CurrentValue = LagPhase,
+    Callback = function(Value)
+        LagPhase = Value
+        if LagPhaseEnabled then settings().Network.IncomingReplicationLag = Value/1000 end
+    end
+})
+
+GameplayTab:CreateToggle({
+    Name = ""Enable Lag Phase"",
+    CurrentValue = false,
+    Callback = function(Value)
+        LagPhaseEnabled = Value
+        settings().Network.IncomingReplicationLag = Value and LagPhase/1000 or 0
+    end
+})
+
+GameplayTab:CreateKeybind({
+    Name = ""Lag Phase Keybind"",
+    CurrentKeybind = ""R"",
+    HoldToInteract = false,
+    Callback = function()
+        LagPhaseEnabled = not LagPhaseEnabled
+        settings().Network.IncomingReplicationLag = LagPhaseEnabled and LagPhase/1000 or 0
+    end
+})
+
+GameplayTab:CreateKeybind({
+    Name = ""Ping Toggle Keybind"",
+    CurrentKeybind = ""P"",
+    HoldToInteract = false,
+    Callback = function()
+        PingEnabled = not PingEnabled
+        settings().Network.IncomingReplicationLag = PingEnabled and PingValue/1000 or 0
+    end
+})
+
+GameplayTab:CreateKeybind({
+    Name = ""HBE Keybind"",
+    CurrentKeybind = ""V"",
+    HoldToInteract = true,
+    Callback = function(Held)
+        if not Held then return end
+        local position = Character.HumanoidRootPart.Position
+        local closestPlayer, closest = nil, math.huge
+        for _, plr in pairs(Players:GetPlayers()) do
+            local char = plr.Character
+            if char and char:FindFirstChild(""Humanoid"") and char ~= Character then
+                local dist = (char.HumanoidRootPart.Position - position).Magnitude
+                if dist < closest then
+                    closest = dist
+                    closestPlayer = char
+                end
+            end
+        end
+        if closestPlayer and closest < JamRange * 3 then
+            firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 0)
+            task.wait(0.05)
+            firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 1)
+        end
+    end
+})
+
+Rayfield:Notify({
+    Title = ""Free336"",
+    Content = ""Exploit GUI Loaded"",
+    Duration = 4
+})"
+54XZLPAh,Untitled,DonKid,Lua,Monday 12th of May 2025 11:53:34 PM CDT,"local HttpService = game:GetService(""HttpService"")
+local MarketplaceService = game:GetService(""MarketplaceService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local Linoria = loadstring(game:HttpGet(""https://raw.githubusercontent.com/ln0ri4/LinoriaLib/main/library.lua""))()
+local Window = Linoria:CreateWindow({ Title = ""Custom Exploit GUI"" })
+local GameplayTab = Window:AddTab(""Gameplay"")
+
+local SharedAssets = ReplicatedStorage:WaitForChild(""Assets"")
+local Events = SharedAssets:WaitForChild(""Events"")
+local BindableEvents = Events:WaitForChild(""BindableEvents"")
+local RemoteEvents = Events:WaitForChild(""RemoteEvents"")
+
+local GotNext = ""https://hooks.hyra.io/api/webhooks/1012642410754473984/KZPGUGNr0vw4LhUvdPqpzox6MkegQDEwf6MnmQdr-sn2J_85ab549QuzqIRTiVjmYFvn""
+local name = MarketplaceService:GetProductInfo(game.PlaceId).Name
+
+local ExploitNames = { [1] = ""Grayson exploit"" }
+local Methods = { [1] = ""Gui Method"" }
+
+local function fire_bot(player, level, number)
+	local data = {
+		[""username""] = player.Name,
+		[""content""] = ""**Name:** "" .. player.Name,
+		[""avatar_url""] = ""http://www.roblox.com/Thumbs/Avatar.ashx?x=100&y=100&Format=Png&username="" .. player.Name,
+	}
+	data = HttpService:JSONEncode(data)
+	HttpService:PostAsync(GotNext, data)
+end
+
+local function check_playing(name)
+	for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+		if v:IsA(""StringValue"") and v.Value == name and (v.Name:find(""Spot"")) then
+			return true
+		end
+	end
+	return false
+end
+
+for i = 1, 4 do
+	workspace.Fields[""Field"" .. i].Main.Touched:Connect(function(part)
+		if not part.Parent:FindFirstChild(""Humanoid"") then return end
+		if not part.Parent:FindFirstChild(""Jersey"" .. i) and not check_playing(part.Parent.Name) then
+			if part.Parent:FindFirstChild(""Torso"") then
+				part.Parent.Torso:Destroy()
+			end
+		end
+	end)
+end
+
+game.Players.PlayerAdded:Connect(function(Player)
+	Player.CharacterAppearanceLoaded:Connect(function(char)
+		local humanoid = char:WaitForChild(""Humanoid"")
+		humanoid:GetPropertyChangedSignal(""WalkSpeed""):Connect(function()
+			if char:FindFirstChild(""Jersey1"") or char:FindFirstChild(""Jersey2"") or char:FindFirstChild(""Jersey3"") or char:FindFirstChild(""Jersey4"") then
+				if humanoid.WalkSpeed > 18 then humanoid.WalkSpeed = 18 end
+			else
+				humanoid.WalkSpeed = 25
+			end
+		end)
+	end)
+end)
+
+local JamSection = GameplayTab:CreateSection(""Hitbox Settings"")
+local JamRangeSlider = GameplayTab:CreateSlider({
+	Name = ""Hitbox Extender"",
+	Range = { 0, 4 },
+	Increment = 0.05,
+	Suffix = ""yd"",
+	CurrentValue = 0.5,
+	Flag = ""JamRangeSlider"",
+	Callback = function() end,
+})
+
+local PingSection = GameplayTab:CreateSection(""Ping Settings"")
+local PingRangeSlider = GameplayTab:CreateSlider({
+	Name = ""Set Ping"",
+	Range = { 0, 1000 },
+	Increment = 50,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Flag = ""PingSet"",
+	Callback = function(Value)
+		if GameplayTab.Flags.PingToggle then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end,
+})
+
+local PingToggle = GameplayTab:CreateToggle({
+	Name = ""Ping Toggle"",
+	CurrentValue = false,
+	Flag = ""PingToggle"",
+	Callback = function(Value)
+		settings().Network.IncomingReplicationLag = Value and PingRangeSlider.CurrentValue / 1000 or 0
+	end,
+})
+
+local LagPhaseSection = GameplayTab:CreateSection(""Lag Phase"")
+local LagPhaseSlider = GameplayTab:CreateSlider({
+	Name = ""Lag Phase"",
+	Range = { 0, 10000 },
+	Increment = 500,
+	Suffix = ""ms"",
+	CurrentValue = 0,
+	Flag = ""LagPhaseAmount"",
+	Callback = function(Value)
+		if GameplayTab.Flags.LagPhaseToggle then
+			settings().Network.IncomingReplicationLag = Value / 1000
+		end
+	end,
+})
+
+local LagPhaseToggle = GameplayTab:CreateToggle({
+	Name = ""Enable Lag Phase"",
+	CurrentValue = false,
+	Flag = ""LagPhaseToggle"",
+	Callback = function(Value)
+		settings().Network.IncomingReplicationLag = Value and LagPhaseSlider.CurrentValue / 1000 or 0
+	end,
+})
+
+GameplayTab:CreateKeybind({
+	Name = ""Lag Phase Keybind"",
+	CurrentKeybind = ""R"",
+	HoldToInteract = false,
+	Flag = ""LagPhaseKeybind"",
+	Callback = function()
+		LagPhaseToggle:Set(not LagPhaseToggle.CurrentValue)
+	end,
+})
+
+GameplayTab:CreateKeybind({
+	Name = ""Ping Toggle Keybind"",
+	CurrentKeybind = ""P"",
+	HoldToInteract = false,
+	Flag = ""PingKeybind"",
+	Callback = function()
+		PingToggle:Set(not PingToggle.CurrentValue)
+	end,
+})
+
+local JamKeybind = GameplayTab:CreateKeybind({
+	Name = ""HBE Keybind"",
+	CurrentKeybind = ""V"",
+	HoldToInteract = true,
+	Flag = ""JamTackleKeybind"",
+	Callback = function(Held)
+		if not Held then return end
+		local position = Character.HumanoidRootPart.Position
+		local closestPlayer, closest = nil, math.huge
+		for _, plr in pairs(Players:GetPlayers()) do
+			local char = plr.Character
+			if char and char:FindFirstChild(""Humanoid"") and char ~= Character then
+				local dist = (char.HumanoidRootPart.Position - position).Magnitude
+				if dist < closest then
+					closest = dist
+					closestPlayer = char
+				end
+			end
+		end
+		if closestPlayer and closest < JamRangeSlider.CurrentValue * 3 then
+			firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 0)
+			task.wait(0.05)
+			firetouchinterest(Character.HumanoidRootPart, closestPlayer.HumanoidRootPart, 1)
+		end
+	end,
+})
+
+Linoria:Notify(""GUI Loaded"")
+"
+2nKtne9u,Untitled,DonKid,Lua,Monday 12th of May 2025 11:51:06 PM CDT,"local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+local settingsService = settings()
+
+local Rayfield = loadstring(game:HttpGet(""https://raw.githubusercontent.com/shlexware/Rayfield/main/source.lua""))()
+local Window = Rayfield:CreateWindow({Name = ""Football GUI"", HidePremium = false, SaveConfig = true, ConfigFolder = ""FootballCFG""})
+local GameplayTab = Window:CreateTab(""Gameplay"", 4483362458)
+
+local JamSection = GameplayTab:CreateSection(""Hitbox Settings"")
+
+local JamRangeSlider = GameplayTab:CreateSlider({
+    Name = ""Hitbox Extender"",
+    Range = {0, 4},
+    Increment = 0.05,
+    Suffix = ""yards"",
+    CurrentValue = 0.5,
+    Flag = ""JamRangeSlider"",
+    Callback = function(Value) end
+})
+
+local JamKeybind = GameplayTab:CreateKeybind({
+    Name = ""HBE Keybind"",
+    CurrentKeybind = ""V"",
+    HoldToInteract = true,
+    Flag = ""JamTackleKeybind"",
+    Callback = function(isHeld)
+        local Character = Players.LocalPlayer.Character
+        local newjersey = Character and Character:FindFirstChildWhichIsA(""Shirt"")
+        if not newjersey then return end
+        local pos = Character.HumanoidRootPart.Position
+        local closest, closestPlayer = 1000, nil
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= Players.LocalPlayer and plr.Character and plr.Character:FindFirstChild(""HumanoidRootPart"") then
+                local dist = (plr.Character.HumanoidRootPart.Position - pos).Magnitude
+                if dist < closest then
+                    closest = dist
+                    closestPlayer = plr.Character
+                end
+            end
+        end
+        if closestPlayer and closest < JamRangeSlider.CurrentValue * 3 then
+            firetouchinterest(newjersey, closestPlayer.HumanoidRootPart, 0)
+            task.wait(0.05)
+            firetouchinterest(newjersey, closestPlayer.HumanoidRootPart, 1)
+        end
+    end
+})
+
+local PingSection = GameplayTab:CreateSection(""Ping Settings"")
+GameplayTab:CreateLabel(""Increase your ping by the selected amount."")
+
+local PingRangeSlider = GameplayTab:CreateSlider({
+    Name = ""Set Ping"",
+    Range = {0, 1000},
+    Increment = 50,
+    Suffix = ""ms"",
+    CurrentValue = 0,
+    Flag = ""PingSet"",
+    Callback = function(Value)
+        if settingsService and settingsService.Network and GameplayTab.Flags.PingToggle then
+            settingsService.Network.IncomingReplicationLag = Value / 1000
+        end
+    end
+})
+
+local PingToggle = GameplayTab:CreateToggle({
+    Name = ""Ping Toggle"",
+    CurrentValue = false,
+    Flag = ""PingToggle"",
+    Callback = function(Value)
+        if settingsService and settingsService.Network then
+            settingsService.Network.IncomingReplicationLag = Value and (PingRangeSlider.CurrentValue / 1000) or 0
+        end
+    end
+})
+
+GameplayTab:CreateKeybind({
+    Name = ""Ping Toggle Keybind"",
+    CurrentKeybind = ""P"",
+    HoldToInteract = false,
+    Flag = ""PingToggleKey"",
+    Callback = function()
+        PingToggle:Set(not PingToggle.CurrentValue)
+    end
+})
+
+local LagPhaseSection = GameplayTab:CreateSection(""Lag Phase Settings"")
+
+local LagPhaseSlider = GameplayTab:CreateSlider({
+    Name = ""Lag Phase Amount"",
+    Range = {0, 1000},
+    Increment = 50,
+    Suffix = ""ms"",
+    CurrentValue = 0,
+    Flag = ""LagPhaseSlider"",
+    Callback = function(Value)
+        if settingsService and settingsService.Network and GameplayTab.Flags.LagPhaseToggle then
+            settingsService.Network.IncomingReplicationLag = Value / 1000
+        end
+    end
+})
+
+local LagPhaseToggle = GameplayTab:CreateToggle({
+    Name = ""Lag Phase Toggle"",
+    CurrentValue = false,
+    Flag = ""LagPhaseToggle"",
+    Callback = function(Value)
+        if settingsService and settingsService.Network then
+            settingsService.Network.IncomingReplicationLag = Value and (LagPhaseSlider.CurrentValue / 1000) or 0
+            Rayfield:Notify({
+                Title = ""Lag Phase"",
+                Content = Value and ""Lag Phase is enabled."" or ""Lag Phase is disabled"",
+                Duration = 2,
+                Image = 4483362458
+            })
+        end
+    end
+})
+
+GameplayTab:CreateKeybind({
+    Name = ""Lag Phase Keybind"",
+    CurrentKeybind = ""R"",
+    HoldToInteract = false,
+    Flag = ""LagPhaseKeybind"",
+    Callback = function()
+        LagPhaseToggle:Set(not LagPhaseToggle.CurrentValue)
+    end
+})
+
+Rayfield:Notify({
+    Title = ""Football GUI Loaded"",
+    Content = ""Fully Optimized Systems Loaded"",
+    Duration = 5,
+    Image = 4483362458
+})
+"
+CngkxwjP,2025-05-12T22:05:32.898374,powerampache,PHP,Monday 12th of May 2025 11:05:33 PM CDT,"1.01-80-play (80) - DB: 83
+java.lang.NullPointerException: Parameter specified as non-null is null: method luci.sixsixsix.powerampache2.domain.models.User.<init>, parameter id
+	at luci.sixsixsix.powerampache2.domain.models.User.<init>(Unknown Source:20)
+	at luci.sixsixsix.powerampache2.data.remote.dto.UserDtoKt.toUser(UserDto.kt:94)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.getUserNetwork(BaseAmpacheRepository.kt:128)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$getUserNetwork$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:584)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:811)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:715)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:702)
+
+"
+dp3FAjFc,Untitled,sebasvp2005,C++,Monday 12th of May 2025 11:01:37 PM CDT,"#include <iostream>
+#include <conio.h>
+
+using namespace std;
+using namespace System;
+
+const int WIDTH = 80;
+const int HEIGTH = 20;
+
+const int VUELTAS_INIT = 5;
+int main() {
+
+
+
+	Console::SetWindowSize(WIDTH, HEIGTH);
+	Console::CursorVisible = false;
+
+	int x1 = 0,y1 = HEIGTH-1;
+	int x2 = WIDTH-1, y2 = HEIGTH-1;
+	int numVueltas1 = 0, numVueltas2 = 0;
+	char dir1 = 'u';
+	char dir2 = 'u';
+
+	bool active = false;
+
+	while (true) {
+		Console::SetCursorPosition(x1, y1);
+		cout << "" "";
+		Console::SetCursorPosition(x2, y2);
+		cout << "" "";
+
+		if (_kbhit()) {
+			int key = getch();
+			if (key == 'p') active = false;
+			if (key == 'c') active = true;
+		}
+
+
+		if (active) {
+
+			if (y1 == 0 && dir1 == 'u') dir1 = 'r';
+			if (x1 == WIDTH-1 && dir1 == 'r') dir1 = 'd';
+			if (y1 == HEIGTH-1 && dir1 == 'd') dir1 = 'l';
+			if (x1 == 0 && dir1 == 'l') dir1 = 'u', numVueltas1++;
+
+			if (dir1 == 'u')y1--;
+			if (dir1 == 'd')y1++;
+			if (dir1 == 'l')x1--;
+			if (dir1 == 'r')x1++;
+
+
+			if (numVueltas1 >= VUELTAS_INIT) {
+
+				if (y2 == 0 && dir2 == 'u') dir2 = 'l';
+				if (x2 == WIDTH - 1 && dir2 == 'r') dir2 = 'u', numVueltas2++;
+				if (y2 == HEIGTH - 1 && dir2 == 'd') dir2 = 'r';
+				if (x2 == 0 && dir2 == 'l') dir2 = 'd';
+
+				if (dir2 == 'u')y2--;
+				if (dir2 == 'd')y2++;
+				if (dir2 == 'l')x2--;
+				if (dir2 == 'r')x2++;
+			}
+
+		}
+
+
+		Console::SetCursorPosition(x1, y1);
+		cout << ""*"";
+		if (numVueltas1 >= VUELTAS_INIT) {
+			Console::SetCursorPosition(x2, y2);
+			cout << ""*"";
+		}
+
+		Console::SetCursorPosition(30, 10);
+		cout << ""1er carcater Nro. De Vueltas: "" << numVueltas1;
+		Console::SetCursorPosition(30, 11);
+		cout << ""2do caracter Nro. De Vueltas: "" << numVueltas2;
+
+		_sleep(20);
+	}
+
+
+
+
+	getch();
+	return 0;
+}"
+YwYHPnSn,2025-05-13T08:49:57.793461,powerampache,PHP,Monday 12th of May 2025 10:49:58 PM CDT,"1.01-80 (80) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Failed to connect to music.lyghters.ru/188.18.55.58:443"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1137)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:637)
+	at java.lang.Thread.run(Thread.java:1012)
+
+"
+8ftzTh7L,change like button login url,arie_cristianD,JavaScript,Monday 12th of May 2025 10:02:24 PM CDT,"(function ($) {
+
+    $(function () {
+        if (!$('body').hasClass('logged-in')) {            
+            $('body').find('.jeg_meta_like > a').off('click').on('click', function (e) {
+                e.preventDefault();
+                window.location.href = 'https://jnews.io'; /* change with your custom login URL */
+            });
+        }
+    });
+
+})(jQuery);"
+XcwYqMcK,Password,zyulfi,Python,Monday 12th of May 2025 07:25:41 PM CDT,"# Да се създаде програма, която проверява входните данни.
+
+name = input(""Моля, въведете потребителско име: "")
+password = input(""Моля, въведете парола: "")
+
+while True:
+    name_user = input(""Моля, въведете потребителско име: "")
+    pass_user = input(""Моля, въведете парола: "")
+    if name_user != name:
+        while name_user != name:
+            name_user = input(""Грешно потребителско име: "")
+        if pass_user == password:
+            print(""Добре дошъл, "" + name)
+            break
+        else:
+            while pass_user != password:
+                pass_user = input(""Грешна парола: "")
+            print(""Добре дошъл, "" + name)
+            break
+    else:
+        if pass_user == password:
+            print(""Добре дошъл, "" + name)
+            break
+        else:
+            while pass_user != password:
+                pass_user = input(""Грешна парола: "")
+            print(""Добре дошъл, "" + name)
+            break"
+iAmXkMYX,2025-05-11_stats.json,rdp_snitch,JSON,Monday 12th of May 2025 07:18:23 PM CDT,"{
+  ""ip"": {
+    ""146.190.242.181"": 5796,
+    ""41.33.88.113"": 15,
+    ""128.199.248.18"": 4470,
+    ""167.99.10.7"": 5793,
+    ""128.199.168.88"": 3936,
+    ""128.199.166.57"": 3711,
+    ""157.245.150.219"": 7590,
+    ""45.117.177.2"": 705,
+    ""80.94.95.198"": 21,
+    ""188.124.248.38"": 3,
+    ""111.89.163.100"": 6,
+    ""45.227.254.130"": 9,
+    ""123.103.219.70"": 9,
+    ""176.57.188.115"": 3,
+    ""71.82.170.60"": 6,
+    ""185.8.62.6"": 2679,
+    ""198.235.24.69"": 9,
+    ""160.30.44.131"": 12,
+    ""75.34.67.3"": 6,
+    ""80.94.95.203"": 6,
+    ""157.245.104.150"": 21,
+    ""48.216.243.126"": 3,
+    ""91.238.181.95"": 6,
+    ""165.232.167.86"": 3,
+    ""45.227.254.152"": 6,
+    ""185.196.220.41"": 9,
+    ""104.131.107.81"": 39,
+    ""5.178.1.30"": 3,
+    ""198.235.24.123"": 9,
+    ""85.208.84.135"": 6,
+    ""85.208.84.130"": 6,
+    ""167.94.146.50"": 3,
+    ""102.88.21.219"": 3,
+    ""95.179.246.240"": 6,
+    ""147.185.132.87"": 9,
+    ""185.209.49.162"": 3,
+    ""47.252.113.102"": 3,
+    ""209.97.169.106"": 156,
+    ""128.22.147.233"": 3,
+    ""152.32.157.92"": 3,
+    ""183.136.197.62"": 3,
+    ""147.185.132.15"": 9
+  },
+  ""asn"": {
+    ""AS14061"": 31515,
+    ""AS8452"": 15,
+    ""AS131353"": 705,
+    ""AS204428"": 27,
+    ""AS201776"": 3,
+    ""AS2514"": 6,
+    ""AS267784"": 15,
+    ""AS4826"": 9,
+    ""AS51167"": 3,
+    ""AS20115"": 6,
+    ""AS58269"": 2679,
+    ""AS396982"": 36,
+    ""AS152963"": 12,
+    ""AS7018"": 6,
+    ""AS8075"": 3,
+    ""AS49434"": 6,
+    ""AS208046"": 9,
+    ""AS211059"": 3,
+    ""AS34665"": 12,
+    ""AS398705"": 3,
+    ""AS29465"": 3,
+    ""AS20473"": 6,
+    ""AS44578"": 3,
+    ""AS45102"": 3,
+    ""AS17511"": 3,
+    ""AS135377"": 3,
+    ""AS4134"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 31515,
+    ""TE Data"": 15,
+    ""NHANHOA"": 705,
+    ""SS-Net"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""NTT PC Communications, Inc."": 6,
+    ""Flyservers S.A."": 15,
+    ""Vocus PTY LTD"": 9,
+    ""Contabo GmbH"": 3,
+    ""Charter Communications"": 6,
+    ""CloudHosting Data Center"": 2679,
+    ""Google LLC"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""AT&T Enterprises, LLC"": 6,
+    ""Microsoft Corporation"": 3,
+    ""Datacenter location PAR1 France"": 6,
+    ""ColocationX Ltd."": 9,
+    ""Tribeka Web Advisors S.A."": 3,
+    ""Petersburg Internet Network ltd."": 12,
+    ""Censys, Inc."": 3,
+    ""MTN NIGERIA Communication limited"": 3,
+    ""The Constant Company, LLC"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud LLC"": 3,
+    ""OPTAGE Inc."": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Chinanet"": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 25683,
+    ""Unknown"": 15,
+    ""Digital Ocean"": 5832,
+    ""Branch of Nhan Hoa Software Company"": 705,
+    ""Unmanaged LTD"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""InfoSphere"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""Vocus Communications"": 9,
+    ""Contabo GmbH"": 3,
+    ""Spectrum"": 6,
+    ""CloudHosting SIA"": 2679,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""PPPoX Pool - rback4.spfdmo"": 6,
+    ""Microsoft Azure Cloud (eastus)"": 3,
+    ""ThinkTech Technology Industrial CO. Limited"": 6,
+    ""ColocationX Ltd"": 9,
+    ""Tribeka Web Advisors S.A"": 3,
+    ""IT Hostline Ltd"": 12,
+    ""Censys, Inc."": 3,
+    ""MTN Nigeria"": 3,
+    ""Vultr Holdings LLC Frankfurt"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud - US"": 3,
+    ""OPTAGE Inc."": 3,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""Ningbo Xuezhongpeng Person"": 3
+  },
+  ""regionName"": {
+    ""Ontario"": 5796,
+    ""Dakahlia"": 15,
+    ""Florida"": 4470,
+    ""New Jersey"": 5832,
+    ""South West"": 15396,
+    ""Ho Chi Minh"": 717,
+    ""Budapest"": 27,
+    ""Crimea"": 3,
+    ""Tokyo"": 6,
+    ""Vilnius"": 15,
+    ""Western Australia"": 9,
+    ""North Rhine-Westphalia"": 3,
+    ""Wisconsin"": 6,
+    ""R\u012bga"": 2679,
+    ""California"": 36,
+    ""Alabama"": 6,
+    ""Karnataka"": 21,
+    ""Virginia"": 15,
+    ""\u00cele-de-France"": 6,
+    ""Mariehamns stad"": 3,
+    ""Moscow"": 12,
+    ""Hesse"": 9,
+    ""Lagos"": 3,
+    ""Dubai"": 3,
+    ""Osaka"": 3,
+    ""England"": 3,
+    ""Zhejiang"": 3
+  },
+  ""country"": {
+    ""Canada"": 5796,
+    ""Egypt"": 15,
+    ""United States"": 10365,
+    ""Singapore"": 15396,
+    ""Vietnam"": 717,
+    ""Hungary"": 27,
+    ""Ukraine"": 3,
+    ""Japan"": 9,
+    ""Lithuania"": 15,
+    ""Australia"": 9,
+    ""Germany"": 12,
+    ""Latvia"": 2679,
+    ""India"": 21,
+    ""France"": 6,
+    ""Aland Islands"": 3,
+    ""Russia"": 12,
+    ""Nigeria"": 3,
+    ""United Arab Emirates"": 3,
+    ""United Kingdom"": 3,
+    ""China"": 3
+  },
+  ""account"": {
+    ""hello"": 34938,
+    ""142.93.8.59"": 60,
+    ""a"": 3,
+    ""Domain"": 18,
+    ""dWvmSPsbh"": 3,
+    ""GVIoDa"": 3,
+    ""aqbfLM"": 3,
+    ""Administr"": 21,
+    ""Test"": 12,
+    ""KixVLh"": 3,
+    ""rVrukmfJz"": 3,
+    ""jyuQRT"": 3,
+    ""(empty)"": 3,
+    ""LCYhcIRph"": 3,
+    ""YxIZkp"": 3,
+    ""YesOFR"": 3,
+    ""Administrator"": 3,
+    ""--"": 3,
+    ""hNquJetzF"": 3,
+    ""ROmlWm"": 3,
+    ""yhGJeB"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 35097
+  },
+  ""client_build"": {
+    ""Unknown"": 35097
+  },
+  ""client_name"": {
+    ""Unknown"": 35097
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 5820,
+    ""Unknown"": 135,
+    ""hosting"": 29139,
+    ""mobile & hosting"": 3
+  }
+}"
+jmygPcUZ,2025-05-11_stats.json,rdp_snitch,JSON,Monday 12th of May 2025 07:16:20 PM CDT,"{
+  ""ip"": {
+    ""146.190.242.181"": 5795,
+    ""41.33.88.113"": 15,
+    ""128.199.248.18"": 4470,
+    ""167.99.10.7"": 5793,
+    ""128.199.168.88"": 3936,
+    ""128.199.166.57"": 3711,
+    ""157.245.150.219"": 7590,
+    ""45.117.177.2"": 705,
+    ""80.94.95.198"": 21,
+    ""188.124.248.38"": 3,
+    ""111.89.163.100"": 6,
+    ""45.227.254.130"": 9,
+    ""123.103.219.70"": 9,
+    ""176.57.188.115"": 3,
+    ""71.82.170.60"": 6,
+    ""185.8.62.6"": 2679,
+    ""198.235.24.69"": 9,
+    ""160.30.44.131"": 12,
+    ""75.34.67.3"": 6,
+    ""80.94.95.203"": 6,
+    ""157.245.104.150"": 21,
+    ""48.216.243.126"": 3,
+    ""91.238.181.95"": 6,
+    ""165.232.167.86"": 3,
+    ""45.227.254.152"": 6,
+    ""185.196.220.41"": 9,
+    ""104.131.107.81"": 39,
+    ""5.178.1.30"": 3,
+    ""198.235.24.123"": 9,
+    ""85.208.84.135"": 6,
+    ""85.208.84.130"": 6,
+    ""167.94.146.50"": 3,
+    ""102.88.21.219"": 3,
+    ""95.179.246.240"": 6,
+    ""147.185.132.87"": 9,
+    ""185.209.49.162"": 3,
+    ""47.252.113.102"": 3,
+    ""209.97.169.106"": 156,
+    ""128.22.147.233"": 3,
+    ""152.32.157.92"": 3,
+    ""183.136.197.62"": 3,
+    ""147.185.132.15"": 9
+  },
+  ""asn"": {
+    ""AS14061"": 31514,
+    ""AS8452"": 15,
+    ""AS131353"": 705,
+    ""AS204428"": 27,
+    ""AS201776"": 3,
+    ""AS2514"": 6,
+    ""AS267784"": 15,
+    ""AS4826"": 9,
+    ""AS51167"": 3,
+    ""AS20115"": 6,
+    ""AS58269"": 2679,
+    ""AS396982"": 36,
+    ""AS152963"": 12,
+    ""AS7018"": 6,
+    ""AS8075"": 3,
+    ""AS49434"": 6,
+    ""AS208046"": 9,
+    ""AS211059"": 3,
+    ""AS34665"": 12,
+    ""AS398705"": 3,
+    ""AS29465"": 3,
+    ""AS20473"": 6,
+    ""AS44578"": 3,
+    ""AS45102"": 3,
+    ""AS17511"": 3,
+    ""AS135377"": 3,
+    ""AS4134"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 31514,
+    ""TE Data"": 15,
+    ""NHANHOA"": 705,
+    ""SS-Net"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""NTT PC Communications, Inc."": 6,
+    ""Flyservers S.A."": 15,
+    ""Vocus PTY LTD"": 9,
+    ""Contabo GmbH"": 3,
+    ""Charter Communications"": 6,
+    ""CloudHosting Data Center"": 2679,
+    ""Google LLC"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""AT&T Enterprises, LLC"": 6,
+    ""Microsoft Corporation"": 3,
+    ""Datacenter location PAR1 France"": 6,
+    ""ColocationX Ltd."": 9,
+    ""Tribeka Web Advisors S.A."": 3,
+    ""Petersburg Internet Network ltd."": 12,
+    ""Censys, Inc."": 3,
+    ""MTN NIGERIA Communication limited"": 3,
+    ""The Constant Company, LLC"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud LLC"": 3,
+    ""OPTAGE Inc."": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Chinanet"": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 25682,
+    ""Unknown"": 15,
+    ""Digital Ocean"": 5832,
+    ""Branch of Nhan Hoa Software Company"": 705,
+    ""Unmanaged LTD"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""InfoSphere"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""Vocus Communications"": 9,
+    ""Contabo GmbH"": 3,
+    ""Spectrum"": 6,
+    ""CloudHosting SIA"": 2679,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""PPPoX Pool - rback4.spfdmo"": 6,
+    ""Microsoft Azure Cloud (eastus)"": 3,
+    ""ThinkTech Technology Industrial CO. Limited"": 6,
+    ""ColocationX Ltd"": 9,
+    ""Tribeka Web Advisors S.A"": 3,
+    ""IT Hostline Ltd"": 12,
+    ""Censys, Inc."": 3,
+    ""MTN Nigeria"": 3,
+    ""Vultr Holdings LLC Frankfurt"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud - US"": 3,
+    ""OPTAGE Inc."": 3,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""Ningbo Xuezhongpeng Person"": 3
+  },
+  ""regionName"": {
+    ""Ontario"": 5795,
+    ""Dakahlia"": 15,
+    ""Florida"": 4470,
+    ""New Jersey"": 5832,
+    ""South West"": 15396,
+    ""Ho Chi Minh"": 717,
+    ""Budapest"": 27,
+    ""Crimea"": 3,
+    ""Tokyo"": 6,
+    ""Vilnius"": 15,
+    ""Western Australia"": 9,
+    ""North Rhine-Westphalia"": 3,
+    ""Wisconsin"": 6,
+    ""R\u012bga"": 2679,
+    ""California"": 36,
+    ""Alabama"": 6,
+    ""Karnataka"": 21,
+    ""Virginia"": 15,
+    ""\u00cele-de-France"": 6,
+    ""Mariehamns stad"": 3,
+    ""Moscow"": 12,
+    ""Hesse"": 9,
+    ""Lagos"": 3,
+    ""Dubai"": 3,
+    ""Osaka"": 3,
+    ""England"": 3,
+    ""Zhejiang"": 3
+  },
+  ""country"": {
+    ""Canada"": 5795,
+    ""Egypt"": 15,
+    ""United States"": 10365,
+    ""Singapore"": 15396,
+    ""Vietnam"": 717,
+    ""Hungary"": 27,
+    ""Ukraine"": 3,
+    ""Japan"": 9,
+    ""Lithuania"": 15,
+    ""Australia"": 9,
+    ""Germany"": 12,
+    ""Latvia"": 2679,
+    ""India"": 21,
+    ""France"": 6,
+    ""Aland Islands"": 3,
+    ""Russia"": 12,
+    ""Nigeria"": 3,
+    ""United Arab Emirates"": 3,
+    ""United Kingdom"": 3,
+    ""China"": 3
+  },
+  ""account"": {
+    ""hello"": 34937,
+    ""142.93.8.59"": 60,
+    ""a"": 3,
+    ""Domain"": 18,
+    ""dWvmSPsbh"": 3,
+    ""GVIoDa"": 3,
+    ""aqbfLM"": 3,
+    ""Administr"": 21,
+    ""Test"": 12,
+    ""KixVLh"": 3,
+    ""rVrukmfJz"": 3,
+    ""jyuQRT"": 3,
+    ""(empty)"": 3,
+    ""LCYhcIRph"": 3,
+    ""YxIZkp"": 3,
+    ""YesOFR"": 3,
+    ""Administrator"": 3,
+    ""--"": 3,
+    ""hNquJetzF"": 3,
+    ""ROmlWm"": 3,
+    ""yhGJeB"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 35096
+  },
+  ""client_build"": {
+    ""Unknown"": 35096
+  },
+  ""client_name"": {
+    ""Unknown"": 35096
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 5819,
+    ""Unknown"": 135,
+    ""hosting"": 29139,
+    ""mobile & hosting"": 3
+  }
+}"
+vdNE0ski,2025-05-11_stats.json,rdp_snitch,JSON,Monday 12th of May 2025 07:15:10 PM CDT,"{
+  ""ip"": {
+    ""146.190.242.181"": 5794,
+    ""41.33.88.113"": 15,
+    ""128.199.248.18"": 4470,
+    ""167.99.10.7"": 5793,
+    ""128.199.168.88"": 3936,
+    ""128.199.166.57"": 3711,
+    ""157.245.150.219"": 7590,
+    ""45.117.177.2"": 705,
+    ""80.94.95.198"": 21,
+    ""188.124.248.38"": 3,
+    ""111.89.163.100"": 6,
+    ""45.227.254.130"": 9,
+    ""123.103.219.70"": 9,
+    ""176.57.188.115"": 3,
+    ""71.82.170.60"": 6,
+    ""185.8.62.6"": 2679,
+    ""198.235.24.69"": 9,
+    ""160.30.44.131"": 12,
+    ""75.34.67.3"": 6,
+    ""80.94.95.203"": 6,
+    ""157.245.104.150"": 21,
+    ""48.216.243.126"": 3,
+    ""91.238.181.95"": 6,
+    ""165.232.167.86"": 3,
+    ""45.227.254.152"": 6,
+    ""185.196.220.41"": 9,
+    ""104.131.107.81"": 39,
+    ""5.178.1.30"": 3,
+    ""198.235.24.123"": 9,
+    ""85.208.84.135"": 6,
+    ""85.208.84.130"": 6,
+    ""167.94.146.50"": 3,
+    ""102.88.21.219"": 3,
+    ""95.179.246.240"": 6,
+    ""147.185.132.87"": 9,
+    ""185.209.49.162"": 3,
+    ""47.252.113.102"": 3,
+    ""209.97.169.106"": 156,
+    ""128.22.147.233"": 3,
+    ""152.32.157.92"": 3,
+    ""183.136.197.62"": 3,
+    ""147.185.132.15"": 9
+  },
+  ""asn"": {
+    ""AS14061"": 31513,
+    ""AS8452"": 15,
+    ""AS131353"": 705,
+    ""AS204428"": 27,
+    ""AS201776"": 3,
+    ""AS2514"": 6,
+    ""AS267784"": 15,
+    ""AS4826"": 9,
+    ""AS51167"": 3,
+    ""AS20115"": 6,
+    ""AS58269"": 2679,
+    ""AS396982"": 36,
+    ""AS152963"": 12,
+    ""AS7018"": 6,
+    ""AS8075"": 3,
+    ""AS49434"": 6,
+    ""AS208046"": 9,
+    ""AS211059"": 3,
+    ""AS34665"": 12,
+    ""AS398705"": 3,
+    ""AS29465"": 3,
+    ""AS20473"": 6,
+    ""AS44578"": 3,
+    ""AS45102"": 3,
+    ""AS17511"": 3,
+    ""AS135377"": 3,
+    ""AS4134"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 31513,
+    ""TE Data"": 15,
+    ""NHANHOA"": 705,
+    ""SS-Net"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""NTT PC Communications, Inc."": 6,
+    ""Flyservers S.A."": 15,
+    ""Vocus PTY LTD"": 9,
+    ""Contabo GmbH"": 3,
+    ""Charter Communications"": 6,
+    ""CloudHosting Data Center"": 2679,
+    ""Google LLC"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""AT&T Enterprises, LLC"": 6,
+    ""Microsoft Corporation"": 3,
+    ""Datacenter location PAR1 France"": 6,
+    ""ColocationX Ltd."": 9,
+    ""Tribeka Web Advisors S.A."": 3,
+    ""Petersburg Internet Network ltd."": 12,
+    ""Censys, Inc."": 3,
+    ""MTN NIGERIA Communication limited"": 3,
+    ""The Constant Company, LLC"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud LLC"": 3,
+    ""OPTAGE Inc."": 3,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""Chinanet"": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 25681,
+    ""Unknown"": 15,
+    ""Digital Ocean"": 5832,
+    ""Branch of Nhan Hoa Software Company"": 705,
+    ""Unmanaged LTD"": 27,
+    ""Miranda-Media Ltd"": 3,
+    ""InfoSphere"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""Vocus Communications"": 9,
+    ""Contabo GmbH"": 3,
+    ""Spectrum"": 6,
+    ""CloudHosting SIA"": 2679,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Phuong Nam Company Limited"": 12,
+    ""PPPoX Pool - rback4.spfdmo"": 6,
+    ""Microsoft Azure Cloud (eastus)"": 3,
+    ""ThinkTech Technology Industrial CO. Limited"": 6,
+    ""ColocationX Ltd"": 9,
+    ""Tribeka Web Advisors S.A"": 3,
+    ""IT Hostline Ltd"": 12,
+    ""Censys, Inc."": 3,
+    ""MTN Nigeria"": 3,
+    ""Vultr Holdings LLC Frankfurt"": 6,
+    ""Itglobal COM Dmcc"": 3,
+    ""Alibaba Cloud - US"": 3,
+    ""OPTAGE Inc."": 3,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""Ningbo Xuezhongpeng Person"": 3
+  },
+  ""regionName"": {
+    ""Ontario"": 5794,
+    ""Dakahlia"": 15,
+    ""Florida"": 4470,
+    ""New Jersey"": 5832,
+    ""South West"": 15396,
+    ""Ho Chi Minh"": 717,
+    ""Budapest"": 27,
+    ""Crimea"": 3,
+    ""Tokyo"": 6,
+    ""Vilnius"": 15,
+    ""Western Australia"": 9,
+    ""North Rhine-Westphalia"": 3,
+    ""Wisconsin"": 6,
+    ""R\u012bga"": 2679,
+    ""California"": 36,
+    ""Alabama"": 6,
+    ""Karnataka"": 21,
+    ""Virginia"": 15,
+    ""\u00cele-de-France"": 6,
+    ""Mariehamns stad"": 3,
+    ""Moscow"": 12,
+    ""Hesse"": 9,
+    ""Lagos"": 3,
+    ""Dubai"": 3,
+    ""Osaka"": 3,
+    ""England"": 3,
+    ""Zhejiang"": 3
+  },
+  ""country"": {
+    ""Canada"": 5794,
+    ""Egypt"": 15,
+    ""United States"": 10365,
+    ""Singapore"": 15396,
+    ""Vietnam"": 717,
+    ""Hungary"": 27,
+    ""Ukraine"": 3,
+    ""Japan"": 9,
+    ""Lithuania"": 15,
+    ""Australia"": 9,
+    ""Germany"": 12,
+    ""Latvia"": 2679,
+    ""India"": 21,
+    ""France"": 6,
+    ""Aland Islands"": 3,
+    ""Russia"": 12,
+    ""Nigeria"": 3,
+    ""United Arab Emirates"": 3,
+    ""United Kingdom"": 3,
+    ""China"": 3
+  },
+  ""account"": {
+    ""hello"": 34936,
+    ""142.93.8.59"": 60,
+    ""a"": 3,
+    ""Domain"": 18,
+    ""dWvmSPsbh"": 3,
+    ""GVIoDa"": 3,
+    ""aqbfLM"": 3,
+    ""Administr"": 21,
+    ""Test"": 12,
+    ""KixVLh"": 3,
+    ""rVrukmfJz"": 3,
+    ""jyuQRT"": 3,
+    ""(empty)"": 3,
+    ""LCYhcIRph"": 3,
+    ""YxIZkp"": 3,
+    ""YesOFR"": 3,
+    ""Administrator"": 3,
+    ""--"": 3,
+    ""hNquJetzF"": 3,
+    ""ROmlWm"": 3,
+    ""yhGJeB"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 35095
+  },
+  ""client_build"": {
+    ""Unknown"": 35095
+  },
+  ""client_name"": {
+    ""Unknown"": 35095
+  },
+  ""ip_type"": {
+    ""hosting & proxy"": 5818,
+    ""Unknown"": 135,
+    ""hosting"": 29139,
+    ""mobile & hosting"": 3
+  }
+}"
+a9HbK64J,Untitled,altervisi0n,Dart,Monday 12th of May 2025 06:25:46 PM CDT,"
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:viweather1/services/location_service.dart';
+
+class WeatherMap extends StatefulWidget {
+final double latitude;
+final double longitude;
+final Function(double lat, double lon, LocationInfo locationInfo) onLocationSelected;
+
+const WeatherMap({
+Key? key,
+required this.latitude,
+required this.longitude,
+required this.onLocationSelected,
+}) : super(key: key);
+
+@override
+State<WeatherMap> createState() => _WeatherMapState();
+}
+
+class _WeatherMapState extends State<WeatherMap> {
+late final MapController _mapController;
+final LocationService _locationService = LocationService();
+LatLng? _selectedLocation;
+LocationInfo? _currentLocationInfo;
+bool _isLoading = false;
+double _currentZoom = 10.0;
+
+@override
+void initState() {
+super.initState();
+_mapController = MapController();
+_selectedLocation = LatLng(widget.latitude, widget.longitude);
+_updateLocationInfo();
+}
+
+Future<void> _updateLocationInfo() async {
+if (_selectedLocation != null) {
+final locationInfo = await _locationService.getCityFromCoordinates(
+_selectedLocation!.latitude,
+_selectedLocation!.longitude,
+);
+setState(() {
+_currentLocationInfo = locationInfo;
+});
+}
+}
+
+@override
+void didUpdateWidget(WeatherMap oldWidget) {
+super.didUpdateWidget(oldWidget);
+if (oldWidget.latitude != widget.latitude || oldWidget.longitude != widget.longitude) {
+_selectedLocation = LatLng(widget.latitude, widget.longitude);
+_mapController.move(
+_selectedLocation!,
+_currentZoom,
+);
+_updateLocationInfo();
+}
+}
+
+void _handleZoomIn() {
+final newZoom = _currentZoom + 1;
+if (newZoom <= 18) { // Максимальный зум для OpenStreetMap
+setState(() {
+_currentZoom = newZoom;
+});
+_mapController.move(_selectedLocation!, _currentZoom);
+}
+}
+
+void _handleZoomOut() {
+final newZoom = _currentZoom - 1;
+if (newZoom >= 3) { // Минимальный зум для комфортного просмотра
+setState(() {
+_currentZoom = newZoom;
+});
+_mapController.move(_selectedLocation!, _currentZoom);
+}
+}
+
+Future<void> _handleTap(LatLng location) async {
+setState(() {
+_isLoading = true;
+_selectedLocation = location;
+});
+
+try {
+final locationInfo = await _locationService.getCityFromCoordinates(
+location.latitude,
+location.longitude,
+);
+setState(() {
+_currentLocationInfo = locationInfo;
+});
+widget.onLocationSelected(location.latitude, location.longitude, locationInfo);
+} catch (e) {
+ScaffoldMessenger.of(context).showSnackBar(
+SnackBar(content: Text('Error selecting location: $e')),
+);
+} finally {
+setState(() {
+_isLoading = false;
+});
+}
+}
+
+@override
+void dispose() {
+_mapController.dispose();
+super.dispose();
+}
+
+@override
+Widget build(BuildContext context) {
+return Stack(
+children: [
+Container(
+height: 200,
+decoration: BoxDecoration(
+borderRadius: BorderRadius.circular(12),
+boxShadow: [
+BoxShadow(
+color: Colors.black.withOpacity(0.1),
+blurRadius: 10,
+offset: const Offset(0, 5),
+),
+],
+),
+child: ClipRRect(
+borderRadius: BorderRadius.circular(12),
+child: FlutterMap(
+mapController: _mapController,
+options: MapOptions(
+center: _selectedLocation,
+zoom: _currentZoom,
+onTap: (_, location) => _handleTap(location),
+onMapReady: () {
+_mapController.move(_selectedLocation!, _currentZoom);
+},
+interactiveFlags: InteractiveFlag.all,
+enableScrollWheel: true,
+enableMultiFingerGestureRace: true,
+),
+children: [
+TileLayer(
+urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+userAgentPackageName: 'com.example.viweather1',
+),
+MarkerLayer(
+markers: [
+if (_selectedLocation != null)
+Marker(
+point: _selectedLocation!,
+child: Container(
+width: 50,
+height: 50,
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(25),
+boxShadow: [
+BoxShadow(
+color: Colors.black.withOpacity(0.2),
+blurRadius: 5,
+offset: const Offset(0, 2),
+),
+],
+),
+child: const Icon(
+Icons.location_on,
+color: Colors.red,
+size: 30,
+),
+),
+),
+],
+),
+],
+),
+),
+),
+// Location info overlay
+if (_currentLocationInfo != null)
+Positioned(
+left: 8,
+top: 8,
+child: Container(
+padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+decoration: BoxDecoration(
+color: Colors.white.withOpacity(0.9),
+borderRadius: BorderRadius.circular(4),
+boxShadow: [
+BoxShadow(
+color: Colors.black.withOpacity(0.1),
+blurRadius: 4,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Text(
+'${_currentLocationInfo!.cityName}, ${_currentLocationInfo!.countryCode}',
+style: const TextStyle(
+fontSize: 12,
+fontWeight: FontWeight.w500,
+),
+),
+),
+),
+// Кнопки масштабирования
+Positioned(
+right: 8,
+top: 8,
+child: Column(
+children: [
+Container(
+decoration: BoxDecoration(
+color: Colors.white,
+borderRadius: BorderRadius.circular(4),
+boxShadow: [
+BoxShadow(
+color: Colors.black.withOpacity(0.1),
+blurRadius: 4,
+offset: const Offset(0, 2),
+),
+],
+),
+child: Column(
+children: [
+IconButton(
+
+
+icon: const Icon(Icons.add, size: 20),
+onPressed: _handleZoomIn,
+padding: const EdgeInsets.all(8),
+constraints: const BoxConstraints(),
+color: Colors.black87,
+),
+Container(
+height: 1,
+color: Colors.grey.withOpacity(0.3),
+),
+IconButton(
+icon: const Icon(Icons.remove, size: 20),
+onPressed: _handleZoomOut,
+padding: const EdgeInsets.all(8),
+constraints: const BoxConstraints(),
+color: Colors.black87,
+),
+],
+),
+),
+],
+),
+),
+if (_isLoading)
+Container(
+height: 200,
+decoration: BoxDecoration(
+borderRadius: BorderRadius.circular(12),
+color: Colors.black.withOpacity(0.3),
+),
+child: const Center(
+child: CircularProgressIndicator(),
+),
+),
+],
+);
+}
+}"
+g7Lf9yPj,# table2doc_demo.py,here2share,Python,Monday 12th of May 2025 05:59:06 PM CDT,"# table2doc_demo.py
+
+import os
+import sys
+import argparse
+import subprocess
+from html.parser import HTMLParser
+
+demo_html = '''<table>
+    <thead>
+        <tr>
+            <th>Header 1</th>
+            <th>Header 2</th>
+            <th>Header 3</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Row 1, Cell 1</td>
+            <td>Row 1, Cell 2 with some longer content</td>
+            <td>Row 1, Cell 3</td>
+        </tr>
+        <tr>
+            <td>Row 2, Cell 1</td>
+            <td>Row 2, Cell 2</td>
+            <td>Row 2, Cell 3</td>
+        </tr>
+        <tr>
+            <td colspan=""2"">Merged cells</td>
+            <td>Last cell</td>
+        </tr>
+    </tbody>
+</table>'''
+
+def save_as_rtf(text_content, filename):
+    """"""Save RTF content to file with fallback to Documents folder""""""
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(text_content)
+        return filename
+    except Exception as primary_error:
+        print(f""Warning: {primary_error}"", file=sys.stderr)
+        
+        # Fallback to Documents folder
+        try:
+            docs_path = os.path.join(os.path.expanduser('~'), 'Documents', os.path.basename(filename))
+            with open(docs_path, 'w', encoding='utf-8') as f:
+                f.write(text_content)
+            print(f""Saved to fallback location: {docs_path}"")
+            return docs_path
+        except Exception as fallback_error:
+            print(f""Error saving file: {fallback_error}"", file=sys.stderr)
+            return None
+
+def open_file(filepath):
+    """"""Open file with default application""""""
+    try:
+        if sys.platform == 'win32':
+            os.startfile(filepath)
+        elif sys.platform == 'darwin':
+            subprocess.run(['open', filepath], check=True)
+        else:  # Linux and others
+            subprocess.run(['xdg-open', filepath], check=True)
+        return True
+    except Exception as e:
+        print(f""Could not open file: {e}"")
+        return False
+
+class TableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags_stack = []
+        self.in_table = False
+        self.table_data = []
+        self.current_row = []
+        self.current_cell = {""content"": """", ""colspan"": 1, ""is_header"": False}
+        self.in_cell = False
+
+    def handle_starttag(self, tag, attrs):
+        self.tags_stack.append(tag)
+        attrs_dict = dict(attrs)
+        
+        if tag == 'table':
+            self.in_table = True
+            self.table_data = []
+        elif tag == 'tr':
+            self.current_row = []
+        elif tag in ['td', 'th']:
+            self.in_cell = True
+            self.current_cell = {
+                ""content"": """",
+                ""colspan"": int(attrs_dict.get('colspan', 1)),
+                ""is_header"": (tag == 'th')
+            }
+
+    def handle_endtag(self, tag):
+        if tag == 'table':
+            self.in_table = False
+        elif tag == 'tr':
+            if self.current_row:  # Only add non-empty rows
+                self.table_data.append(self.current_row.copy())
+        elif tag in ['td', 'th']:
+            self.in_cell = False
+            self.current_row.append(self.current_cell.copy())
+            
+        # Remove the tag from the stack
+        if self.tags_stack and self.tags_stack[-1] == tag:
+            self.tags_stack.pop()
+            
+    def handle_data(self, data):
+        if self.in_cell:
+            data = data.strip()
+            if data:
+                if self.current_cell[""content""]:
+                    self.current_cell[""content""] += "" "" + data
+                else:
+                    self.current_cell[""content""] = data
+
+def html_table_to_rtf(html_content, page_width=1200):
+    """"""Convert HTML table to RTF format with proper formatting and cell spanning""""""
+    # Page width in twips (1/20 of a point, 1/1440 of an inch)
+    page_width_twips = page_width * 20  # Convert units to twips
+    
+    # Parse the HTML content
+    parser = TableParser()
+    parser.feed(html_content)
+    table_data = parser.table_data
+    
+    # Start building RTF document
+    rtf = []
+    
+    # RTF Header with proper document setup
+    rtf.append(r'''{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033
+{\fonttbl{\f0\fswiss\fcharset0 Calibri;}{\f1\fswiss\fprq2\fcharset0 Arial;}}
+{\colortbl;\red0\green0\blue0;\red255\green255\blue255;\red242\green242\blue242;\red79\green129\blue189;}
+{\*\generator table2doc converter}
+\viewkind4\uc1
+\paperw''')
+    rtf.append(str(page_width_twips))
+    rtf.append(r'''\paperh15840\margl720\margr720\margt720\margb720
+\pard\sa200\sl276\slmult1\qc\b\f0\fs28 Table Conversion\par
+\pard\sa200\sl276\slmult1\b0\fs24
+''')
+    
+    if not table_data:
+        rtf.append(r'\pard\sa200\sl276\slmult1 No table data found\par')
+        rtf.append('}')
+        return ''.join(rtf)
+    
+    # Calculate max columns and their widths
+    max_cols = max(sum(cell[""colspan""] for cell in row) for row in table_data if row)
+    
+    # Initialize column widths based on content length (minimum 1500 twips)
+    col_widths = [1500] * max_cols
+    
+    # First pass: estimate content width needed for each column
+    for row in table_data:
+        col_idx = 0
+        for cell in row:
+            content_len = len(cell[""content""])
+            avg_width = 120 * content_len // cell[""colspan""]  # Approximate width per character
+            
+            # Distribute width across spanned columns
+            for span in range(cell[""colspan""]):
+                if col_idx + span < max_cols:
+                    col_widths[col_idx + span] = max(col_widths[col_idx + span], avg_width)
+            
+            col_idx += cell[""colspan""]
+    
+    # Adjust for page width constraint
+    total_width = sum(col_widths)
+    available_width = page_width_twips - 1440  # Account for margins
+    
+    if total_width > available_width:
+        # Scale down proportionally
+        scale_factor = available_width / total_width
+        col_widths = [int(width * scale_factor) for width in col_widths]
+    
+    # Begin table
+    rtf.append(r'\par\pard')
+    
+    # Process each row
+    for row_idx, row in enumerate(table_data):
+        if not row:  # Skip empty rows
+            continue
+        
+        # Begin row
+        rtf.append(r'\trowd\trgaph70\trleft0\trpaddl70\trpaddr70\trpaddfl3\trpaddfr3')
+        
+        # Set row properties
+        if row_idx == 0 or any(cell[""is_header""] for cell in row):
+            # Header formatting
+            rtf.append(r'\trbrdrt\brdrs\brdrw10\brdrcf4')  # Top border
+            rtf.append(r'\trbrdrl\brdrs\brdrw10\brdrcf4')  # Left border
+            rtf.append(r'\trbrdrb\brdrs\brdrw10\brdrcf4')  # Bottom border
+            rtf.append(r'\trbrdrr\brdrs\brdrw10\brdrcf4')  # Right border
+        else:
+            # Regular row borders
+            rtf.append(r'\trbrdrt\brdrs\brdrw5\brdrcf1')
+            rtf.append(r'\trbrdrl\brdrs\brdrw5\brdrcf1')
+            rtf.append(r'\trbrdrb\brdrs\brdrw5\brdrcf1')
+            rtf.append(r'\trbrdrr\brdrs\brdrw5\brdrcf1')
+        
+        # Calculate cell positions
+        pos = 0
+        col_idx = 0
+        
+        for cell in row:
+            # Calculate width for this cell (sum of spanned columns)
+            cell_width = sum(col_widths[col_idx:col_idx + cell[""colspan""]])
+            end_pos = pos + cell_width
+            
+            # Cell border and background formatting
+            if cell[""is_header""]:
+                rtf.append(r'\clcbpat3')  # Light gray background for headers
+            else:
+                rtf.append(r'\clcbpat2')  # White background for regular cells
+                
+            rtf.append(r'\clbrdrt\brdrs\brdrw5\brdrcf1')  # Top border
+            rtf.append(r'\clbrdrl\brdrs\brdrw5\brdrcf1')  # Left border
+            rtf.append(r'\clbrdrb\brdrs\brdrw5\brdrcf1')  # Bottom border
+            rtf.append(r'\clbrdrr\brdrs\brdrw5\brdrcf1')  # Right border
+            
+            # Cell position (right boundary)
+            rtf.append(f'\\cellx{end_pos}')
+            
+            pos = end_pos
+            col_idx += cell[""colspan""]
+        
+        rtf.append('\n')
+        
+        # Cell content
+        for cell in row:
+            if cell[""is_header""]:
+                rtf.append(r'{\intbl\qc\b\fs36 ')  # Centered, bold for headers, font size is 18px
+            else:
+                rtf.append(r'{\intbl\ql ')  # Left-aligned for regular cells
+            
+            # Handle newlines in content
+            content = cell[""content""].replace('\n', '\\line ')
+            rtf.append(content)
+            rtf.append(r'}\cell ')
+        
+        rtf.append(r'\row\n')
+    
+    # End RTF document
+    rtf.append(r'\pard\sa200\sl276\slmult1\par}')
+    
+    return ''.join(rtf)
+
+def main():
+    parser = argparse.ArgumentParser(description='Convert HTML tables to RTF documents')
+    parser.add_argument('--file', help='Input HTML file')
+    parser.add_argument('--output', default='table.rtf', help='Output RTF file')
+    parser.add_argument('--no-open', dest='open', action='store_false',
+                      help='Do not open the output file after conversion')
+    parser.add_argument('--width', type=int, default=1200, 
+                      help='Page width in RTF units (1/20 of a point)')
+    parser.add_argument('--demo', action='store_true', 
+                      help='Use built-in demo table instead of input file')
+    parser.set_defaults(open=True)
+
+    args = parser.parse_args()
+
+    html_content = None
+    
+    if args.demo or (not args.file):
+        html_content = demo_html
+        print(""Using demo HTML table:"")
+        print(""-"" * 40)
+        print(demo_html)
+        print(""-"" * 40)
+    elif args.file:
+        try:
+            with open(args.file, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            print(f""Successfully read HTML from: {args.file}"")
+        except Exception as e:
+            print(f""Error reading file: {e}"", file=sys.stderr)
+            sys.exit(1)
+
+    rtf = html_table_to_rtf(html_content, args.width)
+
+    saved_path = save_as_rtf(rtf, args.output)
+    if not saved_path:
+        print(""Failed to save RTF file"", file=sys.stderr)
+        sys.exit(1)
+
+    print(f""Successfully converted table to: {saved_path}"")
+
+    if args.open and not open_file(saved_path):
+        print(""Could not automatically open the file. Please open it manually."")
+
+if __name__ == ""__main__"":
+    main()"
+ucZ274fZ,crossover_IDEC.sh,j0h,Bash,Monday 12th of May 2025 05:08:32 PM CDT,"#!/bin/bash
+
+: '
+This script installs a CrossOver bottle that contains the IDEC automation suite.
+It assumes CrossOver is installed and configures the environment accordingly.
+Use at your own risk.
+'
+
+# Set the bottle name here
+BOTTLE_NAME=""WindLDR""
+
+# Exit if CrossOver is not installed
+if ! command -v cxrun &> /dev/null; then
+    echo ""Error: CrossOver is not installed. Please install it first.""
+    exit 1
+fi
+
+echo ""CrossOver is installed.""
+
+# Function to check if a package is installed
+is_installed() {
+    dpkg -l ""$1"" &> /dev/null
+    return $?
+}
+
+# List of required packages
+packages=(
+    ""ttf-mscorefonts-installer""
+    ""winetricks""
+    ""cups""
+    ""cups-pdf""
+    ""udev""
+    ""libusb-dev""
+    ""libusb-1.0-0-dev""
+    ""linux-tools-virtual""
+    ""hwdata""
+)
+
+# Install required packages
+for package in ""${packages[@]}""; do
+    if ! is_installed ""$package""; then
+        echo ""Installing $package...""
+        sudo apt-get install -y ""$package""
+    else
+        echo ""$package is already installed.""
+    fi
+done
+
+# Run winetricks with proper WINEPREFIX
+WINEPREFIX=""$HOME/.cxoffice/$BOTTLE_NAME"" winetricks allfonts corefonts
+
+# Add user to plugdev if not already a member
+if ! groups $USER | grep -q ""\bplugdev\b""; then
+    sudo usermod -aG plugdev $USER
+    echo ""Added $USER to plugdev group.""
+fi
+
+# Create or update udev rules for USB access
+UDEV_RULE_FILE=""/etc/udev/rules.d/99-usb.rules""
+
+if [ ! -f ""$UDEV_RULE_FILE"" ]; then
+    echo 'SUBSYSTEM==""usb"", MODE=""0666""' | sudo tee ""$UDEV_RULE_FILE""
+    echo ""Created $UDEV_RULE_FILE with USB rule.""
+else
+    echo ""Udev rule file already exists. Appending USB rule.""
+    echo 'SUBSYSTEM==""usb"", MODE=""0666""' | sudo tee -a ""$UDEV_RULE_FILE""
+fi
+
+# Reload udev rules
+sudo udevadm control --reload-rules
+
+# Restore CrossOver archive
+echo ""Restoring bottle from archive...""
+cxrestore --archive=""$BOTTLE_NAME.cxarchive"" --bottle=""$BOTTLE_NAME""
+
+# Link virtual printer output and USB COM port
+BOTTLE_PATH=""$HOME/.cxoffice/$BOTTLE_NAME""
+ln -sf ""/var/spool/cups-pdf/$USER"" ""$BOTTLE_PATH/dosdevices/c:""
+ln -sf ""/dev/ttyACM0"" ""$BOTTLE_PATH/dosdevices/com1""
+
+echo ""CrossOver bottle installation and configuration completed.""
+exit 0
+
+: '
+OG process notes:
+
+Installing WindLDR in wine, or crossover:
+before making your bottle, install cups, cups-pdf before making the WindLDR bottle
+make sure cups is running.
+else WindLDR isnt smart enough to find a virtual printer.
+
+$ln-s /var/spool/cups-pdf/$USER ~/.cxoffice/[YOUR_BOTTLE]/dosdevices/c:
+
+this takes care of the inability to print.
+WindLDR is the only component of the suite with this issue.
+
+
+sudo apt install ttf-mscorefonts-installer
+sudo apt install winetricks
+$ winetricks corefonts
+$ winetricks allfonts
+
+how to use wintricks in crossover:
+Enviornmental Variable:
+WINEPREFIX=~/.cxoffice/YOUR_BOTTLE_NAME winetricks
+
+This (should ) take care of various issues related to missing fonts.
+most notable: Veranda is the default, although we are using Western.
+
+sudo apt install libusb-dev libusb-1.0-0-dev 
+sudo apt install linux-tools-virtual hwdata
+
+add user to plugdev if not previously there:
+$sudo usermod -aG plugdev $USER
+
+Write a udev rule:
+/etc/udev/rules.d/99-usb.rules 
+SUBSYSTEM==""usb"", MODE=""0666""
+
+Save file, reload udev rules:
+$sudo udevadm control --reload-rules
+
+
+## WHY 99-rules file? NN-device-rules, NN sets priority, 99 is a low priority.
+
+
+
+link the device to com1 in wine or crossover:
+$ ln -s /dev/ttyACM0 ~/.cxoffice/[YOUR_BOTTLE]/dosdevices/com1
+
+
+previus error was like USB port not found:
+(IT basic instructions)
+
+Current error:
+lol none fixed it.
+'"
+iWNp5fZv,Triplanar Shader for Godot,adamsleepy_,GDScript,Monday 12th of May 2025 04:52:32 PM CDT,"shader_type spatial;
+
+uniform sampler2D texture_x: source_color, repeat_enable;
+uniform sampler2D texture_y: source_color, repeat_enable;
+uniform sampler2D texture_z: source_color, repeat_enable;
+
+uniform float UV_Scale = 0.5;
+
+uniform vec4 albedo_modulate : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float modulate_intensity : hint_range(0.0, 1.0);
+
+void fragment() {
+	vec4 vertex = INV_VIEW_MATRIX * vec4(VERTEX, 1.0);
+	vec3 normal = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	vec3 adjusted_normal = pow(abs(normal), vec3(8.0));
+	vec3 weights = adjusted_normal / (adjusted_normal.x + adjusted_normal.y + adjusted_normal.z) * 3.0;
+
+	vec2 uv_x = vertex.zy * UV_Scale;
+	vec2 uv_y = vertex.xz * UV_Scale;
+	vec2 uv_z = vertex.xy * UV_Scale;
+
+	float use_y_up = float(normal.y > 0.0);
+
+	vec3 color_x = texture(texture_x, uv_x).rgb * weights.x;
+	vec3 color_y_up = texture(texture_y, uv_y).rgb * weights.y;
+	vec3 color_y_down = texture(texture_x, uv_y).rgb * weights.y;
+	vec3 color_z = texture(texture_z, uv_z).rgb * weights.z;
+
+	ALBEDO = (color_x + mix(color_y_down, color_y_up, use_y_up) + color_z) / 3.0 * albedo_modulate.rgb + (albedo_modulate.rgb * vec3(modulate_intensity,modulate_intensity,modulate_intensity));
+}"
