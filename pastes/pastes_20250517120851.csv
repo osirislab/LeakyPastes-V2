@@ -1,0 +1,3821 @@
+id,title,username,language,date,content
+UvpQDXSX,Untitled,TDanh,HTML,Saturday 17th of May 2025 06:59:41 AM CDT,"-- DANH SÁCH KEY VÀ SỐ NGÀY
+local keyList = {
+    [""DANH_2007""] = 9999999999
+}
+
+-- LẤY THỜI GIAN HIỆN TẠI + TÍNH HẠN KEY
+local function getTimestampAfterDays(days)
+    local now = os.time()
+    local expireDate = os.date(""*t"", now + days * 24 * 60 * 60)
+    expireDate.hour = 23
+    expireDate.min = 59
+    expireDate.sec = 59
+    return os.time(expireDate)
+end
+
+-- KIỂM TRA KEY
+function checkKey()
+    local input = gg.prompt({""🔑 NHẬP KEY:""}, nil, {""text""})
+    if not input then os.exit() end
+
+    local userKey = string.lower(input[1])
+    local duration = keyList[userKey]
+
+    if duration then
+        local expire = getTimestampAfterDays(duration)
+        local now = os.time()
+        local timeLeft = expire - now
+
+        if timeLeft > 0 then
+            gg.alert(""✅ KEY HỢP LỆ!\nThời hạn: "" .. duration .. "" ngày\nHết hạn lúc: "" .. os.date(""%d/%m/%Y %H:%M:%S"", expire))
+            -- Ghi key vào file lưu hoặc dùng tiếp trong script ở đây nếu cần
+            return true
+        else
+            gg.alert(""❌ KEY ĐÃ HẾT HẠN!"")
+            os.exit()
+        end
+    else
+        gg.alert(""❌ KEY KHÔNG HỢP LỆ!"")
+        os.exit()
+    end
+end
+
+-- GỌI HÀM KIỂM TRA KEY
+checkKey()
+
+gg.toast(""🚀 SCRIPT HACK SPEED KHỞI ĐỘNG..."")
+
+local label = ""SPEED_HACK""
+local speedList = {}
+
+function hackSpeed()
+    -- Nếu đã từng lưu, dùng lại
+    speedList = gg.getListItems(label)
+    if #speedList > 0 then
+        local prompt = gg.prompt({""💬 NHẬP SPEED MỚI (FLOAT):""}, {""2.0""}, {""number""})
+        if not prompt or not tonumber(prompt[1]) then return gg.alert(""⚠️ DỮ LIỆU KHÔNG HỢP LỆ!"") end
+        local newSpeed = tonumber(prompt[1])
+        for i, v in ipairs(speedList) do
+            v.value = newSpeed
+        end
+        gg.setValues(speedList)
+        gg.toast(""✅ SPEED ĐÃ ĐỔI THÀNH: ""..newSpeed)
+        return
+    end
+
+    -- Nếu chưa từng lưu -> Tìm QWORD và edit float
+    gg.setRanges(gg.REGION_CODE_APP)
+    gg.searchNumber(""7310280281569624064"", gg.TYPE_QWORD)
+    local res = gg.getResults(1)
+    if #res == 0 then return gg.alert(""❌ KHÔNG TÌM THẤY QWORD!"") end
+
+    -- Edit FLOAT tại địa chỉ QWORD
+    local addr = res[1].address
+    local prompt = gg.prompt({""💬 NHẬP GIÁ TRỊ SPEED (FLOAT):""}, {""2.0""}, {""number""})
+    if not prompt or not tonumber(prompt[1]) then return gg.alert(""⚠️ DỮ LIỆU KHÔNG HỢP LỆ!"") end
+    local speed = tonumber(prompt[1])
+
+    local floatEntry = {
+        address = addr,
+        flags = gg.TYPE_FLOAT,
+        value = speed,
+        name = label
+    }
+
+    gg.setValues({floatEntry})
+    gg.addListItems({floatEntry})
+    gg.toast(""✅ SPEED SET = ""..speed)
+end
+
+function resetSpeed()
+    local items = gg.getListItems(label)
+    if #items > 0 then
+        for i, v in ipairs(items) do
+            v.value = 1
+        end
+        gg.setValues(items)
+        gg.removeListItems(items)
+        gg.toast(""🔁 ĐÃ RESET SPEED VỀ 1"")
+    end
+    gg.clearResults()
+end
+
+-- Menu
+function main()
+    local menu = gg.multiChoice({
+        ""⚡ HACK SPEED"",
+        ""❌ THOÁT SCRIPT""
+    }, nil, ""📜 MENU BY THÀNH DANH"")
+
+    if menu == nil then return end
+    if menu[1] then hackSpeed() end
+    if menu[2] then
+        resetSpeed()
+        os.exit()
+    end
+end
+
+-- Loop
+while true do
+    if gg.isVisible(true) then
+        gg.setVisible(false)
+        main()
+    end
+end"
+SSzeDkPf,OC-HBM Computer Controlled Combined Cycle Turbine Program (CCCCTP),AlexMastang,Lua,Saturday 17th of May 2025 06:53:40 AM CDT,"-- Made by Alexmaster75
+
+local component = require(""component"")
+local event = require(""event"")
+local term = require(""term"")
+
+term.clear()
+print(""Loading..."")
+
+-- Peripherals
+local gpu = component.gpu
+local battery = {}
+local battery_present = true
+local c = 1
+for add, n in component.list(""ntm_energy_storage"") do
+  battery[c] = component.proxy(add)
+  c = c + 1
+end
+if (#battery >= 1) then
+  battery = battery[1]
+else
+  battery = nil
+  battery_present = false
+end
+local turbines = {}
+local c = 1
+for add, n in component.list(""ntm_gas_turbine"") do
+  turbines[c] = component.proxy(add)
+  c = c + 1
+end
+
+-- Global variables
+local delta_program = 0.1
+local max = 0.8
+local min = 0.2
+
+local temp = {}
+for i=1,1,1 do
+  temp[i] = 0
+end
+local battery_energy = {}
+local battery_percentage = 0.0
+local blink = true
+local key = {}
+local input = """"
+local auto = {}
+for i=1,#turbines,1 do
+  auto[i] = true
+end
+local activation = false
+local turbine_index = 0
+local turbine_set = 0
+local keywords = {}
+local x, y = term.getCursor()
+
+
+-- Scales a number by orders of magnitude
+local function x3_scale(n)
+  local scale = {"" "", ""k"", ""M"", ""G"", ""T""}
+  local num = n
+  
+  local i = 1
+  while (math.abs(num) >= 1000.0 and i < #scale) do
+    num = num / 1000.0
+    i = i + 1
+  end
+  
+  return ((""%5.1f %1s""):format(num, scale[i]))
+end
+
+-- Gets in-game time
+local function time(mask)
+  return tonumber(os.date(mask))
+end
+
+-- Prints a divider given the character/string
+local function screen_divider(str)
+  local W = term.window.width
+  local X, Y = term.getCursor()
+  
+  for i=X,W-#str,#str do
+    term.write(str)
+  end
+  X, Y = term.getCursor()
+  if (X < W) then
+    for i=1,W-X+1,1 do
+      term.write(str:sub(i, i))
+    end
+  end
+  if (#str == 1) then
+    term.write(str)
+  end
+  print()
+end
+
+-- Segments a string containing spaces
+local function segment(string)
+  local k_word = {}
+  local k = 1
+  local char = """"
+  
+  for i=1,string:len(),1 do
+    char = string:sub(i,i)
+    if (char == "" "" or char == nil) then
+      k = k + 1
+    else
+      if (k_word[k] == nil) then k_word[k] = """" end
+      k_word[k] = k_word[k] .. char
+    end
+  end
+  
+  return k_word
+end
+
+-- Starts all turbines
+local function start_all(turbine_array)
+  for i=1,#turbine_array,1 do
+    if (turbine_array[i].getState() == 0) then
+      turbine_array[i].start()
+    end
+  end
+  
+  return
+end
+
+-- Stops all turbines
+local function stop_all(turbine_array)
+  for i=1,#turbine_array,1 do
+    turbine_array[i].stop()
+  end
+  
+  return
+end
+
+-- Prints a single turbine stats
+local function print_turbine(turbine, index)
+  local fluid = {turbine.getFluid()}
+  local energy = turbine.getPower()
+  local num_status = turbine.getState()
+  local status = """"
+  
+  if (num_status == -1) then
+    status = ""Starting...""
+  elseif (num_status == 0) then
+    status = ""Offline""
+  elseif (num_status == 1) then
+    status = ""Online""
+  else
+    status = ""Error""
+  end
+  
+  print((""%-10s: %11d ""):format(""Turbine n."", index))
+  print((""%-10s: %11s ""):format(""Fuel type"", turbine.getType()))
+  print((""%-10s: %11s""):format(""Status"", status))
+  print((""%-10s: %11d ""):format(""RPM"", turbine.getThrottle()))
+  print((""%-10s: %11.1f%1s ""):format(""Fuel"", fluid[1] / fluid[2] * 100.0, ""%""))
+  print((""%-10s: %11.1f%1s ""):format(""Lubricant"", fluid[3] / fluid[4] * 100.0, ""%""))
+  print((""%-10s: %11sHE ""):format(""Energy"", x3_scale(energy)))
+  print((""%-10s: %11.1f%1s ""):format(""Water"", fluid[5] / fluid[6] * 100.0, ""%""))
+  print((""%-10s: %11.1f%1s ""):format(""Steam"", fluid[7] / fluid[8] * 100.0, ""%""))
+  
+  return
+end
+
+
+-- Screen setup
+term.clear()
+local w = term.window.width
+local h = term.window.height
+-- Main
+while (true) do
+  -- Battery data update
+  if (battery_present) then
+    battery_energy = {battery.getInfo()}
+    battery_percentage = battery_energy[1] / battery_energy[2]
+    
+    -- Battery auto regulation
+    if (activation) then
+      -- Max reached
+      if (battery_percentage >= max) then
+        stop_all(turbines)
+      end
+      -- Min reached
+      if (battery_percentage <= min) then
+        start_all(turbines)
+      end
+    end
+  else
+    battery_percentage = -0.01
+  end
+  
+  -- Key acquisition
+  key = {event.pull(0.05, ""key"")}
+
+  -- Input acquisition
+  if (key[3] ~= nil) then
+    if (key[1] == ""key_down"") then
+      if (key[3] == 0) then
+        -- Reset
+        input = """"
+      elseif (key[3] == 8) then
+        -- Backspace
+        input = input:sub(1, -2)
+      elseif (key[3] >= 32 and key[3] <= 126) then
+        -- Characters input
+        input = input .. string.char(key[3])
+      elseif (key[3] == 13) then
+        -- Lowers input characters and returns and keywords segmentation
+        input = string.lower(input)
+        keywords = segment(input)
+        input = """"
+        
+        term.setCursor(x, y)
+        for i=y,h-1,1 do
+          screen_divider(""      "")
+        end
+        term.setCursor(x, y)
+        if (keywords[1] == ""set"") then
+          turbine_set = tonumber(keywords[3])
+          
+          if (type(turbine_set) == ""number"") then
+            if (keywords[2] == ""max"" and turbine_set > min) then
+              max = (turbine_set > 1.0) and 1.0 or turbine_set
+              print(""Changed Max ESBSR setting to "" .. max)
+            elseif (keywords[2] == ""min"" and turbine_set < max) then
+              min = (turbine_set < 0.0) and 0.0 or turbine_set
+              print(""Changed Min ESBSR setting to "" .. min)
+            elseif (keywords[2] == ""throttle"") then
+              turbine_index = tonumber(keywords[4])
+              
+              if (keywords[4] == ""all"") then
+                for i=1,#turbines,1 do
+                  turbines[i].setThrottle(turbine_set)
+                end
+                print((""Changed throttle to %.1f%1s for %2d turbines""):format(turbine_set, ""%"", #turbines))
+              elseif (type(turbine_index) == ""number"") then
+                if (turbine_index > 0 and turbine_index <= #turbines) then
+                  turbines[turbine_index].setThrottle(turbine_set)
+                  print((""Changed throttle to %.1f%1s for turbine n. %2d""):format(turbine_set, ""%"", turbine_index))
+                end
+              end
+            else
+              print(""Usage:"")
+              print(""'-max' -> Sets the maximum percentage of the ESBSR to stop. Needs a decimal number min < x <= 1"")
+              print(""'-min' -> Sets the minimum percentage of the ESBSR to start. Needs a decimal number 0 <= x < max"")
+              print(""'-throttle' -> Sets the throttle of the turbine selected. 'all' for all, 1<=x<=n for one"")
+              print(""'-auto' -> Sets auto control for the turbine. 'all' for all, 0 <= x <= n for one"")
+            end
+          elseif (keywords[2] == ""auto"") then
+            turbine_index = tonumber(keywords[4])
+            
+            if (keywords[4] == ""all"") then
+              for i=1,#turbines,1 do
+                if (keywords[3] == ""true"") then
+                  auto[i] = true
+                elseif (keywords[3] == ""false"") then
+                  auto[i] = false
+                end
+              end
+              print((""Set AUTO to %5s for %2d turbines ""):format(keywords[3], #turbines))
+            elseif (type(turbine_index) == ""number"") then
+              if (turbine_index > 0 and turbine_index <= #turbines) then
+                if (keywords[3] == ""true"") then
+                  auto[turbine_index] = true
+                elseif (keywords[3] == ""false"") then
+                  auto[turbine_index] = false
+                end
+                print((""Set AUTO to %5s for turbine n. %2d ""):format(keywords[3], turbine_index))
+              end
+            end
+          end
+        elseif (keywords[1] == ""get"") then
+          if (keywords[2] == ""turbine"") then
+            turbine_index = tonumber(keywords[3])
+            
+            if (keywords[3] == ""all"") then
+              for i=1,#turbines,1 do
+                print_turbine(turbines[i], i)
+                screen_divider(""-"")
+              end
+            elseif (type(turbine_index) == ""number"") then
+              if (turbine_index > 0 and turbine_index <= #turbines) then
+                print_turbine(turbines[turbine_index], turbine_index)
+              end
+            end
+          elseif (keywords[2] == ""auto"") then
+            turbine_index = tonumber(keywords[3])
+            
+            if (keywords[3] == ""all"") then
+              for i=1,#turbines,1 do
+                print((""Turbine n. %2d -> AUTO: %5s""):format(i, auto[i] and ""true"" or ""false""))
+              end
+            elseif (type(turbine_index) == ""number"") then
+              if (turbine_index > 0 and turbine_index <= #turbines) then
+                print((""Turbine n. %2d -> AUTO: %5s""):format(turbine_index, auto[turbine_index] and ""true"" or ""false""))
+              end
+            end
+          end
+        elseif (keywords[1] == ""clear"") then
+          print()
+        elseif (keywords[1] == ""start"") then
+          turbine_index = tonumber(keywords[2])
+          if (keywords[2] == ""all"") then
+            start_all(turbines)
+            print(""Started "" .. #turbines .. "" turbines"")
+          elseif (type(turbine_index) == ""number"") then
+            if (turbine_index > 0 and turbine_index <= #turbines) then
+              turbines[turbine_index].start()
+              print(""Turbine n. "" .. turbine_index .. "" started"")
+            end
+          else
+            print(""Usage:"")
+            print(""'-all' -> Starts all turbines"")
+            print(""'-n' -> Replace 'n' to start the desired turbine"")
+            print(""Only offline turbines will be started"")
+          end
+        elseif (keywords[1] == ""stop"") then
+          activation = false
+          turbine_index = tonumber(keywords[2])
+          if (keywords[2] == ""all"") then
+            stop_all(turbines)
+            print(""Stopped "" .. #turbines .. "" turbines"")
+          elseif (type(turbine_index) == ""number"") then
+            if (turbine_index > 0 and turbine_index <= #turbines) then
+              turbines[turbine_index].stop()
+              print(""Turbine n. "" .. turbine_index .. "" stopped"")
+            end
+          else
+            print(""Usage:"")
+            print(""'-all' -> Stops all turbines"")
+            print(""'-n' -> Replace 'n' to stop the desired turbine"")
+          end
+        elseif (keywords[1] == ""shutdown"") then
+          activation = false
+          print(""Disabled ESBSR"")
+        elseif (keywords[1] == ""startup"") then
+          activation = true
+          print(""Enabled ESBSR"")
+        elseif (keywords[1] == ""exit"") then
+          stop_all(turbines)
+          exit(0)
+        elseif (keywords[1] == ""help"") then
+          print(""'get' -> Gets data from the system"")
+          print(""'set' -> Sets data in the system"")
+          print(""'start' -> Starts turbines"")
+          print(""'stop' -> Stops turbines"")
+          print(""'startup' -> Enables ESBSR control"")
+          print(""'shutdown' -> Disables ESBSR control"")
+          print(""(ESBSR = 'Energy Storage Block Self-Regulation')"")
+          print(""'clear' -> Clears output"")
+          print(""'exit' -> Exits the program and deactivates the turbines"")
+          print(""'help' -> Shows this commands help list"")
+          print(""Type only one of these keywords to get more info"")
+        else
+          print(""Not known command. Try 'help' for help."")
+        end
+      end
+    end
+  end
+  term.setCursor(1, 3)
+  io.write(""> "" .. input)
+  screen_divider("" "")
+  
+  -- Auto regulation for turbines
+  for i=1,#turbines,1 do
+    turbines[i].setAuto(auto[i])
+  end
+  
+  -- Screen update
+  if (math.abs(time(""%M"") - temp[1]) >= 1) then
+    term.setCursor(1, 1)
+    print((""Heartbeat: %1s | Energy # Max: %5.1f%1s / Min: %5.1f%1s / Now: %5.1f%1s | ESBSR: %3s ""):format(blink and ""*"" or "" "", max * 100.0, ""%"", min * 100.0, ""%"", battery_percentage * 100.0, ""%"", activation and ""ON"" or ""OFF""))
+    screen_divider(""="")
+    term.setCursor(1, 4)
+    screen_divider(""="")
+    if (not battery_present) then
+      gpu.setForeground(0xFFE600)
+      print(""Warning: Energy Storage Block missing. Grid setups will be ignored."")
+      gpu.setForeground(0xFFFFFF)
+    end
+    x, y = term.getCursor()
+    
+    -- Variables update
+    temp[1] = time(""%M"")
+    blink = not blink
+  end
+end"
+uqWuGxCu,Base for Tetris Elektronika 60,WarPie90,Delphi,Saturday 17th of May 2025 06:47:02 AM CDT,"program new;
+(*
+  only thing implemented is `z` to rotate
+*)
+
+
+const
+  DEFAULT_START = 5;
+  TETRIS_ROWS   = 15;
+
+var
+  board: array of Char;
+  tetroLocation: Int32 = DEFAULT_START;
+  thisTetro: Int32 = 0;
+  thisRotation: Int32 = 0;
+
+
+const
+  ui_row_width   = 43;
+  ui_board_start = 19;
+
+  starting_ui = ""
+FULL LINES: 1    <! . . . . . . . . . .!>
+LEVEL: 1         <! . . . . . . . . . .!>
+SCORE: 1         <! . . . . . . . . . .!>
+TIME: 00:00      <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+         XXYYZZ  <! . . . . . . . . . .!>
+           LL    <! . . . . . . . . . .!>
+           PP    <! . . . . . . . . . .!>
+           TT    <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <! . . . . . . . . . .!>
+                 <!********************!>
+                  \/\/\/\/\/\/\/\/\/\/\/
+
+
+                         PADDING
+123456789
+
+"";
+
+
+const
+  tetros: array of array of TByteArray = [
+    {|}
+    [[ 1, 11, 21, 31], [ 0,  1,  2,  3], [ 1, 11, 21, 31], [ 0,  1,  2,  3]],
+
+    {L shapes}
+    [[ 2, 10, 11, 12], [ 1, 11, 21, 22], [20, 10, 11, 12], [ 0, 01, 11, 21]],
+    [[ 0, 10, 11, 12], [ 2,  1, 11, 21], [10, 11, 12, 22], [30, 11, 21, 31]],
+
+    {T}
+    [[ 1, 10, 11, 12], [ 1, 12, 11, 21], [ 11, 0, 1, 2], [ 10, 1, 11, 21]],
+
+    {cube}
+    [[ 1,  2, 11, 12], [ 1,  2, 11, 12], [ 1,  2, 11, 12], [ 1,  2, 11, 12]],
+
+    {z}
+    [[ 0,  1, 11, 12], [11, 21, 20, 30], [ 0,  1, 11, 12], [11, 21, 20, 30]],
+    [[ 1,  2, 10, 11], [10, 20, 21, 31], [ 1,  2, 10, 11], [10, 20, 21, 31]]
+  ];
+
+function ToString(constref x:array of Char): string; override;
+var i: Int32;
+begin
+  for i:=0 to High(x) do
+  begin
+    if (i mod ui_row_width = 0) and (i > 0) then Result += LINE_SEP;
+    Result += x[i];
+  end;
+end;
+
+procedure SetRandomTetro();
+begin
+  thisTetro := Random(Length(tetros));
+end;
+
+procedure RotateTetro();
+begin
+  thisRotation := (thisRotation + 1) mod 4;
+end;
+
+function TBL(idx: Int32): Int32;
+var x,y: Byte;
+begin
+  x := idx mod 10;
+  y := idx div 10;
+  Result := y*ui_row_width+(x*2 + ui_board_start);
+end;
+
+function TBO(idx: Int32): Int32;
+var x,y: Byte;
+begin
+  x := idx mod 10;
+  y := idx div 10;
+  Result := y*ui_row_width+(x*2);
+end;
+
+function VerifyFreeSapce(): Boolean;
+var lc := TBL(tetroLocation);
+var curr := tetros[thisTetro][thisRotation];
+begin
+  Result := (board[lc+TBO(curr[0])] in [' ', '.']) and
+            (board[lc+TBO(curr[1])] in [' ', '.']) and
+            (board[lc+TBO(curr[2])] in [' ', '.']) and
+            (board[lc+TBO(curr[3])] in [' ', '.']);
+end;
+
+procedure DrawTetroBox();
+var lc := TBL(tetroLocation);
+var curr := tetros[thisTetro][thisRotation];
+begin
+  board[lc+TBO(curr[0])+0] := '[';
+  board[lc+TBO(curr[0])+1] := ']';
+  board[lc+TBO(curr[1])+0] := '[';
+  board[lc+TBO(curr[1])+1] := ']';
+  board[lc+TBO(curr[2])+0] := '[';
+  board[lc+TBO(curr[2])+1] := ']';
+  board[lc+TBO(curr[3])+0] := '[';
+  board[lc+TBO(curr[3])+1] := ']';
+end;
+
+procedure ClearTetroBox();
+var lc := TBL(tetroLocation);
+var curr := tetros[thisTetro][thisRotation];
+begin
+  board[lc+TBO(curr[0])+0] := ' ';
+  board[lc+TBO(curr[0])+1] := '.';
+  board[lc+TBO(curr[1])+0] := ' ';
+  board[lc+TBO(curr[1])+1] := '.';
+  board[lc+TBO(curr[2])+0] := ' ';
+  board[lc+TBO(curr[2])+1] := '.';
+  board[lc+TBO(curr[3])+0] := ' ';
+  board[lc+TBO(curr[3])+1] := '.';
+end;
+
+procedure DropTetro();
+begin
+  Inc(tetroLocation, 10);
+end;
+
+procedure UndropTetro();
+begin
+  Dec(tetroLocation, 10);
+end;
+
+var
+  i:int32;
+  TetrisFrame: TImage;
+  ticker: TCountDown;
+begin
+  SetLength(board, Length(starting_ui));
+  Move(starting_ui[1], board[0], Length(starting_ui));
+
+
+  TetrisFrame := TImage.Create(500,1000); //this could be a form
+  TetrisFrame.FontName := 'Consolas';
+  tetrisFrame.FontSize := 15;
+  TetrisFrame.FontAntialiasing := False; {!!!}
+  TetrisFrame.FontBold := False;
+
+  TetrisFrame.Show();
+
+  SetRandomTetro();
+
+  while true do
+  begin
+    TetrisFrame.DrawColor := 0;
+    TetrisFrame.DrawText(ToString(board), [50,50]);
+
+    ClearTetroBox();
+    DropTetro();
+
+    if not VerifyFreeSapce() then
+    begin
+      UnDropTetro();
+      DrawTetroBox();
+
+      TetrisFrame.DrawColor := $0077FF;
+      TetrisFrame.DrawText(ToString(board), [50,50]);
+      TetrisFrame.Show(False);
+
+      SetRandomTetro();
+      tetroLocation := Random(2,8);// DEFAULT_START;
+      thisRotation  := 0;
+
+      // still not free!?¤!""¤""!#%""#%
+      //if not VerifyFreeSapce() then
+      //  TerminateScript('Game over');
+    end else
+    begin
+      DrawTetroBox();
+
+      TetrisFrame.DrawColor := $0077FF;
+      TetrisFrame.DrawText(ToString(board), [50,50]);
+      TetrisFrame.Show(False);
+    end;
+
+
+    ticker.Start(300);
+    while not ticker.IsFinished do
+    begin
+      if Target.KeyPressed(EKeyCode.Z) then
+      begin
+         ClearTetroBox();
+         TetrisFrame.DrawColor := $0077FF;
+         TetrisFrame.Clear();
+
+         RotateTetro();
+         DrawTetroBox();
+         while Target.KeyPressed(EKeyCode.Z) and (not ticker.IsFinished) do sleep(1);
+      end;
+
+    end;
+  end;
+end."
+Rr3uYZs6,Untitled,gandalfbialy,Python,Saturday 17th of May 2025 06:14:39 AM CDT,"import json, random, math
+
+def load_data(path):
+  with open(path, encoding=""utf-8"") as file:
+    return json.load(file)
+
+def train_test_split(data, test_ratio=0.2):
+  random.shuffle(data)
+  cut = int(len(data) * (1-test_ratio))
+  print(f""Uczący zbiór: {len(data[:cut])}"")
+  print(f""Testowy zbiór: {len(data[cut:])}"")
+  return data[:cut], data[cut:]
+
+def build_dictionary(train):
+  vocabulary = set()
+  for record in train:
+    vocabulary.update(record[""tags""])
+  print(vocabulary)
+  return vocabulary
+
+def train_nb(train, vocabulary):
+  class_counts = {}
+  word_counts = {}
+  total_words = {}
+
+  for record in train:
+    c = record[""label""]
+    class_counts[c] = class_counts.get(c, 0) + 1
+    word_counts.setdefault(c, {})
+    total_words.setdefault(c, 0)
+
+    for tag in record[""tags""]:
+      word_counts[c][tag] = word_counts[c].get(tag, 0) + 1
+      total_words[c] += 1
+
+  model = {
+      ""class_counts"": class_counts,
+      ""word_counts"": word_counts,
+      ""total_words"": total_words,
+      ""vocabulary"": vocabulary,
+      ""alpha"": 1.0,
+      ""total_docs"": len(train)
+  }
+
+  print(model)
+  return model"
+h0ASaPpH,dataNone,TestGuy1,JSON,Saturday 17th of May 2025 06:00:08 AM CDT,"{
+  status: 'Success',
+  method: 'server',
+  maindata: '4eb875aecae73f67ac96516d32ded4972b07895f332349cf0c2521e6b14398b84b26ffdb1460b9b6bfdaa735258a8c07343f661aa0dc06b6b203a9f889299f5096debd2c754fab4ac94648b9a17408ceb1ccfc3d7eef55c0eb986b453b164bec9c4a375ea67c418599e52cff4affa398c013af607336163bf6c7594954eb458b',
+  otherdata: [
+    '117726f0b17167129aa831126f230167',
+    '32ce0ca7fb70305acb484bcc91539cf2',
+    '87878513a772235470d620813b81fe0f',
+    '64146a0d1aa1498118cf876728614a1a',
+    'e0224cb0ab97e10b4c18f21e1af9c8ae',
+    '03fce7237c9ad929f7aab1b4fde50410',
+    '437bbef7a926919ded0b7ba8c305fa2a',
+    'c8aa38917ed16035380b4ff1f1ae448f'
+  ]
+}"
+SbJKhypz,network conf,wprod,XML,Saturday 17th of May 2025 05:47:53 AM CDT,"<network>
+  <name>default</name>
+  <uuid>d3f1f03b-ce8c-4516-912b-982a1e0b9ec6</uuid>
+  <forward mode=""nat"">
+    <nat>
+      <port start=""1024"" end=""65535""/>
+    </nat>
+  </forward>
+  <bridge name=""virbr0"" stp=""on"" delay=""0""/>
+  <mac address=""52:54:00:23:b9:28""/>
+  <ip address=""192.168.122.1"" netmask=""255.255.255.0"">
+    <dhcp>
+      <range start=""192.168.122.2"" end=""192.168.122.254""/>
+    </dhcp>
+  </ip>
+</network>"
+qbPPJyW7,archlinux-nopassthrough,wprod,XML,Saturday 17th of May 2025 05:47:22 AM CDT,"<domain type=""kvm"">
+  <name>archlinux</name>
+  <uuid>b0f01776-50f7-4c2a-be22-72b6f295fa0a</uuid>
+  <metadata>
+    <libosinfo:libosinfo xmlns:libosinfo=""http://libosinfo.org/xmlns/libvirt/domain/1.0"">
+      <libosinfo:os id=""http://archlinux.org/archlinux/rolling""/>
+    </libosinfo:libosinfo>
+  </metadata>
+  <memory unit=""KiB"">4194304</memory>
+  <currentMemory unit=""KiB"">4194304</currentMemory>
+  <vcpu placement=""static"">4</vcpu>
+  <os firmware=""efi"">
+    <type arch=""x86_64"" machine=""pc-q35-9.2"">hvm</type>
+    <firmware>
+      <feature enabled=""no"" name=""enrolled-keys""/>
+      <feature enabled=""no"" name=""secure-boot""/>
+    </firmware>
+    <loader readonly=""yes"" type=""pflash"" format=""raw"">/usr/share/edk2/x64/OVMF_CODE.4m.fd</loader>
+    <nvram template=""/usr/share/edk2/x64/OVMF_VARS.4m.fd"" templateFormat=""raw"" format=""raw"">/var/lib/libvirt/qemu/nvram/archlinux_VARS.fd</nvram>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <vmport state=""off""/>
+  </features>
+  <cpu mode=""host-passthrough"" check=""none"" migratable=""on"">
+    <topology sockets=""1"" dies=""1"" clusters=""1"" cores=""4"" threads=""1""/>
+  </cpu>
+  <clock offset=""utc"">
+    <timer name=""rtc"" tickpolicy=""catchup""/>
+    <timer name=""pit"" tickpolicy=""delay""/>
+    <timer name=""hpet"" present=""no""/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled=""no""/>
+    <suspend-to-disk enabled=""no""/>
+  </pm>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type=""file"" device=""disk"">
+      <driver name=""qemu"" type=""qcow2""/>
+      <source file=""/home/keqwerty/libvirt_pool/archlinux.qcow2""/>
+      <target dev=""vda"" bus=""virtio""/>
+      <boot order=""1""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x04"" slot=""0x00"" function=""0x0""/>
+    </disk>
+    <controller type=""usb"" index=""0"" model=""qemu-xhci"" ports=""15"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x02"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""pci"" index=""0"" model=""pcie-root""/>
+    <controller type=""pci"" index=""1"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""1"" port=""0x10""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""2"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""2"" port=""0x11""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""3"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""3"" port=""0x12""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""4"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""4"" port=""0x13""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""5"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""5"" port=""0x14""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""6"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""6"" port=""0x15""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""7"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""7"" port=""0x16""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""8"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""8"" port=""0x17""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x7""/>
+    </controller>
+    <controller type=""pci"" index=""9"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""9"" port=""0x18""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""10"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""10"" port=""0x19""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""11"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""11"" port=""0x1a""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""12"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""12"" port=""0x1b""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""13"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""13"" port=""0x1c""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""14"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""14"" port=""0x1d""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x5""/>
+    </controller>
+    <controller type=""sata"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x1f"" function=""0x2""/>
+    </controller>
+    <controller type=""virtio-serial"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x03"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""scsi"" index=""0"" model=""virtio-scsi"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x07"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <interface type=""network"">
+      <mac address=""52:54:00:5f:3b:70""/>
+      <source network=""default""/>
+      <model type=""e1000e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+    </interface>
+    <serial type=""pty"">
+      <target type=""isa-serial"" port=""0"">
+        <model name=""isa-serial""/>
+      </target>
+    </serial>
+    <console type=""pty"">
+      <target type=""serial"" port=""0""/>
+    </console>
+    <channel type=""unix"">
+      <target type=""virtio"" name=""org.qemu.guest_agent.0""/>
+      <address type=""virtio-serial"" controller=""0"" bus=""0"" port=""1""/>
+    </channel>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""1""/>
+    </input>
+    <input type=""mouse"" bus=""ps2""/>
+    <input type=""keyboard"" bus=""ps2""/>
+    <graphics type=""spice"" autoport=""yes"">
+      <listen type=""address""/>
+      <image compression=""off""/>
+      <gl enable=""no""/>
+    </graphics>
+    <audio id=""1"" type=""none""/>
+    <video>
+      <model type=""qxl"" ram=""65536"" vram=""65536"" vgamem=""16384"" heads=""1"" primary=""yes""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x01"" function=""0x0""/>
+    </video>
+    <watchdog model=""itco"" action=""reset""/>
+    <memballoon model=""virtio"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x05"" slot=""0x00"" function=""0x0""/>
+    </memballoon>
+    <rng model=""virtio"">
+      <backend model=""random"">/dev/urandom</backend>
+      <address type=""pci"" domain=""0x0000"" bus=""0x06"" slot=""0x00"" function=""0x0""/>
+    </rng>
+  </devices>
+</domain>
+"
+bvrvNawg,archlinux-passthrough,wprod,XML,Saturday 17th of May 2025 05:47:01 AM CDT,"<domain type=""kvm"">
+  <name>archlinux-gpu</name>
+  <uuid>f5088c66-cf07-4b1d-9eb6-282b6218a869</uuid>
+  <metadata>
+    <libosinfo:libosinfo xmlns:libosinfo=""http://libosinfo.org/xmlns/libvirt/domain/1.0"">
+      <libosinfo:os id=""http://archlinux.org/archlinux/rolling""/>
+    </libosinfo:libosinfo>
+  </metadata>
+  <memory unit=""KiB"">4194304</memory>
+  <currentMemory unit=""KiB"">4194304</currentMemory>
+  <vcpu placement=""static"">4</vcpu>
+  <os firmware=""efi"">
+    <type arch=""x86_64"" machine=""pc-q35-9.2"">hvm</type>
+    <firmware>
+      <feature enabled=""no"" name=""enrolled-keys""/>
+      <feature enabled=""no"" name=""secure-boot""/>
+    </firmware>
+    <loader readonly=""yes"" type=""pflash"" format=""raw"">/usr/share/edk2/x64/OVMF_CODE.4m.fd</loader>
+    <nvram template=""/usr/share/edk2/x64/OVMF_VARS.4m.fd"" templateFormat=""raw"" format=""raw"">/var/lib/libvirt/qemu/nvram/archlinux-gpu_VARS.fd</nvram>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <vmport state=""off""/>
+  </features>
+  <cpu mode=""host-passthrough"" check=""none"" migratable=""on"">
+    <topology sockets=""1"" dies=""1"" clusters=""1"" cores=""4"" threads=""1""/>
+  </cpu>
+  <clock offset=""utc"">
+    <timer name=""rtc"" tickpolicy=""catchup""/>
+    <timer name=""pit"" tickpolicy=""delay""/>
+    <timer name=""hpet"" present=""no""/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled=""no""/>
+    <suspend-to-disk enabled=""no""/>
+  </pm>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type=""file"" device=""disk"">
+      <driver name=""qemu"" type=""qcow2""/>
+      <source file=""/home/keqwerty/libvirt_pool/archlinux.qcow2""/>
+      <target dev=""vda"" bus=""virtio""/>
+      <boot order=""1""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x04"" slot=""0x00"" function=""0x0""/>
+    </disk>
+    <controller type=""usb"" index=""0"" model=""qemu-xhci"" ports=""15"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x02"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""pci"" index=""0"" model=""pcie-root""/>
+    <controller type=""pci"" index=""1"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""1"" port=""0x10""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""2"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""2"" port=""0x11""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""3"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""3"" port=""0x12""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""4"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""4"" port=""0x13""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""5"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""5"" port=""0x14""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""6"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""6"" port=""0x15""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""7"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""7"" port=""0x16""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""8"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""8"" port=""0x17""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x7""/>
+    </controller>
+    <controller type=""pci"" index=""9"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""9"" port=""0x18""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""10"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""10"" port=""0x19""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""11"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""11"" port=""0x1a""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""12"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""12"" port=""0x1b""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""13"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""13"" port=""0x1c""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""14"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""14"" port=""0x1d""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x5""/>
+    </controller>
+    <controller type=""sata"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x1f"" function=""0x2""/>
+    </controller>
+    <controller type=""virtio-serial"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x03"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""scsi"" index=""0"" model=""virtio-scsi"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x07"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <interface type=""network"">
+      <mac address=""52:54:00:a7:f8:7f""/>
+      <source network=""default""/>
+      <model type=""e1000e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+    </interface>
+    <serial type=""pty"">
+      <target type=""isa-serial"" port=""0"">
+        <model name=""isa-serial""/>
+      </target>
+    </serial>
+    <console type=""pty"">
+      <target type=""serial"" port=""0""/>
+    </console>
+    <channel type=""unix"">
+      <target type=""virtio"" name=""org.qemu.guest_agent.0""/>
+      <address type=""virtio-serial"" controller=""0"" bus=""0"" port=""1""/>
+    </channel>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""1""/>
+    </input>
+    <input type=""mouse"" bus=""ps2""/>
+    <input type=""keyboard"" bus=""ps2""/>
+    <audio id=""1"" type=""none""/>
+    <hostdev mode=""subsystem"" type=""pci"" managed=""yes"">
+      <source>
+        <address domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+      </source>
+      <address type=""pci"" domain=""0x0000"" bus=""0x08"" slot=""0x00"" function=""0x0""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""pci"" managed=""yes"">
+      <source>
+        <address domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x1""/>
+      </source>
+      <address type=""pci"" domain=""0x0000"" bus=""0x09"" slot=""0x00"" function=""0x0""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""usb"" managed=""yes"">
+      <source>
+        <vendor id=""0x2023""/>
+        <product id=""0xf013""/>
+      </source>
+      <address type=""usb"" bus=""0"" port=""2""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""usb"" managed=""yes"">
+      <source>
+        <vendor id=""0x3554""/>
+        <product id=""0xfa09""/>
+      </source>
+      <address type=""usb"" bus=""0"" port=""3""/>
+    </hostdev>
+    <watchdog model=""itco"" action=""reset""/>
+    <memballoon model=""virtio"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x05"" slot=""0x00"" function=""0x0""/>
+    </memballoon>
+    <rng model=""virtio"">
+      <backend model=""random"">/dev/urandom</backend>
+      <address type=""pci"" domain=""0x0000"" bus=""0x06"" slot=""0x00"" function=""0x0""/>
+    </rng>
+  </devices>
+</domain>
+"
+gp7hJthX,win11-nopassthrough,wprod,XML,Saturday 17th of May 2025 05:46:41 AM CDT,"<domain type=""kvm"">
+  <name>win11-nogpu</name>
+  <uuid>4f2a3a6b-572f-441c-9654-f2af30aca67c</uuid>
+  <metadata>
+    <libosinfo:libosinfo xmlns:libosinfo=""http://libosinfo.org/xmlns/libvirt/domain/1.0"">
+      <libosinfo:os id=""http://microsoft.com/win/11""/>
+    </libosinfo:libosinfo>
+  </metadata>
+  <memory unit=""KiB"">16384000</memory>
+  <currentMemory unit=""KiB"">16384000</currentMemory>
+  <memoryBacking>
+    <source type=""memfd""/>
+    <access mode=""shared""/>
+  </memoryBacking>
+  <vcpu placement=""static"">8</vcpu>
+  <os firmware=""efi"">
+    <type arch=""x86_64"" machine=""pc-q35-9.2"">hvm</type>
+    <firmware>
+      <feature enabled=""no"" name=""enrolled-keys""/>
+      <feature enabled=""yes"" name=""secure-boot""/>
+    </firmware>
+    <loader readonly=""yes"" secure=""yes"" type=""pflash"" format=""raw"">/usr/share/edk2/x64/OVMF_CODE.secboot.4m.fd</loader>
+    <nvram template=""/usr/share/edk2/x64/OVMF_VARS.4m.fd"" templateFormat=""raw"" format=""raw"">/var/lib/libvirt/qemu/nvram/win11-nogpu_VARS.fd</nvram>
+    <boot dev=""hd""/>
+    <bootmenu enable=""no""/>
+    <smbios mode=""host""/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <hyperv mode=""custom"">
+      <relaxed state=""on""/>
+      <vapic state=""on""/>
+      <spinlocks state=""on"" retries=""8191""/>
+      <vpindex state=""on""/>
+      <runtime state=""on""/>
+      <synic state=""on""/>
+      <stimer state=""on""/>
+      <frequencies state=""on""/>
+      <tlbflush state=""on""/>
+      <ipi state=""on""/>
+      <avic state=""on""/>
+    </hyperv>
+    <vmport state=""off""/>
+    <smm state=""on""/>
+  </features>
+  <cpu mode=""host-passthrough"" check=""none"" migratable=""on"">
+    <topology sockets=""1"" dies=""1"" clusters=""1"" cores=""8"" threads=""1""/>
+    <feature policy=""disable"" name=""hypervisor""/>
+  </cpu>
+  <clock offset=""localtime"">
+    <timer name=""rtc"" tickpolicy=""catchup""/>
+    <timer name=""pit"" tickpolicy=""delay""/>
+    <timer name=""hpet"" present=""no""/>
+    <timer name=""hypervclock"" present=""yes""/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled=""no""/>
+    <suspend-to-disk enabled=""no""/>
+  </pm>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type=""block"" device=""disk"">
+      <driver name=""qemu"" type=""raw"" cache=""none"" io=""native"" discard=""unmap""/>
+      <source dev=""/dev/disk/by-id/nvme-GXF-1TB_PRO_0017480003329""/>
+      <target dev=""vda"" bus=""virtio""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x05"" slot=""0x00"" function=""0x0""/>
+    </disk>
+    <controller type=""usb"" index=""0"" model=""qemu-xhci"" ports=""15"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x02"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""pci"" index=""0"" model=""pcie-root""/>
+    <controller type=""pci"" index=""1"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""1"" port=""0x10""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""2"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""2"" port=""0x11""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""3"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""3"" port=""0x12""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""4"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""4"" port=""0x13""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""5"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""5"" port=""0x14""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""6"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""6"" port=""0x15""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""7"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""7"" port=""0x16""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""8"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""8"" port=""0x17""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x7""/>
+    </controller>
+    <controller type=""pci"" index=""9"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""9"" port=""0x18""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""10"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""10"" port=""0x19""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""11"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""11"" port=""0x1a""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""12"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""12"" port=""0x1b""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""13"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""13"" port=""0x1c""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""14"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""14"" port=""0x1d""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""15"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""15"" port=""0x1e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""16"" model=""pcie-to-pci-bridge"">
+      <model name=""pcie-pci-bridge""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x06"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""sata"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x1f"" function=""0x2""/>
+    </controller>
+    <controller type=""virtio-serial"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x03"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""scsi"" index=""0"" model=""virtio-scsi"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x0b"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <interface type=""network"">
+      <mac address=""52:54:00:9d:c3:cc""/>
+      <source network=""default""/>
+      <model type=""e1000e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+    </interface>
+    <serial type=""pty"">
+      <target type=""isa-serial"" port=""0"">
+        <model name=""isa-serial""/>
+      </target>
+    </serial>
+    <console type=""pty"">
+      <target type=""serial"" port=""0""/>
+    </console>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""1""/>
+    </input>
+    <input type=""mouse"" bus=""ps2""/>
+    <input type=""keyboard"" bus=""ps2""/>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""2""/>
+    </input>
+    <tpm model=""tpm-crb"">
+      <backend type=""emulator"" version=""2.0""/>
+    </tpm>
+    <graphics type=""spice"" port=""-1"" autoport=""no"">
+      <listen type=""address""/>
+      <gl enable=""no""/>
+    </graphics>
+    <audio id=""1"" type=""none""/>
+    <video>
+      <model type=""qxl"" ram=""65536"" vram=""65536"" vgamem=""16384"" heads=""1"" primary=""yes""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x01"" function=""0x0""/>
+    </video>
+    <watchdog model=""itco"" action=""reset""/>
+    <memballoon model=""virtio"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x04"" slot=""0x00"" function=""0x0""/>
+    </memballoon>
+  </devices>
+</domain>
+"
+fYnGapyV,win11-passthrough,wprod,XML,Saturday 17th of May 2025 05:46:14 AM CDT,"<domain type=""kvm"">
+  <name>win11</name>
+  <uuid>52b43872-12f3-474e-9afd-3494d4bcfbb3</uuid>
+  <metadata>
+    <libosinfo:libosinfo xmlns:libosinfo=""http://libosinfo.org/xmlns/libvirt/domain/1.0"">
+      <libosinfo:os id=""http://microsoft.com/win/11""/>
+    </libosinfo:libosinfo>
+  </metadata>
+  <memory unit=""KiB"">16384000</memory>
+  <currentMemory unit=""KiB"">16384000</currentMemory>
+  <memoryBacking>
+    <source type=""memfd""/>
+    <access mode=""shared""/>
+  </memoryBacking>
+  <vcpu placement=""static"">8</vcpu>
+  <os firmware=""efi"">
+    <type arch=""x86_64"" machine=""pc-q35-9.2"">hvm</type>
+    <firmware>
+      <feature enabled=""no"" name=""enrolled-keys""/>
+      <feature enabled=""yes"" name=""secure-boot""/>
+    </firmware>
+    <loader readonly=""yes"" secure=""yes"" type=""pflash"" format=""raw"">/usr/share/edk2/x64/OVMF_CODE.secboot.4m.fd</loader>
+    <nvram template=""/usr/share/edk2/x64/OVMF_VARS.4m.fd"" templateFormat=""raw"" format=""raw"">/var/lib/libvirt/qemu/nvram/win11_VARS.fd</nvram>
+    <boot dev=""hd""/>
+    <bootmenu enable=""no""/>
+    <smbios mode=""host""/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <hyperv mode=""custom"">
+      <relaxed state=""on""/>
+      <vapic state=""on""/>
+      <spinlocks state=""on"" retries=""8191""/>
+      <vpindex state=""on""/>
+      <runtime state=""on""/>
+      <synic state=""on""/>
+      <stimer state=""on""/>
+      <frequencies state=""on""/>
+      <tlbflush state=""on""/>
+      <ipi state=""on""/>
+      <avic state=""on""/>
+    </hyperv>
+    <vmport state=""off""/>
+    <smm state=""on""/>
+  </features>
+  <cpu mode=""host-passthrough"" check=""none"" migratable=""on"">
+    <topology sockets=""1"" dies=""1"" clusters=""1"" cores=""8"" threads=""1""/>
+  </cpu>
+  <clock offset=""localtime"">
+    <timer name=""rtc"" tickpolicy=""catchup""/>
+    <timer name=""pit"" tickpolicy=""delay""/>
+    <timer name=""hpet"" present=""no""/>
+    <timer name=""hypervclock"" present=""yes""/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled=""no""/>
+    <suspend-to-disk enabled=""no""/>
+  </pm>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type=""block"" device=""disk"">
+      <driver name=""qemu"" type=""raw"" cache=""none"" io=""native"" discard=""unmap""/>
+      <source dev=""/dev/disk/by-id/nvme-GXF-1TB_PRO_0017480003329""/>
+      <target dev=""vda"" bus=""virtio""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x05"" slot=""0x00"" function=""0x0""/>
+    </disk>
+    <controller type=""usb"" index=""0"" model=""qemu-xhci"" ports=""15"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x02"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""pci"" index=""0"" model=""pcie-root""/>
+    <controller type=""pci"" index=""1"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""1"" port=""0x10""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""2"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""2"" port=""0x11""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""3"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""3"" port=""0x12""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""4"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""4"" port=""0x13""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""5"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""5"" port=""0x14""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""6"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""6"" port=""0x15""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""7"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""7"" port=""0x16""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""8"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""8"" port=""0x17""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x02"" function=""0x7""/>
+    </controller>
+    <controller type=""pci"" index=""9"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""9"" port=""0x18""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x0"" multifunction=""on""/>
+    </controller>
+    <controller type=""pci"" index=""10"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""10"" port=""0x19""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x1""/>
+    </controller>
+    <controller type=""pci"" index=""11"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""11"" port=""0x1a""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x2""/>
+    </controller>
+    <controller type=""pci"" index=""12"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""12"" port=""0x1b""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x3""/>
+    </controller>
+    <controller type=""pci"" index=""13"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""13"" port=""0x1c""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x4""/>
+    </controller>
+    <controller type=""pci"" index=""14"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""14"" port=""0x1d""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x5""/>
+    </controller>
+    <controller type=""pci"" index=""15"" model=""pcie-root-port"">
+      <model name=""pcie-root-port""/>
+      <target chassis=""15"" port=""0x1e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x03"" function=""0x6""/>
+    </controller>
+    <controller type=""pci"" index=""16"" model=""pcie-to-pci-bridge"">
+      <model name=""pcie-pci-bridge""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x06"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""sata"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x00"" slot=""0x1f"" function=""0x2""/>
+    </controller>
+    <controller type=""virtio-serial"" index=""0"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x03"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <controller type=""scsi"" index=""0"" model=""virtio-scsi"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x0b"" slot=""0x00"" function=""0x0""/>
+    </controller>
+    <interface type=""network"">
+      <mac address=""52:54:00:bd:37:5d""/>
+      <source network=""default""/>
+      <model type=""e1000e""/>
+      <address type=""pci"" domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+    </interface>
+    <serial type=""pty"">
+      <target type=""isa-serial"" port=""0"">
+        <model name=""isa-serial""/>
+      </target>
+    </serial>
+    <console type=""pty"">
+      <target type=""serial"" port=""0""/>
+    </console>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""1""/>
+    </input>
+    <input type=""mouse"" bus=""ps2""/>
+    <input type=""keyboard"" bus=""ps2""/>
+    <input type=""tablet"" bus=""usb"">
+      <address type=""usb"" bus=""0"" port=""2""/>
+    </input>
+    <tpm model=""tpm-crb"">
+      <backend type=""emulator"" version=""2.0"">
+        <profile name=""default-v1""/>
+      </backend>
+    </tpm>
+    <audio id=""1"" type=""none""/>
+    <hostdev mode=""subsystem"" type=""pci"" managed=""yes"">
+      <source>
+        <address domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x0""/>
+      </source>
+      <address type=""pci"" domain=""0x0000"" bus=""0x07"" slot=""0x00"" function=""0x0""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""pci"" managed=""yes"">
+      <source>
+        <address domain=""0x0000"" bus=""0x01"" slot=""0x00"" function=""0x1""/>
+      </source>
+      <address type=""pci"" domain=""0x0000"" bus=""0x08"" slot=""0x00"" function=""0x0""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""usb"" managed=""yes"">
+      <source>
+        <vendor id=""0x2023""/>
+        <product id=""0xf013""/>
+      </source>
+      <address type=""usb"" bus=""0"" port=""3""/>
+    </hostdev>
+    <hostdev mode=""subsystem"" type=""usb"" managed=""yes"">
+      <source>
+        <vendor id=""0x3554""/>
+        <product id=""0xfa09""/>
+      </source>
+      <address type=""usb"" bus=""0"" port=""4""/>
+    </hostdev>
+    <watchdog model=""itco"" action=""reset""/>
+    <memballoon model=""virtio"">
+      <address type=""pci"" domain=""0x0000"" bus=""0x04"" slot=""0x00"" function=""0x0""/>
+    </memballoon>
+  </devices>
+</domain>
+"
+6RzX1U1T,Zombie Merge Tycoon,new2479,Lua,Saturday 17th of May 2025 05:39:26 AM CDT,"--https://www.youtube.com/@WinPo1R              pls sub 
+--discord :      https://discord.gg/mdnJJYbjCh
+
+
+loadstring(game:HttpGet(""https://raw.githubusercontent.com/powin273/script/refs/heads/main/Zombie_Merge_Tycoon.lua"", true))()"
+ghNC1mBV,TetrisBlock,Apparcane,Arduino,Saturday 17th of May 2025 04:36:47 AM CDT,"byte I_Block_0[4][4] = {
+  {0, 0, 0, 0},
+  {1, 1, 1, 1},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte I_Block_90[4][4] = {
+  {0, 0, 1, 0},
+  {0, 0, 1, 0},
+  {0, 0, 1, 0},
+  {0, 0, 1, 0}
+};
+
+byte I_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {0, 0, 0, 0},
+  {1, 1, 1, 1},
+  {0, 0, 0, 0}
+};
+
+byte I_Block_270[4][4] = {
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 1, 0, 0}
+};
+
+byte L_Block_0[4][4] = {
+  {0, 0, 1, 0},
+  {1, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte L_Block_90[4][4] = {
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0}
+};
+
+byte L_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {1, 1, 1, 0},
+  {1, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte L_Block_270[4][4] = {
+  {1, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte J_Block_0[4][4] = {
+  {1, 0, 0, 0},
+  {1, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte J_Block_90[4][4] = {
+  {0, 1, 1, 0},
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte J_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {1, 1, 1, 0},
+  {0, 0, 1, 0},
+  {0, 0, 0, 0}
+};
+
+byte J_Block_270[4][4] = {
+  {0, 1, 0, 0},
+  {0, 1, 0, 0},
+  {1, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte Z_Block_0[4][4] = {
+  {1, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte Z_Block_90[4][4] = {
+  {0, 0, 1, 0},
+  {0, 1, 1, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte Z_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {1, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0}
+};
+
+byte Z_Block_270[4][4] = {
+  {0, 1, 0, 0},
+  {1, 1, 0, 0},
+  {1, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte S_Block_0[4][4] = {
+  {0, 1, 1, 0},
+  {1, 1, 0, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte S_Block_90[4][4] = {
+  {0, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 1, 0},
+  {0, 0, 0, 0}
+};
+
+byte S_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {0, 1, 1, 0},
+  {1, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte S_Block_270[4][4] = {
+  {1, 0, 0, 0},
+  {1, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte T_Block_0[4][4] = {
+  {0, 1, 0, 0},
+  {1, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte T_Block_90[4][4] = {
+  {0, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte T_Block_180[4][4] = {
+  {0, 0, 0, 0},
+  {1, 1, 1, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte T_Block_270[4][4] = {
+  {0, 1, 0, 0},
+  {1, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte O_Block_0[4][4] = {
+  {0, 1, 1, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte O_Block_90[4][4] = {
+  {0, 1, 1, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte O_Block_180[4][4] = {
+  {0, 1, 1, 0},
+  {1, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};
+
+byte O_Block_270[4][4] = {
+  {0, 1, 1, 0},
+  {0, 1, 1, 0},
+  {0, 0, 0, 0},
+  {0, 0, 0, 0}
+};"
+4xM1rXKx,CF1904D2 AC,pb_jiang,C++,Saturday 17th of May 2025 04:36:46 AM CDT,"// Problem: D2. Set To Max (Hard Version)
+// Contest: Codeforces - Codeforces Round 914 (Div. 2)
+// URL: https://codeforces.com/problemset/problem/1904/D2
+// Memory Limit: 256 MB
+// Time Limit: 4000 ms
+//
+// Powered by CP Editor (https://cpeditor.org)
+
+#include <assert.h>
+#include <bits/stdc++.h>
+using namespace std;
+#ifndef __DEBUG__
+#define dbg(...) 42
+#endif
+template <class T> using mpq = priority_queue<T, vector<T>, greater<T>>;
+
+namespace rngs = std::ranges;
+using ll = long long;
+using a2l = array<ll, 2>;
+using pll = pair<ll, ll>;
+using vl = vector<ll>;
+
+void solve()
+{
+    ll n;
+    cin >> n;
+    vl as(n), bs(n);
+    for (auto &x : as)
+        cin >> x;
+    for (auto &x : bs)
+        cin >> x;
+    map<ll, vl> tg, src;
+    for (ll i = 0; i < n; ++i) {
+        if (bs[i] < as[i]) {
+            cout << ""NO\n"";
+            return;
+        }
+        tg[bs[i]].push_back(i);
+        src[as[i]].push_back(i);
+    }
+    for (auto &[k, v] : tg)
+        if (src.count(k) == 0) {
+            cout << ""NO\n"";
+            return;
+        }
+
+    set<ll> taken, forbid;
+    taken.insert(-1), taken.insert(1e9);
+    for (ll i = 0; i < n; ++i)
+        forbid.insert(i);
+    forbid.insert(-1), forbid.insert(1e9);
+
+    for (auto &[k, v] : tg) {
+        auto ids = src[k];
+        vl avail;
+        for (auto it = src.begin(); it != src.end() && it->first <= k; it = src.erase(it))
+            avail.insert(avail.end(), it->second.begin(), it->second.end());
+        for (auto x : avail)
+            forbid.erase(x);
+        dbg(k, v, ids);
+        dbg(taken, forbid);
+        for (auto i : v) {
+            if (as[i] == bs[i])
+                continue;
+            bool found = false;
+            auto it1 = lower_bound(ids.begin(), ids.end(), i);
+            auto it2 = taken.lower_bound(i);
+            auto it3 = forbid.lower_bound(i);
+
+            if (it1 != ids.end()) {
+                found = found || (*it2 > *it1 && *it3 > *it1);
+            }
+            if (it1 != ids.begin()) {
+                auto p1 = std::prev(it1);
+                auto p2 = std::prev(it2);
+                auto p3 = std::prev(it3);
+                found = found || (*p2 < *p1 && *p3 < *p1);
+            }
+            if (!found) {
+                cout << ""NO\n"";
+                return;
+            }
+        }
+        taken.insert(v.begin(), v.end());
+    }
+    cout << ""YES\n"";
+}
+
+int main(int argc, char **argv)
+{
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
+
+    ll t;
+    cin >> t;
+    while (t--)
+        solve();
+
+    return 0;
+};
+"
+4DMsuXiG,TetrisMain,Apparcane,Arduino,Saturday 17th of May 2025 04:34:59 AM CDT,"#include <GameBoyFixVal.h>
+
+extern byte I_Block_0[4][4];
+extern byte I_Block_90[4][4];
+extern byte I_Block_180[4][4];
+extern byte I_Block_270[4][4];
+extern byte L_Block_0[4][4];
+extern byte L_Block_90[4][4];
+extern byte L_Block_180[4][4];
+extern byte L_Block_270[4][4];
+extern byte J_Block_0[4][4];
+extern byte J_Block_90[4][4];
+extern byte J_Block_180[4][4];
+extern byte J_Block_270[4][4];
+extern byte Z_Block_0[4][4];
+extern byte Z_Block_90[4][4];
+extern byte Z_Block_180[4][4];
+extern byte Z_Block_270[4][4];
+extern byte S_Block_0[4][4];
+extern byte S_Block_90[4][4];
+extern byte S_Block_180[4][4];
+extern byte S_Block_270[4][4];
+extern byte T_Block_0[4][4];
+extern byte T_Block_90[4][4];
+extern byte T_Block_180[4][4];
+extern byte T_Block_270[4][4];
+extern byte O_Block_0[4][4];
+extern byte O_Block_90[4][4];
+extern byte O_Block_180[4][4];
+extern byte O_Block_270[4][4];
+
+GameBoy gb;
+int x = 2, y = -1;
+int rot = 0;
+
+int acc = 1;
+int speed = 200;
+int score = 0;
+int level = 0;
+
+void setup() {
+  gb.begin(8); 
+  randomSeed(analogRead(A5));
+  createBlock(random(0, 7)); 
+}
+
+void drawBlock(byte arr[4][4], int x, int y) {
+  for(int i = 0; i < 4; i++) {
+    for(int j = 0; j < 4; j++) {
+      if(arr[i][j] == 1) {
+        gb.drawPoint(x + i, y + j);
+      }
+    }
+  }
+}
+
+void createBlock(int num) {
+  x = 2;
+  y = -1;
+  rot = random(0, 4);
+  if(num == 0) gb.generateBlock(gb.block, I_Block_0, I_Block_90, I_Block_180, I_Block_270);
+  if(num == 1) gb.generateBlock(gb.block, Z_Block_0, Z_Block_90, Z_Block_180, Z_Block_270);
+  if(num == 2) gb.generateBlock(gb.block, S_Block_0, S_Block_90, S_Block_180, S_Block_270);
+  if(num == 3) gb.generateBlock(gb.block, L_Block_0, L_Block_90, L_Block_180, L_Block_270);
+  if(num == 4) gb.generateBlock(gb.block, J_Block_0, J_Block_90, J_Block_180, J_Block_270);
+  if(num == 5) gb.generateBlock(gb.block, T_Block_0, T_Block_90, T_Block_180, T_Block_270);
+  if(num == 6) gb.generateBlock(gb.block, O_Block_0, O_Block_90, O_Block_180, O_Block_270);
+}
+
+void makeMove(){
+  if(gb.getKey() == 4) {
+    if(!gb.checkBlockCollision(gb.block[rot], x - 1, y)) {
+      x--;
+    }
+  }
+  if(gb.getKey() == 5) {
+    if(!gb.checkBlockCollision(gb.block[rot], x + 1, y)) {
+      x++;
+    }
+  }
+  if(gb.getKey() == 1) {
+    if(!gb.checkBlockCollision(gb.block[rot + 1], x + 1, y)) {
+      if(rot == 3) {
+        rot = 0;
+      }
+      else {
+        rot++;
+      }
+    } 
+  }
+  if(gb.getKey() == 6) {
+    acc = 4;
+  }
+  else {
+    acc = 1;
+  }
+}
+
+void loop() {
+  makeMove();
+  if(gb.checkBlockCollision(gb.block[rot], x, y + 1)) {
+    gb.memBlock(gb.block[rot], x, y);
+    int lines = gb.fullLine();
+    if(lines != 0) {
+      score += lines;
+      level += lines;
+    }
+    if(level >= 4) {
+      gb.sound(SCORE);
+      acc += 1;
+      level = 0;    
+    }
+    createBlock(random(0, 7));
+  }
+  else {
+    y++;
+  }
+  gb.drawDisplay();
+  drawBlock(gb.block[rot], x, y);
+  delay(speed / acc);
+}
+"
+6e5Lh3rE,26 коробки на доразбор,nq1s788,Python,Saturday 17th of May 2025 04:26:35 AM CDT,"data = open('26.txt').readlines()
+n, k, Q = map(int, data[0].split())
+a = []
+for e in data[1:]:
+    a.append(tuple(map(int, e.split())))
+a.sort()
+inf = 1000000000
+mx_s = a[-1][0]
+dp = [[inf for j in range(Q + 1)] for i in range(mx_s + 1)]
+cur_a = 0
+mn = inf
+for s in range(1, mx_s + 1):
+    if s < a[cur_a][0]:
+        continue
+    if cur_a != n and s == a[cur_a + 1][0]:
+        cur_a += 1
+    dp[s][1] = min(mn, a[cur_a][1])
+    mn = dp[s][1]
+for q in range(2, Q + 1):
+    cur_a = 0
+    mn = inf
+    for s in range(1, mx_s + 1):
+        if a[cur_a][0] - k < a[0][0] or dp[a[cur_a][0] - k] :
+            continue
+"
+vVw739UX,2025-05-17T11:05:12.853689,powerampache,PHP,Saturday 17th of May 2025 04:05:11 AM CDT,"1.01-80-free (80) - DB: 83
+java.lang.NullPointerException: Parameter specified as non-null is null: method luci.sixsixsix.powerampache2.domain.models.User.<init>, parameter id
+	at luci.sixsixsix.powerampache2.domain.models.User.<init>(Unknown Source:20)
+	at luci.sixsixsix.powerampache2.data.remote.dto.UserDtoKt.toUser(UserDto.kt:94)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.getUserNetwork(BaseAmpacheRepository.kt:128)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$getUserNetwork$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:584)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:811)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:715)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:702)
+
+"
+FzLbLbWM,Untitled,zidanKohai,C#,Saturday 17th of May 2025 03:38:08 AM CDT,"using KinematicCharacterController;
+using UnityEngine;
+
+namespace Runtime.Platform
+{
+    public class MoveablePlatform : MonoBehaviour, IMoverController
+    {
+        public PhysicsMover Mover;
+
+        [SerializeField] private Vector3 translationAxis = Vector3.right;
+        [SerializeField] private float translationPeriod = 10;
+        [SerializeField] private float translationSpeed = 1;
+        [SerializeField] private bool isAxisLocal = false;
+        [SerializeField] private Vector3 rotationAxis = Vector3.up;
+        [SerializeField] private float rotSpeed = 10;
+
+        private Vector3 _originalPosition;
+
+        private void Start()
+        {
+            _originalPosition = transform.position;
+
+            var rotationAxis = isAxisLocal ? transform.TransformDirection(this.rotationAxis) : this.rotationAxis;
+
+            Mover.MoverController = this;
+        }
+
+        public void UpdateMovement(out Vector3 goalPosition, out Quaternion goalRotation, float deltaTime)
+        {
+            goalPosition = (_originalPosition + (translationAxis.normalized * Mathf.Sin(Time.time * translationSpeed) * translationPeriod));
+
+            goalRotation = Quaternion.AngleAxis(rotSpeed * Time.time, rotationAxis);
+        }
+    }
+}"
+PpRKgFgL,2025-05-17T09:59:59.547801,powerampache,PHP,Saturday 17th of May 2025 03:00:00 AM CDT,"1.01-80 (80) - DB: 83
+java.lang.NullPointerException
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2.invokeSuspend(MusicRepositoryImpl.kt:350)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:984)
+	at android.os.Handler.dispatchMessage(Handler.java:104)
+	at android.os.Looper.loopOnce(Looper.java:238)
+	at android.os.Looper.loop(Looper.java:357)
+	at android.app.ActivityThread.main(ActivityThread.java:8088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:548)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:957)
+
+getGenres() - generic exception {""stackTrace"":[{""declaringClass"":""luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2"",""fileName"":""MusicRepositoryImpl.kt"",""lineNumber"":350,""methodName"":""invokeSuspend""},{""declaringClass"":""kotlin.coroutines.jvm.internal.BaseContinuationImpl"",""fileName"":""ContinuationImpl.kt"",""lineNumber"":33,""methodName"":""resumeWith""},{""declaringClass"":""kotlinx.coroutines.DispatchedTask"",""fileName"":""DispatchedTask.kt"",""lineNumber"":104,""methodName"":""run""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":984,""methodName"":""handleCallback""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":104,""methodName"":""dispatchMessage""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":238,""methodName"":""loopOnce""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":357,""methodName"":""loop""},{""declaringClass"":""android.app.ActivityThread"",""fileName"":""ActivityThread.java"",""lineNumber"":8088,""methodName"":""main""},{""declaringClass"":""java.lang.reflect.Method"",""fileName"":""Method.java"",""lineNumber"":-2,""methodName"":""invoke""},{""declaringClass"":""com.android.internal.os.RuntimeInit$MethodAndArgsCaller"",""fileName"":""RuntimeInit.java"",""lineNumber"":548,""methodName"":""run""},{""declaringClass"":""com.android.internal.os.ZygoteInit"",""fileName"":""ZygoteInit.java"",""lineNumber"":957,""methodName"":""main""}]}"
+UQ5UWZXh,2025-05-17T09:59:59.548874,powerampache,PHP,Saturday 17th of May 2025 03:00:00 AM CDT,"1.01-80 (80) - DB: 83
+java.lang.NullPointerException
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2.invokeSuspend(MusicRepositoryImpl.kt:350)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:984)
+	at android.os.Handler.dispatchMessage(Handler.java:104)
+	at android.os.Looper.loopOnce(Looper.java:238)
+	at android.os.Looper.loop(Looper.java:357)
+	at android.app.ActivityThread.main(ActivityThread.java:8088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:548)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:957)
+
+getGenres() - generic exception {""stackTrace"":[{""declaringClass"":""luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2"",""fileName"":""MusicRepositoryImpl.kt"",""lineNumber"":350,""methodName"":""invokeSuspend""},{""declaringClass"":""kotlin.coroutines.jvm.internal.BaseContinuationImpl"",""fileName"":""ContinuationImpl.kt"",""lineNumber"":33,""methodName"":""resumeWith""},{""declaringClass"":""kotlinx.coroutines.DispatchedTask"",""fileName"":""DispatchedTask.kt"",""lineNumber"":104,""methodName"":""run""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":984,""methodName"":""handleCallback""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":104,""methodName"":""dispatchMessage""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":238,""methodName"":""loopOnce""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":357,""methodName"":""loop""},{""declaringClass"":""android.app.ActivityThread"",""fileName"":""ActivityThread.java"",""lineNumber"":8088,""methodName"":""main""},{""declaringClass"":""java.lang.reflect.Method"",""fileName"":""Method.java"",""lineNumber"":-2,""methodName"":""invoke""},{""declaringClass"":""com.android.internal.os.RuntimeInit$MethodAndArgsCaller"",""fileName"":""RuntimeInit.java"",""lineNumber"":548,""methodName"":""run""},{""declaringClass"":""com.android.internal.os.ZygoteInit"",""fileName"":""ZygoteInit.java"",""lineNumber"":957,""methodName"":""main""}]}"
+fftk5TAt,2025-05-17T09:59:59.544425,powerampache,PHP,Saturday 17th of May 2025 03:00:00 AM CDT,"1.01-80 (80) - DB: 83
+java.lang.NullPointerException
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2.invokeSuspend(MusicRepositoryImpl.kt:350)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:984)
+	at android.os.Handler.dispatchMessage(Handler.java:104)
+	at android.os.Looper.loopOnce(Looper.java:238)
+	at android.os.Looper.loop(Looper.java:357)
+	at android.app.ActivityThread.main(ActivityThread.java:8088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:548)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:957)
+
+getGenres() - generic exception {""stackTrace"":[{""declaringClass"":""luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$getGenres$2"",""fileName"":""MusicRepositoryImpl.kt"",""lineNumber"":350,""methodName"":""invokeSuspend""},{""declaringClass"":""kotlin.coroutines.jvm.internal.BaseContinuationImpl"",""fileName"":""ContinuationImpl.kt"",""lineNumber"":33,""methodName"":""resumeWith""},{""declaringClass"":""kotlinx.coroutines.DispatchedTask"",""fileName"":""DispatchedTask.kt"",""lineNumber"":104,""methodName"":""run""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":984,""methodName"":""handleCallback""},{""declaringClass"":""android.os.Handler"",""fileName"":""Handler.java"",""lineNumber"":104,""methodName"":""dispatchMessage""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":238,""methodName"":""loopOnce""},{""declaringClass"":""android.os.Looper"",""fileName"":""Looper.java"",""lineNumber"":357,""methodName"":""loop""},{""declaringClass"":""android.app.ActivityThread"",""fileName"":""ActivityThread.java"",""lineNumber"":8088,""methodName"":""main""},{""declaringClass"":""java.lang.reflect.Method"",""fileName"":""Method.java"",""lineNumber"":-2,""methodName"":""invoke""},{""declaringClass"":""com.android.internal.os.RuntimeInit$MethodAndArgsCaller"",""fileName"":""RuntimeInit.java"",""lineNumber"":548,""methodName"":""run""},{""declaringClass"":""com.android.internal.os.ZygoteInit"",""fileName"":""ZygoteInit.java"",""lineNumber"":957,""methodName"":""main""}]}"
+mqBrkYPw,2025-05-17T09:44:03.436326,powerampache,PHP,Saturday 17th of May 2025 02:44:03 AM CDT,"1.01-80 (80) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Connection reset"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1156)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:651)
+	at java.lang.Thread.run(Thread.java:1119)
+
+"
+4A8bFct0,2025-05-17T09:43:15.861,powerampache,PHP,Saturday 17th of May 2025 02:43:15 AM CDT,"1.01-76 (76) - DB: 83
+luci.sixsixsix.powerampache2.domain.errors.NullSessionException: Session is NULL
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.authToken(BaseAmpacheRepository.kt:87)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$authToken$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:938)
+	at android.os.Handler.dispatchMessage(Handler.java:99)
+	at android.os.Looper.loop(Looper.java:236)
+	at android.app.ActivityThread.main(ActivityThread.java:8061)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:656)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:967)
+
+scrobble() - generic exception {""detailMessage"":""Session is NULL"",""stackTrace"":[],""suppressedExceptions"":[]}"
+yRektPVq,Tetro,WarPie90,Delphi,Saturday 17th of May 2025 12:47:09 AM CDT,"program new;
+
+const
+  DEFAULT_START = 7;
+  TETRIS_ROWS   = 15;
+
+var
+  column: string := ' '*20;
+  board: array of Char;
+  tetroLocation: Int32 = DEFAULT_START;
+  thisTetro: TByteArray;
+
+const
+  tetros:array of TByteArray = [[1,16,31,46], [2,15,16,17], [1,15,16,17], [2,15,16,17], [1,2,16,17], [0,1,16,17], [1,2,15,16]];
+
+function ToString(constref x:array of Char): string; override;
+var i: Int32;
+begin
+  for i:=0 to High(x) do
+  begin
+    if (i mod 15 = 0) and (i > 0) then Result += LINE_SEP;
+    Result += x[i];
+  end;
+end;
+
+procedure SetRandomTetro();
+begin
+  thisTetro := tetros[Random(Length(tetros))];
+end;
+
+function VerifyFreeSapce(blank:Char=' '): Boolean;
+begin
+                    {lowest pnt}
+  if (tetroLocation+thisTetro[3]) div 15 > TETRIS_ROWS then Exit(False);
+
+
+  Result := (board[tetroLocation+thisTetro[0]] = blank) and
+            (board[tetroLocation+thisTetro[1]] = blank) and
+            (board[tetroLocation+thisTetro[2]] = blank) and
+            (board[tetroLocation+thisTetro[3]] = blank);
+end;
+
+procedure DrawTetro(sym:Char='#');
+begin
+  board[tetroLocation+thisTetro[0]] := sym;
+  board[tetroLocation+thisTetro[1]] := sym;
+  board[tetroLocation+thisTetro[2]] := sym;
+  board[tetroLocation+thisTetro[3]] := sym;
+end;
+
+procedure DropTetro();
+begin
+  Inc(tetroLocation, 15);
+end;
+
+procedure UndropTetro();
+begin
+  Dec(tetroLocation, 15);
+end;
+
+var
+  I:int32;
+  TetrisFrame: TImage;
+begin
+  SetLength(board, Length(column)*25);
+  for i:=0 to 14 do Move(column[1], board[i*20], 20);
+
+
+  TetrisFrame := TImage.Create(500,1000); //this could be a form
+  TetrisFrame.FontName := 'Consolas';
+  TetrisFrame.Show();
+
+  SetRandomTetro();
+  while true do
+  begin
+    TetrisFrame.DrawColor := 0;
+    TetrisFrame.DrawText(ToString(board), [50,50]);
+
+    DrawTetro(#32);
+    DropTetro();
+
+    if not VerifyFreeSapce() then
+    begin
+      UnDropTetro();
+      DrawTetro('#');
+
+      TetrisFrame.DrawColor := $0077FF;
+      TetrisFrame.DrawText(ToString(board), [50,50]);
+      TetrisFrame.Show(False);
+
+      SetRandomTetro();
+      tetroLocation := Random(0,12);// DEFAULT_START;
+
+      // still not free!?¤!""¤""!#%""#%
+      if not VerifyFreeSapce() then
+        TerminateScript('Game over');
+    end else
+    begin
+      DrawTetro('#');
+
+      TetrisFrame.DrawColor := $0077FF;
+      TetrisFrame.DrawText(ToString(board), [50,50]);
+      TetrisFrame.Show(False);
+    end;
+
+    //Sleep(100);
+  end;
+end."
+wSDSHj2A,# remove_consecutive_duplicates.py,here2share,Python,Saturday 17th of May 2025 12:37:36 AM CDT,"# remove_consecutive_duplicates.py
+
+def remove_consecutive_duplicates(text):
+    lines = text.split(""\n"")  # Split the string into individual lines
+    filtered_lines = [lines[i] for i in range(len(lines)) if i == 0 or lines[i] != lines[i-1]]
+    return ""\n"".join(filtered_lines)
+
+test = '''\
+1
+2
+3
+3
+3
+4
+3
+5
+5
+6
+'''
+
+result = remove_consecutive_duplicates(test)
+print(result)"
+NRTr2E0k,VRCExampleDemo,Dieton,C#,Saturday 17th of May 2025 12:23:21 AM CDT,"using UdonSharp;
+using UnityEngine;
+using TMPro;
+using VRC.SDKBase; // Core SDK functionality
+using VRC.SDK3; // Main SDK features
+using VRC.SDK3.Components; // VRCPickup, VRCUrlInputField
+using VRC.SDK3.Data; // DataToken/DataDictionary
+using VRC.SDK3.StringLoading; // String downloads
+using VRC.SDK3.Video.Components.Base; // Base video player
+using VRC.SDK3.ImageLoading; // Texture downloads
+using VRC.Udon.Common.Interfaces; // Network events
+using VRC.SDK3.Networking; // RPCs
+using VRC.SDK3.Validation; // Validation attributes
+
+// Note: Some namespaces like VRC.SDK3.Experimental are intentionally omitted 
+// as they're unstable or editor-only
+
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)] // From VRC.SDKBase
+[RequireComponent(typeof(VRCPickup))] // From VRC.SDK3.Components
+public class VRCNamespaceDemo : UdonSharpBehaviour
+{
+    // ========== VRC.SDK3.Components ==========
+    [SerializeField] private VRCPickup _pickup;
+    [SerializeField] private VRCUrlInputField _urlInputField;
+
+    // ========== VRC.SDKBase ==========
+    [UdonSynced] private int _syncedValue;
+    private VRCPlayerApi _localPlayer;
+
+    // ========== VRC.SDK3.Data ==========
+    private DataDictionary _dataDictionary = new DataDictionary();
+
+    // ========== VRC.SDK3.StringLoading ==========
+    [SerializeField] private VRCUrl _jsonUrl;
+    private string _loadedJson;
+
+    // ========== VRC.SDK3.Video.Components.Base ==========
+    [SerializeField] private UnityEngine.Video.VideoPlayer _videoPlayer;
+
+    // ========== VRC.SDK3.ImageLoading ==========
+    private Texture _downloadedTexture;
+    private VRCImageDownloader _imageDownloader;
+
+    // ========== UI Elements ==========
+    [SerializeField] private TextMeshProUGUI _statusText;
+    [SerializeField] private Renderer _displayRenderer;
+
+    // ========== VRC.SDK3.Validation ==========
+    [RecursiveMethod] // Validation attribute
+    private void ValidateData()
+    {
+        // Method content would go here
+    }
+
+    void Start()
+    {
+        _localPlayer = Networking.LocalPlayer; // From VRC.SDKBase
+        InitializeDataStructure();
+    }
+
+    // ========== VRC.SDK3.Data Demo ==========
+    private void InitializeDataStructure()
+    {
+        _dataDictionary.Add(""playerCount"", new DataToken(0));
+        _dataDictionary.Add(""isActive"", new DataToken(false));
+
+        // WARNING: Complex nested structures impact performance
+        DataList colors = new DataList();
+        colors.Add(new DataToken(""red""));
+        colors.Add(new DataToken(""blue""));
+        _dataDictionary.Add(""colors"", new DataToken(colors));
+    }
+
+    // ========== VRC.SDK3.StringLoading Demo ==========
+    public void LoadJsonData()
+    {
+        VRCStringDownloader.LoadUrl(_jsonUrl, (IUdonEventReceiver)this);
+    }
+
+    public override void OnStringLoadSuccess(IVRCStringDownload result)
+    {
+        _loadedJson = result.Result;
+        _statusText.text = ""JSON loaded!"";
+        
+        // WARNING: Large JSON files may cause lag
+        if (VRCJson.TryDeserializeFromJson(_loadedJson, out DataToken token))
+        {
+            ProcessJsonData(token.DataDictionary);
+        }
+    }
+
+    // ========== VRC.SDK3.Networking Demo ==========
+    [VRCSDK3.Networking.UdonSynced]
+    private int _networkedValue;
+
+    public void IncrementNetworkedValue()
+    {
+        if (!Networking.IsOwner(gameObject))
+            Networking.SetOwner(_localPlayer, gameObject);
+
+        _networkedValue++;
+        RequestSerialization();
+    }
+
+    public override void OnDeserialization()
+    {
+        _statusText.text = $""Synced value: {_networkedValue}"";
+    }
+
+    // ========== VRC.SDK3.ImageLoading Demo ==========
+    public void DownloadImage(VRCUrl imageUrl)
+    {
+        _imageDownloader = new VRCImageDownloader();
+        _imageDownloader.DownloadImage(imageUrl, _displayRenderer.material, _localPlayer);
+    }
+
+    // ========== VRC.SDK3.Video.Components.Base Demo ==========
+    public void PlayVideo(VRCUrl videoUrl)
+    {
+        _videoPlayer.url = videoUrl.ToString();
+        _videoPlayer.Play();
+    }
+
+    // ========== Cleanup ==========
+    void OnDisable()
+    {
+        if (_imageDownloader != null)
+        {
+            _imageDownloader.Dispose();
+        }
+    }
+}"
+z8eb3MfQ,turtle test,Grexxity,Lua,Saturday 17th of May 2025 12:08:20 AM CDT,"local lampName = ""projectred-illumination:lamp""
+local minFuel = 10  -- Minimum fuel threshold
+
+local validFuel = {
+    [""minecraft:coal""] = true,
+    [""minecraft:charcoal""] = true,
+    [""minecraft:blaze_rod""] = true,
+    [""minecraft:coal_block""] = true,
+    [""minecraft:lava_bucket""] = true,
+    [""minecraft:stick""] = true
+}
+
+local function findLampSlot()
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and item.name == lampName then
+            return i
+        end
+    end
+    return nil
+end
+
+local function autoRefuel()
+    if turtle.getFuelLevel() == ""unlimited"" or turtle.getFuelLevel() >= minFuel then
+        return true
+    end
+
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        if item and validFuel[item.name] then
+            turtle.select(i)
+            if turtle.refuel(1) then
+                print(""Refueled using"", item.name)
+                return true
+            end
+        end
+    end
+
+    print(""No fuel found! Halting."")
+    return false
+end
+
+local function smartForward()
+    if turtle.detect() then
+        print(""Wall detected. Stopping."")
+        return false
+    end
+
+    if not turtle.forward() then
+        print(""Failed to move forward. Possibly an entity or world edge."")
+        return false
+    end
+
+    return true
+end
+
+-- Main loop
+while true do
+    if not autoRefuel() then break end
+
+    if not turtle.detectDown() then
+        local slot = findLampSlot()
+        if slot then
+            turtle.select(slot)
+            turtle.placeDown()
+        else
+            print(""No lamps left. Stopping."")
+            break
+        end
+    end
+
+    if not smartForward() then break end
+
+    sleep(0.25)
+end
+"
+BF5fkdXV,Godzhub's Key,GodzScript,Lua,Friday 16th of May 2025 10:07:43 PM CDT,G0dzk3YHU3
+rE08JTxL,Gamepass Shop Client,Cakey3101,Lua,Friday 16th of May 2025 09:57:54 PM CDT,"local MarketPlaceService = game:GetService(""MarketplaceService"")
+local Players = game:GetService(""Players"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+
+local Remotes = ReplicatedStorage.Remotes
+
+local TweenGui = require(script.Parent.TweenGui)
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player.PlayerGui
+
+local Gui = PlayerGui:WaitForChild(""Shop"")
+local Frame = Gui.Frame
+
+local OpenButton = PlayerGui:WaitForChild(""Main"").Right.Shop
+local ExitButton = Frame.Exit
+
+local Container = Frame.Container
+
+local Template = Container.Template
+
+local GamepassIDS = {
+	1222392383,
+	1221912385,
+	1209923362
+}
+
+local function PromptGamepass(GamepassID: number, Buy: TextButton)
+	local OwnsPass = false
+	
+	local Success, ErrorMessage = pcall(function()
+		OwnsPass = MarketPlaceService:UserOwnsGamePassAsync(Player.UserId, GamepassID)
+	end)
+	
+	if not Success then return end
+	
+	if OwnsPass then
+		Buy.Price.Text = ""Owned""
+		Buy.Active = false
+		Buy.AutoButtonColor = false
+	else
+		Buy.Active = true
+		Buy.AutoButtonColor = true
+		MarketPlaceService:PromptGamePassPurchase(Player, GamepassID)
+	end
+end
+
+local function GenerateGamepasses()
+	for _, GamepassID in GamepassIDS do
+		local OwnsPass = false
+
+		local Success, ErrorMessage = pcall(function()
+			OwnsPass = MarketPlaceService:UserOwnsGamePassAsync(Player.UserId, GamepassID)
+		end)
+		
+		local GamepassInfo = MarketPlaceService:GetProductInfo(GamepassID, Enum.InfoType.GamePass)
+
+		local ClonedTempate = Template:Clone()
+		ClonedTempate.Name = GamepassInfo.Name
+		ClonedTempate.Icon.Image = `rbxassetid://{GamepassInfo.IconImageAssetId}`
+		ClonedTempate.Buy.Price.Text = `{GamepassInfo.PriceInRobux} R$`
+		ClonedTempate.Visible = true
+		ClonedTempate.ID.Value = GamepassID
+		ClonedTempate.Parent = Container
+		
+		if OwnsPass then
+			ClonedTempate.Buy.Price.Text = ""Owned""
+			ClonedTempate.Buy.Active = false
+			ClonedTempate.Buy.AutoButtonColor = false
+		else
+			ClonedTempate.Buy.Active = true
+			ClonedTempate.Buy.AutoButtonColor = true
+		end
+
+		ClonedTempate.Buy.MouseButton1Click:Connect(function()
+			PromptGamepass(GamepassID, ClonedTempate.Buy)
+		end)
+	end
+end
+
+local function GamePassPurchased(GamepassID)
+	for _, v in Container:GetChildren() do
+		if v:FindFirstChild(""ID"") then
+			if v.ID.Value == GamepassID then
+				ClonedTempate.Buy.Price.Text = ""Owned""
+				ClonedTempate.Buy.Active = false
+				ClonedTempate.Buy.AutoButtonColor = false
+				break
+			end
+		end
+	end
+end
+
+OpenButton.MouseButton1Click:Connect(function()
+	if Gui.Enabled == true then
+		TweenGui.CloseGui(Gui, Frame)
+	else
+		TweenGui.OpenGui(Gui, Frame)
+	end
+end)
+
+ExitButton.MouseButton1Click:Connect(function()
+	TweenGui.CloseGui(Gui, Frame)
+end)
+
+Remotes.GamePassPurchased.OnClientEvent:Connect(GamePassPurchased)
+
+GenerateGamepasses()"
+8puBLu8Q,Gamepass Shop Server,Cakey3101,Lua,Friday 16th of May 2025 09:57:40 PM CDT,"local MarketPlaceService = game:GetService(""MarketplaceService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+
+local Remotes = ReplicatedStorage.Remotes
+
+MarketPlaceService.PromptGamePassPurchaseFinished:Connect(function(Player: Instance, GamepassID: number, WasPurchased: boolean)
+	if WasPurchased then
+		Remotes.GamePassPurchased:FireClient(Player, GamepassID) 
+	end
+end)"
+rism7NdH,RequestException: error with request,basedcount_bot,Python,Friday 16th of May 2025 09:33:04 PM CDT,"Traceback (most recent call last):
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 46, in wrapper
+    await func(reddit_instance, mongo_client)
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 263, in read_comments
+    async for comment in pcm_subreddit.stream.comments(skip_existing=True):  # Comment
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/util.py"", line 172, in stream_generator
+    [result async for result in function(limit=limit, **function_kwargs)]
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/util.py"", line 172, in <listcomp>
+    [result async for result in function(limit=limit, **function_kwargs)]
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/listing/generator.py"", line 37, in __anext__
+    await self._next_batch()
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/listing/generator.py"", line 90, in _next_batch
+    self._listing = await self._reddit.get(self.url, params=self.params)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/util/deprecate_args.py"", line 54, in wrapped
+    return await _wrapper(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 813, in get
+    return await self._objectify_request(method=""GET"", params=params, path=path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 570, in _objectify_request
+    await self.request(
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/util/deprecate_args.py"", line 54, in wrapped
+    return await _wrapper(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 1061, in request
+    return await self._core.request(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 383, in request
+    return await self._request_with_retries(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 286, in _request_with_retries
+    response, saved_exception = await self._make_request(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 192, in _make_request
+    response = await self._rate_limiter.call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/rate_limit.py"", line 51, in call
+    response = await request_function(*args, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/requestor.py"", line 80, in request
+    raise RequestException(exc, args, kwargs) from None
+asyncprawcore.exceptions.RequestException: error with request 
+"
+RG0WJLq8,Counting_multiples_of_3,zyulfi,Python,Friday 16th of May 2025 09:32:16 PM CDT,"# 8. Броене на кратни на 3 (for)
+# Въведете две цели числа – начало и край.
+# Използвайте for, за да преброите колко числа между тях (включително) се делят на 3.
+
+num_start = int(input(""Please enter integer: ""))
+num_end = int(input(""Please enter integer: ""))
+counter = 0
+flag = False
+
+while True:
+    if num_start < num_end:
+        flag = True
+        for i in range(num_start, num_end + 1):
+            if i % 3 == 0:
+                counter += 1
+        break
+
+    elif num_start == num_end:
+        if num_start % 3 == 0:
+            print(""The numbers are equal and divisible by 3."")
+        else:
+            print(""The numbers are equal and not divisible by 3."")
+        break
+    else:
+        print(""The first number cannot be greater than the second number"")
+        num_start = int(input(""Please enter correct data: ""))
+        num_end = int(input(""Please enter correct data: ""))
+
+if flag:
+    print(""Between numbers "" + str(num_start) + "" and "" + str(num_end) + "" тhere are "" + str(counter) +
+              "" numbers that are divisible by 3."")"
+vXdju6gD,2025-05-16T22:19:47.449533,powerampache,PHP,Friday 16th of May 2025 09:19:48 PM CDT,"1.01-80 (80) - DB: 83
+retrofit2.HttpException: HTTP 404 
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+	at java.lang.Thread.run(Thread.java:1012)
+
+authorize() - cannot load data HttpException {""code"":404,""message"":"""",""detailMessage"":""HTTP 404 "",""stackTrace"":[]}"
+1Kct2b4s,**Syringe Control** rev_01,pleasedontcode,Arduino,Friday 16th of May 2025 09:09:30 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: **Syringe Control**
+	- Source Code NOT compiled for: ESP32 DevKit V1
+	- Source Code created on: 2025-05-17 02:06:03
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* motor doesnt work */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Adafruit_GFX.h>	//https://github.com/adafruit/Adafruit-GFX-Library
+#include <SPI.h>
+#include <Adafruit_ST7735.h> // Added for TFT display support
+
+// -----------------------
+// Pin Definitions
+// -----------------------
+const int stepPin1 = 16;   // coil 1
+const int stepPin2 = 17;   // coil 2
+const int stepPin3 = 18;   // coil 3
+const int stepPin4 = 19;   // coil 4
+
+const int selectButtonPin   = 25; // Updated pin to avoid conflict
+const int validateButtonPin = 14;
+const int resetButtonPin    = 21;
+const int emergencyStopPin  = 25;  // avoid conflict
+const int fsrPin            = 34;  // FSR402 analog input
+
+#define TFT_CS    5
+#define TFT_RST   15
+#define TFT_DC    2
+#define TFT_MOSI  23
+#define TFT_SCLK  18
+#define TFT_MISO  19
+
+// -----------------------
+// Operational Constants
+// -----------------------
+const float mmPerStep = 0.01;  // mm per step
+const int MIN_VOLUME = 1;
+const int MAX_VOLUME = 50;
+const int MIN_RATE   = 1;
+const int MAX_RATE   = 50;
+
+const int NUM_CAPACITIES = 4;
+const int allowedCapacities[NUM_CAPACITIES] = {20, 30, 40, 50};
+int syringeCapacityIndex = 0;
+int syringeCapacity = allowedCapacities[syringeCapacityIndex];
+
+const int DEBOUNCE_DELAY   = 50;
+const int BUTTON_DELAY     = 300;
+const int SYRINGE_SAMPLE_COUNT = 3;
+
+// FSR analog threshold (0-4095)
+int fsrThreshold = 1000;
+
+// -----------------------
+// State Machine
+// -----------------------
+enum State { 
+  SELECT_SYRINGE_CAPACITY,
+  WAIT_SYRINGE, 
+  SELECT_VOLUME, 
+  SELECT_RATE, 
+  READY, 
+  INJECTING, 
+  FINISHED, 
+  ERROR, 
+  ERROR_RESOLVED,
+  EMERGENCY_STOP
+};
+State currentState = SELECT_SYRINGE_CAPACITY;
+State lastState    = currentState;
+bool firstDisplayUpdate = true;
+
+int selectedVolume = 10;
+int selectedRate   = 10;
+long totalSteps = 0;
+unsigned long injectionTimeMs = 0;
+unsigned long stepDelayMs = 0;
+unsigned long currentStep = 0;
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+// -----------------------
+// Function Prototypes
+// -----------------------
+float getSyringeInnerDiameter(int capacity);
+bool isButtonPressed(int pin);
+bool isSyringePresentStable();
+void updateDisplayForState(State s);
+void performInjection();
+bool isErrorResolved();
+void stepClockwise();
+void stepCounterClockwise();
+
+void setup(void)
+{
+	// put your setup code here, to run once:
+  Serial.begin(9600);
+  Serial.println(""Syringe Injector Initialized"");
+
+  // Motor pins
+  pinMode(stepPin1, OUTPUT);
+  pinMode(stepPin2, OUTPUT);
+  pinMode(stepPin3, OUTPUT);
+  pinMode(stepPin4, OUTPUT);
+
+  // Buttons
+  pinMode(selectButtonPin,   INPUT_PULLUP);
+  pinMode(validateButtonPin, INPUT_PULLUP);
+  pinMode(resetButtonPin,    INPUT_PULLUP);
+  pinMode(emergencyStopPin,  INPUT_PULLUP);
+
+  // FSR analog input
+  analogReadResolution(12); // 0-4095
+  pinMode(fsrPin, INPUT);
+
+  // TFT
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(2);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+
+  updateDisplayForState(currentState);
+}
+
+void loop(void)
+{
+	// put your main code here, to run repeatedly:
+  // Emergency stop
+  if (digitalRead(emergencyStopPin) == LOW && currentState != EMERGENCY_STOP) {
+    currentState = EMERGENCY_STOP;
+  }
+
+  // Reset
+  if (isButtonPressed(resetButtonPin)) {
+    currentState = WAIT_SYRINGE;
+    selectedVolume = 10;
+    selectedRate   = 10;
+    currentStep = 0;
+    delay(BUTTON_DELAY);
+  }
+
+  // Display update
+  if (firstDisplayUpdate || currentState != lastState) {
+    updateDisplayForState(currentState);
+    lastState = currentState;
+    firstDisplayUpdate = false;
+  }
+
+  // State handling
+  switch (currentState) {
+    case SELECT_SYRINGE_CAPACITY:
+      if (isButtonPressed(selectButtonPin)) {
+        syringeCapacityIndex = (syringeCapacityIndex + 1) % NUM_CAPACITIES;
+        syringeCapacity = allowedCapacities[syringeCapacityIndex];
+        tft.fillRect(0, 20, tft.width(), 20, ST77XX_BLACK);
+        tft.setCursor(0, 20);
+        tft.print(syringeCapacity);
+        tft.print("" mL ("");
+        tft.print(getSyringeInnerDiameter(syringeCapacity));
+        tft.println("" mm)"");
+        delay(BUTTON_DELAY);
+      }
+      if (isButtonPressed(validateButtonPin)) {
+        currentState = WAIT_SYRINGE;
+        delay(BUTTON_DELAY);
+      }
+      break;
+
+    case WAIT_SYRINGE:
+      if (isSyringePresentStable()) {
+        currentState = SELECT_VOLUME;
+        delay(BUTTON_DELAY);
+      }
+      break;
+
+    case SELECT_VOLUME:
+      if (!isSyringePresentStable()) {
+        currentState = WAIT_SYRINGE;
+        updateDisplayForState(currentState);
+        break;
+      }
+      if (isButtonPressed(selectButtonPin)) {
+        selectedVolume = (selectedVolume % MAX_VOLUME) + 1;
+        tft.fillRect(0, 20, tft.width(), 20, ST77XX_BLACK);
+        tft.setCursor(0, 20);
+        tft.print(selectedVolume);
+        delay(BUTTON_DELAY);
+      }
+      if (isButtonPressed(validateButtonPin)) {
+        currentState = SELECT_RATE;
+        delay(BUTTON_DELAY);
+      }
+      break;
+
+    case SELECT_RATE:
+      if (!isSyringePresentStable()) {
+        currentState = WAIT_SYRINGE;
+        updateDisplayForState(currentState);
+        break;
+      }
+      if (isButtonPressed(selectButtonPin)) {
+        selectedRate = (selectedRate % MAX_RATE) + 1;
+        tft.fillRect(0, 20, tft.width(), 20, ST77XX_BLACK);
+        tft.setCursor(0, 20);
+        tft.print(selectedRate);
+        delay(BUTTON_DELAY);
+      }
+      if (isButtonPressed(validateButtonPin)) {
+        currentState = READY;
+        delay(BUTTON_DELAY);
+      }
+      break;
+
+    case READY: {
+      if (isButtonPressed(validateButtonPin)) {
+        float diameter = getSyringeInnerDiameter(syringeCapacity);
+        float area = PI * sq(diameter / 2.0);
+        float V_mm3 = selectedVolume * 1000.0;
+        float displacement = V_mm3 / area;
+        totalSteps = (long)ceil(displacement / mmPerStep);
+        injectionTimeMs = (unsigned long)((selectedVolume * 60000.0) / selectedRate);
+        stepDelayMs = injectionTimeMs / totalSteps;
+        currentState = INJECTING;
+        delay(BUTTON_DELAY);
+      }
+      break;
+    }
+
+    case INJECTING:
+      performInjection();
+      break;
+
+    case FINISHED:
+      // idle
+      break;
+
+    case ERROR:
+      if (isErrorResolved()) currentState = ERROR_RESOLVED;
+      break;
+
+    case ERROR_RESOLVED:
+      if (!isErrorResolved()) currentState = ERROR;
+      if (isButtonPressed(validateButtonPin)) {
+        currentState = INJECTING;
+        delay(BUTTON_DELAY);
+      }
+      break;
+
+    case EMERGENCY_STOP:
+      if (isButtonPressed(validateButtonPin)) {
+        currentState = INJECTING;
+        delay(BUTTON_DELAY);
+      }
+      break;
+  }
+}
+
+// -----------------------
+// Motor Step Functions
+// -----------------------
+void stepClockwise() {
+  digitalWrite(stepPin1, HIGH); digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, HIGH);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, HIGH); digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, HIGH);
+  delay(stepDelayMs);
+}
+
+void stepCounterClockwise() {
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, HIGH);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, HIGH); digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, LOW);  digitalWrite(stepPin2, HIGH);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+  digitalWrite(stepPin1, HIGH); digitalWrite(stepPin2, LOW);
+  digitalWrite(stepPin3, LOW);  digitalWrite(stepPin4, LOW);
+  delay(stepDelayMs);
+}
+
+// -----------------------
+// Injection Routine
+// -----------------------
+void performInjection() {
+  bool aborted = false;
+  Serial.println(""Starting injection...""); // Debugging output
+  for (; currentStep < totalSteps; currentStep++) {
+    if (!isSyringePresentStable() || digitalRead(emergencyStopPin) == LOW) {
+      aborted = true;
+      break;
+    }
+    stepClockwise(); // Make sure motor is stepping
+    Serial.print(""Step: ""); Serial.println(currentStep); // Debugging output
+  }
+  currentState = aborted ? ERROR : FINISHED;
+}
+
+// -----------------------
+// Utilities
+// -----------------------
+bool isButtonPressed(int pin) {
+  if (digitalRead(pin) == LOW) {
+    delay(DEBOUNCE_DELAY);
+    if (digitalRead(pin) == LOW) {
+      while (digitalRead(pin) == LOW) {}
+      delay(DEBOUNCE_DELAY);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Lecture FSR analogique et stabilisation
+bool isSyringePresentStable() {
+  int count = 0;
+  for (int i = 0; i < SYRINGE_SAMPLE_COUNT; i++) {
+    int val = analogRead(fsrPin);
+    if (val >= fsrThreshold) count++;
+    delay(2);
+  }
+  return count >= (SYRINGE_SAMPLE_COUNT - 1);
+}
+
+bool isErrorResolved() {
+  return digitalRead(emergencyStopPin) == HIGH && isSyringePresentStable();
+}
+
+float getSyringeInnerDiameter(int capacity) {
+  switch (capacity) {
+    case 20: return 19.66;
+    case 30: return 22.70;
+    case 40: return 25.00;
+    case 50: return 29.00;
+    default: return 0.0;
+  }
+}
+
+void updateDisplayForState(State s) {
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setCursor(0, 0);
+  switch (s) {
+    case SELECT_SYRINGE_CAPACITY:
+      tft.print(""Select Syringe Capacity"");
+      tft.setCursor(0, 20);
+      tft.print(syringeCapacity);
+      tft.print("" mL ("");
+      tft.print(getSyringeInnerDiameter(syringeCapacity));
+      tft.println("" mm)"");
+      tft.setCursor(0, 40);
+      tft.print(""SELECT = change"");
+      tft.setCursor(0, 60);
+      tft.print(""VALIDATE = confirm"");
+      break;
+
+    case WAIT_SYRINGE:
+      tft.print(""Insert Syringe"");
+      break;
+
+    case SELECT_VOLUME:
+      tft.print(""Select Volume (mL):"");
+      tft.setCursor(0, 20);
+      tft.print(selectedVolume);
+      tft.setCursor(0, 40);
+      tft.print(""SELECT = change"");
+      tft.setCursor(0, 60);
+      tft.print(""VALIDATE = confirm"");
+      break;
+
+    case SELECT_RATE:
+      tft.print(""Select Rate (mL/min):"");
+      tft.setCursor(0, 20);
+      tft.print(selectedRate);
+      tft.setCursor(0, 40);
+      tft.print(""SELECT = change"");
+      tft.setCursor(0, 60);
+      tft.print(""VALIDATE = confirm"");
+      break;
+
+    case READY:
+      tft.print(""Ready to Inject"");
+      tft.setCursor(0, 20);
+      tft.print(""Vol: ""); tft.print(selectedVolume); tft.print("" mL"");
+      tft.setCursor(0, 40);
+      tft.print(""Rate: ""); tft.print(selectedRate); tft.print("" mL/min"");
+      tft.setCursor(0, 60);
+      tft.print(""VALIDATE = start"");
+      break;
+
+    case INJECTING:
+      tft.print(""Injecting..."");
+      break;
+
+    case FINISHED:
+      tft.print(""Injection Completed"");
+      tft.setCursor(0, 20);
+      tft.print(""RESET to restart"");
+      break;
+
+    case ERROR:
+      tft.print(""ERROR DETECTED"");
+      tft.setCursor(0, 20);
+      tft.print(""Injection paused"");
+      if (!isSyringePresentStable()) {
+        tft.setCursor(0, 40);
+        tft.print(""No syringe"");
+      }
+      if (digitalRead(emergencyStopPin) == LOW) {
+        tft.setCursor(0, 60);
+        tft.print(""Emergency stop"");
+      }
+      break;
+
+    case ERROR_RESOLVED:
+      tft.print(""Error Resolved"");
+      tft.setCursor(0, 20);
+      tft.print(""VALIDATE = resume"");
+      break;
+
+    case EMERGENCY_STOP:
+      tft.print(""Emergency Stop"");
+      tft.setCursor(0, 20);
+      tft.print(""VALIDATE = continue"");
+      tft.setCursor(0, 40);
+      tft.print(""RESET = restart"");
+      break;
+  }
+}
+
+/* END CODE */"
+2WqN6iQf,Mine,Slinger0001,Lua,Friday 16th of May 2025 08:58:58 PM CDT,"-- Simple Mining Program
+
+
+-- Set the number of blocks to mine
+local distanceforward = 0
+local forward = 1 --Forward Facing
+local distanceBackward = 0
+local distanceLeft = 0 
+local distanceRight = 0
+local distanceLimit = 50
+local FuelAmount = 0
+
+
+-- Check Fuel Level
+local function fuelcheck()
+    FuelAmount = turtle.getFuelLevel()
+    print(""Fuel Level "" .. FuelAmount)
+end
+
+-- Fuel Up
+local function Fuel()
+    turtle.select(1)
+    turtle.refuel(64)
+    turtle.select(2)
+    turtle.refuel(64)
+    turtle.select(1)
+end
+
+local function Left()
+    turtle.turnLeft()
+end
+
+local function Right()
+    turtle.turnRight()
+end
+
+
+local function ClearAbove()
+    if turtle.detectup() then
+        turtle.digup()
+    end
+end
+
+local function Clearforward()
+    if turtle.detect() then
+        turtle.dig()
+    end
+end
+
+
+
+-- Function to ensure the path is clear
+local function DigAll()
+    while turtle.getFuelLevel()>50 do
+            while distanceRight<10 do
+                while distanceforward < distanceLimit  do
+                    ClearAbove()
+                    Left()
+                    Clearforward()
+                    Right()
+                    Right()
+                    Clearforward()
+                    Left()
+                    if forward == 1 then
+                        distanceforward = distanceforward+1
+                    else
+                        distanceforward = distanceforward-1
+                    end
+
+                    if forward > 0  then 
+                        forward = 0 --Backwards
+                        Right()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Right()
+                    else 
+                        forward = 1 --Forward
+                        Left()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Clearforward()
+                        distanceright = distanceright+1
+                        turtle.forward()
+                        Left()
+                    end 
+                end
+            end    
+        if forward == 1 then
+            Left()
+            while distanceright>0 do
+                turtle.forward()
+                distanceright=distanceright-1
+            end
+        else
+            Right()
+            while distanceright>0 do
+            turtle.forward()
+            distanceright=distanceright-1
+            end
+            Left()
+            while distanceforward > 0 do
+                turtle.forward()
+                distanceforward = distanceforward-1
+            end
+        end
+    end
+end
+fuelcheck()"
+JfntEaxN,Figure,zyulfi,Python,Friday 16th of May 2025 08:46:27 PM CDT,"# 7. Фигурка с for
+# Въведете число n. Отпечатайте триъгълник от звездички:
+
+num = int(input(""Please enter integer: ""))
+
+for i in range(1, num + 1):
+    print(""*"" * i)"
+XXUETb6S,Numbering,zyulfi,Python,Friday 16th of May 2025 08:39:06 PM CDT,"# 6. Изреждане на числа (for)
+# Въведете цяло число n. Отпечатайте числата от 1 до n, по едно на ред.
+
+num = int(input(""Please enter integer: ""))
+
+for i in range(1, num + 1):
+    print(i)
+    "
+mG0GUakn,Countdown,zyulfi,Python,Friday 16th of May 2025 08:28:34 PM CDT,"# 5. Брояч назад (while)
+# Въведете цяло положително число n. Използвайки while, отпечатайте числата от n до 1.
+
+num = int(input(""Please, enter a positive integer: ""))
+
+while num >= 1:
+    print(num)
+    num -= 1"
+KVJyYt8q,Password_check,zyulfi,Python,Friday 16th of May 2025 08:17:31 PM CDT,"# 4. Проверка за парола (while)
+# Позволете на потребителя да въведе парола.
+# Ако въведе ""python123"" – отпечатайте ""Достъп разрешен"" и прекратете.
+# Ако не – продължете да искате отново.
+
+
+password = input(""Please enter password: "")
+
+while True:
+    if password == ""python123"":
+        print(""Access is allowed"")
+        break
+    else:
+        password = input(""Please enter password: "")"
+hu1hWjQJ,Doubling_while,zyulfi,Python,Friday 16th of May 2025 08:07:40 PM CDT,"# Започнете с число 1. Удвоявайте го (×2), докато стане по-голямо от 100.
+# Отпечатайте всяка стойност.
+
+num = 1
+
+while num < 100:
+    print(num)
+    num *= 2
+"
+kU9t8TBX,Max_num,zyulfi,Python,Friday 16th of May 2025 07:58:34 PM CDT,"# 2. Намиране на най-голямото (while)
+# Потребителят въвежда числа едно по едно. Когато въведе ""stop"" – въвеждането приключва.
+# Намерете най-голямото въведено число.
+
+num = input(""Please enter number: "")
+max_num = float(num)
+
+while num != ""stop"":
+    num_curr = float(num)
+    if max_num < num_curr:
+        max_num = num_curr
+    num = input(""Please enter number or 'stop' for termination: "")
+
+print(""The maximum number of numbers entered is: "" + str(max_num))
+"
+2sM3nP0t,Sum_num,zyulfi,Python,Friday 16th of May 2025 07:29:12 PM CDT,"# 1. Сумиране до число (while)
+# Въведете положително цяло число n.
+# Използвайте while, за да изчислите сумата на числата от 1 до n.
+
+num = int(input(""Please enter a positive integer: ""))
+i = 1
+sum_num = 0
+
+if num < 0:
+    while num < 0:
+        print(""Enter a positive integer: "")
+        num = int(input())
+
+if num > 0:
+    while i <= num:
+        sum_num += i
+        i += 1
+
+if sum_num != 0:
+    print(""Тhe sum of the numbers from 1 to "" + str(num) + "" is: "" + str(sum_num))
+else:
+    print(""Тhe sum is 0"")
+"
+01v5aG84,Pneumatic Craft Monitoring,Darknio,Lua,Friday 16th of May 2025 06:46:58 PM CDT,"--local side =peripheral.getNames()
+local pneu = peripheral.wrap(""bottom"")
+local mon = peripheral.wrap(""back"")
+
+
+function Anzeige()
+    mon.setTextColor(colors.white)
+    mon.clear()
+    mon.setCursorPos(1,1)
+    mon.write(""Aktueller Durck:"")
+    mon.setCursorPos(1,5)
+    mon.write(""Generator: "")
+    --mon.setCursorPos(1,4)
+   -- mon.write(""Luftmenge: "")
+    mon.setTextColor(color)
+    mon.setCursorPos(1,2)
+    mon.write(string.format(""%.2f"",pressure).. ""bar"")
+    mon.setCursorPos(12,5)
+    mon.write(status)
+ --   mon.setCursorPos(1,4)
+
+end
+
+function Auto()
+        if pressure > 4.6 then
+        rs.setOutput(""bottom"",false)
+        color = colors.red
+        status = ""off""
+    elseif pressure < 4.0 then
+        rs.setOutput(""bottom"",true)
+        color = colors.green
+        status = ""on""
+    else 
+		if pressure > 4.6 then
+		    status = ""off""
+		else
+        	status = ""on""
+		end
+        color = colors.orange   
+    end
+end
+
+while true do
+pressure = pneu.getPressure()
+-- air = pneu.getAir()
+Auto()
+Anzeige()
+sleep(0.5)
+end    "
+ZhiNWULT,Convert_text_to_number,zyulfi,Python,Friday 16th of May 2025 06:31:24 PM CDT,"# 10.Конвертиране на текст към число
+# Въведете число като текст (напр. ""42""). Преобразувайте го до int и отпечатайте:
+# Удвоената му стойност (в този пример: 84)
+
+num = float(input(""Моля, въведете число: ""))
+num_int = int(num)
+
+doubled = num_int * 2
+
+print(""Удвоената стойност на цялата част на числото е: "" + str(doubled))"
+9GRTkqVZ,Boolean,zyulfi,Python,Friday 16th of May 2025 06:17:54 PM CDT,"# 9. Булев вход
+# Въведете стойност ""True"" или ""False"" (като текст).
+# Преобразувайте я до bool и отпечатайте:
+    # ""Истина"", ако е True
+    # ""Лъжа"", ако е False
+
+text = input(""Mоля, въведете стойност"" + "" True"" + "" или ""+ ""False"" + "" (като текст): "")
+
+if text == ""True"":
+    print(""Истина!"")
+elif text == ""False"":
+    print(""Лъжа!"")
+else:
+    print(""Грешен текст!"")
+"
+uCRNZ5kX,**Display Update** rev_01,pleasedontcode,Arduino,Friday 16th of May 2025 05:53:22 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: **Display Update**
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-05-16 22:52:40
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The application shall provide real-time feedback */
+	/* to users by updating the display and controlling */
+	/* actuators based on input events, ensuring a */
+	/* seamless experience. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Wire.h>
+#include <Adafruit_SSD1306.h>	//https://github.com/stblassitude/Adafruit_SSD1306_Wemos_OLED.git
+#include <U8g2_for_Adafruit_GFX.h>	//https://github.com/olikraus/U8g2_for_Adafruit_GFX
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateDisplay(const char* message); // Function to update the display with a message
+
+/***** DEFINITION OF I2C PINS *****/
+const uint8_t myDisplay_SSD1306OledDisplay_I2C_PIN_SDA_A4		= A4;
+const uint8_t myDisplay_SSD1306OledDisplay_I2C_PIN_SCL_A5		= A5;
+const uint8_t myDisplay_SSD1306OledDisplay_I2C_SLAVE_ADDRESS		= 60;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+// Create display object
+Adafruit_SSD1306 display(128, 32, &Wire, -1); // Initialize the display object
+
+void setup(void)
+{
+	// Initialize the display
+	display.begin(SSD1306_SWITCHCAPVCC, myDisplay_SSD1306OledDisplay_I2C_SLAVE_ADDRESS);
+	display.clearDisplay(); // Clear the display buffer
+	display.display(); // Show the buffer on the display
+
+	// Display initial message
+	updateDisplay(""Initializing..."");
+}
+
+void loop(void)
+{
+	// Example of real-time feedback
+	updateDisplay(""Running...""); // Update display with running status
+	delay(1000); // Simulate some processing delay
+	updateDisplay(""Processing...""); // Update display with processing status
+	delay(1000); // Simulate some processing delay
+}
+
+// Function to update the display with a message
+void updateDisplay(const char* message) {
+	display.clearDisplay(); // Clear the display buffer
+	display.setTextSize(1); // Set text size
+	display.setTextColor(SSD1306_WHITE); // Set text color
+	display.setCursor(0, 0); // Set cursor position
+	display.print(message); // Print the message
+	display.display(); // Show the buffer on the display
+}
+
+/* END CODE */"
+dKcGF1ry,RequestException: error with request,basedcount_bot,Python,Friday 16th of May 2025 05:36:35 PM CDT,"Traceback (most recent call last):
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 46, in wrapper
+    await func(reddit_instance, mongo_client)
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/basedcount_bot.py"", line 123, in check_mail
+    async for message in reddit_instance.inbox.unread(limit=None):  # Message
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/listing/generator.py"", line 37, in __anext__
+    await self._next_batch()
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/models/listing/generator.py"", line 90, in _next_batch
+    self._listing = await self._reddit.get(self.url, params=self.params)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/util/deprecate_args.py"", line 54, in wrapped
+    return await _wrapper(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 813, in get
+    return await self._objectify_request(method=""GET"", params=params, path=path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 570, in _objectify_request
+    await self.request(
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/util/deprecate_args.py"", line 54, in wrapped
+    return await _wrapper(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncpraw/reddit.py"", line 1061, in request
+    return await self._core.request(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 383, in request
+    return await self._request_with_retries(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 286, in _request_with_retries
+    response, saved_exception = await self._make_request(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/sessions.py"", line 192, in _make_request
+    response = await self._rate_limiter.call(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/rate_limit.py"", line 51, in call
+    response = await request_function(*args, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/gmktec-server/Programming/Bots/basedcount_bot/.venv/lib/python3.11/site-packages/asyncprawcore/requestor.py"", line 80, in request
+    raise RequestException(exc, args, kwargs) from None
+asyncprawcore.exceptions.RequestException: error with request 
+"
+jDdEJFLx,Controller Program flo,Darknio,Lua,Friday 16th of May 2025 05:09:41 PM CDT,"--local side =peripheral.getNames()
+local pneu = peripheral.wrap(""back"")
+local mon = peripheral.wrap(""top"")
+
+
+function Anzeige()
+    mon.setTextColor(colors.white)
+    mon.clear()
+    mon.setCursorPos(1,1)
+    mon.write(""Aktueller Durck:"")
+    mon.setCursorPos(1,3)
+    mon.write(""Generator: "")
+    mon.setTextColor(color)
+    mon.setCursorPos(1,2)
+    mon.write(string.format(""%.2f"",pressure).. ""bar"")
+    mon.setCursorPos(12,3)
+    mon.write(status)
+    mon.setCursorPos(1,4)
+
+end
+
+function Auto()
+        if pressure > 4.6 then
+        rs.setOutput(""right"",false)
+        rs.setOutput(""back"", false)
+        color = colors.red
+        status = ""off""
+    elseif pressure < 3.5 then
+        rs.setOutput(""right"",true)
+        rs.setOutput(""back"", true)
+        color = colors.green
+        status = ""on""
+    else 
+        color = colors.orange   
+    end
+end
+
+while true do
+pressure = pneu.getPressure()
+Auto()
+Anzeige()
+sleep(0.5)
+end    "
+GKPxp2WU,Untitled,LeonMMS,Ruby,Friday 16th of May 2025 04:29:31 PM CDT,"#==============================================================================
+# ** Socket
+#------------------------------------------------------------------------------
+#  Esta classe lida com o soquete de rede. Ela estabelece
+# uma conexão entre o cliente e o servidor.
+#------------------------------------------------------------------------------
+#  Autor: Cidiomar
+#==============================================================================
+
+class SocketError < StandardError
+
+  ENOASSOCHOST = 'getaddrinfo: nenhum endereço associado ao nome do host.'
+  lib = Fiddle.dlopen('System/VXAOS.dll')
+  SocketLib__GetLastError = Fiddle::Function.new(
+    lib['SocketLib__GetLastError'],
+    [],
+    Fiddle::TYPE_INT
+  )
+  
+  def self.raise(errno = SocketLib__GetLastError.call)
+    Kernel.raise(
+      Errno.const_get(
+        Errno.constants.detect do |c|
+          Errno.const_get(c).new.errno == errno
+        end
+      ),
+      '',
+      caller(2)
+    )
+  end
+
+  def self.raise_no_assoc_host
+    Kernel.raise(SocketError, ENOASSOCHOST, caller(2))
+  end
+  
+end
+
+#==============================================================================
+# ** SocketLib
+#==============================================================================
+class SocketLib
+
+  lib = Fiddle.dlopen('System/VXAOS.dll')
+  SocketLib__setup = Fiddle::Function.new(
+    lib['SocketLib__setup'],
+    [],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__connect = Fiddle::Function.new(
+    lib['SocketLib__connect'],
+    [
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_VOIDP
+    ],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__close = Fiddle::Function.new(
+    lib['SocketLib__close'],
+    [Fiddle::TYPE_UINT],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__send = Fiddle::Function.new(
+    lib['SocketLib__send'],
+    [
+      Fiddle::TYPE_UINT,
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_INT
+    ],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__recv = Fiddle::Function.new(
+    lib['SocketLib__recv'],
+    [
+      Fiddle::TYPE_UINT,
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_INT
+    ],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__recv_non_block = Fiddle::Function.new(
+    lib['SocketLib__recv_non_block'],
+    [
+      Fiddle::TYPE_UINT,
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_INT
+    ],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__TestHost = Fiddle::Function.new(
+    lib['SocketLib__TestHost'],
+    [
+      Fiddle::TYPE_VOIDP,
+      Fiddle::TYPE_VOIDP
+    ],
+    Fiddle::TYPE_INT
+  )
+  SocketLib__eof = Fiddle::Function.new(
+    lib['SocketLib__eof'],
+    [Fiddle::TYPE_UINT],
+    Fiddle::TYPE_INT
+  )
+
+  def initialize(ip, port)
+    _port = port.to_s
+    @socket_id = [0, 0, 0, 0].pack('L')
+    err = SocketLib__connect.call(ip, _port, @socket_id)
+    unless err == 0
+      if err == -1
+        SocketError.raise_no_assoc_host
+      else
+        SocketError.raise
+      end
+    end
+    @socket_id = @socket_id.unpack1('L')
+  end
+  
+  def send(data)
+    data = data.to_s
+    return 0 if data.empty?
+    if (ss = SocketLib__send.call(@socket_id, data, data.bytesize)) < 0
+      SocketError.raise
+    end
+    ss
+  end
+  
+  def recv(maxlen)
+    buff = ""\0"" * (maxlen.to_i + 4)
+    r_len = SocketLib__recv.call(@socket_id, buff, maxlen)
+    SocketError.raise if r_len < 0
+    if r_len == maxlen
+      buff
+    else
+      buff[0...r_len]
+    end
+  end
+  
+  def recv_non_block(maxlen)
+    buff = ""\0"" * (maxlen.to_i + 4)
+    r_len = SocketLib__recv_non_block.call(@socket_id, buff, maxlen)
+    return -1 if r_len <= 0
+    if r_len == maxlen
+      buff
+    else
+      buff[0...r_len]
+    end
+  end
+  
+  def eof?
+    SocketLib__eof.call(@socket_id) == 0
+  end
+  
+  def close
+    SocketLib__close.call(@socket_id)
+  end
+  
+  class << self
+    def test_host(ip, port)
+      if (SocketLib__TestHost.call(ip, port) == 1)
+        return true
+      else
+        SocketError::SocketLib__GetLastError.call()
+        return false
+      end
+    end
+  end
+  
+  # Consulta o ping de forma bloqueante. Deve ser
+  # utilizado apenas em situações realmente necessárias.
+  def self.ping(server)
+    IO.popen(""ping -n 1 #{server}"").close
+    $?.exitstatus == 0
+  end
+  
+  if SocketLib__setup.call != 0
+    SocketError.raise
+  end
+  
+end"
+78XFFqUF,2025-05-17T00:19:21.215173,powerampache,PHP,Friday 16th of May 2025 04:19:22 PM CDT,"1.01-79 (79) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Failed to connect to audio.dotsaft.ru/192.168.2.45:443"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+	at java.lang.Thread.run(Thread.java:1012)
+
+"
+pjQUN6F4,EnvVars + Encore Run,Joe3rdwash,Bash,Friday 16th of May 2025 04:13:53 PM CDT,"┌──────────────────────┬──────────────────────────────────────────────────────────┬─────────────────────────────────────────────┐
+│ NAME                 │ VALUE                                                    │ NOTE                                        │
+├──────────────────────┼──────────────────────────────────────────────────────────┼─────────────────────────────────────────────┤
+│ DOPPLER_CONFIG       │ dev_docker                                               │                                             │
+│ DOPPLER_ENVIRONMENT  │ dev                                                      │                                             │
+│ DOPPLER_PROJECT      │ notes-app                                                │                                             │
+│ PEXELS_API_KEY       │ random │ https://www.pexels.com/api/key/             │
+│ POSTGRES_DB          │ notes                                                    │                                             │
+│ POSTGRES_HOST_ENCORE │ db                                                       │                                             │
+│ POSTGRES_PASSWORD    │ example                                                  │                                             │
+│ POSTGRES_PORT_ENCORE │ 5432                                                     │                                             │
+│ POSTGRES_USER        │ postgres                                                 │                                             │
+│ VITE_API_ENDPOINT    │ http://localhost:8080                                    │ API endpoint via Encore cli or docker build │
+└──────────────────────┴──────────────────────────────────────────────────────────┴─────────────────────────────────────────────┘
+4:01PM INF compiling Encore application for linux/amd64
+4:01PM ERR build infra config: could not decode infra config: json: cannot unmarshal object into Go struct field SQLServer.sql_servers.host of type string
+make: *** [Makefile:21: up] Error 1"
