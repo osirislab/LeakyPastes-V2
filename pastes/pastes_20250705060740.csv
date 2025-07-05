@@ -1,0 +1,5332 @@
+id,title,username,language,date,content
+C99hYMid,scheme language bottom up mergesort code,z66is,Scheme,Saturday 5th of July 2025 12:29:31 AM CDT,";; Merge two sorted lists using the given comparator
+(define (merge comparator list1 list2)
+  (define (merge01 l1 l2 acc)
+    (cond
+      ((null? l2) (append (reverse acc) l1))
+      ((null? l1) (append (reverse acc) l2))
+      ((comparator (car l2) (car l1))
+       (merge01 l1 (cdr l2) (cons (car l2) acc)))
+      (else
+       (merge01 (cdr l1) l2 (cons (car l1) acc)))))
+  (merge01 list1 list2 '()))
+
+;; Prepare each element as a singleton list
+(define (sort01 jumble)
+  (map list jumble))
+
+;; Perform one pass of merging adjacent pairs
+(define (sort02 comparator lists)
+  (cond
+    ((null? lists) '())
+    ((null? (cdr lists)) lists)
+    (else
+     (cons (merge comparator (car lists) (cadr lists))
+           (sort02 comparator (cddr lists))))))
+
+;; Repeatedly merge until one list remains
+(define (sort03 comparator lists)
+  (cond
+    ((null? lists) '())
+    ((null? (cdr lists)) (car lists))
+    (else
+     (sort03 comparator (sort02 comparator lists)))))
+
+;; Top‐level sort: prepare, merge‐pass, then finalize
+(define (sort comparator jumble)
+  (sort03 comparator (sort02 comparator (sort01 jumble))))
+
+;; Entry point: sort the sample list in descending order then display
+(define (main)
+  (display (sort > '(4 3 5 6 8 7 1 2 9)))
+  (newline))"
+n5MEYEby,Untitled,zamoth,Lua,Saturday 5th of July 2025 12:14:23 AM CDT,"-- bar_ui.lua  (run on your UI-side computer)
+
+-- ========================================================
+-- Peripheral wrapping
+-- ========================================================
+rednet.open(""left"")  
+local monitorBar = assert(peripheral.wrap(""back""), ""Bar monitor not found"")
+
+-- ========================================================
+-- Formatting
+-- ========================================================
+local function formatK(val)
+  if not val then return ""-"" end
+  if val >= 1000 then return string.format(""%dk"", math.floor(val/1000)) end
+  return tostring(val)
+end
+
+-- ========================================================
+-- Monitor Bar UI (with 3-color bar and min/max markers)
+-- ========================================================
+local function monitorBarUI(data)
+  monitorBar.setBackgroundColor(colors.black)
+  monitorBar.clear()
+  monitorBar.setTextScale(0.5)
+
+  local width, _    = monitorBar.getSize()
+  local margin      = 2
+  local barWidth    = width - margin * 2
+  local curTotal    = data.totalEnergy
+  local maxTotal    = data.totalCapacity
+  local fillColumns = (data.accPct / 100) * barWidth
+
+  -- compute marker positions
+  local minPct       = maxTotal > 0 and (data.minEnergy / maxTotal) or 0
+  local markerMinPos = math.floor(minPct * barWidth + 0.5)
+  local maxPct       = maxTotal > 0 and (data.maxEnergy / maxTotal) or 0
+  local markerMaxPos = math.floor(maxPct * barWidth + 0.5)
+
+  -- decide bar color by current energy
+  local barColor
+  if curTotal < 36000000 then
+    barColor = colors.red
+  elseif curTotal < data.minEnergy then
+    barColor = colors.orange
+  else
+    barColor = colors.lime
+  end
+
+  -- header: “XX.X%    123k/900k”
+  local pctStr    = string.format(""%.1f%%"", data.accPct)
+  local curMaxStr = formatK(curTotal) .. ""/"" .. formatK(maxTotal)
+  local header    = pctStr .. string.rep("" "", width - #pctStr - #curMaxStr) .. curMaxStr
+
+  local fillChar = string.char(149)
+  local barLines = {}
+
+  -- build each line of the bar
+  for _ = 1, 5 do
+    local line = """"
+    for j = 1, barWidth do
+      if j == markerMinPos or j == markerMaxPos then
+        line = line .. ""|""
+      else
+        local floor = math.floor(fillColumns)
+        if j <= floor or (j == floor + 1 and fillColumns % 1 > 0) then
+          line = line .. fillChar
+        else
+          line = line .. "" ""
+        end
+      end
+    end
+    table.insert(barLines, string.rep("" "", margin) .. line .. string.rep("" "", margin))
+  end
+
+  -- draw header
+  monitorBar.setCursorPos(1, 2)
+  monitorBar.setTextColor(colors.white)
+  monitorBar.write(header)
+
+  -- draw the bar
+  for i, line in ipairs(barLines) do
+    monitorBar.setCursorPos(1, 2 + i)
+    for j = 1, #line do
+      local c     = line:sub(j, j)
+      local idx   = j - margin
+      local floor = math.floor(fillColumns)
+      if c == ""|"" then
+        -- draw marker
+        monitorBar.setTextColor(colors.black)
+        monitorBar.setBackgroundColor(idx <= fillColumns and barColor or colors.gray)
+        monitorBar.write(""|"")
+      elseif idx >= 1 and idx <= floor then
+        -- filled
+        monitorBar.setTextColor(barColor)
+        monitorBar.setBackgroundColor(barColor)
+        monitorBar.write(fillChar)
+      elseif idx == floor + 1 and fillColumns % 1 > 0 then
+        -- partial fill
+        monitorBar.setTextColor(barColor)
+        monitorBar.setBackgroundColor(colors.gray)
+        monitorBar.write(fillChar)
+      elseif idx > 0 and idx <= barWidth then
+        -- empty
+        monitorBar.setTextColor(colors.gray)
+        monitorBar.setBackgroundColor(colors.gray)
+        monitorBar.write("" "")
+      else
+        -- margin
+        monitorBar.setTextColor(colors.white)
+        monitorBar.setBackgroundColor(colors.black)
+        monitorBar.write("" "")
+      end
+    end
+  end
+
+  -- bottom labels: min and max as percentages
+  local minLabel     = string.format(""%.1f%%"", (data.minEnergy / maxTotal) * 100)
+  local maxLabel     = string.format(""%.1f%%"", (data.maxEnergy / maxTotal) * 100)
+  local leftPadding  = margin + markerMinPos - math.floor(#minLabel / 2) - 1
+  local bottomLine   = string.rep("" "", math.max(0, leftPadding)) .. minLabel
+  local gap          = (margin + markerMaxPos - math.floor(#maxLabel / 2) - 1) - #bottomLine
+  if gap > 0 then
+    bottomLine = bottomLine .. string.rep("" "", gap)
+  end
+  bottomLine = bottomLine .. maxLabel
+
+  monitorBar.setCursorPos(1, 2 + #barLines + 1)
+  monitorBar.setTextColor(colors.white)
+  monitorBar.setBackgroundColor(colors.black)
+  monitorBar.write(bottomLine)
+end
+
+-- ========================================================
+-- Receive & render loop
+-- ========================================================
+while true do
+  local _, data = rednet.receive(""generator_status"")
+  monitorBarUI(data)
+end
+"
+z7FrRksN,fallout new vegas hud helix plugin,DontSleep,Lua,Friday 4th of July 2025 11:36:59 PM CDT,"local PLUGIN = PLUGIN
+PLUGIN.name = ""Fallout HUD""
+PLUGIN.author = ""DontSleep""
+PLUGIN.description = ""HUD Fallout New Vegas""
+
+function PLUGIN:ShouldDrawCrosshair(client, weapon)
+    return false
+end
+
+function PLUGIN:ShouldHideBars()
+    return true
+end
+
+function PLUGIN:CanDrawAmmoHUD(weapon)
+	return false
+end
+
+local hide = { 
+    CHudHealth = true, 
+    CHudBattery = true, 
+    CHudAmmo = true, 
+    CHudSecondaryAmmo = true 
+}
+
+local crosshairMat = Material(""fonvui/hud/hud_crosshair.png"") 
+
+hook.Add(""HUDPaint"", ""DrawCustomCrosshair"", function()
+    local x, y = ScrW() / 2, ScrH() / 2
+    local size = 64 
+
+    surface.SetDrawColor(252,177,65,255)
+    surface.SetMaterial(crosshairMat)
+    surface.DrawTexturedRect(x - size/2, y - size/2, size, size)
+end)
+
+hook.Add(""HUDShouldDraw"", ""HideDefaultHUD"", function(name)
+    if hide[name] then return false end
+end)
+
+hook.Add(""HUDShouldDraw"", ""HideDefaultCrosshair"", function(name)
+    if name == ""CHudCrosshair"" then
+        return false
+    end
+end)
+
+hook.Add(""HUDPaint"", ""DrawCustomHealthBar"", function()
+	local client = LocalPlayer()
+	if (!IsValid(client)) then return end
+
+	local hp = client:Health()
+	local maxHp = client:GetMaxHealth()
+    
+
+	
+	local w, h = 430, 250
+	local x = ScrW() - w - 1450
+	local y = ScrH() - h + 90
+
+	
+    
+    local mat = Material(""fonvui/hud/hud_left_main.png"")
+    surface.SetMaterial(mat)
+    surface.SetDrawColor(252,177,65,255)
+    surface.DrawTexturedRect(x, y, w , h)
+    surface.SetFont(""FalloutFont"")
+    surface.SetTextPos(x + 35, y + 3)
+    surface.SetTextColor(252,177,65,255)
+    surface.DrawText(""HP"")
+
+    
+    local mat = Material(""fonvui/hud/hud_right_main.png"")
+    surface.SetMaterial(mat)
+    surface.SetDrawColor(252,177,65,255)
+    surface.DrawTexturedRect(x + 1430, y, w , h)
+    surface.SetFont(""FalloutFont"")
+    surface.SetTextPos(x + 1800, y + 3)
+    surface.SetTextColor(252,177,65,255)
+    surface.DrawText(""AP"")
+
+    local compassMat = Material(""fonvui/hud/compass.png"") 
+local compassW, compassH = 620, 600    
+local drawW, drawH = 350, 45           
+local compassX = x + 30
+local compassY = y + 80
+
+local yaw = LocalPlayer():EyeAngles().y
+yaw = math.NormalizeAngle(yaw)
+
+local u = ( 1 - (yaw / 360)) % 1
+
+local halfDrawU = (drawW / compassW) / 2
+local uStart = u - halfDrawU
+local uEnd = u + halfDrawU
+
+
+if uStart < 0 then uStart = uStart + 1 end
+if uEnd > 1 then uEnd = uEnd - 1 end
+
+surface.SetDrawColor(252, 177, 65, 255)
+surface.SetMaterial(compassMat)
+
+if uStart > uEnd then
+    
+    local leftUVWidth = 1 - uStart
+    local leftPixelWidth = drawW * (leftUVWidth / (leftUVWidth + uEnd))
+    
+    surface.DrawTexturedRectUV(compassX, compassY, leftPixelWidth, drawH, uStart, 0, 1, 1)
+
+    
+    local rightPixelWidth = drawW - leftPixelWidth
+    
+    surface.DrawTexturedRectUV(compassX + leftPixelWidth, compassY, rightPixelWidth, drawH, 0, 0, uEnd, 1)
+else
+    
+    surface.DrawTexturedRectUV(compassX, compassY, drawW, drawH, uStart, 0, uEnd, 1)
+end
+
+
+local hpMat = Material(""fonvui/hud/percent_hud.png"")
+local hp = math.Clamp(LocalPlayer():Health() / LocalPlayer():GetMaxHealth(), 0, 1)
+
+local barX = x + 25
+local barY = y + 35
+local barW = w - 105
+local barH = h - 225
+local visibleW = barW * hp
+
+
+render.SetScissorRect(barX, barY, barX + visibleW, barY + barH, true)
+
+
+surface.SetMaterial(hpMat)
+surface.SetDrawColor(225, 225, 225)
+surface.DrawTexturedRect(barX, barY, barW, barH)
+
+
+render.SetScissorRect(0, 0, 0, 0, false)
+
+
+local hpMat = Material(""fonvui/hud/percent_hud.png"")
+local ply = LocalPlayer()
+local char = ply:GetCharacter()
+local stamina = ply:GetLocalVar(""stm"", 0)
+stamina = math.Clamp(stamina / 100, 0, 1)
+
+
+local rightX = x + 1482
+local barX = rightX + 25
+local barY = y + 35
+local barW = w - 105
+local barH = h - 225
+local visibleW = barW * stamina
+
+
+render.SetScissorRect(barX, barY, barX + visibleW, barY + barH, true)
+
+surface.SetMaterial(hpMat)
+surface.SetDrawColor(225, 225, 225)
+surface.DrawTexturedRect(barX, barY, barW, barH)
+
+render.SetScissorRect(0, 0, 0, 0, false)
+
+local ply = LocalPlayer()
+local wep = ply:GetActiveWeapon()
+
+if IsValid(wep) and wep:Clip1() >= 0 then
+    local ammoInMag = wep:Clip1()
+    local ammoReserve = ply:GetAmmoCount(wep:GetPrimaryAmmoType())
+    local ammoText = string.format(""%02d / %02d"", ammoInMag, ammoReserve)
+
+    surface.SetFont(""FalloutFont"")
+    surface.SetTextColor(252, 177, 65, 255)
+
+    local ammoX = x + 1690 + 30
+    local ammoY = y + 80
+
+    surface.SetTextPos(ammoX, ammoY)
+    surface.DrawText(ammoText)
+end
+
+
+end)
+
+surface.CreateFont(""FalloutFont"", {
+    font = ""Monofonto"",
+    size = 34,
+    weight = 500,
+    antialias = true,
+})"
+Z38uLUW1,Untitled,zamoth,Lua,Friday 4th of July 2025 10:37:24 PM CDT,"-- ui.lua  (run on your UI-side computer)
+
+-- ========================================================
+-- Peripheral wrapping
+-- ========================================================
+rednet.open(""left"")  
+local monitor = assert(peripheral.wrap(""back""), ""Monitor not found"")
+
+-- ========================================================
+-- Formatting
+-- ========================================================
+local function formatK(val)
+  if not val then return ""-"" end
+  if val >= 1000 then
+    return string.format(""%dk"", math.floor(val/1000))
+  else
+    return tostring(val)
+  end
+end
+
+local function formatTimeTicks(ticks)
+  if not ticks or ticks == ""-"" or ticks == math.huge then return ""-"" end
+  local seconds = math.floor(ticks/20 + 0.5)
+  local h = math.floor(seconds/3600)
+  local m = math.floor((seconds % 3600)/60)
+  local s = seconds % 60
+  return string.format(""%02d:%02d:%02d"", h, m, s)
+end
+
+-- ========================================================
+-- Monitor UI (main, with percentage thresholds)
+-- ========================================================
+local function monitorUI(data)
+  monitor.setBackgroundColor(colors.black)
+  monitor.clear()
+  monitor.setTextScale(1)
+
+  local w, _ = monitor.getSize()
+
+  -- top line: accumulator % on left, ON/OFF on right
+  monitor.setCursorPos(1, 1)
+  monitor.setTextColor(colors.white)
+  monitor.write(string.format(""Accumulator: %.1f%%"", data.accPct))
+  monitor.setCursorPos(w - 2, 1)
+  monitor.setTextColor(data.generatorOn and colors.lime or colors.red)
+  monitor.write(data.generatorOn and ""ON"" or ""OFF"")
+
+  -- rate & ETA
+  monitor.setCursorPos(1, 3)
+  monitor.setTextColor(colors.white)
+  monitor.write(""Rate: "" .. tostring(math.floor(data.avgFEperTick + 0.5)) .. "" FE/t"")
+  monitor.setCursorPos(1, 4)
+  monitor.write(data.etaLabel .. "" "" .. formatTimeTicks(data.etaTicks))
+
+  -- thresholds as percentages
+  local minPct = data.minEnergy / data.totalCapacity * 100
+  local maxPct = data.maxEnergy / data.totalCapacity * 100
+  monitor.setCursorPos(1, 6)
+  monitor.setTextColor(colors.lightGray)
+  monitor.write(string.format(
+    ""Thresholds: Min: %.1f%%   Max: %.1f%%"",
+    minPct, maxPct
+  ))
+
+  -- battery banks
+  local y = 8
+  monitor.setTextColor(colors.lightGray)
+  monitor.setCursorPos(1, y)
+  monitor.write(string.format(""Bank 0: %s/%s"", formatK(data.accEnergy),  formatK(data.accCapacity)))
+  monitor.setCursorPos(1, y + 1)
+  monitor.write(string.format(""Bank 1: %s/%s"", formatK(data.acc0Energy), formatK(data.acc0Capacity)))
+  monitor.setCursorPos(1, y + 2)
+  monitor.write(string.format(""Bank 2: %s/%s"", formatK(data.acc1Energy), formatK(data.acc1Capacity)))
+  monitor.setCursorPos(1, y + 3)
+  monitor.write(string.format(""Bank 3: %s/%s"", formatK(data.capBankEnergy), formatK(data.capBankCap)))
+end
+
+-- ========================================================
+-- Receive & render loop
+-- ========================================================
+while true do
+  local _, data = rednet.receive(""generator_status"")
+  monitorUI(data)
+end
+"
+gMvP5bLq,Object Detection rev_06,pleasedontcode,Arduino,Friday 4th of July 2025 08:21:50 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Object Detection
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-05 01:21:30
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The system should use the HC-SR04 ultrasonic */
+	/* sensor to detect items in the outdoor bin and play */
+	/* a designated MP3 sound via the DFPlayer Mini when */
+	/* an object is detected. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>	//https://github.com/DFRobot/DFRobotDFPlayerMini
+#include <Ultrasonic.h>	//https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs(void);
+void checkObjectDetection(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonicsensor_HC-SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonicsensor_HC-SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF Software Serial *****/
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0 = A0;
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1 = A1;
+SoftwareSerial mp3player_DFPlayerMini_Serial(mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1, mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0);
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData = LOW;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonicsensor_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/****** LIBRARY CLASS INSTANCES *****/
+Ultrasonic ultrasonicSensor(ultrasonicsensor_HC-SR04_Trigger_PIN_D2, ultrasonicsensor_HC-SR04_Echo_PIN_D3);
+DFRobotDFPlayerMini myDFPlayer;
+
+void setup(void)
+{
+  // put your setup code here, to run once:
+  pinMode(ultrasonicsensor_HC-SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonicsensor_HC-SR04_Trigger_PIN_D2, OUTPUT);
+  mp3player_DFPlayerMini_Serial.begin(9600);
+  // Initialize DFPlayer
+  if (!myDFPlayer.begin(mp3player_DFPlayerMini_Serial, true, true)) {
+    // Handle initialization failure if needed
+  }
+}
+
+void loop(void)
+{
+  // put your main code here, to run repeatedly:
+  checkObjectDetection();
+  updateOutputs();
+}
+
+void updateOutputs()
+{
+  digitalWrite(ultrasonicsensor_HC-SR04_Trigger_PIN_D2, ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData);
+}
+
+void checkObjectDetection()
+{
+  // Read distance from ultrasonic sensor
+  int distance_cm = ultrasonicSensor.read(); // in centimeters
+  // Define threshold distance in cm for object detection
+  const int detectionThreshold = 20; // e.g., 20 cm
+  if (distance_cm > 0 && distance_cm <= detectionThreshold)
+  {
+    // Object detected within threshold
+    // Play sound via DFPlayer
+    myDFPlayer.play(1); // Play the designated MP3 sound (e.g., sound index 1)
+  }
+}
+
+/* END CODE */"
+CwaPvxF4,Untitled,ItsPingu,FreeBasic,Friday 4th of July 2025 08:14:14 PM CDT,"' Append data to uncompressed test.txt inside a ZIP (no external libs)
+
+Type ZipFileEntry
+    filename As String
+    method As UShort
+    crc As UInteger
+    compSize As UInteger
+    uncompSize As UInteger
+    localHeaderOffset As UInteger
+    data As String
+End Type
+
+Function ReadUInt32(f As Integer) As UInteger
+    Dim As UInteger val
+    Dim As UByte b(3)
+    For i As Integer = 0 To 3
+        Get #f, , b(i)
+    Next
+    val = b(0) Or (b(1) << 8) Or (b(2) << 16) Or (b(3) << 24)
+    Return val
+End Function
+
+Function ReadUInt16(f As Integer) As UShort
+    Dim As UShort val
+    Dim As UByte b(1)
+    For i As Integer = 0 To 1
+        Get #f, , b(i)
+    Next
+    val = b(0) Or (b(1) << 8)
+    Return val
+End Function
+
+Function ReadString(f As Integer, length As Integer) As String
+    Dim As String s
+    Dim As UByte b
+    For i As Integer = 1 To length
+        Get #f, , b
+        s += Chr(b)
+    Next
+    Return s
+End Function
+
+' Find EOCD (End of central directory) from the end of file
+Function FindEOCD(f As Integer) As UInteger
+    Dim As Integer filesize = Lof(f)
+    Dim As Integer maxSearch = Min(filesize, 65536)
+    Dim As Integer pos = filesize - maxSearch
+
+    Dim As UByte b1, b2, b3, b4
+    For offset As Integer = maxSearch To 0 Step -1
+        Seek #f, pos + offset
+        Get #f, , b1
+        Get #f, , b2
+        Get #f, , b3
+        Get #f, , b4
+        If b1 = &H50 And b2 = &H4B And b3 = &H05 And b4 = &H06 Then
+            Return pos + offset
+        End If
+    Next
+    Return 0
+End Function
+
+Sub AppendToUncompressedFileInZip(ByVal zipPath As String, ByVal targetFile As String, ByVal appendData As String, ByVal outputZip As String)
+    Dim As Integer f = FreeFile()
+    Open zipPath For Binary Access Read As #f
+
+    Dim As UInteger eocdPos = FindEOCD(f)
+    If eocdPos = 0 Then
+        Print ""EOCD not found. Not a valid ZIP?""
+        Close #f
+        Exit Sub
+    End If
+
+    ' Read EOCD (22 bytes min)
+    Seek #f, eocdPos + 4
+    Dim totalEntries As UShort = ReadUInt16(f)
+    Dim centralDirSize As UInteger = ReadUInt32(f)
+    Dim centralDirOffset As UInteger = ReadUInt32(f)
+
+    ' Read central directory entries
+    Seek #f, centralDirOffset
+    Dim entries() As ZipFileEntry
+    Redim entries(totalEntries - 1)
+
+    For i As Integer = 0 To totalEntries - 1
+        Dim As UInteger sig = ReadUInt32(f)
+        If sig <> &H2014B50 Then ' Central dir file header signature 0x02014b50
+            Print ""Invalid central directory signature""
+            Close #f
+            Exit Sub
+        End If
+
+        ' Skip version made by(2), version needed(2), flags(2)
+        Seek #f, Seek(#f) + 6
+
+        Dim method As UShort = ReadUInt16(f)
+        ' Skip mod time/date
+        Seek #f, Seek(#f) + 4
+
+        Dim crc As UInteger = ReadUInt32(f)
+        Dim compSize As UInteger = ReadUInt32(f)
+        Dim uncompSize As UInteger = ReadUInt32(f)
+
+        Dim fnameLen As UShort = ReadUInt16(f)
+        Dim extraLen As UShort = ReadUInt16(f)
+        Dim commentLen As UShort = ReadUInt16(f)
+
+        ' Skip disk start(2), internal attr(2), external attr(4)
+        Seek #f, Seek(#f) + 10
+
+        Dim localHdrOffset As UInteger = ReadUInt32(f)
+
+        Dim fname As String = ReadString(f, fnameLen)
+
+        ' Skip extra and comment
+        Seek #f, Seek(#f) + extraLen + commentLen
+
+        entries(i).filename = fname
+        entries(i).method = method
+        entries(i).crc = crc
+        entries(i).compSize = compSize
+        entries(i).uncompSize = uncompSize
+        entries(i).localHeaderOffset = localHdrOffset
+    Next
+
+    ' Find target file index
+    Dim targetIdx As Integer = -1
+    For i As Integer = 0 To totalEntries - 1
+        If entries(i).filename = targetFile Then
+            targetIdx = i
+            Exit For
+        End If
+    Next
+
+    If targetIdx = -1 Then
+        Print ""File not found in archive: ""; targetFile
+        Close #f
+        Exit Sub
+    End If
+
+    ' Read target file local header and data
+    Seek #f, entries(targetIdx).localHeaderOffset
+    Dim localSig As UInteger = ReadUInt32(f)
+    If localSig <> &H4034B50 Then ' Local file header signature 0x04034b50
+        Print ""Invalid local file header signature""
+        Close #f
+        Exit Sub
+    End If
+
+    ' Skip version needed(2), flags(2), method(2), time(2), date(2)
+    Seek #f, Seek(#f) + 10
+
+    Dim localCRC As UInteger = ReadUInt32(f)
+    Dim localCompSize As UInteger = ReadUInt32(f)
+    Dim localUncompSize As UInteger = ReadUInt32(f)
+
+    Dim localNameLen As UShort = ReadUInt16(f)
+    Dim localExtraLen As UShort = ReadUInt16(f)
+
+    Dim localName As String = ReadString(f, localNameLen)
+
+    ' Read file data (uncompressed)
+    Dim As String fileData
+    Seek #f, Seek(#f) + localExtraLen
+    fileData = String(entries(targetIdx).compSize, Chr(0))
+    Get #f, , fileData
+
+    Close #f
+
+    ' Check compression method = 0 (stored)
+    If entries(targetIdx).method <> 0 Then
+        Print ""File is compressed; this method only works with uncompressed files.""
+        Exit Sub
+    End If
+
+    ' Append new data
+    fileData += appendData
+
+    ' Recalculate CRC32 (simple, just demo: you can implement full CRC32 if needed)
+    ' Here we'll keep old CRC to keep example simple.
+
+    ' Update sizes
+    entries(targetIdx).compSize = Len(fileData)
+    entries(targetIdx).uncompSize = Len(fileData)
+
+    ' Now rebuild the ZIP
+    Dim outf = FreeFile()
+    Open outputZip For Binary Access Write As #outf
+
+    Dim localOffsets(totalEntries - 1) As UInteger
+    Dim curOffset As UInteger = 0
+
+    ' Write all local file headers + data (replace target file with new data)
+    For i As Integer = 0 To totalEntries - 1
+        localOffsets(i) = curOffset
+
+        ' Local file header signature
+        Put #outf, , &H4034B50
+
+        ' Version needed
+        Put #outf, , CType(20, UShort)
+        ' Flags
+        Put #outf, , CType(0, UShort)
+        ' Method
+        Put #outf, , entries(i).method
+        ' Mod time/date
+        Put #outf, , mod_time
+        Put #outf, , mod_date
+
+        ' CRC, sizes
+        Dim writeCRC As UInteger = entries(i).crc
+        Dim writeCompSize As UInteger = entries(i).compSize
+        Dim writeUncompSize As UInteger = entries(i).uncompSize
+
+        ' If this is target file, update sizes and fake CRC
+        If i = targetIdx Then
+            writeCompSize = Len(fileData)
+            writeUncompSize = Len(fileData)
+            writeCRC = 0 ' TODO: calculate real CRC if you want
+        End If
+
+        Put #outf, , writeCRC
+        Put #outf, , writeCompSize
+        Put #outf, , writeUncompSize
+
+        ' File name length and extra length
+        Put #outf, , CType(Len(entries(i).filename), UShort)
+        Put #outf, , CType(0, UShort)
+
+        ' File name
+        Put #outf, , entries(i).filename
+
+        ' File data
+        Dim writeData As String
+        If i = targetIdx Then
+            writeData = fileData
+        Else
+            ' Open old ZIP and read data for this entry
+            Dim oldf = FreeFile()
+            Open zipPath For Binary Access Read As #oldf
+            Seek #oldf, entries(i).localHeaderOffset
+
+            ' Skip local header
+            ReadUInt32(oldf) : Seek #oldf, Seek(oldf) + 26 ' Skip 26 bytes after signature
+            Dim nlen As UShort = ReadUInt16(oldf)
+            Dim nextra As UShort = ReadUInt16(oldf)
+            Seek #oldf, Seek(oldf) + nlen + nextra
+
+            Dim dataStr As String = String(entries(i).compSize, Chr(0))
+            Get #oldf, , dataStr
+            Close #oldf
+            writeData = dataStr
+        End If
+
+        Put #outf, , writeData
+
+        curOffset = Seek(#outf)
+    Next
+
+    ' Write central directory
+    Dim centralDirStart = curOffset
+
+    For i As Integer = 0 To totalEntries - 1
+        Put #outf, , &H2014B50  ' Central dir signature
+        Put #outf, , CType(20, UShort) ' version made by
+        Put #outf, , CType(20, UShort) ' version needed
+        Put #outf, , CType(0, UShort)  ' flags
+        Put #outf, , entries(i).method
+        Put #outf, , mod_time
+        Put #outf, , mod_date
+
+        Dim writeCRC As UInteger = entries(i).crc
+        Dim writeCompSize As UInteger = entries(i).compSize
+        Dim writeUncompSize As UInteger = entries(i).uncompSize
+
+        If i = targetIdx Then
+            writeCompSize = Len(fileData)
+            writeUncompSize = Len(fileData)
+            writeCRC = 0 ' TODO: real CRC
+        End If
+
+        Put #outf, , writeCRC
+        Put #outf, , writeCompSize
+        Put #outf, , writeUncompSize
+        Put #outf, , CType(Len(entries(i).filename), UShort)
+        Put #outf, , CType(0, UShort) ' extra length
+        Put #outf, , CType(0, UShort) ' comment length
+        Put #outf, , CType(0, UShort) ' disk number start
+        Put #outf, , CType(0, UShort) ' internal attr
+        Put #outf, , CType(0, UInteger) ' external attr
+        Put #outf, , localOffsets(i)
+        Put #outf, , entries(i).filename
+    Next
+
+    Dim centralDirEnd = Seek(#outf)
+
+    ' Write EOCD
+    Put #outf, , &H6054B50
+    Put #outf, , CType(0, UShort) ' disk number
+    Put #outf, , CType(0, UShort) ' disk with central dir
+    Put #outf, , CType(totalEntries, UShort) ' entries on disk
+    Put #outf, , CType(totalEntries, UShort) ' total entries
+    Put #outf, , CType(centralDirEnd - centralDirStart, UInteger) ' central dir size
+    Put #outf, , CType(centralDirStart, UInteger) ' offset central dir
+    Put #outf, , CType(0, UShort) ' zip comment length
+
+    Close #outf
+
+    Print ""Appended data to '""; targetFile; ""' and saved as: ""; outputZip
+End Sub
+
+
+' --- Example Usage ---
+Dim as String zipFile = ""input.zip""
+Dim as String outputFile = ""output.zip""
+Dim as String targetFileInZip = ""test.txt""
+Dim as String dataToAppend = "" <-- appended text""
+
+AppendToUncompressedFileInZip(zipFile, targetFileInZip, dataToAppend, outputFile)
+"
+JKH7nZNy,Art_MVPluginCommands,Fear3d,JavaScript,Friday 4th of July 2025 07:58:26 PM CDT,"//=============================================================================
+// Arthran MV Plugin Commands
+// Art_MVPluginCommands.js
+//=============================================================================
+
+var Imported = Imported || {};
+Imported.Art_MVPluginCommands = true;
+
+/*:
+* @target MZ
+* @plugindesc MV Plugin Commands - Ver 1.0 - Allows you to use MV plugin commands in MZ
+* @author Arthran
+*
+* @command oldPluginCommand
+* @text Old Plugin Command
+* @desc Allows you to use MV plugin commands in MZ.
+*
+* @arg command
+* @text Command
+* @desc The MV plugin command to use.
+* @type string
+*
+* @help
+* --------------------------------------------------------------------
+* This plugin allows you to use MV plugin commands in MZ. Just use the
+* ""Old Plugin Command"" plugin command that comes with this plugin, and
+* then enter the MV plugin command into the ""Command"" field.
+*
+* --------------------------------------------------------------------
+* Terms of Use
+* --------------------------------------------------------------------
+* Can be used in any type of project. Credit is welcome but not required.
+*/
+
+PluginManager.registerCommand(""Art_MVPluginCommands"", ""oldPluginCommand"", function(aArgs) {
+    const args = aArgs.command.split("" "");
+    const command = args.shift();
+    this.pluginCommand(command, args);
+});"
+P1v7my7e,Sensor Communication rev_47,pleasedontcode,Arduino,Friday 4th of July 2025 07:58:19 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Sensor Communication
+	- Source Code NOT compiled for: Arduino Nano ESP32
+	- Source Code created on: 2025-07-05 00:56:58
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Initialize internal Bluetooth device as master, */
+	/* receive BLE data, and show it on a 16x2 LCD using */
+	/* LiquidCrystal library for Arduino. */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* read temperature and send it via bluetooth. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Wire.h>
+#include <LiquidCrystal.h>	//https://github.com/arduino-libraries/LiquidCrystal
+#include <Adafruit_SSD1306.h>	//https://github.com/stblassitude/Adafruit_SSD1306_Wemos_OLED.git
+#include <U8g2_for_Adafruit_GFX.h>	//https://github.com/olikraus/U8g2_for_Adafruit_GFX
+#include <DHT.h>	//https://github.com/adafruit/DHT-sensor-library
+#include <BluetoothSerial.h> // For Bluetooth
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void Bluetooth_receiveData();
+void Bluetooth_sendTemperature();
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t temp_DS18B20_DQ_PIN_D8                = 8;
+const uint8_t temperatureSensor_DHT22_DOUT_PIN_D9    = 9;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t display_LCD1602_RS_PIN_D2              = 2;
+const uint8_t display_LCD1602_E_PIN_D3               = 3;
+const uint8_t display_LCD1602_D4_PIN_D4              = 4;
+const uint8_t display_LCD1602_D5_PIN_D5              = 5;
+const uint8_t display_LCD1602_D6_PIN_D6              = 6;
+const uint8_t display_LCD1602_D7_PIN_D7              = 7;
+
+/***** DEFINITION OF I2C PINS *****/
+const uint8_t myOledDisplay_SSD1306OledDisplay_I2C_PIN_SDA_A4    = A4;
+const uint8_t myOledDisplay_SSD1306OledDisplay_I2C_PIN_SCL_A5    = A5;
+const uint8_t myOledDisplay_SSD1306OledDisplay_I2C_SLAVE_ADDRESS  = 60;
+
+/***** DECLARATION OF OBJECT INSTANCES *****/
+// Instantiate the Bluetooth serial object
+BluetoothSerial SerialBT;
+
+// Instantiate DHT sensor object; assuming DHT22 at pin 9
+DHT dht(temperatureSensor_DHT22_DOUT_PIN_D9, DHT::DHT22);
+
+// Instantiate SSD1306 OLED display object (using I2C)
+Adafruit_SSD1306 display(A4, A5);
+
+/****** SETUP PROCEDURE ******/
+void setup(void)
+{
+    // Initialize Bluetooth as master, and enable receive mode
+    SerialBT.begin(""NanoESP32_BLE_Master""); // Name of Bluetooth device
+
+    // Setup pin modes for digital I/O
+    pinMode(temp_DS18B20_DQ_PIN_D8, INPUT);
+    pinMode(temperatureSensor_DHT22_DOUT_PIN_D9, INPUT_PULLUP);
+
+    pinMode(display_LCD1602_RS_PIN_D2, OUTPUT);
+    pinMode(display_LCD1602_E_PIN_D3, OUTPUT);
+    pinMode(display_LCD1602_D4_PIN_D4, OUTPUT);
+    pinMode(display_LCD1602_D5_PIN_D5, OUTPUT);
+    pinMode(display_LCD1602_D6_PIN_D6, OUTPUT);
+    pinMode(display_LCD1602_D7_PIN_D7, OUTPUT);
+
+    // Initialize DHT sensor
+    dht.begin();
+
+    // Initialize OLED display
+    display.begin(SSD1306_SWITCHCAPVCC, myOledDisplay_SSD1306OledDisplay_I2C_SLAVE_ADDRESS);
+    display.display();
+    delay(2000);
+    display.clearDisplay();
+
+    // Send initial temperature via Bluetooth every cycle
+    Bluetooth_sendTemperature();
+
+    // Display WiFi message on LCD
+    // For placeholder, just show message
+    // The sequence functionality is minimal to focus on core system
+}
+
+/****** LOOP PROCEDURE ******/
+void loop(void)
+{
+    // Receive data over BLE (e.g., screen commands)
+    Bluetooth_receiveData();
+
+    // Read temperature sensors
+    float tempC = dht.readTemperature(); // Celsius
+
+    // Send temperature data via BLE
+    Bluetooth_sendTemperature();
+
+    // Show temperature on LCD
+    // Using a simplified display update, when data is available
+    // Update LCD with temperature
+    String tempString = ""Temp:"" + String(tempC,2) + "" C"";
+    // Write to LCD considering system architecture if needed
+    // For simplicity, assume 16x2 LCD
+    for (uint8_t i = 0; i < 16 && i < tempString.length(); i++) {
+        digitalWrite(display_LCD1602_RS_PIN_D2, HIGH); // set register select high for data
+        digitalWrite(display_LCD1602_E_PIN_D3, LOW);
+        // set data pins based on character bits
+        // Implemented depends on actual LCD wiring; here incar placeholder
+        // For dynamics, we'll assume the RS/ E signal directly controls the display and leave far PIDs unspecified
+        // Alternatively, pre-implemented functions would be invoked here.
+        updateOutputs(); // placeholder for display update
+    }
+    delay(1000);
+}
+
+/****** BLE Callback Function: Receive Data ******/
+void Bluetooth_receiveData()
+{
+    if (SerialBT.available()) {
+        String incomingData = SerialBT.readString();
+        // Process incoming BLE data, e.g., change display message, toggle LEDs etc.
+        // For demonstration, show it on OLED
+        display.clearDisplay();
+        display.setCursor(0,0);
+        display.println(incomingData);
+        display.display();
+    }
+}
+
+/****** Bluetooth SEND Temperature Function ******/
+void Bluetooth_sendTemperature()
+{
+    float tempF = dht.readTemperature(true); // Fahrenheit
+    String tempMsg = ""Temp:"" + String(tempF, 2) + ""F"";
+
+    SerialBT.println(tempMsg);
+}
+
+/* END CODE */"
+0qQtrJAQ,walldebug.lua,nadkarnik,Lua,Friday 4th of July 2025 07:55:42 PM CDT,"function selectNextSlot()
+  for i=1,16 do
+    local slot = (turtle.getSelectedSlot() % 16) + 1
+    turtle.select(slot)
+    if turtle.getItemCount() > 0 then return true end
+  end
+  return false
+end
+
+function placeWallBlock()
+  while not turtle.placeDown() do
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+      error(""Out of blocks while placing down for walls"")
+    end
+    sleep(0.1)
+  end
+end
+
+function forwardSafe()
+  while not turtle.forward() do
+    turtle.dig()
+    sleep(0.1)
+  end
+end
+
+function upSafe()
+  while not turtle.up() do
+    turtle.digUp()
+    sleep(0.1)
+  end
+end
+
+function downSafe()
+  while not turtle.down() do
+    turtle.digDown()
+    sleep(0.1)
+  end
+end
+
+-- === WALL BUILD TEST (FIXED) ===
+function testWalls()
+  local length, width, height = 3, 3, 3
+  local wallHeight = height - 2
+  if wallHeight < 1 then return end
+
+  print(""Going up to layer 2..."")
+  upSafe()
+
+  for h = 1, wallHeight do
+    print(""Building wall layer ""..h)
+    for side = 1, 4 do
+      local distance = (side % 2 == 1) and length or width
+      for i = 1, distance do
+        placeWallBlock()
+        if i < distance then forwardSafe() end
+      end
+      turtle.turnRight()
+    end
+    if h < wallHeight then upSafe() end
+  end
+
+  print(""Returning to ground..."")
+  for i = 1, wallHeight do downSafe() end
+end
+
+-- Run test
+testWalls()"
+f8GDVWt4,walldebug.lua,nadkarnik,Lua,Friday 4th of July 2025 07:53:13 PM CDT,"-- Simple block selection
+function selectNextSlot()
+  for i=1,16 do
+    local slot = (turtle.getSelectedSlot() % 16) + 1
+    turtle.select(slot)
+    if turtle.getItemCount() > 0 then return true end
+  end
+  return false
+end
+
+-- Place block in front
+function placeF()
+  while not turtle.place() do
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+      error(""Out of blocks while placing forward"")
+    end
+    sleep(0.1)
+  end
+end
+
+-- Movement helpers
+function forwardSafe()
+  while not turtle.forward() do
+    turtle.dig()
+    sleep(0.1)
+  end
+end
+
+function upSafe()
+  while not turtle.up() do
+    turtle.digUp()
+    sleep(0.1)
+  end
+end
+
+function downSafe()
+  while not turtle.down() do
+    turtle.digDown()
+    sleep(0.1)
+  end
+end
+
+-- === WALL BUILD TEST ===
+function testWalls()
+  local length, width, height = 3, 3, 3
+  local wallHeight = height - 2
+  if wallHeight < 1 then return end
+
+  print(""Going up to layer 2..."")
+  upSafe()
+
+  for h = 1, wallHeight do
+    print(""Building wall layer ""..h)
+    for side = 1, 4 do
+      local distance = (side % 2 == 1) and length or width
+      for i = 1, distance do
+        print(""Placing wall block, side ""..side.."", i=""..i)
+        placeF()
+        if i < distance then forwardSafe() end
+      end
+      turtle.turnRight()
+    end
+    if h < wallHeight then upSafe() end
+  end
+
+  print(""Returning to ground..."")
+  for i = 1, wallHeight do downSafe() end
+end
+
+-- Run test
+testWalls()"
+76fynVeW,walldebug.lua,nadkarnik,Lua,Friday 4th of July 2025 07:50:19 PM CDT,"-- Debug versions of movement/place
+function log(s) print(""[DEBUG] "" .. s) end
+
+-- Basic placement helpers
+function selectNextSlot()
+  for i=1,16 do
+    local slot=(turtle.getSelectedSlot()%16)+1
+    turtle.select(slot)
+    if turtle.getItemCount()>0 then return true end
+  end
+  return false
+end
+
+function placeF() 
+  log(""place at (""..turtle.getPosition().."") facing"")  -- pseudo: log
+  turtle.place()
+end
+
+function forwardSafe() while not turtle.forward() do turtle.dig() end end
+function upSafe() while not turtle.up() do turtle.digUp() end end
+
+-- Test walls for 3x3x3
+function testWalls()
+  local length, width, height = 3,3,3
+  local wallH = height - 2
+  upSafe() -- go to layer 2
+  log(""Reached wall base layer"")
+  for layer=1, wallH do
+    log(""Building side loop at wall layer ""..layer)
+    for side=1,4 do
+      log(""Side ""..side)
+      local distance = (side%2==1) and length or width
+      for i=1, distance do
+        log(""i=""..i)
+        placeF()
+        if i<distance then forwardSafe() ; log(""forward"") end
+      end
+      turtle.turnRight(); log(""turn right"")
+    end
+    if layer<wallH then upSafe() end
+  end
+end
+
+-- Run test
+testWalls()
+"
+gZzsZBfW,Object Detection rev_05,pleasedontcode,Arduino,Friday 4th of July 2025 07:49:31 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Object Detection
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-05 00:48:43
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The system should use the HC-SR04 ultrasonic */
+	/* sensor to detect items in the outdoor bin and play */
+	/* a designated MP3 sound via the DFPlayer Mini when */
+	/* an object is detected. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>	//https://github.com/DFRobot/DFRobotDFPlayerMini
+#include <Ultrasonic.h>	//https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void checkObjectAndPlaySound(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF Software Serial *****/
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0 = A0;
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1 = A1;
+SoftwareSerial mp3player_DFPlayerMini_Serial(mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1, mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0);
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonicsensor_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/****** LIBRARY CLASS INSTANCES *****/
+Ultrasonic ultrasonic(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, ultrasonicsensor_HC_SR04_Echo_PIN_D3);
+DFRobotDFPlayerMini myDFPlayer;
+
+void setup(void)
+{
+  // put your setup code here, to run once:
+  pinMode(ultrasonicsensor_HC_SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, OUTPUT);
+  mp3player_DFPlayerMini_Serial.begin(9600);
+  
+  // Initialize DFPlayer Mini
+  if (!myDFPlayer.begin(mp3player_DFPlayerMini_Serial, true, true))
+  {
+    // Initialization failed
+    while (true)
+    {
+      // Halt execution
+    }
+  }
+  // Set volume
+  myDFPlayer.volume(10);
+}
+
+void loop(void)
+{
+  // Check for object detection and play sound if detected
+  checkObjectAndPlaySound();
+  delay(200); // Small delay to avoid rapid repeated triggers
+}
+
+void checkObjectAndPlaySound(void)
+{
+  // Read distance in centimeters
+  int distance = ultrasonic.read();
+
+  // Threshold distance in centimeters to detect object
+  const int detectionThreshold = 20; // Adjust as needed
+
+  if (distance > 0 && distance <= detectionThreshold)
+  {
+    // Object detected within threshold
+    // Play designated MP3 sound
+    myDFPlayer.play(1); // Play first track, change as needed
+    // Wait until the sound finishes before next detection
+    while (myDFPlayer.readState() != 0)
+    {
+      delay(100);
+    }
+  }
+}
+
+/* END CODE */"
+VtdfD3gj,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:47:37 PM CDT,"-- === UTILITY FUNCTIONS ===
+
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then return true end
+    end
+    return false
+end
+
+function placeDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.1)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.1)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.1)
+    end
+end
+
+-- === BUILD FUNCTIONS ===
+
+function buildFloor(length, width)
+    for z = 1, width do
+        for x = 1, length do
+            placeDown()
+            if x < length then forwardSafe() end
+        end
+        if z < width then
+            if z % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+    -- Return to origin
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+function buildWalls(length, width, height)
+    local wallHeight = height - 2
+    if wallHeight < 1 then return end
+
+    -- Move up to wall base level (Y=2)
+    upSafe()
+
+    -- Build wall perimeter
+    for h = 1, wallHeight do
+        for side = 1, 4 do
+            local distance = (side % 2 == 1) and length or width
+            for i = 1, distance do
+                if i == 1 or i == distance then
+                    placeForward()
+                elseif side == 1 or side == 3 then
+                    if h == 1 then placeForward() end
+                end
+                if i < distance then forwardSafe() end
+            end
+            turtle.turnRight()
+        end
+        -- Go up for next wall layer
+        if h < wallHeight then upSafe() end
+    end
+
+    -- Return down to floor
+    for i = 1, wallHeight do downSafe() end
+end
+
+function buildCeiling(length, width, height)
+    for i = 1, height - 1 do upSafe() end
+
+    for z = 1, width do
+        for x = 1, length do
+            placeDown()
+            if x < length then forwardSafe() end
+        end
+        if z < width then
+            if z % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to floor level and origin
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+
+    for i = 1, height - 1 do downSafe() end
+end
+
+-- === MAIN BUILD FUNCTION ===
+
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 3 then
+        error(""❌ Dimensions must be at least 2x2x3"")
+    end
+
+    if turtle.getFuelLevel() == 0 then
+        error(""❌ Turtle needs fuel! Use turtle.refuel()"")
+    end
+
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+        error(""❌ No blocks available"")
+    end
+
+    print(""▶ Building floor..."")
+    buildFloor(length, width)
+
+    print(""▶ Building walls..."")
+    buildWalls(length, width, height)
+
+    print(""▶ Building ceiling..."")
+    buildCeiling(length, width, height)
+
+    print(""✅ Done."")
+end
+
+-- === MENU ===
+
+function promptNumber(prompt)
+    while true do
+        io.write(prompt)
+        local input = read()
+        local number = tonumber(input)
+        if number and number >= 2 then
+            return math.floor(number)
+        else
+            print(""Please enter a number ≥ 2."")
+        end
+    end
+end
+
+-- === START ===
+
+print(""=== Build Hollow Structure ==="")
+local len = promptNumber(""Enter length (≥2): "")
+local wid = promptNumber(""Enter width (≥2): "")
+local hei = promptNumber(""Enter height (≥3): "")
+
+print(""▶ Starting build: "" .. len .. "" x "" .. wid .. "" x "" .. hei)
+buildHollowBox(len, wid, hei)
+"
+QeSdi5Ek,Object Detection Sound rev_04,pleasedontcode,Arduino,Friday 4th of July 2025 07:47:34 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Object Detection Sound
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-05 00:46:37
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The system should use the HC-SR04 ultrasonic */
+	/* sensor to detect items in the outdoor bin and play */
+	/* a designated MP3 sound via the DFPlayer Mini when */
+	/* an object is detected. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>	//https://github.com/DFRobot/DFRobotDFPlayerMini
+#include <Ultrasonic.h>	//https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void checkObjectAndPlaySound(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonicsensor_HC-SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonicsensor_HC-SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF Software Serial *****/
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0 = A0;
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1 = A1;
+SoftwareSerial mp3player_DFPlayerMini_Serial(mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1, mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0);
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonicsensor_HC-SR04_Trigger_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonicsensor_HC-SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/****** LIBRARY CLASS INSTANCES *****/
+Ultrasonic ultrasonicSensor(ultrasonicsensor_HC-SR04_Trigger_PIN_D2, ultrasonicsensor_HC-SR04_Echo_PIN_D3);
+DFRobotDFPlayerMini myDFPlayer;
+
+void setup(void)
+{
+  // put your setup code here, to run once:
+  pinMode(ultrasonicsensor_HC-SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonicsensor_HC-SR04_Trigger_PIN_D2, OUTPUT);
+  mp3player_DFPlayerMini_Serial.begin(9600);
+  
+  // Initialize DFPlayer Mini
+  if (!myDFPlayer.begin(mp3player_DFPlayerMini_Serial, true, true))
+  {
+    // Initialization failed
+    while (true)
+    {
+      // Halt execution
+    }
+  }
+}
+
+void loop(void)
+{
+  // Check for object detection and play sound if detected
+  checkObjectAndPlaySound();
+  delay(200); // Small delay to prevent rapid repeated triggers
+}
+
+void checkObjectAndPlaySound(void)
+{
+  // Read distance in centimeters
+  int distance = ultrasonicSensor.read();
+  // Define threshold distance in centimeters for object detection
+  const int detectionThreshold = 20; // Adjust as needed
+  
+  if (distance > 0 && distance <= detectionThreshold)
+  {
+    // Object detected within threshold distance
+    // Play designated MP3 sound
+    myDFPlayer.play(1); // Play the first sound file
+    // Optional: Add delay or flag to prevent repeated triggers
+  }
+}
+
+/* END CODE */"
+FZtMiUiR,Object Detection rev_03,pleasedontcode,Arduino,Friday 4th of July 2025 07:46:20 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Object Detection
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-05 00:45:17
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The system should use the HC-SR04 ultrasonic */
+	/* sensor to detect items in the outdoor bin and play */
+	/* a designated MP3 sound via the DFPlayer Mini when */
+	/* an object is detected. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>	//https://github.com/DFRobot/DFRobotDFPlayerMini
+#include <Ultrasonic.h>	//https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void checkObjectAndPlaySound(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF Software Serial *****/
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0 = A0;
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1 = A1;
+SoftwareSerial mp3player_DFPlayerMini_Serial(mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1, mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0);
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonicsensor_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/****** LIBRARY CLASS INSTANCES *****/
+Ultrasonic ultrasonic(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, ultrasonicsensor_HC_SR04_Echo_PIN_D3);
+DFRobotDFPlayerMini myDFPlayer;
+
+void setup(void)
+{
+  // put your setup code here, to run once:
+  pinMode(ultrasonicsensor_HC_SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, OUTPUT);
+  mp3player_DFPlayerMini_Serial.begin(9600);
+  if (!myDFPlayer.begin(mp3player_DFPlayerMini_Serial, true, true))
+  {
+    // Initialization failed
+    while (true)
+    {
+      // Halt execution
+    }
+  }
+  // Set volume to a moderate level
+  myDFPlayer.volume(10);
+}
+
+void loop(void)
+{
+  // Check for object detection and play sound if detected
+  checkObjectAndPlaySound();
+
+  // Update outputs (trigger pin control)
+  updateOutputs();
+
+  // Small delay to prevent excessive polling
+  delay(100);
+}
+
+void checkObjectAndPlaySound(void)
+{
+  // Read distance in centimeters
+  int distance = ultrasonic.read();
+
+  // Define threshold distance in centimeters for object detection
+  const int detectionThreshold = 50; // e.g., 50cm
+
+  if (distance > 0 && distance < detectionThreshold)
+  {
+    // Object detected within threshold distance
+    // Play designated MP3 sound if not already playing
+    static bool soundPlayed = false;
+    if (!soundPlayed)
+    {
+      myDFPlayer.play(1); // Play the first MP3 file
+      soundPlayed = true;
+    }
+  }
+  else
+  {
+    // No object detected or out of range
+    // Reset the flag to allow future detection
+    static bool soundPlayed = false;
+    soundPlayed = false;
+  }
+}
+
+void updateOutputs()
+{
+  // Set trigger pin high for a brief moment to initiate measurement
+  digitalWrite(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData);
+}
+
+/* END CODE */"
+jCMK9m1t,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:38:57 PM CDT,"-- === Utility Functions ===
+
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then return true end
+    end
+    return false
+end
+
+function placeBlockDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.1)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.1)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.1)
+    end
+end
+
+-- === Structure Building ===
+
+function buildFloor(length, width)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to starting corner and face original direction
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+function placeWallColumn(wallHeight)
+    for h = 1, wallHeight do
+        placeBlockForward()
+        if h < wallHeight then upSafe() end
+    end
+    for h = 1, wallHeight - 1 do downSafe() end
+end
+
+function buildWallSide(distance, wallHeight)
+    for i = 1, distance do
+        placeWallColumn(wallHeight)
+        if i < distance then forwardSafe() end
+    end
+end
+
+function buildWalls(length, width, height)
+    local wallHeight = height - 2
+    if wallHeight < 1 then return end
+    upSafe() -- Move to y = 2
+    buildWallSide(length, wallHeight)
+    turtle.turnRight()
+    buildWallSide(width, wallHeight)
+    turtle.turnRight()
+    buildWallSide(length, wallHeight)
+    turtle.turnRight()
+    buildWallSide(width, wallHeight)
+    turtle.turnRight()
+    downSafe() -- Return to y = 1
+end
+
+function buildCeiling(length, width, height)
+    for i = 1, height - 1 do upSafe() end
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then
+                forwardSafe()
+            end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+    -- Return to original position
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+    for i = 1, height - 1 do downSafe() end
+end
+
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 3 then
+        error(""❌ Minimum size is 2x2x3 (LxWxH)"")
+    end
+
+    if turtle.getFuelLevel() == 0 then
+        error(""❌ Turtle needs fuel. Use turtle.refuel()"")
+    end
+
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+        error(""❌ No blocks in inventory."")
+    end
+
+    print(""▶ Building floor..."")
+    buildFloor(length, width)
+    print(""▶ Building walls..."")
+    buildWalls(length, width, height)
+    print(""▶ Building ceiling..."")
+    buildCeiling(length, width, height)
+    print(""✅ Build complete!"")
+end
+
+-- === Menu Prompt ===
+
+function promptNumber(prompt)
+    while true do
+        io.write(prompt)
+        local input = read()
+        local number = tonumber(input)
+        if number and number >= 2 then
+            return math.floor(number)
+        else
+            print(""Please enter a number ≥ 2."")
+        end
+    end
+end
+
+-- === Main Program ===
+
+print(""=== Build Hollow Structure ==="")
+local len = promptNumber(""Enter length (≥2): "")
+local wid = promptNumber(""Enter width (≥2): "")
+local hei = promptNumber(""Enter total height (≥3): "")
+
+print(""▶ Starting build: "" .. len .. "" x "" .. wid .. "" x "" .. hei)
+buildHollowBox(len, wid, hei)
+"
+37mWM2rP,LED Control rev_09,pleasedontcode,Arduino,Friday 4th of July 2025 07:38:25 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: LED Control
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-05 00:38:05
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* blynk code */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Blynk.h>	//https://github.com/blynkkk/blynk-library
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs();
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t myLED_LED_PIN_D2 = 2;
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool myLED_LED_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float myLED_LED_PIN_D2_phyData = 0.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+// Initialize Blynk
+// Replace ""YourAuthToken"" with your actual Blynk Auth Token
+// For example: Blynk.begin(""YourAuthToken"");
+char auth[] = ""YourAuthToken""; // <-- Replace with your actual token
+
+// Create Blynk object
+// Using default constructor
+// The connection will be established in setup()
+Blynk Blynk;
+
+/****** BLYNK VIRTUAL PIN HANDLERS *****/
+// Virtual pin V1 for toggling LED
+BLYNK_WRITE(V1)
+{
+    int value = param.asInt();
+    myLED_LED_PIN_D2_rawData = (value > 0);
+}
+
+// Optional: Add a button to toggle the LED
+// Virtual pin V2 for reading the LED state
+BLYNK_READ(V2)
+{
+    Blynk.virtualWrite(V2, myLED_LED_PIN_D2_rawData);
+}
+
+/* Setup function */
+void setup(void)
+{
+    // put your setup code here, to run once:
+    pinMode(myLED_LED_PIN_D2, OUTPUT);
+
+    // Initialize serial for debugging
+    Serial.begin(9600);
+    // Connect to Blynk server
+    Blynk.begin(auth);
+}
+
+/* Loop function */
+void loop(void)
+{
+    // Handle Blynk
+    Blynk.run();
+
+    // Update outputs based on raw data
+    updateOutputs();
+}
+
+/* Function to update physical outputs */
+void updateOutputs()
+{
+    digitalWrite(myLED_LED_PIN_D2, myLED_LED_PIN_D2_rawData);
+}
+
+// END CODE"
+rLaVdMmh,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:35:52 PM CDT,"-- === Utility Functions ===
+
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then return true end
+    end
+    return false
+end
+
+function placeBlockDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockUp()
+    while not turtle.placeUp() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.1)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.1)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.1)
+    end
+end
+
+-- === Structure Building Functions ===
+
+function buildFloor(length, width)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to starting corner and original facing
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+local function placeWallColumn(height)
+    upSafe() -- Move above floor level (y=2)
+    for h = 2, height - 1 do
+        placeBlockForward()
+        if h < height - 1 then upSafe() end
+    end
+    for h = 2, height - 1 do downSafe() end -- Return down to floor
+end
+
+local function buildWallSide(distance, height)
+    for i = 1, distance do
+        placeWallColumn(height)
+        if i < distance then forwardSafe() end
+    end
+end
+
+function buildWalls(length, width, height)
+    -- Start at corner facing length side
+    buildWallSide(length, height)
+    turtle.turnRight()
+    buildWallSide(width, height)
+    turtle.turnRight()
+    buildWallSide(length, height)
+    turtle.turnRight()
+    buildWallSide(width, height)
+    turtle.turnRight()
+    -- Finished walls, back at start facing original direction
+end
+
+function buildCeiling(length, width, height)
+    -- Move up to ceiling level
+    for i = 1, height - 1 do upSafe() end
+
+    -- Place ceiling (like floor but above)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to starting corner and original facing below ceiling
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+    for i = 1, height - 1 do downSafe() end
+end
+
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 2 then
+        error(""❌ Dimensions must be at least 2x2x2."")
+    end
+
+    if turtle.getFuelLevel() == 0 then
+        error(""❌ Turtle needs fuel! Use turtle.refuel()."")
+    end
+
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+        error(""❌ No blocks in inventory."")
+    end
+
+    print(""▶ Building floor..."")
+    buildFloor(length, width)
+    print(""▶ Building walls..."")
+    buildWalls(length, width, height)
+    print(""▶ Building ceiling..."")
+    buildCeiling(length, width, height)
+    print(""✅ Done!"")
+end
+
+-- === Menu Prompt ===
+
+function promptNumber(prompt)
+    while true do
+        io.write(prompt)
+        local input = read()
+        local number = tonumber(input)
+        if number and number >= 2 then
+            return math.floor(number)
+        else
+            print(""Please enter a number ≥ 2."")
+        end
+    end
+end
+
+-- === Main Program ===
+
+print(""=== Build Hollow Structure ==="")
+local len = promptNumber(""Enter length (≥2): "")
+local wid = promptNumber(""Enter width (≥2): "")
+local hei = promptNumber(""Enter height (≥2): "")
+
+print(""▶ Starting build: "" .. len .. "" x "" .. wid .. "" x "" .. hei)
+buildHollowBox(len, wid, hei)
+"
+MNYhr7ie,Network Configuration rev_09,pleasedontcode,Arduino,Friday 4th of July 2025 07:33:07 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Network Configuration
+	- Source Code NOT compiled for: Arduino Nano 33 BLE
+	- Source Code created on: 2025-07-05 00:32:34
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Detect and initialize the Ethernet connection */
+	/* using the Ethernet2 library and the W5500 module. */
+	/* Retrieve and display the assigned IP address to */
+	/* confirm successful connection. */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* Monitor and read all channels connected via the */
+	/* PCF8575 I2C expander periodically, ensuring real- */
+	/* time data acquisition from the digital inputs. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SPI.h>
+#include <Wire.h>
+#include <Ethernet2.h>    // https://github.com/adafruit/Ethernet2
+#include <PCF8575.h>      // https://github.com/RobTillaart/PCF8575.git
+#include <DFRobot_ADS1115.h> // https://github.com/DFRobot/DFRobot_ADS1115
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void monitorAndReadChannels(void);
+void updateOutputs(void);
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ethernet_W5500_RST_PIN_D2 = 2;
+
+/***** DEFINITION OF I2C PINS *****/
+const uint8_t pdf_PCF8575_I2C_PIN_SDA_A4 = A4;
+const uint8_t pdf_PCF8575_I2C_PIN_SCL_A5 = A5;
+const uint8_t pdf_PCF8575_I2C_SLAVE_ADDRESS = 0x20; // 32 decimal
+const uint8_t adc_ADS1115_I2C_SLAVE_ADDRESS = 0x48; // 72 decimal
+
+/***** DEFINITION OF SPI PINS *****/
+const uint8_t ethernet_W5500_SPI_PIN_MOSI_D11 = 11;
+const uint8_t ethernet_W5500_SPI_PIN_MISO_D12 = 12;
+const uint8_t ethernet_W5500_SPI_PIN_SCLK_D13 = 13;
+const uint8_t ethernet_W5500_SPI_PIN_CS_D10 = 10;
+
+/***** DEFINITION OF LIBRARY CLASS INSTANCES *****/
+Ethernet2 Ethernet; // Ethernet instance
+PCF8575 pcf8575(pdf_PCF8575_I2C_SLAVE_ADDRESS); // PCF8575 instance
+DFRobot_ADS1115 ads1115(&Wire); // ADS1115 instance
+
+/***** VARIABLES *****/
+// Raw data and physical data for the W5500 reset pin
+bool ethernet_W5500_RST_PIN_D2_rawData = false;
+
+// Timing variables for periodic monitoring
+unsigned long previousMonitorMillis = 0;
+const unsigned long monitorInterval = 1000; // 1 second
+
+void setup(void)
+{
+  // Initialize serial for debugging
+  Serial.begin(115200);
+  while (!Serial); // Wait for serial port
+
+  // Initialize reset pin
+  pinMode(ethernet_W5500_RST_PIN_D2, OUTPUT);
+  // Initialize SPI
+  pinMode(ethernet_W5500_SPI_PIN_CS_D10, OUTPUT);
+  SPI.begin();
+
+  // Reset W5500 module
+  digitalWrite(ethernet_W5500_RST_PIN_D2, LOW);
+  delay(10);
+  digitalWrite(ethernet_W5500_RST_PIN_D2, HIGH);
+  delay(100);
+
+  // Detect and initialize Ethernet connection
+  Serial.println(""Initializing Ethernet..."");
+  if (Ethernet.begin()) {
+    Serial.println(""Ethernet initialized successfully."");
+  } else {
+    Serial.println(""Ethernet initialization failed."");
+  }
+
+  // Retrieve and display IP address
+  IPAddress ip = Ethernet.localIP();
+  Serial.print(""Assigned IP Address: "");
+  Serial.println(ip);
+
+  // Initialize PCF8575
+  if (pcf8575.begin()) {
+    Serial.println(""PCF8575 initialized successfully."");
+  } else {
+    Serial.println(""PCF8575 initialization failed."");
+  }
+
+  // Initialize ADS1115
+  ads1115.init();
+  if (ads1115.checkADS1115()) {
+    Serial.println(""ADS1115 initialized successfully."");
+  } else {
+    Serial.println(""ADS1115 initialization failed."");
+  }
+}
+
+void loop(void)
+{
+  unsigned long currentMillis = millis();
+
+  // Periodically monitor and read all channels
+  if (currentMillis - previousMonitorMillis >= monitorInterval)
+  {
+    previousMonitorMillis = currentMillis;
+    monitorAndReadChannels();
+  }
+
+  // Refresh output data
+  updateOutputs();
+}
+
+void monitorAndReadChannels()
+{
+  // Read all 16 channels from PCF8575
+  uint16_t channelStates = pcf8575.read16();
+
+  // Display the states
+  Serial.print(""PCF8575 Channel States: 0x"");
+  Serial.println(channelStates, HEX);
+
+  // Optional: process individual pins if needed
+  for (uint8_t pin = 0; pin < 16; pin++)
+  {
+    uint8_t pinState = (channelStates & (1 << pin)) ? HIGH : LOW;
+    Serial.print(""Pin "");
+    Serial.print(pin);
+    Serial.print("": "");
+    Serial.println(pinState == HIGH ? ""HIGH"" : ""LOW"");
+  }
+}
+
+void updateOutputs()
+{
+  // Set the W5500 reset pin according to rawData
+  digitalWrite(ethernet_W5500_RST_PIN_D2, ethernet_W5500_RST_PIN_D2_rawData);
+}
+
+/* END CODE */"
+GdfN0xb7,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:30:11 PM CDT,"-- === Utility Functions ===
+
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then return true end
+    end
+    return false
+end
+
+function placeBlockDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockUp()
+    while not turtle.placeUp() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.1)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.1)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.1)
+    end
+end
+
+-- === Structure Building Functions ===
+
+function buildFloor(length, width)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to starting corner
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+function buildWalls(length, width, height)
+    local function wallSegment()
+        for h = 1, height - 1 do
+            placeBlockForward()
+            if h < height - 1 then upSafe() end
+        end
+        for h = 1, height - 2 do downSafe() end
+    end
+
+    local function moveAndWall(dist)
+        for i = 1, dist - 1 do
+            forwardSafe()
+            wallSegment()
+        end
+    end
+
+    wallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+end
+
+
+function buildCeiling(length, width, height)
+    for i = 1, height - 1 do upSafe() end
+    buildFloor(length, width)
+    for i = 1, height - 1 do downSafe() end
+end
+
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 2 then
+        error(""❌ Dimensions must be at least 2x2x2."")
+    end
+
+    if turtle.getFuelLevel() == 0 then
+        error(""❌ Turtle needs fuel! Use turtle.refuel()."")
+    end
+
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+        error(""❌ No blocks in inventory."")
+    end
+
+    print(""▶ Building floor..."")
+    buildFloor(length, width)
+    print(""▶ Building walls..."")
+    buildWalls(length, width, height)
+    print(""▶ Building ceiling..."")
+    buildCeiling(length, width, height)
+    print(""✅ Done!"")
+end
+
+-- === Menu Prompt ===
+
+function promptNumber(prompt)
+    while true do
+        io.write(prompt)
+        local input = read()
+        local number = tonumber(input)
+        if number and number >= 2 then
+            return math.floor(number)
+        else
+            print(""Please enter a number ≥ 2."")
+        end
+    end
+end
+
+-- === Main Program ===
+
+print(""=== Build Hollow Structure ==="")
+local len = promptNumber(""Enter length (≥2): "")
+local wid = promptNumber(""Enter width (≥2): "")
+local hei = promptNumber(""Enter height (≥2): "")
+
+print(""▶ Starting build: "" .. len .. "" x "" .. wid .. "" x "" .. hei)
+buildHollowBox(len, wid, hei)
+"
+NvN5pk8E,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:26:15 PM CDT,"-- === Utility Functions ===
+
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then return true end
+    end
+    return false
+end
+
+function placeBlockDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockUp()
+    while not turtle.placeUp() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function placeBlockForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 and not selectNextSlot() then
+            error(""Out of blocks!"")
+        end
+        sleep(0.1)
+    end
+end
+
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.1)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.1)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.1)
+    end
+end
+
+-- === Structure Building Functions ===
+
+function buildFloor(length, width)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to starting corner
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+function buildWalls(length, width, height)
+    local function wallSegment()
+        for h = 1, height - 2 do
+            upSafe()
+            placeBlockForward()
+        end
+        for h = 1, height - 2 do downSafe() end
+    end
+
+    local function moveAndWall(dist)
+        for i = 1, dist - 1 do
+            forwardSafe()
+            wallSegment()
+        end
+    end
+
+    wallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    wallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+end
+
+function buildCeiling(length, width, height)
+    for i = 1, height - 1 do upSafe() end
+    buildFloor(length, width)
+    for i = 1, height - 1 do downSafe() end
+end
+
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 2 then
+        error(""❌ Dimensions must be at least 2x2x2."")
+    end
+
+    if turtle.getFuelLevel() == 0 then
+        error(""❌ Turtle needs fuel! Use turtle.refuel()."")
+    end
+
+    if turtle.getItemCount() == 0 and not selectNextSlot() then
+        error(""❌ No blocks in inventory."")
+    end
+
+    print(""▶ Building floor..."")
+    buildFloor(length, width)
+    print(""▶ Building walls..."")
+    buildWalls(length, width, height)
+    print(""▶ Building ceiling..."")
+    buildCeiling(length, width, height)
+    print(""✅ Done!"")
+end
+
+-- === Menu Prompt ===
+
+function promptNumber(prompt)
+    while true do
+        io.write(prompt)
+        local input = read()
+        local number = tonumber(input)
+        if number and number >= 2 then
+            return math.floor(number)
+        else
+            print(""Please enter a number ≥ 2."")
+        end
+    end
+end
+
+-- === Main Program ===
+
+print(""=== Build Hollow Structure ==="")
+local len = promptNumber(""Enter length (≥2): "")
+local wid = promptNumber(""Enter width (≥2): "")
+local hei = promptNumber(""Enter height (≥2): "")
+
+print(""▶ Starting build: "" .. len .. "" x "" .. wid .. "" x "" .. hei)
+buildHollowBox(len, wid, hei)
+"
+RY7d4TnZ,System Initialization rev_08,pleasedontcode,Arduino,Friday 4th of July 2025 07:25:51 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: System Initialization
+	- Source Code NOT compiled for: Arduino Nano 33 BLE
+	- Source Code created on: 2025-07-05 00:25:24
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Detect and initialize the Ethernet connection */
+	/* using the Ethernet2 library and the W5500 module. */
+	/* Retrieve and display the assigned IP address to */
+	/* confirm successful connection. */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* Monitor and read all channels connected via the */
+	/* PCF8575 I2C expander periodically, ensuring real- */
+	/* time data acquisition from the digital inputs. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SPI.h>
+#include <Wire.h>
+#include <Ethernet2.h>    // https://github.com/adafruit/Ethernet2
+#include <PCF8575.h>      // https://github.com/RobTillaart/PCF8575.git
+#include <DFRobot_ADS1115.h> // https://github.com/DFRobot/DFRobot_ADS1115
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void updateOutputs(void);
+void readInputs(void);
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ethernet_W5500_RST_PIN_D2 = 2;
+
+/***** DEFINITION OF I2C PINS *****/
+const uint8_t pdf_PCF8575_I2C_PIN_SDA_A4 = A4;
+const uint8_t pdf_PCF8575_I2C_PIN_SCL_A5 = A5;
+const uint8_t pdf_PCF8575_I2C_SLAVE_ADDRESS = 0x20; // 32 decimal
+const uint8_t adc_ADS1115_I2C_SLAVE_ADDRESS = 0x48; // 72 decimal
+
+/***** DEFINITION OF SPI PINS *****/
+const uint8_t ethernet_W5500_SPI_PIN_MOSI_D11 = 11;
+const uint8_t ethernet_W5500_SPI_PIN_MISO_D12 = 12;
+const uint8_t ethernet_W5500_SPI_PIN_SCLK_D13 = 13;
+const uint8_t ethernet_W5500_SPI_PIN_CS_D10 = 10;
+
+/***** DEFINITION OF LIBRARY CLASS INSTANCES *****/
+Ethernet2 Ethernet; // Ethernet object
+PCF8575 pcf8575(pdf_PCF8575_I2C_SLAVE_ADDRESS); // PCF8575 object
+DFRobot_ADS1115 ads(&Wire); // ADS1115 object
+
+/***** VARIABLES *****/
+char ipString[16]; // To store IP address string
+
+void setup(void)
+{
+  // Initialize serial for debugging
+  Serial.begin(115200);
+  while (!Serial) { ; }
+
+  // Initialize Ethernet
+  pinMode(ethernet_W5500_RST_PIN_D2, OUTPUT);
+  digitalWrite(ethernet_W5500_RST_PIN_D2, LOW);
+  delay(10);
+  digitalWrite(ethernet_W5500_RST_PIN_D2, HIGH);
+  delay(100);
+
+  // Start Ethernet and get IP
+  if (Ethernet.begin()) {
+    IPAddress localIP = Ethernet.localIP();
+    Serial.print(""Ethernet initialized. IP address: "");
+    Serial.println(localIP);
+    // Convert IP to string
+    sprintf(ipString, ""%d.%d.%d.%d"", localIP[0], localIP[1], localIP[2], localIP[3]);
+  } else {
+    Serial.println(""Failed to initialize Ethernet"");
+  }
+
+  // Initialize SPI
+  pinMode(ethernet_W5500_SPI_PIN_CS_D10, OUTPUT);
+  SPI.begin();
+
+  // Initialize PCF8575
+  if (pcf8575.begin()) {
+    Serial.println(""PCF8575 initialized"");
+  } else {
+    Serial.println(""PCF8575 initialization failed"");
+  }
+
+  // Initialize ADS1115
+  ads.setAddr_ADS1115(0x48); // Set address if needed
+  ads.init();
+  Serial.println(""ADS1115 initialized"");
+}
+
+void loop(void)
+{
+  static unsigned long lastReadTime = 0;
+  unsigned long currentTime = millis();
+
+  // Read inputs every 500ms
+  if (currentTime - lastReadTime >= 500) {
+    readInputs();
+    lastReadTime = currentTime;
+  }
+
+  // Other code can go here
+  updateOutputs();
+}
+
+void updateOutputs()
+{
+  // Set the output pin based on raw data
+  digitalWrite(ethernet_W5500_RST_PIN_D2, ethernet_W5500_RST_PIN_D2_rawData);
+}
+
+void readInputs()
+{
+  // Read all 16 channels from PCF8575
+  uint16_t inputStates = pcf8575.read16();
+
+  // Display the input states
+  Serial.print(""Input states: 0x"");
+  Serial.println(inputStates, HEX);
+
+  // Optionally, process individual bits
+  for (uint8_t i = 0; i < 16; i++) {
+    bool state = (inputStates & (1 << i)) != 0;
+    Serial.print(""Pin "");
+    Serial.print(i);
+    Serial.print("": "");
+    Serial.println(state ? ""HIGH"" : ""LOW"");
+  }
+}
+"
+SwTNuqn8,2025-07-03_stats.json,rdp_snitch,JSON,Friday 4th of July 2025 07:18:01 PM CDT,"{
+  ""ip"": {
+    ""188.213.128.212"": 8547,
+    ""91.238.181.93"": 6,
+    ""193.24.211.25"": 3,
+    ""91.238.181.95"": 6,
+    ""167.94.145.97"": 3,
+    ""103.77.246.206"": 9,
+    ""172.104.10.192"": 12,
+    ""45.79.0.154"": 3,
+    ""195.3.223.186"": 3,
+    ""138.68.188.52"": 21,
+    ""205.210.31.79"": 9,
+    ""167.94.138.198"": 3,
+    ""111.170.152.113"": 9,
+    ""45.146.130.128"": 12,
+    ""199.45.154.151"": 3,
+    ""147.185.132.117"": 9,
+    ""2.57.121.247"": 6,
+    ""147.185.132.123"": 9,
+    ""162.210.245.77"": 6,
+    ""165.154.174.108"": 3,
+    ""85.215.149.156"": 3,
+    ""71.6.135.131"": 3,
+    ""107.150.117.219"": 3,
+    ""198.235.24.86"": 9,
+    ""103.45.234.155"": 3,
+    ""103.15.222.151"": 6,
+    ""68.183.179.179"": 3
+  },
+  ""asn"": {
+    ""AS29222"": 8547,
+    ""AS49434"": 12,
+    ""AS215929"": 3,
+    ""AS398705"": 3,
+    ""AS140810"": 9,
+    ""AS63949"": 15,
+    ""AS201814"": 3,
+    ""AS14061"": 24,
+    ""AS396982"": 36,
+    ""AS398324"": 3,
+    ""AS151185"": 9,
+    ""AS213790"": 12,
+    ""AS398722"": 3,
+    ""AS47890"": 6,
+    ""AS397651"": 6,
+    ""AS135377"": 6,
+    ""AS8560"": 3,
+    ""AS10439"": 3,
+    ""AS135921"": 3,
+    ""AS149137"": 6
+  },
+  ""isp"": {
+    ""Infomaniak Network SA"": 8547,
+    ""Datacenter location PAR1 France"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 9,
+    ""BIDATA"": 9,
+    ""Akamai Technologies"": 12,
+    ""Akamai Technologies, Inc."": 3,
+    ""MEVSPACE sp. z o.o."": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Google LLC"": 36,
+    ""China Telecom"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""RCI Broadband"": 6,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""IONOS SE"": 3,
+    ""CariNet, Inc."": 3,
+    ""Zenlayer Inc"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TAN Thanh AN International Trade Development Company Limited"": 6
+  },
+  ""org"": {
+    ""Infomaniak Network SA"": 8547,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 6,
+    ""Bidata Media and Technology Joint Stock Company"": 9,
+    ""Linode"": 15,
+    ""MEVSPACE sp. z o.o"": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Censys, Inc"": 3,
+    ""Chinanet HB"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""10x Servers"": 6,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""CariNet, Inc."": 3,
+    ""ZENLA-1"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TANTHANHAN"": 6
+  },
+  ""regionName"": {
+    ""Lucerne"": 8547,
+    ""\u00cele-de-France"": 12,
+    ""Central and Western District"": 3,
+    ""Michigan"": 6,
+    ""B\u1eafc Ninh Province"": 9,
+    ""New Jersey"": 12,
+    ""Texas"": 3,
+    ""Mazovia"": 3,
+    ""England"": 30,
+    ""California"": 39,
+    ""Hubei"": 9,
+    ""Federal District"": 12,
+    ""New York"": 3,
+    ""Virginia"": 6,
+    ""Hesse"": 6,
+    ""Hanoi"": 9,
+    ""South West"": 3
+  },
+  ""country"": {
+    ""Switzerland"": 8547,
+    ""France"": 12,
+    ""Hong Kong"": 3,
+    ""United States"": 69,
+    ""Vietnam"": 18,
+    ""Poland"": 3,
+    ""United Kingdom"": 30,
+    ""China"": 9,
+    ""Brazil"": 12,
+    ""Germany"": 6,
+    ""Singapore"": 3
+  },
+  ""account"": {
+    ""hello"": 8598,
+    ""Test"": 33,
+    ""(empty)"": 12,
+    ""grdyo417"": 12,
+    ""beio"": 3,
+    ""Administr"": 9,
+    ""MJFlhhjNf"": 3,
+    ""fwqPZF"": 3,
+    ""bxjmjh"": 3,
+    ""CgiINCBmU"": 3,
+    ""kmgzDO"": 3,
+    ""JqKsNS"": 3,
+    ""qcOqVdChr"": 3,
+    ""CkLkwW"": 3,
+    ""JqzDrX"": 3,
+    ""Administrator"": 6,
+    ""root"": 3,
+    ""rNNeBdIlZ"": 3,
+    ""ZaUnVd"": 3,
+    ""GDwBhX"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 8712
+  },
+  ""client_build"": {
+    ""Unknown"": 8712
+  },
+  ""client_name"": {
+    ""Unknown"": 8712
+  },
+  ""ip_type"": {
+    ""mobile & hosting"": 8547,
+    ""hosting"": 99,
+    ""Unknown"": 48,
+    ""proxy"": 18
+  }
+}"
+L3BJHtaM,Measurement Management rev_07,pleasedontcode,Arduino,Friday 4th of July 2025 07:17:39 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Measurement Management
+	- Source Code NOT compiled for: Arduino Nano 33 BLE
+	- Source Code created on: 2025-07-05 00:16:04
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Detect and initialize the Ethernet connection */
+	/* using the Ethernet2 library and the W5500 module. */
+	/* Retrieve and display the assigned IP address to */
+	/* confirm successful connection. */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* Monitor and read all channels connected via the */
+	/* PCF8575 I2C expander periodically, ensuring real- */
+	/* time data acquisition from the digital inputs. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SPI.h>
+#include <Wire.h>
+#include <Ethernet2.h>	//https://github.com/adafruit/Ethernet2
+#include <PCF8575.h>	//https://github.com/RobTillaart/PCF8575.git
+#include <DFRobot_ADS1115.h>	//https://github.com/DFRobot/DFRobot_ADS1115
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void initializeEthernet();
+void readAllChannels();
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ethernet_W5500_RST_PIN_D2 = 2;
+
+/***** DEFINITION OF I2C PINS *****/
+const uint8_t pdf_PCF8575_I2C_PIN_SDA_A4 = A4;
+const uint8_t pdf_PCF8575_I2C_PIN_SCL_A5 = A5;
+const uint8_t pdf_PCF8575_I2C_SLAVE_ADDRESS = 32;
+const uint8_t adc_ADS1115_I2C_PIN_SDA_A4 = A4;
+const uint8_t adc_ADS1115_I2C_PIN_SCL_A5 = A5;
+const uint8_t adc_ADS1115_I2C_SLAVE_ADDRESS = 72;
+
+/***** DEFINITION OF SPI PINS *****/
+const uint8_t ethernet_W5500_SPI_PIN_MOSI_D11 = 11;
+const uint8_t ethernet_W5500_SPI_PIN_MISO_D12 = 12;
+const uint8_t ethernet_W5500_SPI_PIN_SCLK_D13 = 13;
+const uint8_t ethernet_W5500_SPI_PIN_CS_D10 = 10;
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ethernet_W5500_RST_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ethernet_W5500_RST_PIN_D2_phyData = 0.0;
+
+/****** LIBRARY INSTANCES *****/
+PCF8575 pcf8575Device(pdf_PCF8575_I2C_SLAVE_ADDRESS);
+DFRobot_ADS1115 ads1115(&Wire);
+
+/* Initialize Ethernet connection */
+void initializeEthernet() {
+  pinMode(ethernet_W5500_RST_PIN_D2, OUTPUT);
+  digitalWrite(ethernet_W5500_RST_PIN_D2, LOW);
+  delay(10);
+  digitalWrite(ethernet_W5500_RST_PIN_D2, HIGH);
+  delay(100);
+  // Start Ethernet with DHCP
+  if (Ethernet.begin()) {
+    Serial.print(""Ethernet initialized. IP address: "");
+    Serial.println(Ethernet.localIP());
+  } else {
+    Serial.println(""Failed to initialize Ethernet"");
+  }
+}
+
+/* Read all channels from PCF8575 and print the values */
+void readAllChannels() {
+  uint16_t inputStates = pcf8575Device.read16();
+  Serial.print(""PCF8575 Input States: 0x"");
+  Serial.println(inputStates, HEX);
+}
+
+/* Setup function */
+void setup(void) {
+  Serial.begin(9600);
+  while (!Serial) {
+    ; // wait for serial port to connect
+  }
+
+  // Initialize Ethernet connection
+  initializeEthernet();
+
+  // Initialize I2C
+  Wire.begin();
+
+  // Initialize PCF8575 device
+  if (pcf8575Device.begin()) {
+    Serial.println(""PCF8575 device initialized successfully."");
+  } else {
+    Serial.println(""Failed to initialize PCF8575 device."");
+  }
+
+  // Initialize ADS1115 device
+  ads1115.setAddr_ADS1115(adc_ADS1115_I2C_SLAVE_ADDRESS);
+  ads1115.init();
+
+  // Optional: Configure ADS1115 gain, mode, etc.
+  ads1115.setGain(eGAIN_TWO);
+  ads1115.setMode(eMODE_SINGLE);
+
+  Serial.println(""Setup complete."");
+}
+
+/* Main loop */
+void loop(void) {
+  // Periodically read all channels from PCF8575
+  readAllChannels();
+
+  // Add delay for periodic reading
+  delay(1000);
+}
+
+/* Update outputs based on raw data */
+void updateOutputs() {
+  digitalWrite(ethernet_W5500_RST_PIN_D2, ethernet_W5500_RST_PIN_D2_rawData);
+}
+
+/* END CODE */"
+Uigr3nqT,2025-07-03_stats.json,rdp_snitch,JSON,Friday 4th of July 2025 07:16:10 PM CDT,"{
+  ""ip"": {
+    ""188.213.128.212"": 8546,
+    ""91.238.181.93"": 6,
+    ""193.24.211.25"": 3,
+    ""91.238.181.95"": 6,
+    ""167.94.145.97"": 3,
+    ""103.77.246.206"": 9,
+    ""172.104.10.192"": 12,
+    ""45.79.0.154"": 3,
+    ""195.3.223.186"": 3,
+    ""138.68.188.52"": 21,
+    ""205.210.31.79"": 9,
+    ""167.94.138.198"": 3,
+    ""111.170.152.113"": 9,
+    ""45.146.130.128"": 12,
+    ""199.45.154.151"": 3,
+    ""147.185.132.117"": 9,
+    ""2.57.121.247"": 6,
+    ""147.185.132.123"": 9,
+    ""162.210.245.77"": 6,
+    ""165.154.174.108"": 3,
+    ""85.215.149.156"": 3,
+    ""71.6.135.131"": 3,
+    ""107.150.117.219"": 3,
+    ""198.235.24.86"": 9,
+    ""103.45.234.155"": 3,
+    ""103.15.222.151"": 6,
+    ""68.183.179.179"": 3
+  },
+  ""asn"": {
+    ""AS29222"": 8546,
+    ""AS49434"": 12,
+    ""AS215929"": 3,
+    ""AS398705"": 3,
+    ""AS140810"": 9,
+    ""AS63949"": 15,
+    ""AS201814"": 3,
+    ""AS14061"": 24,
+    ""AS396982"": 36,
+    ""AS398324"": 3,
+    ""AS151185"": 9,
+    ""AS213790"": 12,
+    ""AS398722"": 3,
+    ""AS47890"": 6,
+    ""AS397651"": 6,
+    ""AS135377"": 6,
+    ""AS8560"": 3,
+    ""AS10439"": 3,
+    ""AS135921"": 3,
+    ""AS149137"": 6
+  },
+  ""isp"": {
+    ""Infomaniak Network SA"": 8546,
+    ""Datacenter location PAR1 France"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 9,
+    ""BIDATA"": 9,
+    ""Akamai Technologies"": 12,
+    ""Akamai Technologies, Inc."": 3,
+    ""MEVSPACE sp. z o.o."": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Google LLC"": 36,
+    ""China Telecom"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""RCI Broadband"": 6,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""IONOS SE"": 3,
+    ""CariNet, Inc."": 3,
+    ""Zenlayer Inc"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TAN Thanh AN International Trade Development Company Limited"": 6
+  },
+  ""org"": {
+    ""Infomaniak Network SA"": 8546,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 6,
+    ""Bidata Media and Technology Joint Stock Company"": 9,
+    ""Linode"": 15,
+    ""MEVSPACE sp. z o.o"": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Censys, Inc"": 3,
+    ""Chinanet HB"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""10x Servers"": 6,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""CariNet, Inc."": 3,
+    ""ZENLA-1"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TANTHANHAN"": 6
+  },
+  ""regionName"": {
+    ""Lucerne"": 8546,
+    ""\u00cele-de-France"": 12,
+    ""Central and Western District"": 3,
+    ""Michigan"": 6,
+    ""B\u1eafc Ninh Province"": 9,
+    ""New Jersey"": 12,
+    ""Texas"": 3,
+    ""Mazovia"": 3,
+    ""England"": 30,
+    ""California"": 39,
+    ""Hubei"": 9,
+    ""Federal District"": 12,
+    ""New York"": 3,
+    ""Virginia"": 6,
+    ""Hesse"": 6,
+    ""Hanoi"": 9,
+    ""South West"": 3
+  },
+  ""country"": {
+    ""Switzerland"": 8546,
+    ""France"": 12,
+    ""Hong Kong"": 3,
+    ""United States"": 69,
+    ""Vietnam"": 18,
+    ""Poland"": 3,
+    ""United Kingdom"": 30,
+    ""China"": 9,
+    ""Brazil"": 12,
+    ""Germany"": 6,
+    ""Singapore"": 3
+  },
+  ""account"": {
+    ""hello"": 8597,
+    ""Test"": 33,
+    ""(empty)"": 12,
+    ""grdyo417"": 12,
+    ""beio"": 3,
+    ""Administr"": 9,
+    ""MJFlhhjNf"": 3,
+    ""fwqPZF"": 3,
+    ""bxjmjh"": 3,
+    ""CgiINCBmU"": 3,
+    ""kmgzDO"": 3,
+    ""JqKsNS"": 3,
+    ""qcOqVdChr"": 3,
+    ""CkLkwW"": 3,
+    ""JqzDrX"": 3,
+    ""Administrator"": 6,
+    ""root"": 3,
+    ""rNNeBdIlZ"": 3,
+    ""ZaUnVd"": 3,
+    ""GDwBhX"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 8711
+  },
+  ""client_build"": {
+    ""Unknown"": 8711
+  },
+  ""client_name"": {
+    ""Unknown"": 8711
+  },
+  ""ip_type"": {
+    ""mobile & hosting"": 8546,
+    ""hosting"": 99,
+    ""Unknown"": 48,
+    ""proxy"": 18
+  }
+}"
+wYTx4SZb,2025-07-03_stats.json,rdp_snitch,JSON,Friday 4th of July 2025 07:15:10 PM CDT,"{
+  ""ip"": {
+    ""188.213.128.212"": 8545,
+    ""91.238.181.93"": 6,
+    ""193.24.211.25"": 3,
+    ""91.238.181.95"": 6,
+    ""167.94.145.97"": 3,
+    ""103.77.246.206"": 9,
+    ""172.104.10.192"": 12,
+    ""45.79.0.154"": 3,
+    ""195.3.223.186"": 3,
+    ""138.68.188.52"": 21,
+    ""205.210.31.79"": 9,
+    ""167.94.138.198"": 3,
+    ""111.170.152.113"": 9,
+    ""45.146.130.128"": 12,
+    ""199.45.154.151"": 3,
+    ""147.185.132.117"": 9,
+    ""2.57.121.247"": 6,
+    ""147.185.132.123"": 9,
+    ""162.210.245.77"": 6,
+    ""165.154.174.108"": 3,
+    ""85.215.149.156"": 3,
+    ""71.6.135.131"": 3,
+    ""107.150.117.219"": 3,
+    ""198.235.24.86"": 9,
+    ""103.45.234.155"": 3,
+    ""103.15.222.151"": 6,
+    ""68.183.179.179"": 3
+  },
+  ""asn"": {
+    ""AS29222"": 8545,
+    ""AS49434"": 12,
+    ""AS215929"": 3,
+    ""AS398705"": 3,
+    ""AS140810"": 9,
+    ""AS63949"": 15,
+    ""AS201814"": 3,
+    ""AS14061"": 24,
+    ""AS396982"": 36,
+    ""AS398324"": 3,
+    ""AS151185"": 9,
+    ""AS213790"": 12,
+    ""AS398722"": 3,
+    ""AS47890"": 6,
+    ""AS397651"": 6,
+    ""AS135377"": 6,
+    ""AS8560"": 3,
+    ""AS10439"": 3,
+    ""AS135921"": 3,
+    ""AS149137"": 6
+  },
+  ""isp"": {
+    ""Infomaniak Network SA"": 8545,
+    ""Datacenter location PAR1 France"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 9,
+    ""BIDATA"": 9,
+    ""Akamai Technologies"": 12,
+    ""Akamai Technologies, Inc."": 3,
+    ""MEVSPACE sp. z o.o."": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Google LLC"": 36,
+    ""China Telecom"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""RCI Broadband"": 6,
+    ""UCLOUD INFORMATION TECHNOLOGY (HK) LIMITED"": 3,
+    ""IONOS SE"": 3,
+    ""CariNet, Inc."": 3,
+    ""Zenlayer Inc"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TAN Thanh AN International Trade Development Company Limited"": 6
+  },
+  ""org"": {
+    ""Infomaniak Network SA"": 8545,
+    ""ThinkTech Technology Industrial CO. Limited"": 12,
+    ""Data Campus Limited"": 3,
+    ""Censys, Inc."": 6,
+    ""Bidata Media and Technology Joint Stock Company"": 9,
+    ""Linode"": 15,
+    ""MEVSPACE sp. z o.o"": 3,
+    ""DigitalOcean, LLC"": 24,
+    ""Palo Alto Networks, Inc"": 36,
+    ""Censys, Inc"": 3,
+    ""Chinanet HB"": 9,
+    ""Limited Network LTD"": 12,
+    ""Unmanaged LTD"": 6,
+    ""10x Servers"": 6,
+    ""Ucloud Information Technology (hk) Limited"": 3,
+    ""De Ber Ionos Cloud Txl"": 3,
+    ""CariNet, Inc."": 3,
+    ""ZENLA-1"": 3,
+    ""Maxserver Company Limited"": 3,
+    ""TANTHANHAN"": 6
+  },
+  ""regionName"": {
+    ""Lucerne"": 8545,
+    ""\u00cele-de-France"": 12,
+    ""Central and Western District"": 3,
+    ""Michigan"": 6,
+    ""B\u1eafc Ninh Province"": 9,
+    ""New Jersey"": 12,
+    ""Texas"": 3,
+    ""Mazovia"": 3,
+    ""England"": 30,
+    ""California"": 39,
+    ""Hubei"": 9,
+    ""Federal District"": 12,
+    ""New York"": 3,
+    ""Virginia"": 6,
+    ""Hesse"": 6,
+    ""Hanoi"": 9,
+    ""South West"": 3
+  },
+  ""country"": {
+    ""Switzerland"": 8545,
+    ""France"": 12,
+    ""Hong Kong"": 3,
+    ""United States"": 69,
+    ""Vietnam"": 18,
+    ""Poland"": 3,
+    ""United Kingdom"": 30,
+    ""China"": 9,
+    ""Brazil"": 12,
+    ""Germany"": 6,
+    ""Singapore"": 3
+  },
+  ""account"": {
+    ""hello"": 8596,
+    ""Test"": 33,
+    ""(empty)"": 12,
+    ""grdyo417"": 12,
+    ""beio"": 3,
+    ""Administr"": 9,
+    ""MJFlhhjNf"": 3,
+    ""fwqPZF"": 3,
+    ""bxjmjh"": 3,
+    ""CgiINCBmU"": 3,
+    ""kmgzDO"": 3,
+    ""JqKsNS"": 3,
+    ""qcOqVdChr"": 3,
+    ""CkLkwW"": 3,
+    ""JqzDrX"": 3,
+    ""Administrator"": 6,
+    ""root"": 3,
+    ""rNNeBdIlZ"": 3,
+    ""ZaUnVd"": 3,
+    ""GDwBhX"": 3
+  },
+  ""keyboard"": {
+    ""Unknown"": 8710
+  },
+  ""client_build"": {
+    ""Unknown"": 8710
+  },
+  ""client_name"": {
+    ""Unknown"": 8710
+  },
+  ""ip_type"": {
+    ""mobile & hosting"": 8545,
+    ""hosting"": 99,
+    ""Unknown"": 48,
+    ""proxy"": 18
+  }
+}"
+ezpDXuz9,BUILD_HOUSE.lua,nadkarnik,Lua,Friday 4th of July 2025 07:01:10 PM CDT,"-- Helper: Select next non-empty slot
+function selectNextSlot()
+    for i = 1, 16 do
+        local slot = (turtle.getSelectedSlot() % 16) + 1
+        turtle.select(slot)
+        if turtle.getItemCount() > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper: Try placing a block in a direction, handling slot changes
+function placeBlockDown()
+    while not turtle.placeDown() do
+        if turtle.getItemCount() == 0 then
+            if not selectNextSlot() then error(""Out of blocks!"") end
+        else
+            sleep(0.2)
+        end
+    end
+end
+
+function placeBlockUp()
+    while not turtle.placeUp() do
+        if turtle.getItemCount() == 0 then
+            if not selectNextSlot() then error(""Out of blocks!"") end
+        else
+            sleep(0.2)
+        end
+    end
+end
+
+function placeBlockForward()
+    while not turtle.place() do
+        if turtle.getItemCount() == 0 then
+            if not selectNextSlot() then error(""Out of blocks!"") end
+        else
+            sleep(0.2)
+        end
+    end
+end
+
+-- Helpers: Movement (with digging if needed)
+function forwardSafe()
+    while not turtle.forward() do
+        turtle.dig()
+        sleep(0.2)
+    end
+end
+
+function upSafe()
+    while not turtle.up() do
+        turtle.digUp()
+        sleep(0.2)
+    end
+end
+
+function downSafe()
+    while not turtle.down() do
+        turtle.digDown()
+        sleep(0.2)
+    end
+end
+
+-- Build the floor at the current level
+function buildFloor(length, width)
+    for w = 1, width do
+        for l = 1, length do
+            placeBlockDown()
+            if l < length then forwardSafe() end
+        end
+        if w < width then
+            if w % 2 == 1 then
+                turtle.turnRight()
+                forwardSafe()
+                turtle.turnRight()
+            else
+                turtle.turnLeft()
+                forwardSafe()
+                turtle.turnLeft()
+            end
+        end
+    end
+
+    -- Return to bottom-left corner facing original direction
+    if width % 2 == 1 then
+        turtle.turnRight()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnRight()
+    else
+        turtle.turnLeft()
+        for i = 1, length - 1 do turtle.back() end
+        turtle.turnLeft()
+    end
+    for i = 1, width - 1 do turtle.back() end
+end
+
+-- Build walls around the structure
+function buildWalls(length, width, height)
+    local function buildWallSegment()
+        for h = 1, height - 2 do
+            upSafe()
+            placeBlockForward()
+        end
+        for i = 1, height - 2 do downSafe() end
+    end
+
+    local function moveAndWall(dist)
+        for i = 1, dist - 1 do
+            forwardSafe()
+            buildWallSegment()
+        end
+    end
+
+    buildWallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    buildWallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+    buildWallSegment()
+    moveAndWall(length)
+    turtle.turnRight()
+    buildWallSegment()
+    moveAndWall(width)
+    turtle.turnRight()
+end
+
+-- Build ceiling (go to height, then build floor again at top)
+function buildCeiling(length, width, height)
+    for i = 1, height - 1 do upSafe() end
+    buildFloor(length, width)
+    for i = 1, height - 1 do downSafe() end
+end
+
+-- Main function
+function buildHollowBox(length, width, height)
+    if length < 2 or width < 2 or height < 2 then
+        error(""Dimensions must be at least 2x2x2."")
+    end
+
+    -- Ensure a valid slot is selected
+    if turtle.getItemCount() == 0 then
+        if not selectNextSlot() then
+            error(""No blocks in inventory!"")
+        end
+    end
+
+    buildFloor(length, width)
+    buildWalls(length, width, height)
+    buildCeiling(length, width, height)
+
+    print(""✅ Hollow structure complete."")
+end
+
+-- Example call:
+-- Uncomment and customize the below line to run directly:
+-- buildHollowBox(5, 4, 3)
+"
+nUmx2G4G,WiFi Setup rev_01,pleasedontcode,Arduino,Friday 4th of July 2025 05:32:04 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: WiFi Setup
+	- Source Code NOT compiled for: ESP8266 NodeMCU V1.0
+	- Source Code created on: 2025-07-04 22:31:49
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Implement a Wi-Fi connection feature using the */
+	/* ESP8266 NodeMCU V1.0 to enable remote control of */
+	/* connected devices. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+// Include the ESP8266WiFi library for Wi-Fi connectivity
+#include <ESP8266WiFi.h>
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+// Wi-Fi network credentials
+const char* ssid = ""Your_SSID"";       // Replace with your Wi-Fi SSID
+const char* password = ""Your_PASSWORD""; // Replace with your Wi-Fi password
+
+void setup(void)
+{
+    // put your setup code here, to run once:
+    Serial.begin(115200);
+    delay(10);
+    Serial.println();
+    Serial.println(""Connecting to WiFi..."");
+
+    // Initiate Wi-Fi connection
+    WiFi.begin(ssid, password);
+
+    // Wait for connection
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(""."");
+    }
+
+    Serial.println("""");
+    Serial.println(""WiFi connected"");
+    Serial.print(""IP address: "");
+    Serial.println(WiFi.localIP());
+}
+
+void loop(void)
+{
+    // put your main code here, to run repeatedly:
+    // For example, you can add code to handle remote control commands
+}
+"
+E07B2EeL,Convert directory from upper to lower case,patlefort,Bash,Friday 4th of July 2025 05:27:50 PM CDT,"#!/usr/bin/env bash
+
+while read -d $'\0' f; do
+	mv -T ""$f"" ""$(dirname ""$f"")/$(echo ""$(basename ""$f"")"" | tr '[:upper:]' '[:lower:]')""
+done < <(find . -depth -mindepth 1 -print0)
+"
+Bvc6dKVU,Project_3164 rev_01,pleasedontcode,Arduino,Friday 4th of July 2025 05:19:35 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: 
+	- Source Code NOT compiled for: Arduino Nano 33 BLE
+	- Source Code created on: 2025-07-04 22:19:04
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Connect two push buttons to the Arduino Nano 33 */
+	/* BLE, using digital pins, to control game states */
+	/* such as start and reset, with debouncing handled */
+	/* by the EasyButton library. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+/****** DEFINITION OF LIBRARIES *****/
+#include <EasyButton.h> // Include EasyButton library for debouncing buttons
+
+/****** DECLARATION OF BUTTON OBJECTS *****/
+// Instantiate EasyButton objects for two push buttons connected to pins 2 and 3
+EasyButton startButton(2);
+EasyButton resetButton(3);
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+void setup(void)
+{
+    // Initialize serial communication for debugging (optional)
+    Serial.begin(9600);
+
+    // Initialize the start button
+    startButton.begin();
+
+    // Initialize the reset button
+    resetButton.begin();
+
+    // Optionally, set pull-up resistors if needed
+    // startButton.setPullupEnabled(true);
+    // resetButton.setPullupEnabled(true);
+}
+
+void loop(void)
+{
+    // Update button states
+    startButton.update();
+    resetButton.update();
+
+    // Check if start button is pressed
+    if (startButton.isPressed())
+    {
+        Serial.println(""Start button pressed"");
+        // Add code to handle start game state
+    }
+
+    // Check if reset button is pressed
+    if (resetButton.isPressed())
+    {
+        Serial.println(""Reset button pressed"");
+        // Add code to handle reset game state
+    }
+}
+"
+aiS4RFay,OutdoorBinSoundActivation rev_02,pleasedontcode,Arduino,Friday 4th of July 2025 05:14:19 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: 
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-07-04 22:12:16
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* The system should use the HC-SR04 ultrasonic */
+	/* sensor to detect items in the outdoor bin and play */
+	/* a designated MP3 sound via the DFPlayer Mini when */
+	/* an object is detected. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>  // https://github.com/DFRobot/DFRobotDFPlayerMini
+#include <Ultrasonic.h>            // https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+void checkObjectDetection(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Echo_PIN_D3 = 3;
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ultrasonicsensor_HC_SR04_Trigger_PIN_D2 = 2;
+
+/***** DEFINITION OF Software Serial *****/
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0 = A0;
+const uint8_t mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1 = A1;
+SoftwareSerial mp3player_DFPlayerMini_Serial(mp3player_DFPlayerMini_Serial_PIN_SERIAL_RX_A1, mp3player_DFPlayerMini_Serial_PIN_SERIAL_TX_A0);
+
+/***** DEFINITION OF OUTPUT RAW VARIABLES *****/
+/***** used to store raw data *****/
+bool ultrasonicsensor_HC_SR04_Trigger_PIN_D2_rawData = 0;
+
+/***** DEFINITION OF OUTPUT PHYSICAL VARIABLES *****/
+/***** used to store data after characteristic curve transformation *****/
+float ultrasonicsensor_HC_SR04_Trigger_PIN_D2_phyData = 0.0;
+
+/***** Instantiate Ultrasonic sensor object *****/
+Ultrasonic ultrasonicSensor(ultrasonicsensor_HC_SR04_Echo_PIN_D3);
+
+/***** Detection threshold in centimeters *****/
+const float detectionThreshold = 20.0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+DFRobotDFPlayerMini mp3Player;
+
+void setup(void)
+{
+  // put your setup code here, to run once:
+  pinMode(ultrasonicsensor_HC_SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonicsensor_HC_SR04_Trigger_PIN_D2, OUTPUT);
+  mp3player_DFPlayerMini_Serial.begin(9600);
+
+  // Initialize MP3 Player
+  if (!mp3Player.begin(mp3player_DFPlayerMini_Serial)) {
+    // Initialization failed
+    while(true);
+  }
+  mp3Player.volume(20); // Set volume level (0-30)
+}
+
+void loop(void)
+{
+  // put your main code here, to run repeatedly:
+  checkObjectDetection();
+}
+
+void checkObjectDetection()
+{
+  // Read distance from ultrasonic sensor
+  float distance = ultrasonicSensor.read();
+
+  // Check if object is within detection threshold
+  if (distance > 0 && distance <= detectionThreshold)
+  {
+    // Play sound if not already playing
+    if (!mp3Player.isPlaying())
+    {
+      mp3Player.play(1); // Play the first track
+    }
+  }
+  else
+  {
+    // Optional: stop playback if no object
+    // mp3Player.stop();
+  }
+  delay(200); // Small delay to prevent rapid triggering
+}
+
+/* END CODE */"
+WN5XBUr4,dynamic routing,nuclearsmilz,YAML,Friday 4th of July 2025 05:00:14 PM CDT,"1 (ingressroutes):
+---
+# IngressRoutes for Traefik dashboard and backend API
+http:
+  routers:
+    # Traefik Dashboard IngressRoute
+    dashboard:
+      entryPoints:
+        - websecure
+      rule: ""Host(`traefik.example.com`)""
+      service: api@internal
+      middlewares:
+        - dashboard-auth@file
+      tls:
+        certResolver: letsencrypt
+    
+    # Backend API IngressRoute
+    backend-api:
+      entryPoints:
+        - websecure
+      rule: ""Host(`backend.hackalyst.com`)""
+      service: backend-svc
+      middlewares:
+        - rate-limit@file
+        - secure-headers@file
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    # Define the backend service
+    backend-svc:
+      loadBalancer:
+        servers:
+          - url: ""http://hackalyst-backend:3000""
+
+
+2 (middlewares):
+---
+http:
+  middlewares:
+    # Basic authentication for Traefik dashboard
+    dashboard-auth:
+      basicAuth:
+        users:
+          # Will be injected by environment variable
+          - ""${TRAEFIK_DASHBOARD_CRED}""
+    
+    # Additional development middlewares
+    dev-redirects:
+      redirectRegex:
+        regex: ""^http://localhost/(.*)""
+        replacement: ""https://localhost/$1""
+        permanent: true
+        
+    # IP whitelist for dashboard access
+    dashboard-ipAllowList:
+      ipAllowList:
+        sourceRange:
+          # Private LAN of the droplet (adjust as needed)
+          - ""10.0.0.0/8""
+          - ""172.16.0.0/12""
+          - ""192.168.0.0/16""
+          # Add your admin IPs here
+          - ""203.0.113.1/32""
+          - ""70.49.131.141/32""
+
+    # Rate limiting middleware
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1m
+    
+    # Security headers middleware
+    secure-headers:
+      headers:
+        frameDeny: true
+        sslRedirect: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: ""SAMEORIGIN""
+        customRequestHeaders:
+          X-Forwarded-Proto: ""https""
+
+
+3 (tls):
+---
+# TLS configuration for secure connections
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+
+  # For development, we'll use auto-generated certificates
+  # Comment out stores section for now since the certificate files don't exist
+  # stores:
+  #   default:
+  #     defaultCertificate:
+  #       certFile: /etc/traefik/certs/cert.pem
+  #       keyFile: /etc/traefik/certs/key.pem
+
+  # Certificate resolvers configuration moved to main traefik.yml
+"
+zWtrPVq2,docker compose - backend+traefik,nuclearsmilz,YAML,Friday 4th of July 2025 04:57:12 PM CDT,"# Unified Docker Compose file for Hackalyst (Traefik + Backend)
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    environment:
+      # Use staging Let's Encrypt server for development to avoid rate limits
+      - ACME_CA_SERVER=https://acme-staging-v02.api.letsencrypt.org/directory
+      # Hardcoded for local development
+      - TRAEFIK_DASHBOARD_CRED=user:pass (removed real value for pastebin)
+    ports:
+      - ""80:80""
+      - ""443:443""
+      - ""8081:8080"" # Dashboard port for development (changed to 8081 to avoid conflicts)
+    volumes:
+      - ./backend/infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./backend/infra/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./backend/infra/traefik/acme/acme.json:/acme/acme.json
+      - /var/run/docker.sock:/var/run/docker.sock:ro # For Docker provider to work
+    networks:
+      - proxy
+    command:
+      - ""--providers.docker.exposedbydefault=false""
+      - ""--api.insecure=true"" # Allow insecure access to dashboard in development
+    labels:
+      - ""traefik.enable=true""
+      - ""traefik.http.routers.dashboard-local.rule=Host(`localhost`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))""
+      - ""traefik.http.routers.dashboard-local.service=api@internal""
+      - ""traefik.http.routers.dashboard-local.entrypoints=dashboard""
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: hackalyst-backend
+    container_name: hackalyst-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://localhost:27017/hackalyst
+      - CLERK_JWKS_PUBLIC_KEY=dummy_key
+      # Uncomment these for production with Infisical
+      # - INFISICAL_MACHINE_IDENTITY_ID=${INFISICAL_MACHINE_IDENTITY_ID}
+      # - INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET=${INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET}
+      # - INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}
+    volumes:
+      - ./backend:/root/app
+    networks:
+      - proxy
+    labels:
+      - ""traefik.enable=true""
+      - ""traefik.http.routers.backend.rule=Host(`backend.hackalyst.com`)""
+      - ""traefik.http.routers.backend.entrypoints=websecure""
+      - ""traefik.http.routers.backend.tls.certresolver=letsencrypt""
+      - ""traefik.http.services.backend.loadbalancer.server.port=3000""
+      # For local non-TLS access
+      - ""traefik.http.routers.backend-insecure.rule=Host(`backend.hackalyst.com`)""
+      - ""traefik.http.routers.backend-insecure.entrypoints=web""
+
+networks:
+  proxy:
+    name: proxy
+    external: true # Use an existing network
+"
+Ud4pTAB9,ocean birds,romeocommissions,HTML,Friday 4th of July 2025 04:56:12 PM CDT,"<!-- this is a html-only f2u code by herosjourney 
+- though if other css is involved, it'll look different
+
+this should look at least decent with all current site skins.
+ --> 
+
+
+<div class=""container ml-3 p-5"" style=""background-image:url('https://i.imgur.com/7MclyC8.jpeg'); max-width:850px; border-radius:30px;"">
+
+<div class=""card m-2 p-3 h-100"" style=""background:#023641; color:#c3deec;"">
+    <div class=""row gx-2"">
+	<!-- card image -->
+        <div class=""col-4""><img src=""https://i.imgur.com/lhSvWYG.jpeg""></div>
+	
+
+	<!-- user info -->
+	<div class=""col-8"">
+
+ 		<!-- USERNAME -->
+	
+	<h1 class=""text-center"" style=""color:#c0e7e6"">username</h1>
+	<hr class=""w-80"">
+	 
+		<!-- LINKS | THESE CENTER AUTOMATICALLY, SEPARATED FOR EASE OF EDITING -->
+	<div class=""text-center mt-n2"" style=""color:#5ab5d1"">
+		<a href=""LINK"" target=""_blank"" class=""mx-2"" style=""font-size:16pt; color:inherit;""><i class=""fa-brands fa-bluesky""></i></a>
+		<a href=""LINK"" target=""_blank"" class=""mx-2"" style=""font-size:16pt; color:inherit;""><i class=""fa-brands fa-trello""></i></a>
+		<a href=""LINK"" target=""_blank"" class=""mx-2"" style=""font-size:16pt; color:inherit""><i class=""fa-brands fa-deviantart""></i></a>
+		<a href=""LINK"" target=""_blank"" class=""mx-2"" style=""font-size:16pt; color:inherit""><i class=""fa-brands fa-tumblr""></i></a>
+		<a href=""LINK"" class=""mx-2"" style=""font-size:16pt; color:inherit""><i class=""fa-brands fa-twitter""></i></a>
+	</div>
+
+	<!-- USER BLURB -->
+	<div class=""pt-2 text-justify w-90""><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis sollicitudin elit sed tellus blandit viverra sed eget odio. Donec accumsan tempor lacus, et venenatis elit feugiat non. Duis porta eros et velit blandit dapibus. Curabitur ac finibus eros. Duis placerat velit vitae massa sodales, eget mattis nibh pellentesque.</p>
+
+<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis sollicitudin elit sed tellus blandit viverra sed eget odio. Donec accumsan tempor lacus, et venenatis elit feugiat non. Duis porta eros et velit blandit dapibus. Curabitur ac finibus eros. Duis placerat velit vitae massa sodales, eget mattis nibh pellentesque.</p>
+</div>
+
+<!-- END OF USER COLUMN-->
+	</div>
+    </div>
+</div>
+
+
+</div>
+
+<div class=""container""><a href=""https://toyhou.se/~herosjourney""><i class=""fa-duotone fa-solid fa-code""></i> CODE</a></div>"
+e13jZsaz,CI-CD-Pipeline,nuclearsmilz,YAML,Friday 4th of July 2025 04:55:56 PM CDT,"name: Backend CI/CD
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - 'backend/infra/traefik/**'
+      - '.github/workflows/ci-cd-pipeline.yml'
+    branches: [main]
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'backend/infra/traefik/**'
+      - '.github/workflows/ci-cd-pipeline.yml'
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.get_version.outputs.image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to DigitalOcean Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.digitalocean.com
+          username: do
+          password: ${{ secrets.DOCR_TOKEN }}
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Get backend version
+        id: get_version
+        working-directory: ./backend
+        run: |
+          VERSION=$(poetry version -s)
+          echo ""VERSION=$VERSION"" >> $GITHUB_ENV
+          echo ""image_tag=$VERSION"" >> $GITHUB_OUTPUT
+
+      - name: Print VERSION
+        run: echo ""VERSION is ${{ env.VERSION }}""
+        env:
+          VERSION: ${{ env.VERSION }}
+
+      - name: Build and push Docker image
+        id: build_push
+        uses: docker/build-push-action@v5
+        env:
+            VERSION: ${{ env.VERSION }}
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            registry.digitalocean.com/hackalyst-backend/hackalyst-backend:latest
+            registry.digitalocean.com/hackalyst-backend/hackalyst-backend:${{ env.VERSION }}
+            registry.digitalocean.com/hackalyst-backend/hackalyst-backend:${{ github.sha }}
+
+  deploy-traefik:
+    name: Deploy Traefik Configuration
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Copy Traefik files to remote server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          source: ""backend/infra/traefik/*,backend/infra/traefik/dynamic/*""
+          target: ""/opt/hackalyst/""
+          strip_components: 2
+
+      - name: Deploy Traefik Configuration
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script_stop: true
+          script: |
+            # Create traefik directory if it doesn't exist
+            mkdir -p /opt/hackalyst/traefik
+            mkdir -p /opt/hackalyst/traefik/dynamic
+            
+            # Navigate to Traefik directory
+            cd /opt/hackalyst/traefik
+            
+            # Fix acme.json permissions
+            touch acme/acme.json
+            chmod 600 acme/acme.json
+            
+            # Remove the version line from docker-compose.yml
+            grep -v ""^version:"" docker-compose.yml > docker-compose.tmp && mv docker-compose.tmp docker-compose.yml
+            
+            # Update network configuration to use external network
+            sed -i 's/external: false/external: true/' docker-compose.yml
+            
+            # Fix network issue by handling active containers before recreating the network
+            # First stop traefik container if it exists
+            docker stop traefik || true
+            docker rm traefik || true
+            
+            # Handle active endpoints on the proxy network
+            if docker network inspect proxy 2>/dev/null; then
+              # Get list of containers connected to the proxy network
+              CONNECTED_CONTAINERS=$(docker network inspect proxy -f '{{range .Containers}}{{.Name}} {{end}}')
+              
+              if [ -n ""$CONNECTED_CONTAINERS"" ]; then
+                echo ""Disconnecting containers from proxy network: $CONNECTED_CONTAINERS""
+                for CONTAINER in $CONNECTED_CONTAINERS; do
+                  echo ""Disconnecting $CONTAINER from proxy network""
+                  docker network disconnect -f proxy ""$CONTAINER"" || true
+                done
+              fi
+              
+              # Now it's safe to remove the network
+              docker network rm proxy || true
+            fi
+            
+            # Create the network with proper subnet and labels
+            docker network create --subnet=137.184.161.0/24 --gateway=137.184.161.1 --label=""com.docker.compose.network=proxy"" proxy
+            
+            # Pull latest changes and restart Traefik
+            # Ensure Traefik dashboard port is available
+            if netstat -tuln | grep -q ':8081'; then
+              echo ""Warning: Port 8081 is already in use. Checking what's using it...""
+              fuser -n tcp 8081 || true
+              lsof -i:8081 || true
+              echo ""Attempting to stop any process using port 8081...""
+              fuser -k 8081/tcp || true
+            fi
+            
+            # Pass the Traefik dashboard credentials from GitHub secrets
+            export TRAEFIK_DASHBOARD_CRED=""${{ secrets.TRAEFIK_DASHBOARD_CRED }}""
+            
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d
+
+  deploy-production:
+    name: Deploy to Production Droplet
+    needs: deploy-traefik
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install Infisical CLI
+        run: |
+          curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
+          sudo apt-get update && sudo apt-get install -y infisical
+
+      - name: Generate Infisical Access Token
+        run: |
+          chmod +x backend/scripts/generate_infisical_token.sh
+          source backend/scripts/generate_infisical_token.sh
+          echo ""INFISICAL_ACCESS_TOKEN=$INFISICAL_ACCESS_TOKEN"" >> $GITHUB_ENV
+        env:
+          INFISICAL_MACHINE_IDENTITY_ID: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+
+      - name: Deploy to Production Droplet
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          envs: INFISICAL_MACHINE_IDENTITY_ID,INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET,INFISICAL_PROJECT_ID
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            # Install Docker if needed
+            if ! command -v docker &> /dev/null; then
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sudo sh get-docker.sh
+              sudo usermod -aG docker $USER
+              newgrp docker
+            fi
+
+            # Login to DigitalOcean Container Registry
+            echo ""${{ secrets.DOCR_TOKEN }}"" | docker login \
+              --username do \
+              --password-stdin \
+              registry.digitalocean.com
+
+            # Pull the latest image
+            docker pull registry.digitalocean.com/hackalyst-backend/hackalyst-backend:latest
+            
+            # Stop and remove existing container if it exists
+            docker stop hackalyst-backend || true
+            docker rm hackalyst-backend || true
+
+            # Ensure proxy network exists with the correct labels and subnet
+            # Remove existing network if it exists
+            docker network inspect proxy >/dev/null 2>&1 && docker network rm proxy
+            
+            # Create network with specific subnet
+            docker network create --subnet=137.184.161.0/24 --gateway=137.184.161.1 proxy --label=""com.docker.compose.network=proxy""
+            
+            # Run the new container with Infisical environment variables and Traefik labels
+            docker run -d --name hackalyst-backend --network proxy \
+              --ip 137.184.161.2 \
+              --network-alias hackalyst-backend \
+              -p 127.0.0.1:8000:8000 \
+              -e INFISICAL_MACHINE_IDENTITY_ID=""${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}"" \
+              -e INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET=""${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}"" \
+              -e INFISICAL_PROJECT_ID=""${{ secrets.INFISICAL_PROJECT_ID }}"" \
+              -l ""traefik.enable=true"" \
+              -l ""traefik.http.routers.backend.rule=Host(\`backend.hackalyst.com\`)"" \
+              -l ""traefik.http.routers.backend.entrypoints=websecure"" \
+              -l ""traefik.http.routers.backend.tls.certresolver=letsencrypt"" \
+              -l ""traefik.http.services.backend.loadbalancer.server.port=3000"" \
+              --restart unless-stopped \
+              registry.digitalocean.com/hackalyst-backend/hackalyst-backend:latest
+              
+            # Verify DNS resolution is working correctly
+            echo ""Verifying DNS resolution from traefik to hackalyst-backend...""
+            docker exec traefik ping -c 4 hackalyst-backend
+            
+            # Verify IP address assignment
+            echo ""Verifying IP address assignment...""
+            docker inspect hackalyst-backend | grep ""IPv4Address""
+
+        env:
+          INFISICAL_MACHINE_IDENTITY_ID: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          INFISICAL_ACCESS_TOKEN: ${{ env.INFISICAL_ACCESS_TOKEN }}
+"
+uAEYwa0T,Untitled,Brusnik,Python,Friday 4th of July 2025 04:42:49 PM CDT,"# Задание №1
+
+for x in range (1, 11):
+    for y in range(1, 11):
+        print(x*y, ' ' * (3- len(str(x*y))), end ='')
+    print()
+
+# Задание №2
+
+ans_2 = 0
+for x in range(10, 51):
+    for y in range(10, 51):
+        for k in range(10, 51):
+            if x**2 + y**2 == k**2:
+                ans_2 += 1
+
+print(ans_2)
+
+
+# Задание №3
+
+for i in range(299):
+    for j in range(i+1, 300):
+        num_1 = []
+        num_2 = []
+        for n_1 in range(2, int(j**0.5)+1):
+            if j % n_1 == 0:
+                num_1.append(n_1)
+                n_1_dop = j // n_1
+                if n_1_dop != n_1:
+                    num_1.append(n_1_dop)
+
+        for n_2 in range(2, int(i**0.5)+1):
+            if i % n_2 == 0:
+                num_2.append(n_2)
+                n_2_dop = i // n_2
+                if n_2_dop != n_2:
+                    num_2.append(n_2_dop)
+
+        if sum(num_2) + 1 == j and sum(num_1) + 1 == i:
+            print(i, j)
+
+
+# Задание №4
+
+for i in range(10000):
+    n = str(i)
+    if len(n) == 4:
+        a = int(str(n[0]))
+        b = int(str(n[1]))
+        c = int(str(n[2]))
+        d = int(str(n[3]))
+        if a**4 + b**4 + c**4 + d**4 == i:
+            print(i, end=' ')"
+GtT8zfik,Untitled,amirq555,JSON,Friday 4th of July 2025 04:33:06 PM CDT,"{
+    ""Transport"": ""direct"",
+    ""ProxyMethod"": ""wireguard"",
+    ""EncryptionMethod"": ""aes-256-gcm"",
+    ""UID"": ""H0Hhd+MFTrq1QNDcd4gCEw=="",
+    ""PublicKey"": ""w8XJRkV/K9xt1CjAaIWCj4UYztV7oW79gxHC8CK50xI="",
+    ""ServerName"": ""209.38.199.70"",
+    ""NumConn"": 4,
+    ""BrowserSig"": ""chrome""
+}"
+kUXbFX7w,2025-07-04T17:07:47.682018,powerampache,PHP,Friday 4th of July 2025 04:07:47 PM CDT,"1.01-79-play (79) - DB: 83
+java.time.format.DateTimeParseException: Text '0' could not be parsed at index 0
+	at java.time.format.DateTimeFormatter.parseResolved0(DateTimeFormatter.java:2050)
+	at java.time.format.DateTimeFormatter.parse(DateTimeFormatter.java:1952)
+	at java.time.LocalDateTime.parse(LocalDateTime.java:487)
+	at luci.sixsixsix.powerampache2.data.mapping.AmpacheDateMapper.isoStringToLocalDateTime(AmpacheDateMapper.kt:43)
+	at luci.sixsixsix.powerampache2.domain.mappers.DateMapper$DefaultImpls.invoke(DateMapper.kt:28)
+	at luci.sixsixsix.powerampache2.data.mapping.AmpacheDateMapper.invoke(AmpacheDateMapper.kt:29)
+	at luci.sixsixsix.powerampache2.data.remote.dto.AuthDtoKt.toSession(AuthDto.kt:111)
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl.tryAuthorize(MusicRepositoryImpl.kt:271)
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl.access$tryAuthorize(MusicRepositoryImpl.kt:83)
+	at luci.sixsixsix.powerampache2.data.MusicRepositoryImpl$tryAuthorize$1.invokeSuspend(Unknown Source:18)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at android.os.Handler.handleCallback(Handler.java:991)
+	at android.os.Handler.dispatchMessage(Handler.java:102)
+	at android.os.Looper.loopOnce(Looper.java:232)
+	at android.os.Looper.loop(Looper.java:317)
+	at android.app.ActivityThread.main(ActivityThread.java:8934)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:591)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:911)
+
+authorize() - generic exception {""detailMessage"":""Text \u00270\u0027 could not be parsed at index 0"",""stackTrace"":[]}"
+7SPGSVwb,Soluppgång,alexbergsland,YAML,Friday 4th of July 2025 02:34:56 PM CDT,"alias: Script Elsa soluppgång (ledlist)
+sequence:
+  - metadata: {}
+    data:
+      brightness: 1
+      color_temp_kelvin: ""{{ states('input_number.elsa_ljustemperatur_dag') | int(370) }}""
+    target:
+      entity_id: light.ledlist_elsa
+    action: light.turn_on
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 1
+      milliseconds: 0
+  - metadata: {}
+    data:
+      transition: >-
+        {{ states('input_number.terrarium_tid_for_soluppgang_och_solnedgang') |
+        float(0) * 60 }}
+      brightness: 254
+      color_temp_kelvin: ""{{ states('input_number.elsa_ljustemperatur_dag') | int(370) }}""
+    target:
+      entity_id: light.ledlist_elsa
+    action: light.turn_on
+mode: single
+icon: mdi:led-strip-variant
+"
+F3baAxC8,Rock Paper Scissor,Md_Nabeel,Python,Friday 4th of July 2025 02:30:01 PM CDT,"import random
+ut=ct=0
+while(ut<5 and ct<5):
+    u=input(""You: "")
+    if(u not in ""RPS""):
+        print(""Wrong input"")
+        continue
+    c=random.choice(""RPS"")
+    print(""Computer: "", c)
+    if u!=c:
+        if ((u==""R"" and c==""P"") or (u==""P"" and c==""S"") or (u==""S"" and c==""R"")):
+            ct+=1
+            print(""Computer wins"",""\n"")
+        elif ((u==""R"" and c==""S"") or (u==""P"" and c==""R"") or (u==""S"" and c==""P"")) :
+            ut+=1
+            print(""You win"",""\n"")
+        print(""# User= "", ut,""\n"",""# Computer= "",ct,""\n"")
+if ut==5:
+    print(""Congratulations! You WON the Game"")
+else:
+    print(""### You LOST the Game ###"")"
+imVRqk7Q,Binary Search,tepyotin2,C++,Friday 4th of July 2025 01:58:13 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+struct Swap{
+    int a, b;
+};
+
+int t;
+
+void solve(){
+    int n, x;
+    cin >> n >> x;
+    // cout << ""n: "" << n << "", x: "" << x << '\n';
+    vector<int> perm(n+1);
+    vector<Swap> sw;
+    int pos_x = -1;
+    for(int i=1; i<=n; i++){
+        cin >> perm[i];
+        if(perm[i] == x){
+            pos_x = i;
+        }
+    }
+    // for(int i=1; i<=n; i++){
+    //     if(perm[i] == x){
+    //         pos_x = i;
+    //     }
+    // }
+    int l = 1;
+    int r = n+1;
+    while(r-l>1){
+        int m = (r+l)/2;
+        if(perm[m]<=x){
+            l = m;
+        }else{
+            r = m;
+        }
+    }
+    // cout << ""l: "" << l << "", r: "" << r << '\n';
+    if(perm[l] == x){
+        cout << ""0"" << '\n';
+        return;
+    }
+    if(l != pos_x){
+        // cout << ""HI"" << '\n';
+        // cout << ""l: "" << l << "", "" << pos_x << '\n';
+        sw.push_back({l, pos_x});
+        swap(perm[l], perm[pos_x]);
+    }
+    // for(int i=1; i<=n; i++){
+    //     cout << perm[i] << '\n';
+    // }
+    int nl = 1;
+    int nr = n+1;
+    while(nr-nl>1){
+        int m = (nr+nl)/2;
+        if(perm[m]<=x){
+            nl = m;
+        }else{
+            nr = m;
+        }
+    }
+    // cout << ""nl: "" << nl << "", nr: "" << nr << '\n';
+    if(perm[nl] == x){
+        cout << sw.size() << '\n';
+        for(Swap v: sw){
+            cout << v.a << "" "" << v.b << '\n';
+        }
+        return;
+    }
+    for(int i=1; i<=n; i++){
+        if(i!=l && i!=pos_x && perm[i] == l){
+            sw.push_back({i, l});
+            cout << sw.size() << '\n';
+            for(Swap v: sw){
+                cout << v.a << "" "" << v.b << '\n';
+            }
+            return;
+        }
+    }
+}
+
+int main(){
+    // freopen(""binarysearch.in"", ""r"", stdin);
+
+    cin >> t;
+    while(t--){
+        solve();
+    }
+
+    return 0;
+}"
+9nffvPKi,Convention,tepyotin2,C++,Friday 4th of July 2025 01:57:14 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+typedef long long ll;
+
+int n, m, c;
+vector<ll> wtime;
+ll l, r;
+ll ans;
+
+bool check(int mid){
+	ll cur = wtime[0];
+	//int ccw = 1;
+	int cib = 1;
+	int res = 1;
+	//cout << ""mid: "" << mid << '\n';
+	for(int i=1; i<n; i++){
+		//cout << ""wtime[i]: "" << wtime[i] << '\n';
+		if(cib>=c || wtime[i]-cur>mid){
+			cib = 1;
+			cur = wtime[i];
+			//ccw++;
+			res++;
+		}else{
+			cib++;
+		}
+	}
+	return res<=m;
+}
+
+int main(){
+	freopen(""convention.in"", ""r"", stdin);
+	freopen(""convention.out"", ""w"", stdout);
+	
+	cin >> n >> m >> c;
+	wtime.resize(n);
+	for(int i=0; i<n; i++){
+		cin >> wtime[i];
+		r = max(r, wtime[i]);
+	}
+	sort(wtime.begin(), wtime.end());
+	ll omid = 0;
+	while(l<r){
+		ll mid = (l+r)/2;
+		if(omid == mid) break;
+		if(check(mid)){
+			r = mid;
+			ans = mid;
+		}else{
+			l = mid;
+		}
+		omid = mid;
+	}
+	cout << ans << '\n';
+	
+	return 0;
+}
+"
+qzadrhMJ,Meeting on the Line,tepyotin2,C++,Friday 4th of July 2025 01:56:12 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+typedef long double ld;
+const ld EPS = 1e-7;
+
+int T;
+int n;
+vector<ld> x, t;
+
+ld cost(ld pos){
+    ld mx = 0;
+    for(int i=0; i<n; i++){
+        // cout << ""x[i]: "" << x[i] << "", t[i]: "" << t[i] << '\n';
+        mx = max(mx, t[i]+abs(x[i]-pos));
+    }
+    return mx;
+}
+
+int main(){
+    // freopen(""meetonline.in"", ""r"", stdin);
+    // freopen(""meetonline1.out"", ""w"", stdout);
+
+    cin >> T;
+    while(T--){
+        cin >> n;
+        // vector<ld> x(n), t(n);
+        x.resize(n, 0);
+        t.resize(n, 0);
+        for(int i=0; i<n; i++){
+            cin >> x[i];
+            // cout << x[i] << "" "";
+        }
+        // cout << '\n';
+        for(int i=0; i<n; i++){
+            cin >> t[i];
+            // cout << t[i] << "" "";
+        }
+        // cout << '\n';
+        ld lo = 0, hi = 1e8;
+        for(int v=0; v<100; v++){
+            ld m1 = lo+(hi-lo)/3;
+            ld m2 = hi-(hi-lo)/3;
+            // cout << ""v: "" << v << "", lo: "" << lo << "", hi: "" << hi << "", m1: "" << m1 << "", m2: "" << m2 << '\n';
+            // cout << ""cm1: "" << cost(m1) << "", cm2: "" << cost(m2) << '\n';
+            if(cost(m1)<cost(m2)){
+                hi = m2;
+            }else{
+                lo = m1;
+            }
+        }
+        cout << fixed << setprecision(10) << (lo+hi)/2 << '\n';
+    }
+
+    return 0;
+}"
+ig50sUyg,Untitled,Sansuall,MySQL,Friday 4th of July 2025 01:49:34 PM CDT,"-- По гильдии: https://wowroad.info/?item=45977
+SELECT
+ guild.guildid,
+ guild.name,
+ SUM( item_instance.count ) AS total_count 
+FROM
+ guild
+ INNER JOIN guild_bank_item ON guild.guildid = guild_bank_item.guildid
+ INNER JOIN item_instance ON guild_bank_item.item_guid = item_instance.guid 
+WHERE
+ item_instance.itemEntry = 45977 
+GROUP BY
+ guild.guildid 
+HAVING
+ total_count > 100;
+ 
+ 
+ 
+-- https://wowroad.info/?item=49908
+SELECT
+ guild.guildid,
+ guild.name,
+ SUM( item_instance.count ) AS total_count 
+FROM
+ guild
+ INNER JOIN guild_bank_item ON guild.guildid = guild_bank_item.guildid
+ INNER JOIN item_instance ON guild_bank_item.item_guid = item_instance.guid 
+WHERE
+ item_instance.itemEntry = 49908 
+GROUP BY
+ guild.guildid 
+HAVING
+ total_count > 1000;"
+KTf37YGB,QDockWidget without & in the Title,StSav012,Python,Friday 4th of July 2025 01:41:55 PM CDT,"import sys
+
+from PySide6 import QtCore, QtWidgets
+
+if sys.platform == ""win32"":
+
+    class DockWidget(QtWidgets.QDockWidget):
+        """"""A `QtWidgets.QDockWidget` that doesn't display an `&` in the title.
+
+        The issue occurs on Windows OS.
+        """"""
+
+        def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+            super().__init__(parent)
+
+            @QtCore.Slot()
+            def on_top_level_changed(_top_level: bool) -> None:
+                if self.windowHandle() is not None:
+                    self.windowHandle().setTitle(self.windowTitle().replace(""&"", """"))
+
+            self.topLevelChanged.connect(on_top_level_changed)
+
+        def restoreGeometry(self, geometry: QtCore.QByteArray | bytes | bytearray | memoryview) -> bool:
+            res: bool = super().restoreGeometry(geometry)
+            if self.windowHandle() is not None:
+                self.windowHandle().setTitle(self.windowTitle().replace(""&"", """"))
+            return res
+
+        def setWindowTitle(self, title: str) -> None:
+            super().setWindowTitle(title.replace(""&"", """"))
+            if self.windowHandle() is not None:
+                self.windowHandle().setTitle(title.replace(""&"", """"))
+            self.toggleViewAction().setText(title)
+
+    QtWidgets.QDockWidget = DockWidget"
+HCmhPZ4h,Untitled,thelebaron,C#,Friday 4th of July 2025 01:28:30 PM CDT,"using Junk.Cameras;
+using Unity.Assertions;
+using Unity.Burst;
+using Unity.Burst.Intrinsics;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Rendering;
+using Unity.Transforms;
+using UnityEngine;
+
+namespace Junk.FirstPerson
+{
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    // something in this causes built player burst crash
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    [BurstCompile]
+    public struct AddToPlayerInventoryJob : IJobChunk
+    {
+        public EntityCommandBuffer               EntityCommandBuffer;
+        public float                             DeltaTime;
+        public EntityTypeHandle                  EntityHandle;
+        public ComponentLookup<MaterialMeshInfo> MaterialMeshInfoLookup;
+        public ComponentTypeHandle<ItemPickup>   WeaponPickupHandle;
+        public ComponentTypeHandle<Equipped>     EquippedHandle;
+        // optional chunk components
+        public ComponentTypeHandle<WeaponGraphicsEntities> WeaponGraphicsEntitiesHandle;
+        public ComponentTypeHandle<WeaponMuzzleModel>      WeaponMuzzleModelHandle;
+        
+        // Player components
+        public Entity                                PlayerEntity;
+        public ComponentLookup<LocalTransform>       LocalTransformLookup;
+        public ComponentLookup<PlayerItemsInventory> PlayerItemsInventoryLookup;
+        public BufferLookup<ItemSlot>                ItemSlotBufferLookup;
+        public BufferLookup<Child>                   ChildBufferLookup;
+        public ComponentLookup<FirstPersonCamera>    FirstPersonCameraLookup;
+        
+        public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask, in v128 chunkEnabledMask)
+        {
+            Assert.IsTrue(ChildBufferLookup.HasBuffer(PlayerEntity));
+            Assert.IsTrue(LocalTransformLookup.HasComponent(PlayerEntity));
+            Assert.IsTrue(PlayerItemsInventoryLookup.HasComponent(PlayerEntity));
+            Assert.IsTrue(ItemSlotBufferLookup.HasBuffer(PlayerEntity));
+
+            var playerChildren  = ChildBufferLookup[PlayerEntity];
+            var playerTransform = LocalTransformLookup[PlayerEntity];
+            var playerInventory = PlayerItemsInventoryLookup[PlayerEntity];
+            var playerSlots     = ItemSlotBufferLookup[PlayerEntity];
+            
+            var entities      = chunk.GetNativeArray(EntityHandle);
+            var weaponPickups = chunk.GetNativeArray(ref WeaponPickupHandle);
+                
+            var entityEnumerator = new ChunkEntityEnumerator(useEnabledMask, chunkEnabledMask, chunk.Count);
+
+            while (entityEnumerator.NextEntityIndex(out var entityIndex))
+            {
+                var entity       = entities[entityIndex];
+                var weaponPickup = weaponPickups[entityIndex];
+
+                // Cant operate without a camera
+                if (playerChildren.Length < 1)
+                {
+                    Debug.Log($""playerChildren buffer length: {playerChildren.Length}"");
+                    continue;
+                }
+                
+                //
+                // < --- burst crash here --- >
+                // Player.log exerpt
+                // Streamed scene with  215ms latency from C:/Users/thele/Documents/Repos/cyberjunk/bin/Pain Meat Pain_Data/StreamingAssets/EntityScenes/a4185ca62cee3a144826b19ec2b9d207.0.entities
+                // playerChildren buffer length: 0
+                // playerChildren buffer length: 0
+                // Crash!!!
+                
+                if (playerChildren.Length < 1)
+                    Debug.Log($""playerChildren.Length < 1, continue "");
+                
+                
+                Debug.Log($""Checking Camera"");
+                if (!HasCamera(playerChildren, out var cameraChild))
+                {
+                    Debug.Log($""No camera found in playerChildren, continue"");
+                    continue;
+                }
+                
+                Debug.Log($""Camera found"");
+                
+                /*
+                // this is a bit of a janky check for a camera, should have a component with camera entity on it
+                // disable this?
+                if (playerChildren.Length < 1)
+                {
+                    Debug.Log($""playerChildren.Length < 1, continue "");
+                    continue;
+                }
+
+                Debug.Log($""playerChildren.Length: {playerChildren.Length}"");
+
+                // Dont execute if maxed out inventory
+                if(playerSlots.Length > playerInventory.MaxWeapons)
+                {
+                    Debug.Log($""Inventory maxed out: {playerSlots.Length} > {playerInventory.MaxWeapons}, continue"");
+                    continue;
+                }
+
+                // destroy event if entity already inside buffer
+                var containedAlready = false;
+                for (var j = 0; j < playerSlots.Length; j++)
+                {
+                    if (playerSlots[j].ItemEntity.Equals(entity))
+                    {
+                        Debug.Log($""containedAlready"");
+                        containedAlready = true;
+                        break;
+                    }
+                }
+
+                if (containedAlready)
+                {
+                    Debug.Log($""Entity {entity} already in inventory, disabling pickup"");
+                    weaponPickup = default;
+                    //weaponPickups[entityIndex] = weaponPickup; ??
+                    chunk.SetComponentEnabled(ref WeaponPickupHandle, entityIndex, false);
+                    continue;
+                }
+
+                Debug.Log($""Entity {entity} not in inventory, proceeding with pickup"");
+
+                weaponPickup.Player = PlayerEntity;
+                Debug.Log($""Set weaponPickup.Player to {PlayerEntity}"");
+
+                // Set graphics status
+                // Enable the arms model entity
+                if (chunk.Has(ref WeaponGraphicsEntitiesHandle))
+                {
+                    var weaponGraphicsEntities = chunk.GetNativeArray(ref WeaponGraphicsEntitiesHandle)[entityIndex];
+                    Debug.Log($""Enabling weapon graphics: Arms={weaponGraphicsEntities.Arms}, Weapon={weaponGraphicsEntities.Weapon}"");
+                    MaterialMeshInfoLookup.SetComponentEnabled(weaponGraphicsEntities.Arms, true);
+                    MaterialMeshInfoLookup.SetComponentEnabled(weaponGraphicsEntities.Weapon, true);
+                    MaterialMeshInfoLookup.SetComponentEnabled(entity, false);
+                    //EntityCommandBuffer.RemoveComponent<DisableRendering>(weaponGraphicsEntities.Arms);
+                    //EntityCommandBuffer.RemoveComponent<DisableRendering>(weaponGraphicsEntities.Weapon);
+                    //EntityCommandBuffer.AddComponent<DisableRendering>(entity);
+                }
+                // Enable muzzle entity
+                if (chunk.Has(ref WeaponMuzzleModelHandle))
+                {
+                    var weaponMuzzle = chunk.GetNativeArray(ref WeaponMuzzleModelHandle)[entityIndex];
+                    Debug.Log($""Enabling muzzle entity: {weaponMuzzle.MuzzleEntity}"");
+                    EntityCommandBuffer.SetEnabled(weaponMuzzle.MuzzleEntity, true);
+                }
+
+                // ""Equip"" the weapon by parenting to player cameraand adding equipped component, and reset its local position//
+                Debug.Log($""Parenting entity {entity} to camera {cameraChild}"");
+                EntityCommandBuffer.AddComponent(entity, new Parent{Value = cameraChild });
+                EntityCommandBuffer.SetComponent(entity, LocalTransform.FromPositionRotationScale(playerTransform.Position, quaternion.identity, 1));
+
+                // Add an event to populate it to the player's buffer
+                var newSlotIndex = playerSlots.Length;
+                Debug.Log($""Adding item to slot {newSlotIndex}"");
+                playerSlots.Add(new ItemSlot
+                {
+                    Index            = newSlotIndex,
+                    ItemEntity       = entity,
+                    ItemPickupEntity = Entity.Null,
+                    Selected         = false
+                });
+
+                // Disable trigger
+                Debug.Log($""Disabling trigger {weaponPickup.WeaponTriggerEntity} and rigidbody {weaponPickup.WeaponRigidbodyEntity}"");
+                EntityCommandBuffer.SetEnabled(weaponPickup.WeaponTriggerEntity, false);
+                EntityCommandBuffer.SetEnabled(weaponPickup.WeaponRigidbodyEntity, false);
+
+                // set equipped if no other weapons
+                if (playerSlots.Length.Equals(1))
+                {
+                    Debug.Log($""First weapon, setting as selected"");
+                    var slotArray = playerSlots.AsNativeArray();
+                    var slot      = slotArray[0];
+                    slot.Selected = true;
+                    slotArray[0]  = slot;
+                }
+
+                weaponPickups[entityIndex] = weaponPickup;
+                chunk.SetComponentEnabled(ref EquippedHandle, entityIndex, true);*/
+                Debug.Log($""Completed pickup for entity {entity}"");
+            }
+        }
+        
+        private bool HasCamera(in DynamicBuffer<Child> childBuffer, out Entity entity)
+        {
+            Debug.Log($""HasCamera method start"");
+            entity = Entity.Null;
+
+            if (childBuffer.Length == 0)
+            {
+                Debug.Log($""No children to find a camera in"");
+                return false;
+            }
+
+            for (var j = 0; j < childBuffer.Length; j++)
+            {
+                var child = childBuffer[j].Value;
+                
+                var hasComponent = FirstPersonCameraLookup.HasComponent(child);
+
+                if (!hasComponent)
+                {
+                    Debug.Log($""Skipping child {child} because it doesn't have a FirstPersonCamera component"");
+                    continue;
+                }
+
+                Debug.Log($""Found camera in child {child}"");
+                entity = child;
+                return true;
+            }
+
+            Debug.Log($""No camera found after checking all children, returning false"");
+            return false;
+        }
+    }
+}"
+P6BP3QAs,Untitled,Adm_ggx,Lua,Friday 4th of July 2025 01:15:55 PM CDT,"local player = game.Players.LocalPlayer
+local gui = Instance.new(""ScreenGui"", game.CoreGui)
+
+local frame = Instance.new(""Frame"", gui)
+frame.Size = UDim2.new(0, 220, 0, 100)
+frame.Position = UDim2.new(0, 20, 0, 200)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.Active, frame.Draggable = true, true
+
+local title = Instance.new(""TextLabel"", frame)
+title.Size = UDim2.new(1, -30, 0, 30)
+title.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+title.Text = ""Script made by userr0011""
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local minimize = Instance.new(""TextButton"", frame)
+minimize.Position = UDim2.new(1, -30, 0, 0)
+minimize.Size = UDim2.new(0, 30, 0, 30)
+minimize.Text = ""-""
+minimize.TextColor3 = Color3.new(1, 1, 1)
+minimize.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+
+local btn = Instance.new(""TextButton"", frame)
+btn.Position = UDim2.new(0.1, 0, 0.5, 0)
+btn.Size = UDim2.new(0.8, 0, 0.4, 0)
+btn.Text = ""GodMode: OFF""
+btn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+btn.TextColor3 = Color3.new(1, 1, 1)
+btn.TextSize = 18
+btn.Font = Enum.Font.SourceSansBold
+
+local god = false
+btn.MouseButton1Click:Connect(function()
+	god = not god
+	btn.Text = god and ""GodMode: ON"" or ""GodMode: OFF""
+	if god then
+		coroutine.wrap(function()
+			while god do
+				local h = player.Character and player.Character:FindFirstChildOfClass(""Humanoid"")
+				if h then h.Health = h.MaxHealth end
+				wait(0.1)
+			end
+		end)()
+	end
+end)
+
+-- Restore image
+local restore = Instance.new(""ImageButton"", gui)
+restore.Size = UDim2.new(0, 40, 0, 40)
+restore.Position = UDim2.new(0, 10, 0, 10)
+restore.Image = ""rbxassetid://6031094678""
+restore.BackgroundTransparency = 1
+restore.Visible = false
+
+local drag = Instance.new(""Frame"", gui)
+drag.Size = restore.Size
+drag.Position = restore.Position
+drag.BackgroundTransparency = 1
+drag.Active, drag.Draggable = true, true
+drag.Visible = false
+restore.Parent = drag
+
+minimize.MouseButton1Click:Connect(function()
+	frame.Visible = false
+	restore.Visible = true
+	drag.Visible = true
+end)
+
+restore.MouseButton1Click:Connect(function()
+	frame.Visible = true
+	restore.Visible = false
+	drag.Visible = false
+end)"
+eQD77Zpr,alertMessages.socket.service,semsem_elazazy,JavaScript,Friday 4th of July 2025 12:36:01 PM CDT,"import { io, Socket } from ""socket.io-client"";
+
+const alertSocket: Socket = io(""https://your-server-url"", {
+  auth: {
+    token: ""USER_JWT_TOKEN""
+  },
+});
+
+alertSocket.on(""connect"", () => {
+  console.log(""Connected to alert socket:"", alertSocket.id);
+});
+
+alertSocket.on(""Inventory-Alert"", (alert) => {
+  console.log(""Inventory Alert Received:"", alert);
+});
+
+alertSocket.on(""alert-messages"", (alerts) => {
+  console.log(""All alert messages received:"", alerts);
+});
+
+alertSocket.on(""notifications"", (alerts) => {
+  console.log(""Updated notifications list:"", alerts);
+});
+
+alertSocket.on(""error"", (error) => {
+  console.error(""Alert socket error:"", error.message || error);
+});
+
+alertSocket.on(""disconnect"", () => {
+  console.log(""Disconnected from alert socket"");
+});
+
+export function requestAllAlerts() {
+  alertSocket.emit(""get-alert-messages"");
+}
+
+export function markAllAlertsAsRead() {
+  alertSocket.emit(""mark-all-as-read"");
+}
+
+export function clearAllAlerts() {
+  alertSocket.emit(""clear-all-notifications"");
+}
+
+export function clearSingleAlert(alertId: string) {
+  alertSocket.emit(""clear-alert"", alertId);
+}
+
+export function disconnectAlertSocket() {
+  alertSocket.disconnect();
+}
+
+export default alertSocket;
+"
+ZE3isCrR,Untitled,Brusnik,Python,Friday 4th of July 2025 12:19:46 PM CDT,"# Задание №1
+
+print(sum([x**2 for x in range(1, 101)]))
+
+
+# Задание №2
+
+#[0, 8, 16, 24, 32]
+
+
+# Задание №3
+
+print(len([i for i in range(1, 21) if i % 2 == 0]))
+
+
+# Задание №4
+
+a = [64, 8, 72, 1, 56, 78, 7, 59, 9, 80]
+print(len([a[i] for i in range(0, len(a), 2) if a[i] % 2 == 0]))
+
+
+# Задание №5
+
+print(len([i for i in range(1, 1001) if i % 7 == 0 or i % 11 == 0]))"
+1SR904Du,Hamiltonian Flight,tepyotin2,C++,Friday 4th of July 2025 12:15:42 PM CDT,"#include <bits/stdc++.h>
+
+using namespace std;
+
+int dp[1 << 21][21];
+bool visited[1 << 21][21];
+vector<int> adj[21];
+
+int main() {
+    ios_base::sync_with_stdio(0), cin.tie(0);
+
+    int n, m;
+    cin >> n >> m;
+
+    for (int i = 0; i < m; i++) {
+        int a, b;
+        cin >> a >> b; // 1 - n
+        adj[a - 1].push_back(b - 1); // 0 - n-1
+    }
+
+    queue<pair<int, int>> q;
+
+    dp[1][0] = 1;
+    q.push({1, 0});
+    visited[1][0] = true;
+
+    while (!q.empty()) {
+        int mask = q.front().first, u = q.front().second;
+        q.pop();
+
+        for (int v: adj[u]) {
+            if (!(mask & (1 << v))) {
+                dp[mask ^ (1 << v)][v] += dp[mask][u];
+                dp[mask ^ (1 << v)][v] %= int(1e9) + 7;
+                if (!visited[mask ^ (1 << v)][v]) {
+                    visited[mask ^ (1 << v)][v] = true;
+                    q.push({mask ^ (1 << v), v});
+                }
+            }
+        }
+    }
+
+    cout << dp[(1 << n) - 1][n - 1] << '\n';
+
+    return 0;
+}
+"
