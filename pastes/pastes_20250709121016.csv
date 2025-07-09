@@ -1,0 +1,539 @@
+id,title,username,language,date,content
+PxL0GNSD,MAKE $5000 INSTANTLY S,Killeurook,JavaScript,Wednesday 9th of July 2025 07:08:52 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1832541
+
+"
+sRZU58es,MAKE $1000 INSTANTLY P,queteimportaamigo,JavaScript,Wednesday 9th of July 2025 07:08:23 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 2710388
+
+"
+5V4wU5P8,✅ MAKE $22OO IN 10 MIN O,Killeurook,JavaScript,Wednesday 9th of July 2025 07:07:47 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 2375681
+
+"
+p94i5C2M,FREE BTC GUIDE 8,barka2020,JavaScript,Wednesday 9th of July 2025 07:07:08 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5811486
+
+"
+kjRATs21,Make $2000 in 15 minutes 0,barka2020,JavaScript,Wednesday 9th of July 2025 07:06:05 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 8192100
+
+"
+6CVKaBpH,MAKE $1000 INSTANTLY P,barka2020,JavaScript,Wednesday 9th of July 2025 07:05:01 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 4131406
+
+"
+80rFT5qn,✅ MAKE $22OO IN 10 MIN 0,barka2020,JavaScript,Wednesday 9th of July 2025 07:03:57 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 7385096
+
+"
+s0fbumnm,Make 3500$ in 20 MIN [Method] 3,barka2020,JavaScript,Wednesday 9th of July 2025 07:02:52 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5862991
+
+"
+zXxGNiEd,FREE BTC GUIDE 8,barka2020,JavaScript,Wednesday 9th of July 2025 07:01:45 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 0201888
+
+"
+R1vT1Zwb,MAKE $1000 INSTANTLY P,barka2020,JavaScript,Wednesday 9th of July 2025 07:00:39 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1361560
+
+"
+mNL6V3xK,AC_PWM,ces-engine,C++,Wednesday 9th of July 2025 06:59:53 AM CDT,"#include <Ticker.h>
+#include ""U8g2lib.h""
+#include ""Wire.h""
+#include <GyverButton.h>
+#include ""settings.h""
+#include ""WiFiManager.h""      
+#include <LittleFS.h>         
+#include <FS.h>               
+#include ""SaveLoadManager.h""  
+Ticker blinker;
+WiFiManager wifiManager;
+
+U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+
+GButton extBtn(pinExternalBtn);
+
+void ICACHE_RAM_ATTR handleInterrupt();
+
+void ICACHE_RAM_ATTR onTimerISR() {
+  digitalWrite(dimPin, HIGH);
+  delayMicroseconds(pulseDuration);
+  digitalWrite(dimPin, LOW);
+  timer1_write(50000);  // 10мс
+}
+
+void ICACHE_RAM_ATTR handleInterrupt() {
+  power = 49000 - 475 * dimmerPercent;
+  timer1_write(power);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println(""Старт"");
+  if (!LittleFS.begin()) {
+    Serial.println(""Ошибка инициализации LittleFS"");
+  } else {
+    Serial.println(""Инициализирован LittleFS"");
+  }
+  pinMode(SENSOR_PIN, INPUT);
+  pinMode(interruptPin, INPUT_PULLUP);
+  pinMode(dimPin, OUTPUT);
+
+
+  //attachInterrupt(digitalPinToInterrupt(interruptPin), handleInterrupt, FALLING);
+
+  timer1_attachInterrupt(onTimerISR);
+  timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE);
+
+
+  extBtn.setDebounce(50);
+  extBtn.setTimeout(300);
+  extBtn.setClickTimeout(600);
+  extBtn.setType(HIGH_PULL);
+  extBtn.setDirection(NORM_OPEN);
+
+  wifiManager.begin();
+  delay(400);
+
+
+  u8g2.begin();
+  u8g2.enableUTF8Print();
+  WelcomeText();
+}
+
+
+void loop() {
+  wifiManager.handleClient();
+  handleButton();
+  // === Обработка оборотов ===
+  if (motorRunning) {
+    bool currentState = digitalRead(SENSOR_PIN);
+    if (lastState == HIGH && currentState == LOW) {
+      hasEntered = true;
+    }
+    if (lastState == LOW && currentState == HIGH) {
+      if (hasEntered) {
+        unsigned long now = millis();
+        if (now - lastPulseTime > pulseDebounce) {
+          lastPulseTime = now;
+          count++;
+          Serial.print(""Detected marks: "");
+          Serial.println(count);
+          lengthPerRevolution = (piData * spoolDiameter) / 1000.0f;  
+          lengthPerRevolution *= (1.0f + correctionCoefficient);     
+          totalLength = count * lengthPerRevolution;                 
+          DisplayStatus();
+        }
+        hasEntered = false;
+      }
+    }
+    lastState = currentState;
+  }
+
+
+  // === Автостоп по достижению 20м ===
+  if (motorRunning && totalLength >= targetLength) {
+    motorRunning = false;
+  }
+
+
+  // === Плавное управление ШИМ ===
+
+  static unsigned long lastUpdate = 0;
+
+  if (millis() - lastUpdate >= updateInterval) {
+    lastUpdate = millis();
+
+    if (motorRunning) {
+      if (dimmerValue < maxDimmerValue) {
+        dimmerValue += dimmerStep;
+        if (dimmerValue > maxDimmerValue) dimmerValue = maxDimmerValue;
+      }
+    } else {
+      if (dimmerValue > 0) {
+        dimmerValue = 0;
+        val = 0;
+        DisplayStatus();
+      }
+    }
+
+    val = dimmerValue;
+    dimmerPercent = dimmerValue;
+  }
+}
+
+void DisplayStatus() {
+  // === Отображение на дисплее ===
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_8x13_t_cyrillic);
+
+  u8g2.setCursor(0, 12);
+  u8g2.print(""Обороты: "");
+  u8g2.print(count);
+
+  u8g2.setCursor(0, 64);
+  u8g2.print(""T:"");
+  u8g2.print(maxDimmerValue);
+  u8g2.print('%');
+
+  u8g2.setCursor(0, 24);
+  u8g2.print(""Намотка: "");
+  u8g2.print(totalLength, 2);  
+  u8g2.print(""м"");
+
+  u8g2.setCursor(36, 48);
+  u8g2.print(motorRunning ? ""Запущен"" : ""Остановлен"");
+
+  u8g2.sendBuffer();
+}
+
+void WelcomeText() {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_8x13_t_cyrillic);
+
+  u8g2.setCursor(10, 12);
+  u8g2.print(""Готов к "");
+  u8g2.setCursor(0, 26);
+  u8g2.print(""использованию"");
+  u8g2.setCursor(0, 42);
+  u8g2.print(""Нажмите кнопку"");
+  u8g2.setCursor(40, 56);
+  u8g2.print("" Старт"");
+  u8g2.sendBuffer();
+}
+
+void handleButton() {
+  extBtn.tick();  
+
+  if (extBtn.isClick()) {
+    Serial.println(""click"");
+    if (!motorRunning) {
+      // Запуск
+      startMotor();
+    } else {
+      // Остановка
+      stopMotor();
+    }
+  }
+}
+
+void startMotor() {
+  motorRunning = true;
+  count = 0;
+  totalLength = 0;
+  dimmerValue = 0;
+  dimmerStep = (float)maxDimmerValue / ((float)accelerationTime / (float)updateInterval);
+  attachInterrupt(digitalPinToInterrupt(interruptPin), handleInterrupt, RISING);
+  Serial.println(""Motor started"");
+  DisplayStatus();
+}
+
+void stopMotor() {
+  dimmerValue = 0;
+  motorRunning = false;
+  detachInterrupt(digitalPinToInterrupt(interruptPin));
+  Serial.println(""Motor stopped"");
+  DisplayStatus();
+}
+"
+LTw2bHur,Make 3500$ in 20 MIN [Method] 3,barka2020,JavaScript,Wednesday 9th of July 2025 06:59:30 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 7151169
+
+"
+qWgEk5iP,Make $2000 in 15 minutes 0,barka2020,JavaScript,Wednesday 9th of July 2025 06:58:21 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 6794441
+
+"
+Unj7PiE4,✅ MAKE $22OO IN 10 MIN 0,barka2020,JavaScript,Wednesday 9th of July 2025 06:57:09 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 9355084
+
+"
+vZTsZUNn,Make 3500$ in 20 MIN [Method] 3,barka2020,JavaScript,Wednesday 9th of July 2025 06:56:04 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 8248545
+
+"
+LGc6tZzN,Make $2000 in 15 minutes 0,barka2020,JavaScript,Wednesday 9th of July 2025 06:54:52 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 3933630
+
+"
+pzEW0P4G,MAKE $1000 INSTANTLY P,barka2020,JavaScript,Wednesday 9th of July 2025 06:53:49 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 2920208
+
+"
+SDFn0M3k,✅ MAKE $22OO IN 10 MIN 0,barka2020,JavaScript,Wednesday 9th of July 2025 06:52:44 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5549468
+
+"
+r92rSj7X,FREE BTC GUIDE 8,barka2020,JavaScript,Wednesday 9th of July 2025 06:51:35 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5231719
+
+"
+97kSqH2U,Make $2000 in 15 minutes 0,peez,JavaScript,Wednesday 9th of July 2025 06:48:42 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 0338177
+
+"
+0yZwbdQ7,MAKE $1000 INSTANTLY P,peez,JavaScript,Wednesday 9th of July 2025 06:47:39 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 3322358
+
+"
+T8aAcDp6,Make 3500$ in 20 MIN [Method] 3,peez,JavaScript,Wednesday 9th of July 2025 06:46:32 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 8272094
+
+"
+vfUbKP04,Make 3500$ in 20 MIN [Method] N,prepvn,JavaScript,Wednesday 9th of July 2025 06:46:00 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5365230
+
+"
+j3qdKg7U,Make $2000 in 15 minutes R,chato27081974,JavaScript,Wednesday 9th of July 2025 06:45:52 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5008757
+
+"
+DWPfBtSC,Make $2200 in 15 minutes L,prepvn,JavaScript,Wednesday 9th of July 2025 06:45:34 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 7194286
+
+"
+xZzkV1be,Make $2000 in 15 minutes R,Donkeyballs27,JavaScript,Wednesday 9th of July 2025 06:45:11 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 0925789
+
+"
+GYSBjmn8,MAKE $5000 INSTANTLY G,prepvn,JavaScript,Wednesday 9th of July 2025 06:45:08 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1484807
+
+"
+xXQr7Chb,MAKE $1000 INSTANTLY M,Donkeyballs27,JavaScript,Wednesday 9th of July 2025 06:44:46 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 0833421
+
+"
+7q97zZMG,✅ MAKE $22OO IN 10 MIN D,prepvn,JavaScript,Wednesday 9th of July 2025 06:44:43 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 9369419
+
+"
+VsddLXzQ,Untitled,esaalviana,HTML,Wednesday 9th of July 2025 06:44:28 AM CDT,"https://info.gopay.co.id/a/qkrnQmY
+dn,b"
+AnatjtZ1,✅ MAKE $22OO IN 10 MIN U,Donkeyballs27,JavaScript,Wednesday 9th of July 2025 06:44:22 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1216091
+
+"
+nu91AT8i,FREE BTC GUIDE R,prepvn,JavaScript,Wednesday 9th of July 2025 06:44:15 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 3184408
+
+"
+Er4kvhqn,FREE BTC GUIDE 3,Donkeyballs27,JavaScript,Wednesday 9th of July 2025 06:43:57 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5697554
+
+"
+bbCBvjFu,Make $2200 in 15 minutes L,prepvn,JavaScript,Wednesday 9th of July 2025 06:43:50 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 6171460
+
+"
+XWsjfbuh,Make $2000 in 15 minutes R,Donkeyballs27,JavaScript,Wednesday 9th of July 2025 06:43:33 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 4247439
+
+"
+0vxsK5hS,MAKE $5000 INSTANTLY G,prepvn,JavaScript,Wednesday 9th of July 2025 06:43:24 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 0493842
+
+"
+wGhrMKAj,Make $2000 in 15 minutes R,LusionOwen,JavaScript,Wednesday 9th of July 2025 06:42:35 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 6870924
+
+"
+VJSZPjeV,MAKE $1000 INSTANTLY M,LusionOwen,JavaScript,Wednesday 9th of July 2025 06:42:12 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 3085403
+
+"
+9hJJNzrh,MAKE $1000 INSTANTLY M,error__sans,JavaScript,Wednesday 9th of July 2025 06:41:32 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 8643429
+
+"
+wypYnnrT,FREE BTC GUIDE 3,yVitorz,JavaScript,Wednesday 9th of July 2025 06:41:02 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 2331346
+
+"
+SzaCqRtA,Make $2200 in 15 minutes L,zxXJOOJXxz,JavaScript,Wednesday 9th of July 2025 06:41:01 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5327523
+
+"
+0EMH6WZ5,Make $2000 in 15 minutes R,yVitorz,JavaScript,Wednesday 9th of July 2025 06:40:39 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 5148001
+
+"
+uDcpPep2,Make 3500$ in 20 MIN [Method] N,hoesbemad,JavaScript,Wednesday 9th of July 2025 06:40:25 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 4766598
+
+"
+aFwNxvBn,MAKE $1000 INSTANTLY M,yVitorz,JavaScript,Wednesday 9th of July 2025 06:40:13 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 2152227
+
+"
+aDcyBAuh,FREE BTC GUIDE R,hoesbemad,JavaScript,Wednesday 9th of July 2025 06:40:01 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 4814926
+
+"
+tU5Wnv3q,Make $2200 in 15 minutes L,hoesbemad,JavaScript,Wednesday 9th of July 2025 06:39:36 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 6447893
+
+"
+6xcvQfir,✅ MAKE $22OO IN 10 MIN U,duhocvietphap,JavaScript,Wednesday 9th of July 2025 06:39:29 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1583898
+
+"
+c9QqZTvP,✅ MAKE $22OO IN 10 MIN D,hoesbemad,JavaScript,Wednesday 9th of July 2025 06:39:10 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 4404029
+
+"
+dNEyxgGN,Make 3500$ in 20 MIN [Method] 1,duhocvietphap,JavaScript,Wednesday 9th of July 2025 06:39:04 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 3864794
+
+"
+npRNDsSh,FREE BTC GUIDE R,hoesbemad,JavaScript,Wednesday 9th of July 2025 06:38:43 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PEZgui
+
+ 1180543
+
+"
