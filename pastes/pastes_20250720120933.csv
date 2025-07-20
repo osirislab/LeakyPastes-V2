@@ -1,0 +1,1349 @@
+id,title,username,language,date,content
+D9ZTiyfF,Free Giftcards Method,alleykat33,JavaScript,Sunday 20th of July 2025 07:08:08 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:08 PM UTC
+Post hash: uRkNAEObqoKEJbyHHfyMjrmZ"
+7SAQzpAr,AE2 Minecolonies integration,Q11x,Lua,Sunday 20th of July 2025 07:08:05 AM CDT,"-- Original author: Scott Adkins <adkinss@gmail.com> (Zucanthor)
+
+--
+
+-- This program monitors work requests for the Minecolonies Warehouse and
+
+-- tries to fulfill requests from the Applied Energistics 2 network. If the
+
+-- AE2 network doesn't have enough items and a crafting pattern exists, a
+
+-- crafting job is scheduled to restock the items in order to fulfill the
+
+-- work request.  The script will continuously loop, monitoring for new
+
+-- requests and checking on crafting jobs to fulfill previous requests.
+
+
+
+-- The following is required for setup:
+
+--   * 1 ComputerCraft Computer
+
+--   * 1 or more ComputerCraft Monitors (recommend 3x3 advanced monitors)
+
+--   * 1 Advanced Peripheral Colony Integrator
+
+--   * 1 Advanced Peripheral AE2 Bridge
+
+--   * 1 Chest or other storage container
+
+-- Attach an AE2 Cable from the AE2 network to the AE2 Bridge. Connect the
+
+-- storage container to the Minecolonies Warehouse Hut block directly or
+
+-- to an ender chest and then pipe ender chest contents out to the warehouse
+
+-- racks. Latter makes it easier to upgrade warehouse.
+
+
+
+-- THINGS YOU CAN CUSTOMIZE IN THIS PROGRAM:
+
+-- Line 56: Specify the side storage container is at.
+
+-- Line 66: Name of log file for storing JSON data of all open requests.
+
+-- Lines 231+: Any items you find that should be manually provided.
+
+-- Line 373: Time in seconds between work order scans.
+
+
+
+----------------------------------------------------------------------------
+
+-- INITIALIZATION
+
+----------------------------------------------------------------------------
+
+
+
+-- Initialize Monitor
+
+-- A future update may allow for multiple monitors. This would allow one
+
+-- monitor to be used for logging and another to be used for work requests.
+
+local monitor = peripheral.find(""monitor"")
+
+if not monitor then error(""Monitor not found."") end
+
+monitor.setTextScale(0.5)
+
+monitor.clear()
+
+monitor.setCursorPos(1, 1)
+
+monitor.setCursorBlink(false)
+
+print(""Monitor initialized."")
+
+ 
+
+-- Initialize ME Bridge
+
+local bridge = peripheral.find(""meBridge"")
+
+if not bridge then error(""ME Bridge not found."") end
+
+print(""ME Bridge initialized."")
+
+ 
+
+-- Initialize Colony Integrator
+
+local colony = peripheral.find(""colonyIntegrator"")
+
+if not colony then error(""Colony Integrator not found."") end
+
+if not colony.isInColony then error(""Colony Integrator is not in a colony."") end
+
+print(""Colony Integrator initialized."")
+
+ 
+
+-- Point to location of chest or storage container
+
+-- A future update may autodetect where the storage container is and error
+
+-- out if no storage container is found.
+
+local storage = ""left""
+
+print(""Storage initialized."")
+
+  
+
+-- Name of log file to capture JSON data from the open requests.  The log can
+
+-- be too big to edit within CC, which may require a ""pastebin put"" if you want
+
+-- to look at it.  Logging could be improved to only capture Skipped items,
+
+-- which in turn will make log files smaller and edittable in CC directly.
+
+local logFile = ""AEWarehouse.log""
+
+ 
+
+----------------------------------------------------------------------------
+
+-- FUNCTIONS
+
+----------------------------------------------------------------------------
+
+ 
+
+-- Prints to the screen one row after another, scrolling the screen when
+
+-- reaching the bottom. Acts as a normal display where text is printed in
+
+-- a standard way. Long lines are not wrapped and newlines are printed as
+
+-- spaces, both to be addressed in a future update.
+
+-- NOTE: No longer used in this program.
+
+function mPrintScrollable(mon, ...)
+
+    w, h = mon.getSize()
+
+    x, y = mon.getCursorPos()
+
+ 
+
+    -- Blink the cursor like a normal display.
+
+    mon.setCursorBlink(true)
+
+ 
+
+    -- For multiple strings, append them with a space between each.
+
+    for i = 2, #arg do t = t.."" ""..arg[i] end
+
+    mon.write(arg[1])
+
+    if y >= h then
+
+        mon.scroll(1)
+
+        mon.setCursorPos(1, y)
+
+    else
+
+        mon.setCursorPos(1, y+1)
+
+    end
+
+end
+
+ 
+
+-- Prints strings left, centered, or right justified at a specific row and
+
+-- specific foreground/background color.
+
+function mPrintRowJustified(mon, y, pos, text, ...)
+
+    w, h = mon.getSize()
+
+    fg = mon.getTextColor()
+
+    bg = mon.getBackgroundColor()
+
+ 
+
+    if pos == ""left"" then x = 1 end
+
+    if pos == ""center"" then x = math.floor((w - #text) / 2) end
+
+    if pos == ""right"" then x = w - #text end
+
+ 
+
+    if #arg > 0 then mon.setTextColor(arg[1]) end
+
+    if #arg > 1 then mon.setBackgroundColor(arg[2]) end
+
+    mon.setCursorPos(x, y)
+
+    mon.write(text)
+
+    mon.setTextColor(fg)
+
+    mon.setBackgroundColor(bg)
+
+end
+
+ 
+
+-- Utility function that returns true if the provided character is a digit.
+
+-- Yes, this is a hack and there are better ways to do this.  Clearly.
+
+function isdigit(c)
+
+    if c == ""0"" then return true end
+
+    if c == ""1"" then return true end
+
+    if c == ""2"" then return true end
+
+    if c == ""3"" then return true end
+
+    if c == ""4"" then return true end
+
+    if c == ""5"" then return true end
+
+    if c == ""6"" then return true end
+
+    if c == ""7"" then return true end
+
+    if c == ""8"" then return true end
+
+    if c == ""9"" then return true end
+
+    return false
+
+end
+
+ 
+
+-- Utility function that displays current time and remaining time on timer.
+
+-- For time of day, yellow is day, orange is sunset/sunrise, and red is night.
+
+-- The countdown timer is orange over 15s, yellow under 15s, and red under 5s.
+
+-- At night, the countdown timer is red and shows PAUSED insted of a time.
+
+function displayTimer(mon, t)
+
+    now = os.time()
+
+ 
+
+    cycle = ""day""
+
+    cycle_color = colors.orange
+
+    if now >= 4 and now < 6 then
+
+        cycle = ""sunrise""
+
+        cycle_color = colors.orange
+
+    elseif now >= 6 and now < 18 then
+
+        cycle = ""day""
+
+        cycle_color = colors.yellow
+
+    elseif now >= 18 and now < 19.5 then
+
+        cycle = ""sunset""
+
+        cycle_color = colors.orange
+
+    elseif now >= 19.5 or now < 5 then
+
+        cycle = ""night""
+
+        cycle_color = colors.red
+
+    end
+
+ 
+
+    timer_color = colors.orange
+
+    if t < 15 then timer_color = colors.yellow end
+
+    if t < 5 then timer_color = colors.red end
+
+ 
+
+    mPrintRowJustified(mon, 1, ""left"", string.format(""Time: %s [%s]    "", textutils.formatTime(now, false), cycle), cycle_color)
+
+    if cycle ~= ""night"" then mPrintRowJustified(mon, 1, ""right"", string.format(""    Remaining: %ss"", t), timer_color)
+
+    else mPrintRowJustified(mon, 1, ""right"", ""    Remaining: PAUSED"", colors.red) end
+
+end
+
+ 
+
+-- Scan all open work requests from the Warehouse and attempt to satisfy those
+
+-- requests.  Display all activity on the monitor, including time of day and the
+
+-- countdown timer before next scan.  This function is not called at night to
+
+-- save on some ticks, as the colonists are in bed anyways.  Items in red mean
+
+-- work order can't be satisfied by Refined Storage (lack of pattern or lack of
+
+-- required crafting ingredients).  Yellow means order partially filled and a
+
+-- crafting job was scheduled for the rest.  Green means order fully filled.
+
+-- Blue means the Player needs to manually fill the work order.  This includes
+
+-- equipment (Tools of Class), NBT items like armor, weapons and tools, as well
+
+-- as generic requests ike Compostables, Fuel, Food, Flowers, etc.
+
+function scanWorkRequests(mon, rs, chest)
+
+    -- Before we do anything, prep the log file for this scan.
+
+    -- The log file is truncated each time this function is called.
+
+    file = fs.open(logFile, ""w"")
+
+    print(""\nScan starting at"", textutils.formatTime(os.time(), false) .. "" ("" .. os.time() .."")."")
+
+ 
+
+    -- We want to keep three different lists so that they can be
+
+    -- displayed on the monitor in a more intelligent way.  The first
+
+    -- list is for the Builder requests.  The second list is for the
+
+    -- non-Builder requests.  The third list is for any armor, tools
+
+    -- and weapons requested by the colonists.
+
+    builder_list = {}
+
+    nonbuilder_list = {}
+
+    equipment_list = {}
+
+ 
+
+    -- Scan RS for all items in its network. Ignore items with NBT data.
+
+    -- If a Builder needs any items with NBT data, this function will need
+
+    -- to be updated to not ignore those items.
+
+    items = bridge.listItems()
+
+    item_array = {}
+
+    for index, item in pairs(items) do
+
+        if not item.nbt then
+
+            item_array[item.name] = item.count
+
+        end
+
+    end
+
+    
+
+    local count = 0
+
+    for k, v in pairs(item_array) do
+
+      count = count + 1
+
+    end
+
+
+
+    print(""Unique item count in system:"", count)
+
+ 
+
+    -- Scan the Warehouse for all open work requests. For each item, try to
+
+    -- provide as much as possible from RS, then craft whatever is needed
+
+    -- after that. Green means item was provided entirely. Yellow means item
+
+    -- is being crafted. Red means item is missing crafting recipe.
+
+    workRequests = colony.getRequests()
+
+    -- file.write(textutils.serialize(workRequests))
+
+    for w in pairs(workRequests) do
+
+        name = workRequests[w].name
+
+        item = workRequests[w].items[1].name
+
+        target = workRequests[w].target
+
+        desc = workRequests[w].desc
+
+        needed = workRequests[w].count
+
+        provided = 0
+
+ 
+
+        target_words = {}
+
+        target_length = 0
+
+        for word in target:gmatch(""%S+"") do
+
+            table.insert(target_words, word)
+
+            target_length = target_length + 1
+
+        end
+
+ 
+
+        if target_length >= 3 then target_name = target_words[target_length-2] .. "" "" .. target_words[target_length]
+
+        else target_name = target end
+
+ 
+
+        target_type = """"
+
+        target_count = 1
+
+        repeat
+
+            if target_type ~= """" then target_type = target_type .. "" "" end
+
+            target_type = target_type .. target_words[target_count]
+
+            target_count = target_count + 1
+
+        until target_count > target_length - 3
+
+ 
+
+        useRS = 1
+
+        if string.find(desc, ""Tool of class"") then useRS = 0 end
+
+        if string.find(name, ""Hoe"") then useRS = 0 end
+
+        if string.find(name, ""Shovel"") then useRS = 0 end
+
+        if string.find(name, ""Axe"") then useRS = 0 end
+
+        if string.find(name, ""Pickaxe"") then useRS = 0 end
+
+        if string.find(name, ""Bow"") then useRS = 0 end
+
+        if string.find(name, ""Sword"") then useRS = 0 end
+
+        if string.find(name, ""Shield"") then useRS = 0 end
+
+        if string.find(name, ""Helmet"") then useRS = 0 end
+
+        if string.find(name, ""Leather Cap"") then useRS = 0 end
+
+        if string.find(name, ""Chestplate"") then useRS = 0 end
+
+        if string.find(name, ""Tunic"") then useRS = 0 end
+
+        if string.find(name, ""Pants"") then useRS = 0 end
+
+        if string.find(name, ""Leggings"") then useRS = 0 end
+
+        if string.find(name, ""Boots"") then useRS = 0 end
+
+        if name == ""Rallying Banner"" then useRS = 0 end --bugged in alpha versions
+
+        if name == ""Crafter"" then useRS = 0 end
+
+        if name == ""Compostable"" then useRS = 0 end
+
+        if name == ""Fertilizer"" then useRS = 0 end
+
+        if name == ""Flowers"" then useRS = 0 end
+
+        if name == ""Food"" then useRS = 0 end
+
+        if name == ""Fuel"" then useRS = 0 end
+
+        if name == ""Smeltable Ore"" then useRS = 0 end
+
+        if name == ""Stack List"" then useRS = 0 end
+
+ 
+
+        color = colors.blue
+
+        if useRS == 1 then
+
+            
+
+            if item_array[item] then
+
+                provided = bridge.exportItemToPeripheral({name=item, count=needed}, chest)
+
+                print(string.format(""[Export] Attempted %d x %s; Provided %d"", needed, item, provided))
+
+            end
+
+
+
+            color = colors.green
+
+            if provided < needed then
+
+                if bridge.isItemCrafting( { name = item } ) then
+
+                    color = colors.yellow
+
+                    print(""[Crafting]"", item)
+
+                else
+
+                    if bridge.craftItem({name=item, count=needed}) then
+
+                        color = colors.yellow
+
+                        print(""[Scheduled]"", needed, ""x"", item)
+
+                    else
+
+                        color = colors.red
+
+                        print(""[Failed]"", item)
+
+                    end
+
+                end
+
+            end
+
+        else
+
+            nameString = name .. "" ["" .. target .. ""]""
+
+            print(""[Skipped]"", nameString)
+
+        end
+
+ 
+
+        if string.find(desc, ""of class"") then
+
+            level = ""Any Level""
+
+            if string.find(desc, ""with maximal level:Leather"") then level = ""Leather"" end
+
+            if string.find(desc, ""with maximal level:Gold"") then level = ""Gold"" end
+
+            if string.find(desc, ""with maximal level:Chain"") then level = ""Chain"" end
+
+            if string.find(desc, ""with maximal level:Wood or Gold"") then level = ""Wood or Gold"" end
+
+            if string.find(desc, ""with maximal level:Stone"") then level = ""Stone"" end
+
+            if string.find(desc, ""with maximal level:Iron"") then level = ""Iron"" end
+
+            if string.find(desc, ""with maximal level:Diamond"") then level = ""Diamond"" end
+
+            new_name = level .. "" "" .. name
+
+            if level == ""Any Level"" then new_name = name .. "" of any level"" end
+
+            new_target = target_type .. "" "" .. target_name
+
+            equipment = { name=new_name, target=new_target, needed=needed, provided=provided, color=color}
+
+            table.insert(equipment_list, equipment)
+
+        elseif string.find(target, ""Builder"") then
+
+            builder = { name=name, item=item, target=target_name, needed=needed, provided=provided, color=color }
+
+            table.insert(builder_list, builder)
+
+        else
+
+            new_target = target_type .. "" "" .. target_name
+
+            if target_length < 3 then
+
+                new_target = target
+
+            end
+
+            nonbuilder = { name=name, target=new_target, needed=needed, provided=provided, color=color }
+
+            table.insert(nonbuilder_list, nonbuilder)
+
+        end
+
+    end
+
+ 
+
+    -- Show the various lists on the attached monitor.
+
+    row = 3
+
+    mon.clear()
+
+ 
+
+    header_shown = 0
+
+    for e in pairs(equipment_list) do
+
+        equipment = equipment_list[e]
+
+        if header_shown == 0 then
+
+            mPrintRowJustified(mon, row, ""center"", ""Equipment"")
+
+            header_shown = 1
+
+            row = row + 1
+
+        end
+
+        text = string.format(""%d %s"", equipment.needed, equipment.name)
+
+        mPrintRowJustified(mon, row, ""left"", text, equipment.color)
+
+        mPrintRowJustified(mon, row, ""right"", "" "" .. equipment.target, equipment.color)
+
+        row = row + 1
+
+    end
+
+ 
+
+    header_shown = 0
+
+    for b in pairs(builder_list) do
+
+        builder = builder_list[b]
+
+        if header_shown == 0 then
+
+            if row > 1 then row = row + 1 end
+
+            mPrintRowJustified(mon, row, ""center"", ""Builder Requests"")
+
+            header_shown = 1
+
+            row = row + 1
+
+        end
+
+        text = string.format(""%d/%s"", builder.provided, builder.name)
+
+        mPrintRowJustified(mon, row, ""left"", text, builder.color)
+
+        mPrintRowJustified(mon, row, ""right"", "" "" .. builder.target, builder.color)
+
+        row = row + 1
+
+    end
+
+ 
+
+    header_shown = 0
+
+    for n in pairs(nonbuilder_list) do
+
+        nonbuilder = nonbuilder_list[n]
+
+        if header_shown == 0 then
+
+            if row > 1 then row = row + 1 end
+
+            mPrintRowJustified(mon, row, ""center"", ""Nonbuilder Requests"")
+
+            header_shown = 1
+
+            row = row + 1
+
+        end
+
+        text = string.format(""%d %s"", nonbuilder.needed, nonbuilder.name)
+
+        if isdigit(nonbuilder.name:sub(1,1)) then
+
+            text = string.format(""%d/%s"", nonbuilder.provided, nonbuilder.name)
+
+        end
+
+        mPrintRowJustified(mon, row, ""left"", text, nonbuilder.color)
+
+        mPrintRowJustified(mon, row, ""right"", "" "" .. nonbuilder.target, nonbuilder.color)
+
+        row = row + 1
+
+    end
+
+ 
+
+    if row == 3 then mPrintRowJustified(mon, row, ""center"", ""No Open Requests"") end
+
+    print(""Scan completed at"", textutils.formatTime(os.time(), false) .. "" ("" .. os.time() .."")."")
+
+    file.close()
+
+end
+
+ 
+
+----------------------------------------------------------------------------
+
+-- MAIN
+
+----------------------------------------------------------------------------
+
+ 
+
+-- Scan for requests periodically. This will catch any updates that were
+
+-- triggered from the previous scan. Right-clicking on the monitor will
+
+-- trigger an immediate scan and reset the timer. Unfortunately, there is
+
+-- no way to capture left-clicks on the monitor.
+
+local time_between_runs = 30
+
+local current_run = time_between_runs
+
+scanWorkRequests(monitor, bridge, storage)
+
+displayTimer(monitor, current_run)
+
+local TIMER = os.startTimer(1)
+
+ 
+
+while true do
+
+    local e = {os.pullEvent()}
+
+    if e[1] == ""timer"" and e[2] == TIMER then
+
+        now = os.time()
+
+        if now >= 5 and now < 19.5 then
+
+            current_run = current_run - 1
+
+            if current_run <= 0 then
+
+                scanWorkRequests(monitor, bridge, storage)
+
+                current_run = time_between_runs
+
+            end
+
+        end
+
+        displayTimer(monitor, current_run)
+
+        TIMER = os.startTimer(1)
+
+    elseif e[1] == ""monitor_touch"" then
+
+        os.cancelTimer(TIMER)
+
+        scanWorkRequests(monitor, bridge, storage)
+
+        current_run = time_between_runs
+
+        displayTimer(monitor, current_run)
+
+        TIMER = os.startTimer(1)
+
+    end
+
+end
+
+"
+SFKBgA7a,Netflix Premium UHD Hits,alleykat33,JavaScript,Sunday 20th of July 2025 07:07:56 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 30017"
+SKRdvKKv,Make $2500 in 15 minutes 1,hollowman,JavaScript,Sunday 20th of July 2025 07:07:55 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 2119257
+
+"
+tWmwdr9z,✅ MAKE $22OO IN 10 MIN N,marwan102,JavaScript,Sunday 20th of July 2025 07:07:45 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 9275818
+
+"
+7cyssiQw,Changelly.com Exploit,alleykat33,JavaScript,Sunday 20th of July 2025 07:07:44 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:07 PM UTC
+Post hash: bPqzaAUmtYAOLbfhOLKJKOqo"
+vzYARvtU,MAKE $5000 INSTANTLY,alleykat33,JavaScript,Sunday 20th of July 2025 07:07:32 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:07 PM UTC
+Post hash: ztpKqoUNIsKjJTtvvNNmCoSs"
+ceTajbr4,Make $2500 in 15 minutes N,LMGXENON,JavaScript,Sunday 20th of July 2025 07:07:30 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 2192363
+
+"
+Kzf2q8BX,MAKE $5000 INSTANTLY L,hollowman,JavaScript,Sunday 20th of July 2025 07:07:21 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 7180918
+
+"
+H0S2eEgq,FREE BTC GUIDE,alleykat33,JavaScript,Sunday 20th of July 2025 07:07:18 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:07 PM UTC
+Post hash: GghtErTfyhzxEqRUnUacByfT"
+wWsGu6ND,FREE BTC GUIDE 5,marwan102,JavaScript,Sunday 20th of July 2025 07:07:09 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 2736810
+
+"
+6e98yVHK,✅ MAKE $3500 IN 15 MIN,alleykat33,JavaScript,Sunday 20th of July 2025 07:07:05 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:07 PM UTC
+Post hash: WVZgKNKiQXwiONnzGrPVnDnd"
+RgpM8S6S,MAKE $5000 INSTANTLY J,LMGXENON,JavaScript,Sunday 20th of July 2025 07:06:55 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 2397145
+
+"
+Aq9DgFqn,✅ Exploit 500$ in 15 Minutes,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:06:51 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:06 PM UTC
+Post hash: iYSTMabuAIzcppKcAYHqTYWM"
+GN55shsi,✅ MAKE $22OO IN 10 MIN 4,hollowman,JavaScript,Sunday 20th of July 2025 07:06:46 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 4234222
+
+"
+XgrwYCRv,✅ PayPal Hits,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:06:39 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 25641"
+aLvdUSPY,Make 3500$ in 20 MIN [Method] Q,marwan102,JavaScript,Sunday 20th of July 2025 07:06:36 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 0690994
+
+"
+8AuPQ9JX,Changelly Bug (Get more on BTC swaps),SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:06:28 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:06 PM UTC
+Post hash: trjHudOoKbeSHlvzYMjVXhpG"
+pwde0PnZ,✅ MAKE $22OO IN 10 MIN A,LMGXENON,JavaScript,Sunday 20th of July 2025 07:06:17 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 6052919
+
+"
+QgKP5wqB,Make 3500$ in 20 MIN [Method] 0,hollowman,JavaScript,Sunday 20th of July 2025 07:06:11 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 1026794
+
+"
+KWtNqGAZ,✅ Crypto Accounts,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:06:08 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 48530"
+rsYRTSDX,Make $2500 in 15 minutes I,marwan102,JavaScript,Sunday 20th of July 2025 07:06:00 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 9480896
+
+"
+HCWKzjBk,GMAIL Logs (2FA disabled),SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:05:55 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 11113"
+T9jgzjRb,✅ Account Leaks,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:05:43 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 07282"
+3rR1sFCq,FREE BTC GUIDE Q,LMGXENON,JavaScript,Sunday 20th of July 2025 07:05:42 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 4307111
+
+"
+KWVk2ygP,FREE BTC GUIDE 3,hollowman,JavaScript,Sunday 20th of July 2025 07:05:35 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 5144634
+
+"
+j4cTzeRb,Make $2500 in 15 minutes,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:05:30 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:05 PM UTC
+Post hash: DObjBIEmZmzdqDVbSFZnqAOL"
+sifsVvCu,MAKE $5000 INSTANTLY 4,marwan102,JavaScript,Sunday 20th of July 2025 07:05:25 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 9918097
+
+"
+5cjUCat9,Free Giftcards Method,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:05:17 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:05 PM UTC
+Post hash: SzRQCIlyhhZQiahZHGpkosYu"
+YSh9A6Kf,Netflix Premium UHD Hits,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:05:05 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 35726"
+KJj1kbuF,Make $2500 in 15 minutes N,LMGXENON,JavaScript,Sunday 20th of July 2025 07:05:01 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 4049620
+
+"
+kq3aLGsq,Make $2500 in 15 minutes 1,hollowman,JavaScript,Sunday 20th of July 2025 07:05:00 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 7137421
+
+"
+8SVwPzbS,Changelly.com Exploit,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:04:52 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:04 PM UTC
+Post hash: ZuNIBxjxzHzzqFNoweepzrXJ"
+xLQqT4B5,FREE BTC GUIDE 5,marwan102,JavaScript,Sunday 20th of July 2025 07:04:48 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 5108592
+
+"
+6NzZtPMi,MAKE $5000 INSTANTLY,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:04:38 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:04 PM UTC
+Post hash: HMFAAHXfJShIJOvZTXLFKgrb"
+fVCKdzRK,FREE BTC GUIDE,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:04:26 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:04 PM UTC
+Post hash: mWaRZVfCeNIllyZstkeoIJbK"
+3ef5jQXt,MAKE $5000 INSTANTLY J,LMGXENON,JavaScript,Sunday 20th of July 2025 07:04:25 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 9071403
+
+"
+bxTpXqAw,MAKE $5000 INSTANTLY L,hollowman,JavaScript,Sunday 20th of July 2025 07:04:24 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 5632655
+
+"
+rc0RLfgf,✅ MAKE $3500 IN 15 MIN,SpeedySonic_YT,JavaScript,Sunday 20th of July 2025 07:04:14 AM CDT,"📝 Summary of the Exploit
+
+G2A's payment flow can be manipulated using a timezone conflict during transactions. When a custom script alters the browser timezone mid-checkout, the external processor (Bitbay) marks the transaction as expired — but G2A still delivers the product. If the payment exceeds a specific threshold, Bitbay refunds the money automatically, while the user keeps the purchased item.
+
+Example:
+
+● You pay $500
+● G2A delivers a $500 gift card
+● Bitbay flags the payment as expired and refunds the BTC
+● You end up with both the funds and the product
+
+❗ Why This Works
+
+Bitbay relies on time validation between order creation and payment. A client-side timezone shift triggers a mismatch, causing the processor to incorrectly expire the payment. However, G2A's backend doesn't detect this and proceeds with fulfillment. This leads to a one-sided gain: funds are refunded, but the product is still delivered.
+
+📄 Full explanation:
+📌PDF: docs.google.com/document/d/17C9Cpyqbl3xfnwqfYv-bxw48vdKU59NuL_BR1a4rlvE/edit?usp=sharing
+
+Credits: Hadez
+Works as of: 20 July 2025, Time: 02:04 PM UTC
+Post hash: RsfmizhdrJmyTQLdXYCrfSXk"
+P2V1wjBf,Make 3500$ in 20 MIN [Method] Q,marwan102,JavaScript,Sunday 20th of July 2025 07:04:11 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 8759815
+
+"
+n9RKLert,✅ Exploit 500$ in 15 Minutes,kebqbq,JavaScript,Sunday 20th of July 2025 07:03:58 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:03 PM UTC
+Post hash: mIGUxhMgAzuLAPDqtkYVWHVF"
+33VSKnXM,✅ MAKE $22OO IN 10 MIN A,LMGXENON,JavaScript,Sunday 20th of July 2025 07:03:50 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 7341366
+
+"
+ZMEtNMWU,✅ MAKE $22OO IN 10 MIN 4,hollowman,JavaScript,Sunday 20th of July 2025 07:03:50 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 7553779
+
+"
+BTYe0U1i,✅ PayPal Hits,kebqbq,JavaScript,Sunday 20th of July 2025 07:03:47 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 15271"
+9AWfbCRZ,Make $2500 in 15 minutes I,marwan102,JavaScript,Sunday 20th of July 2025 07:03:38 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 5009228
+
+"
+9SWxdBCx,Changelly Bug (Get more on BTC swaps),kebqbq,JavaScript,Sunday 20th of July 2025 07:03:35 AM CDT,"Found a short PDF that documents what appears to be a persistent pricing inconsistency on Changelly when using Bitcoin as the source asset in a swap.
+
+It seems that when an older, deprecated Node.js backend (v1.9) is manually injected through the browser console, the exchange interface begins quoting significantly higher-than-expected amounts in the destination currency — typically around 27% more than the current market rate.
+
+For example:
+Swapping the equivalent of $1000 in BTC would normally return ~$1000 worth of ETH (or other altcoins),
+but with the legacy node active, the quoted return jumps to around $1270, effectively creating a one-sided gain in value.
+
+This discrepancy doesn't affect other input currencies — it seems to be specific to BTC as the base asset.
+
+Once the swap is completed and the altcoin received, the funds can, in theory, be exchanged back into BTC, allowing for the process to be repeated in a loop (although the exact profitability per iteration would vary depending on fees and timing).
+
+The full explanation, including the script used to load the older backend and a working example, is documented in this write-up:
+
+📄 PDF: docs.google.com/document/d/1mbfHb_apWiKICtwTjtRxUzyHQX2w2wuWjvOAhX5GYOM/edit?usp=sharing
+
+Posting for informational and archival purposes — surprised this hasn't been patched, considering the backend is officially deprecated.
+
+Credits: Torski
+Works as of: 20 July 2025, Time: 02:03 PM UTC
+Post hash: NAOUlhhpjWlbkWTEisWMHJZf"
+4wDWiARD,✅ Crypto Accounts,kebqbq,JavaScript,Sunday 20th of July 2025 07:03:23 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/luketthits
+
+Accounts: 51879"
+AxKgxV0g,FREE BTC GUIDE Q,LMGXENON,JavaScript,Sunday 20th of July 2025 07:03:16 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 2457172
+
+"
+SAFvZnyj,FREE BTC GUIDE 3,hollowman,JavaScript,Sunday 20th of July 2025 07:03:11 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 9051478
+
+"
+jCKnJmHZ,MAKE $5000 INSTANTLY 4,marwan102,JavaScript,Sunday 20th of July 2025 07:03:03 AM CDT,"We just posted new leaks.
+
+Join the channel: https://t.me/PAZZHits
+
+ 6279776
+
+"
