@@ -1,0 +1,808 @@
+id,title,username,language,date,content
+juRpiF50,Sudoku Gen Phase I,Ruiqun2009,C++,Saturday 13th of September 2025 01:03:25 AM CDT,"#include <cstdio>
+#include <bitset>
+#include <vector>
+#include <array>
+#include <utility>
+#include <iostream>
+#include <unordered_map>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <random>
+#include <cassert>
+#include <chrono>
+static std::mt19937 rng(186498);
+#define MAX_NUM 10
+// numbers used
+namespace num { std::bitset<MAX_NUM * MAX_NUM + 1> row[MAX_NUM * MAX_NUM], col[MAX_NUM * MAX_NUM], mat[MAX_NUM * MAX_NUM]; }
+unsigned mat[MAX_NUM * MAX_NUM][MAX_NUM * MAX_NUM];
+unsigned dim, dimsq, dimsqsq;
+inline unsigned point_to_mat_id(unsigned row, unsigned col) { return (row / dim) * dim + col / dim; }
+unsigned filled = 0, timeout = 250;
+bool load_matrix() {
+    for (size_t i = 0; i < MAX_NUM * MAX_NUM; i++) {
+        num::row[i].reset();
+        num::col[i].reset();
+        num::mat[i].reset();
+    }
+    bool ok = true;
+    for (unsigned i = 0; i < dimsq; i++) for (unsigned j = 0; j < dimsq; j++) if (mat[i][j]) {
+        bool ok_this = true;
+        num::row[i][mat[i][j]] ? (ok_this = false) : (num::row[i][mat[i][j]] = true);
+        num::col[j][mat[i][j]] ? (ok_this = false) : (num::col[j][mat[i][j]] = true);
+        num::mat[point_to_mat_id(i, j)][mat[i][j]] ? (ok_this = false) : (num::mat[point_to_mat_id(i, j)][mat[i][j]] = true);
+        ok &= ok_this;
+        if (ok_this) filled++;
+    }
+    return ok;
+}
+void remove() {
+    while (true) {
+        if (filled == dimsqsq) return;
+        bool removed = false;
+        for (unsigned i = 0; i < dimsq; i++) for (unsigned j = 0; j < dimsq; j++) if (!mat[i][j]) {
+            std::bitset<MAX_NUM * MAX_NUM + 1> mask = num::row[i] | num::col[j] | num::mat[point_to_mat_id(i, j)];
+            if (mask.count() == 8) {
+                for (unsigned _ = 1; _ <= dimsq; _++) if (!mask[_]) {
+                    mat[i][j] = _;
+                    break;
+                }
+                num::row[i][mat[i][j]] = true;
+                num::col[j][mat[i][j]] = true;
+                num::mat[point_to_mat_id(i, j)][mat[i][j]] = true;
+                removed = true;
+                ++filled;
+            }
+        }
+        if (!removed) break;
+    }
+}
+struct dlx_node {
+    size_t num_row, num_col;
+    dlx_node *left, *right, *up, *down;
+};
+/*
+head   col[1] col[2] col[3] ...
+row[1]
+row[2]
+row[3]
+...
+*/
+class dlx {
+    dlx_node **col;
+    size_t *size_col;
+    dlx_node **first;
+    size_t num_col;
+    static constexpr size_t ms_used(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    }
+public:
+    dlx() : col(nullptr), size_col(nullptr), first(nullptr), num_col(0) {}
+    dlx(size_t num_row, size_t num_col_) : num_col(num_col_ + 1) {
+        col = new dlx_node*[num_col_ + 1];
+        size_col = new size_t[num_col_ + 1];
+        first = new dlx_node*[num_row + 1];
+        for (size_t i = 1; i <= num_col_; i++) col[i] = new dlx_node;
+        for (size_t i = 0; i <= num_row; i++) first[i] = nullptr, size_col[i] = 0;
+        col[0] = new dlx_node;
+        *col[0] = {0, 0, col[num_col_], col[1], col[0], col[0]};
+        for (size_t i = 1; i < num_col_; i++) *col[i] = {0, i, col[i - 1], col[i + 1], col[i], col[i]};
+        *col[num_col_] = {0, num_col_, col[num_col_ - 1], col[0], col[num_col_], col[num_col_]};
+    }
+    void insert(size_t num_row, size_t num_col) {
+        dlx_node* tar = new dlx_node{num_row, num_col, nullptr, nullptr, nullptr, nullptr};
+        tar->down = col[num_col]->down;
+        tar->up = col[num_col];
+        col[num_col]->down->up = tar;
+        col[num_col]->down = tar;
+        ++size_col[num_col];
+        if (!first[num_row]) first[num_row] = tar->left = tar->right = tar;
+        else {
+            tar->left = first[num_row];
+            tar->right = first[num_row]->right;
+            first[num_row]->right->left = tar;
+            first[num_row]->right = tar;
+        }
+    }
+public:
+    void erase(size_t num_col) {
+        dlx_node *i, *j;
+        (col[num_col]->left->right = col[num_col]->right)->left = col[num_col]->left;
+        for (i = col[num_col]->down; i != col[num_col]; i = i->down) for (j = i->right; j != i; j = j->right) {
+            (j->down->up = j->up)->down = j->down;
+            --size_col[j->num_col];
+        }
+    }
+    void recover(size_t num_col) {
+        dlx_node *i, *j;
+        for (i = col[num_col]->up; i != col[num_col]; i = i->up) for (j = i->left; j != i; j = j->left) {
+            j->down->up = j->up->down = j;
+            ++size_col[j->num_col];
+        }
+        col[num_col]->right->left = col[num_col]->left->right = col[num_col];
+    }
+private:
+    std::vector<size_t> sol;
+    void pre_dance() {
+        std::vector<size_t> ideal;
+        while (true) {
+            for (dlx_node *cur = col[0]->right; cur != col[0]; cur = cur->right) if (size_col[cur->num_col] == 1) {
+                ideal.push_back(cur->num_col);
+                break;
+            }
+            if (!ideal.empty()) {
+                auto v = ideal[0];
+                erase(v);
+                for (dlx_node *cur = col[v]->down; cur != col[v]; cur = cur->down) {
+                    sol.push_back(cur->num_row);
+                    for (dlx_node *i = cur->right; i != cur; i = i->right) erase(i->num_col);
+                }
+            }
+            else break;
+            ideal.clear();
+        }
+    }
+    bool after_dance(unsigned num_sol, const std::chrono::steady_clock::time_point& start_time) {
+        if (ms_used(start_time, std::chrono::steady_clock::now()) >= timeout) return false;
+        if (col[0]->right == col[0]) {
+            sols.push_back(sol);
+            return true;
+        }
+        size_t target_col = col[0]->right->num_col;
+        for (dlx_node *cur = col[0]->right->right; cur != col[0]; cur = cur->right) {
+            if (size_col[cur->num_col] == 0) continue;
+            if (size_col[cur->num_col] <= size_col[target_col]) target_col = cur->num_col;
+            else if (size_col[cur->num_col] == size_col[target_col] && (rng() & 1)) target_col = cur->num_col;
+        }
+        erase(target_col);
+        for (dlx_node *cur = col[target_col]->down; cur != col[target_col]; cur = cur->down) {
+            sol.push_back(cur->num_row);
+            for (dlx_node *i = cur->right; i != cur; i = i->right) erase(i->num_col);
+            bool ret = after_dance(num_sol, start_time);
+            if (ret && num_sol && sols.size() >= num_sol) return true;
+            for (dlx_node *i = cur->right; i != cur; i = i->right) recover(i->num_col);
+            sol.pop_back();
+        }
+        recover(target_col);
+        return false;
+    }
+public:
+    std::vector<std::vector<size_t> > sols;
+    bool dance(unsigned num_sol) {
+        pre_dance();
+        std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+        bool ret = after_dance(num_sol, t);
+        return ret && sols.size() >= num_sol;
+    }
+};
+size_t get_id(size_t row, size_t col, size_t num) { return row * dimsqsq + col * dimsq + num; }
+int main(int argc, char* argv[]) {
+    dim = 3;
+    dimsq = dim * dim;
+    dimsqsq = dimsq * dimsq;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], ""--dim"") == 0 || strcmp(argv[i], ""-d"") == 0) {
+            i++;
+            int res = sscanf(argv[i], ""%u"", &dim);
+            if (res != 1) {
+                printf(""Unknown option: %s %s\n"", argv[i - 1], argv[i]);
+                exit(1);
+            }
+            else {
+                dimsq = dim * dim;
+                dimsqsq = dimsq * dimsq;
+            }
+        }
+        else if (strcmp(argv[i], ""--timeout"") == 0 || strcmp(argv[i], ""-t"") == 0) {
+            i++;
+            int res = sscanf(argv[i], ""%u"", &timeout);
+            if (res != 1) {
+                printf(""Unknown option: %s %s\n"", argv[i - 1], argv[i]);
+                exit(1);
+            }
+        }
+        else {
+            printf(""Unknown option: -%s\n"", argv[i]);
+            exit(1);
+        }
+    }
+    rng = std::mt19937(std::random_device{}());
+    std::vector<size_t> sols;
+    size_t rounds = 0;
+    while (true) {
+        fprintf(stderr, ""Round %lu\r"", ++rounds);
+        memset(mat, 0, sizeof(mat));
+        std::vector<size_t> initial_arr(dimsq);
+        for (size_t i = 1; i <= dimsq; i++) initial_arr[i - 1] = i;
+        std::shuffle(initial_arr.begin(), initial_arr.end(), rng);
+        for (size_t i = 0; i < dim; i++) for (size_t j = 0; j < dim; j++) mat[i][j] = initial_arr[i * dim + j];
+        for (size_t row = 0; row < dim; row++) {
+            for (size_t blk = 1; blk < dim; blk++) {
+                initial_arr.clear();
+                for (size_t num = 1; num <= dimsq; num++) {
+                    bool flag = 0;
+                    for (size_t perrow = 0; perrow < row; ++perrow) {
+                        for (size_t j = 0; j < dim; j++) if (mat[perrow][blk * dim + j] == num) {
+                            flag = 1;
+                            break;
+                        }
+                    }
+                    if (!flag) for (size_t j = 0; j < blk * dim; j++) if (mat[row][j] == num) {
+                        flag = 1;
+                        break;
+                    }
+                    if (!flag) initial_arr.push_back(num);
+                }
+                std::shuffle(initial_arr.begin(), initial_arr.end(), rng);
+                for (size_t j = 0; j < dim; j++) mat[row][blk * dim + j] = initial_arr[j];
+            }
+        }
+        for (size_t col = 0; col < dim; col++) {
+            for (size_t blk = 1; blk < dim; blk++) {
+                initial_arr.clear();
+                for (size_t num = 1; num <= dimsq; num++) {
+                    bool flag = 0;
+                    for (size_t precol = 0; precol < col; ++precol) {
+                        for (size_t j = 0; j < dim; j++) if (mat[blk * dim + j][precol] == num) {
+                            flag = 1;
+                            break;
+                        }
+                    }
+                    if (!flag) for (size_t j = 0; j < blk * dim; j++) if (mat[j][col] == num) {
+                        flag = 1;
+                        break;
+                    }
+                    if (!flag) initial_arr.push_back(num);
+                }
+                std::shuffle(initial_arr.begin(), initial_arr.end(), rng);
+                for (size_t j = 0; j < dim; j++) mat[blk * dim + j][col] = initial_arr[j];
+            }
+        }
+        if (!load_matrix()) continue;
+        remove();
+        if (dim >= 3) {
+            std::vector<std::pair<size_t, size_t> > unfilled;
+            for (size_t row = 0; row < dimsq; row++) for (size_t col = 0; col < dimsq; col++) {
+                if (!mat[row][col]) unfilled.push_back(std::make_pair(row, col));
+            }
+            constexpr unsigned threshold[] = {0, 0, 0, 5, ~0u, ~0u};
+            std::shuffle(unfilled.begin(), unfilled.end(), rng);
+            size_t rand_fill = 0;
+            for (auto [row, col] : unfilled) {
+                std::bitset<MAX_NUM * MAX_NUM + 1> candidates;
+                candidates.set();
+                for (size_t i = 0; i < dimsq; i++) candidates[mat[row][i]] = false;
+                for (size_t i = 0; i < dimsq; i++) candidates[mat[i][col]] = false;
+                for (size_t i = 0; i < dim; i++) for (size_t j = 0; j < dim; j++) {
+                    candidates[mat[(row / dim) * dim + i][(col / dim) * dim + j]] = false;
+                }
+                std::vector<size_t> cand;
+                for (size_t i = 1; i <= dimsq; i++) if (candidates[i]) cand.push_back(i);
+                if (cand.size() == 0) break;
+                mat[row][col] = cand[rng() % cand.size()];
+                if(++rand_fill >= unfilled.size() / threshold[dim]) break;
+            }
+            if (!load_matrix()) continue;
+            remove();
+        }
+        if (filled == dimsqsq) {
+            for (unsigned i = 0; i < dimsq; i++, putchar('\n')) for (unsigned j = 0; j < dimsq; j++) printf(""%u "", mat[i][j]);
+            return 0;
+        }
+        /*
+        else {
+            fputs(""processed sudoku:\n"", stderr);
+            for (unsigned i = 0; i < dimsq; i++, fputc('\n', stderr)) for (unsigned j = 0; j < dimsq; j++) fprintf(stderr, ""%u "", mat[i][j]);
+            putchar('\n');
+        }
+        */
+        dlx solver(dimsqsq * dimsq, dimsqsq << 2);
+        for (unsigned i = 0; i < dimsq; i++) for (unsigned j = 0; j < dimsq; j++) for (unsigned v = 0; v < dimsq; v++) {
+            if (mat[i][j] && mat[i][j] != v + 1) continue;
+            size_t id = get_id(i, j, v) + 1;
+            solver.insert(id, i * dimsq + v + 1);
+            solver.insert(id, dimsqsq + j * dimsq + v + 1);
+            solver.insert(id, dimsqsq * 2 + point_to_mat_id(i, j) * dimsq + v + 1);
+            solver.insert(id, dimsqsq * 3 + i * dimsq + j + 1);
+        }
+        solver.dance(1);
+        if (!solver.sols.empty()) {
+            sols = solver.sols[0];
+            break;
+        }
+    }
+    for (auto v : sols) mat[(v - 1) / dimsqsq][((v - 1) / dimsq) % dimsq] = (v - 1) % dimsq + 1;
+    for (unsigned i = 0; i < dimsq; i++, putchar('\n')) for (unsigned j = 0; j < dimsq; j++) printf(""%u "", mat[i][j]);
+}"
+Eqbfq2Db,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐⭐,jehovahfitness,Java,Saturday 13th of September 2025 12:58:47 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+fKIUMbrp
+"
+vAkUXeua,⭐Swapzone Glitch (Working)⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:58:44 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: g49rguw45owkl2b2n0mhrsvvpss2bal2qhjlnj8a6mempl4l6s
+
+"
+hDW4FWyJ,⭐⭐MAKE $8O0 IN 15 MIN⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:58:38 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: zbnvbpy5rfm7bd77gfnskcywajknce5jf98hjkdstzpu3pvmun
+
+"
+Depuiipf,⭐⭐⭐Instant Profit Method⭐⭐⭐,jehovahfitness,Java,Saturday 13th of September 2025 12:58:36 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+xUW1phC1
+"
+SQNSiMTg,⭐⭐⭐Instant Profit Method⭐⭐⭐ Z,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:58:32 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: ecnn4pt2c1oz0u5kgwocxfxva2lovcf1nbwn3mmdvankh9ab06
+
+"
+uyR2S6Zt,⭐⭐⭐Make $1500 in 20 minutes⭐⭐⭐,jehovahfitness,Java,Saturday 13th of September 2025 12:58:25 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+8KiYB9Gf
+"
+fdcFBQ8S,⭐⭐MAKE $10OO INSTANTLY⭐⭐ U,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:58:24 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 5vaxwma1tlbnd2dpx0bb1bpc2rvtnzkj0pmlu2nolcsbnpd1fl
+
+"
+wv4uygAQ,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐⭐,jehovahfitness,Java,Saturday 13th of September 2025 12:58:14 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+DT2Jmk6E
+"
+BxS35dwd,⭐ChangeNOW Bug (Get more on BTC swaps)⭐⭐ E,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:58:12 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: abs0jc1lwq7m6zbscs3eb02bqwjohrqnyxrdc51e2zydq0vbvy
+
+"
+6DL8CDc2,⭐⭐⭐Exchange Exploit T 2⭐⭐⭐,jehovahfitness,Java,Saturday 13th of September 2025 12:58:03 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+nRQD6WHl
+"
+XMyQpDiB,⭐⭐⭐Exchange Exploit⭐⭐⭐ 7,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:59 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: aamsyabfnb3kj4wkbkn96y67ryl7yu8aeora7s05ulhcpl9gq6
+
+"
+rPDP0DT5,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐⭐,flyingood,Java,Saturday 13th of September 2025 12:57:52 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+IrufI7Bn
+"
+hka9bEHA,⭐Swapzone Glitch (Working)⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:52 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 9l0qlteuvnq36t7mbg5lysvng5fg38nvvnxuar5qv2gg4oue5n
+
+"
+cBbcYAQ8,⭐⭐MAKE $8O0 IN 15 MIN⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:45 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: sk1j33ebs6r8gajcw1bbd4e5td4pn8g72zs9bt6b92345hlt4n
+
+"
+GdHr6nus,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐⭐,flyingood,Java,Saturday 13th of September 2025 12:57:41 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+GbAY8ghK
+"
+RdPbG1gf,⭐⭐⭐Instant Profit Method⭐⭐⭐ Z,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:39 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: p2sr30h43l7tasg68hxs16ttxh934fgbno9k2rs9d784gpn5mb
+
+"
+pNrfaEgV,⭐⭐MAKE $10OO INSTANTLY⭐⭐ U,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:32 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 9dxe34hd3f8w0adwy78avg1b8tz71a9en644n3vmngafb9wfob
+
+"
+8dfiQRbZ,⭐ChangeNOW Bug (Get more on BTC swaps)⭐⭐ E,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:20 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 3vjfnp96nvgr33vkywplvug9bhkqd8clb7zn1ezdzkabz6ods8
+
+"
+6Apc6iBY,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐⭐,flyingood,Java,Saturday 13th of September 2025 12:57:09 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+dMYKN7ez
+"
+6gA3RKQk,⭐⭐⭐Exchange Exploit⭐⭐⭐ 7,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:08 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 10kebyy2px6omgfmb8y3bwf385s20tb2m5chjkkn9ln4fnwqmm
+
+"
+RJDUwZBL,⭐Swapzone Glitch (Working)⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:57:02 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: m9nw9xl19wz5nq4kxscz2cvsmde9wptwqwrtvsmhqlhqfnxu0e
+
+"
+QSP4AYWS,⭐⭐MAKE $8O0 IN 15 MIN⭐⭐ R,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:56:56 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: bt3tm3hjcyrpa09g6yp7ls8aovt37abdsnyd7b6nt03py1f7ld
+
+"
+1cbxVXST,⭐⭐⭐Instant Profit Method⭐⭐⭐ Z,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:56:49 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 035hdeyp05kbu0clmwdp3nl4tjkxgj43u1bnbyny9fc0urx32e
+
+"
+UaKkxvEY,⭐⭐MAKE $10OO INSTANTLY⭐⭐ U,HorrifyingDays,JavaScript,Saturday 13th of September 2025 12:56:41 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 731oojnoghhbctbqoy0f0r94ozxs7tbuttch0lfdbj8lhw3jnq
+
+"
+PPj7VsAn,⭐⭐⭐Exchange Exploit T 2⭐⭐⭐,takumi19970565,Java,Saturday 13th of September 2025 12:48:43 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+5bXl4ztN
+"
+9gzT2bgR,⭐⭐⭐Instant Profit Method⭐⭐⭐,takumi19970565,Java,Saturday 13th of September 2025 12:48:32 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+sXgQvLk8
+"
+g8AkpBbJ,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐⭐,takumi19970565,Java,Saturday 13th of September 2025 12:48:22 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+5S89N1Mb
+"
+MgGtkTkR,⭐⭐⭐Exchange Exploit T 2⭐⭐⭐,takumi19970565,Java,Saturday 13th of September 2025 12:48:00 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+1bsJYRav
+"
+kfMkuKXM,⭐⭐⭐Make $1500 in 20 minutes⭐⭐⭐,trevezxx,Java,Saturday 13th of September 2025 12:47:50 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+r61PMZ0I
+"
+mGSJTvCT,⭐⭐⭐Crypto Accounts⭐⭐⭐,trevezxx,Java,Saturday 13th of September 2025 12:47:39 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+Ktrarv7b
+"
+5jP92JG3,⭐⭐⭐ChangeNOW Exploit⭐⭐⭐,trevezxx,Java,Saturday 13th of September 2025 12:47:28 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+yGceLtNB
+"
+MgTaJPT5,⭐⭐⭐Profit Method⭐⭐⭐,trevezxx,Java,Saturday 13th of September 2025 12:47:18 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+glWX98K4
+"
+wQKBtPnG,⭐⭐⭐Exchange Exploit⭐⭐⭐,trevezxx,Java,Saturday 13th of September 2025 12:47:07 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+hPeacsOF
+"
+BET4aiYs,⭐⭐⭐Exchange Exploit⭐⭐⭐ 7,Salbin007,JavaScript,Saturday 13th of September 2025 12:43:15 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: abdxmd0mhmm7t8uf47frkgaj56tb8g95l3pnhxvrnwb5j5zsna
+
+"
+3VR3iX1F,⭐⭐⭐Exploit 500$ in 15 Minutes⭐⭐⭐,bartpix,Java,Saturday 13th of September 2025 12:43:11 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+t.me/d9kdj2
+
+18P435Cc
+"
+1zRkWCfM,⭐Swapzone Glitch (Working)⭐⭐ R,Salbin007,JavaScript,Saturday 13th of September 2025 12:43:09 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: uytgwrrozxywbgh0vjjaxhwqt31hd2jyq5ghw1cm3qdk9q5r4n
+
+"
+vZ6JqBei,⭐⭐MAKE $8O0 IN 15 MIN⭐⭐ R,Salbin007,JavaScript,Saturday 13th of September 2025 12:43:03 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: q80yw52xc178yq2k05bnq6uvsbzyf2rjl6d25e2kesegq8q0ns
+
+"
+vsaUm6HV,⭐⭐⭐Exploit 500$ in 15 Minutes⭐⭐⭐,bartpix,Java,Saturday 13th of September 2025 12:43:00 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+w5HxBiz8
+"
+8djwYFaL,⭐⭐⭐Instant Profit Method⭐⭐⭐ Z,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:57 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: bavqscn0ywv42rj2egts1yrf71ndu19hxsbx763uxhvjhlbany
+
+"
+33XnLzSF,⭐⭐MAKE $10OO INSTANTLY⭐⭐ U,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:51 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 1n8b8mn4hfmbcu9kcajnfx2lxcsrgg9ezdcqsxq3yln7bcoexb
+
+"
+XEK28SJ9,⭐⭐⭐Exchange Exploit⭐⭐⭐,bartpix,Java,Saturday 13th of September 2025 12:42:49 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+m9b8w3uf
+"
+ziLmkM0k,⭐ChangeNOW Bug (Get more on BTC swaps)⭐⭐ E,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:39 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: esjbn4lfkwo67lqu53lhp1vu68n728o5c3sn8otw6pcbnxbxbr
+
+"
+jkWMPWUb,⭐⭐⭐Exchange Exploit⭐⭐⭐ 7,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:26 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: cwemt8x3jf5vnwczxhnoqvobljh6z4369zkle516yno3vvx84b
+
+"
+nPJGh7ta,⭐Swapzone Glitch (Working)⭐⭐ R,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:20 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 2hbl68n2srp1w4lmn9u40n9gcjxecrd7zquk7hze0cvmxkxzw0
+
+"
+0F5PuU0D,⭐⭐MAKE $8O0 IN 15 MIN⭐⭐ R,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:15 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: mun0nuz15w989qnv4xt8van578lh7b8xzqv0df13m4ptk9e1n9
+
+"
+pD06PtFW,⭐⭐⭐Instant Profit Method⭐⭐⭐ Z,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:09 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 08lcvya0ebu1xl2yg0m7w4oben8mnsx699kl0kswdodpvrjsul
+
+"
+Kc2YbU7A,⭐⭐MAKE $10OO INSTANTLY⭐⭐ U,Salbin007,JavaScript,Saturday 13th of September 2025 12:42:03 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 3devrk63nvcnlmy97q09618c6e24bb0b40x1gvplo8d5bznrjf
+
+"
+B9XUpff0,⭐⭐⭐Exploit 500$ in 15 Minutes⭐⭐⭐,05alejandro27,Java,Saturday 13th of September 2025 12:42:01 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+discord.gg/5qSZj44FgF
+
+QQTpB0Fi
+"
+rUxinDmN,⭐ChangeNOW Bug (Get more on BTC swaps)⭐⭐ E,Salbin007,JavaScript,Saturday 13th of September 2025 12:41:52 AM CDT,"New account hits and guides just got posted on our channel!
+
+INSTANT $$ MEHTOD
+docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA/edit?usp=drive_link
+
+Leaks join here: t.me/xxxLekxxx
+
+Post hash: 4pfwn08ntplgpht4spklpyo0qvul4tuy8xtveg05hg9fnho8pg
+
+"
