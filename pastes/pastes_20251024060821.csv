@@ -1,0 +1,2834 @@
+id,title,username,language,date,content
+m9sX8L4g,VeinMiner,MISSID,Lua,Friday 24th of October 2025 12:55:11 AM CDT,"--========================================================--
+--  vein_miner.lua - Universal vein miner for CC:Tweaked  --
+--========================================================--
+-- Usage:
+--  1. Place the turtle near the ore vein.
+--  2. Put one sample block of the desired type in inventory.
+--  3. Place a chest directly below the turtle (for fuel & output).
+--  4. Run:  vein_miner.lua
+-- Features:
+--  - Mines only blocks matching the sample type.
+--  - Uses GPS if available; falls back to internal tracking.
+--  - Returns to base when full or low on fuel.
+--  - Unloads and refuels from the chest below.
+--========================================================--
+
+------------------------------
+-- Configuration
+------------------------------
+local MIN_FREE_SLOTS = 2
+local FUEL_THRESHOLD = 200
+local GPS_TIMEOUT = 5
+
+------------------------------
+-- State
+------------------------------
+local pos = {x=0,y=0,z=0}
+local dir = 0  -- 0=north, 1=east, 2=south, 3=west
+local gpsEnabled = true
+local startPos, startDir
+local visited = {}
+local targetName
+
+------------------------------
+-- Utility
+------------------------------
+local function normalizeDir(d) return ((d % 4) + 4) % 4 end
+local function key(x,y,z) return x.."",""..y.."",""..z end
+
+local function log(tag,msg) print(""[""..tag..""] ""..msg) end
+
+local function turnLeft() turtle.turnLeft() dir = normalizeDir(dir-1) end
+local function turnRight() turtle.turnRight() dir = normalizeDir(dir+1) end
+
+local function updatePos(dx,dy,dz)
+  if gpsEnabled then
+    local x,y,z = gps.locate(GPS_TIMEOUT)
+    if x then pos={x=x,y=y,z=z}
+    else gpsEnabled=false; log(""Warn"",""GPS lost, switching to internal tracking."") end
+  else
+    pos.x, pos.y, pos.z = pos.x+dx, pos.y+dy, pos.z+dz
+  end
+end
+
+local function forward()
+  while not turtle.forward() do
+    if turtle.detect() then turtle.dig() else os.sleep(0.2) end
+  end
+  local moves = {[0]={0,0,-1}, [1]={1,0,0}, [2]={0,0,1}, [3]={-1,0,0}}
+  updatePos(table.unpack(moves[dir]))
+end
+
+local function back()
+  turtle.back()
+  local moves = {[0]={0,0,1}, [1]={-1,0,0}, [2]={0,0,-1}, [3]={1,0,0}}
+  updatePos(table.unpack(moves[dir]))
+end
+
+local function up()
+  while not turtle.up() do
+    if turtle.detectUp() then turtle.digUp() else os.sleep(0.2) end
+  end
+  updatePos(0,1,0)
+end
+
+local function down()
+  while not turtle.down() do
+    if turtle.detectDown() then turtle.digDown() else os.sleep(0.2) end
+  end
+  updatePos(0,-1,0)
+end
+
+------------------------------
+-- Inventory & Fuel
+------------------------------
+local function freeSlots()
+  local c=0; for i=1,16 do if turtle.getItemCount(i)==0 then c=c+1 end end; return c
+end
+
+local function refuelFromChest()
+  if turtle.getFuelLevel()==""unlimited"" then return end
+  if turtle.getFuelLevel()>=FUEL_THRESHOLD then return end
+  log(""Fuel"",""Refueling from chest below..."")
+  for i=1,16 do
+    turtle.select(i)
+    turtle.suckDown(64)
+    if turtle.refuel(64) then
+      if turtle.getFuelLevel()>=FUEL_THRESHOLD then break end
+    end
+  end
+  turtle.select(1)
+end
+
+local function unloadToChest()
+  log(""Mine"",""Unloading items to chest below..."")
+  for i=1,16 do turtle.select(i); turtle.dropDown() end
+  turtle.select(1)
+end
+
+------------------------------
+-- Navigation
+------------------------------
+local function face(target)
+  target=normalizeDir(target)
+  while dir~=target do turnRight() end
+end
+
+local function goTo(target)
+  if gpsEnabled then
+    local x,y,z = gps.locate(GPS_TIMEOUT)
+    if x then pos={x=x,y=y,z=z}
+    else gpsEnabled=false; log(""Warn"",""GPS lost, using internal tracking."") end
+  end
+
+  while pos.y<target.y do up() end
+  while pos.y>target.y do down() end
+  if pos.x<target.x then face(1) while pos.x<target.x do forward() end end
+  if pos.x>target.x then face(3) while pos.x>target.x do forward() end end
+  if pos.z<target.z then face(2) while pos.z<target.z do forward() end end
+  if pos.z>target.z then face(0) while pos.z>target.z do forward() end end
+end
+
+local function goHome()
+  log(""Nav"",""Returning to base..."")
+  local current={x=pos.x,y=pos.y,z=pos.z}
+  local currentDir=dir
+  goTo(startPos)
+  face(startDir)
+  unloadToChest()
+  refuelFromChest()
+  log(""Nav"",""Returning to vein..."")
+  goTo(current)
+  face(currentDir)
+end
+
+------------------------------
+-- Mining
+------------------------------
+local function inspectAndMine(dirName)
+  local inspect,dig,move,backtrack
+  if dirName==""front"" then inspect,dig,move,backtrack=turtle.inspect,turtle.dig,forward,back
+  elseif dirName==""up"" then inspect,dig,move,backtrack=turtle.inspectUp,turtle.digUp,up,down
+  elseif dirName==""down"" then inspect,dig,move,backtrack=turtle.inspectDown,turtle.digDown,down,up
+  end
+  local ok,data=inspect()
+  if ok and data.name==targetName then
+    dig(); move(); mineVein(); backtrack()
+  end
+end
+
+function mineVein()
+  if freeSlots()<=MIN_FREE_SLOTS or turtle.getFuelLevel()<20 then goHome() end
+  local k=key(pos.x,pos.y,pos.z)
+  if visited[k] then return end
+  visited[k]=true
+
+  for d=0,3 do
+    face(d)
+    local ok,data=turtle.inspect()
+    if ok and data.name==targetName then
+      turtle.dig(); forward(); mineVein(); back()
+    end
+  end
+  inspectAndMine(""up"")
+  inspectAndMine(""down"")
+end
+
+------------------------------
+-- Main
+------------------------------
+local function main()
+  log(""Init"",""Starting vein miner..."")
+
+  local x,y,z=gps.locate(GPS_TIMEOUT)
+  if x then
+    gpsEnabled=true
+    pos={x=x,y=y,z=z}
+    log(""Nav"",string.format(""GPS signal at (%.1f,%.1f,%.1f)"",x,y,z))
+  else
+    gpsEnabled=false
+    log(""Warn"",""No GPS signal found. Using internal tracking."")
+    pos={x=0,y=0,z=0}
+  end
+  startPos={x=pos.x,y=pos.y,z=pos.z}
+  startDir=dir
+
+  for i=1,16 do
+    local item=turtle.getItemDetail(i)
+    if item then targetName=item.name break end
+  end
+  if not targetName then error(""[Error] No sample block found in inventory."") end
+  log(""Mine"",""Target block: ""..targetName)
+
+  log(""Mine"",""Beginning vein mining..."")
+  mineVein()
+  log(""Mine"",""Vein mining complete."")
+  goHome()
+  log(""Done"",""All tasks complete."")
+end
+
+local ok,err=pcall(main)
+if not ok then log(""Error"",err) end
+"
+zE14zwBn,💵 Make 3000$ in 20 minutes 💵,Valkyori,JavaScript,Friday 24th of October 2025 12:51:29 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+✅ Swapzone Profit Method
+Docs Link: docs.google.com/document/d/17UjnylIW0RrPxWJRy1DQ7BhN8EdvaeDmBMgKpCr63mI
+
+Post hash: pXKviglKvSmFDJzRsPfZfoiCYTKZrMsbyePfwVlbobHh"
+jPVfPL7V,⭐MAKE $9OO INSTANTLY ⭐ 📌📝,masterghost_1030,JavaScript,Friday 24th of October 2025 12:40:21 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: vbkwc40lk6ue3qc4nofmbn0lxnqps976tywwz5n3rpsxrwqjk6
+"
+bBj6SzsS,ДЗ: Канзас сити шафл,NikaBang,C#,Friday 24th of October 2025 12:39:12 AM CDT,"using System;
+
+internal class Program
+{
+    static void Main(string[] args)
+    {
+        Random random = new Random();
+
+        int[] numbers = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        
+        Console.Write(""Изначальный массив: "");
+        Console.WriteLine(string.Join("" "", numbers));
+        
+        Shuffle(numbers);
+        
+        Console.Write(""Перемешанный массив: "");
+        Console.WriteLine(string.Join("" "", numbers));
+
+        random.Shuffle(numbers);
+
+        Console.Write(""Перемешанный массив встроенным методом: "");
+        Console.WriteLine(string.Join("" "", numbers));
+        Console.ReadKey();
+    }
+
+    static void Shuffle(int[] array)
+    {
+        Random random = new Random();
+
+        for (int i = array.Length - 1; i > 0; i--)
+        {
+            int j = random.Next(i + 1);
+            (array[i], array[j]) = (array[j], array[i]);
+        }
+    }
+}"
+tuH4hKMa,📝 MAKE $2500 IN 15 MIN ✅ Working,Valkyori,JavaScript,Friday 24th of October 2025 12:34:47 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+✅ Swapzone Profit Method
+Docs Link: docs.google.com/document/d/17UjnylIW0RrPxWJRy1DQ7BhN8EdvaeDmBMgKpCr63mI
+
+Post hash: hwRDMREnqxgiNWLYCYuqDVwySkaxnUfBPflgVcKjQefY"
+UPcNvDJX,💎 ChangeNOW Exploit,AArja,JavaScript,Friday 24th of October 2025 12:18:00 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+✅ Swapzone Profit Method
+Docs Link: docs.google.com/document/d/17UjnylIW0RrPxWJRy1DQ7BhN8EdvaeDmBMgKpCr63mI
+
+Post hash: kIZlfZgkPVutSRnOOyDkLjjPKeIcDdrWAbmIkipjVsDW"
+r9Y9XSR2,⭐Make $15OO in 2O minutes⭐ ✅📝,masterghost_1030,JavaScript,Thursday 23rd of October 2025 11:50:18 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: ckpg9x1cwzx2ypanbmzznbnjn5bsnusvromneeztl7x6dnwcrv
+"
+Hbjci6v8,⭐Make $15OO in 2O minutes⭐ ✅🔥,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 11:00:11 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: hv3sr5hqvv4vcwc0p0tml8g444uhl68ryuo1djre6vz3zu8ert
+"
+bkXT3xcQ,⭐Profit Method⭐ ✅✅,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 10:10:07 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: 4ssj0eb2bq6bcxm2otv5fkskwqgxbcap6pawsnm1lned6c4ron
+"
+makHJWEy,1064 - Positives and Average,tonmoy09,Python,Thursday 23rd of October 2025 09:40:20 PM CDT,"numbers = []
+for x in range(6):
+    num = float(input())
+    numbers.append(num)
+pos = [c for c in numbers if c>0]
+count = len(pos)
+avg = sum(pos)/count
+print(f""{count} valores positivos"")
+print(f""{avg:.1f}"")
+"
+TyAHqmd3,disable sidefeed on elementor full with template,arie_cristianD,PHP,Thursday 23rd of October 2025 09:27:16 PM CDT,"/**
+ * Disable Sidefeed on Elementor Full Width template
+ */
+add_filter(
+	'theme_mod_jnews_sidefeed_enable',
+	function ( $enable ) {
+		if ( is_page() ) {
+			$page_id       = get_queried_object_id();
+			$template_slug = get_page_template_slug( $page_id );
+			if ( ! empty( $template_slug ) && 'elementor_header_footer' === $template_slug ) {
+				return false;
+			}
+		}
+
+		return $enable;
+	}
+);"
+xrj4sFu6,⭐MAKE $9OO INSTANTLY ⭐ 📌📝,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 09:20:02 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: m8lbp5s6wnnhuclf50glzomuopaehelasgtper6527b0y69ebb
+"
+JHKcPmmh,Data Duplikat,maharditya,PostgreSQL,Thursday 23rd of October 2025 09:11:11 PM CDT,"-- Cek unique_code yang duplikat
+SELECT unique_code, COUNT(*) as jumlah_duplikat
+FROM public.temp_master_data
+GROUP BY unique_code
+HAVING COUNT(*) > 1
+ORDER BY jumlah_duplikat DESC;
+
+
+-- Cek serial yang duplikat (muncul lebih dari 1 kali)
+SELECT serial, COUNT(*) as jumlah_duplikat
+FROM public.temp_master_data
+GROUP BY serial
+HAVING COUNT(*) > 1
+ORDER BY jumlah_duplikat DESC;"
+nMEDQ6aa,⭐Make $15OO in 2O minutes⭐ ✅📝,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 08:29:58 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: 1c4hzc53ydhgptsjafb8n837bbr9vgggspqtlzjmrnayfr15uk
+"
+HXnjEYf5,"fix ""Undefined global `vim`"" .luarc.json",bal_gennady,JSON,Thursday 23rd of October 2025 08:04:40 PM CDT,"{
+  ""$schema"": ""https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json"",
+  ""diagnostics"": {
+    ""enable"": true,
+    ""globals"": [""vim"", ""use""]
+  }
+}"
+tkCpZyG4,airtable-concatenate 3 fields,joedigital,VBScript,Thursday 23rd of October 2025 08:00:51 PM CDT,"IF(
+    OR(
+        {more1} & {more2} & {more3} = """",
+        AND(
+            {more1} = ""0"",
+            {more2} = ""0"",
+            {more3} = ""0""
+        )
+    ),
+    """",
+    CONCATENATE(
+        SWITCH({more1}, ""0"", """", ""dupe"", """", {more1} & ""\n""),
+        IF(
+            AND(
+                SWITCH({more1}, ""0"", """", ""dupe"", """") != """",
+                SWITCH({more2}, ""0"", """", ""dupe"", """") != """"
+            ),
+            ""\n"", """"
+        ),
+        SWITCH({more2}, ""0"", """", ""dupe"", """", {more2}),
+        IF(
+            AND(
+                SWITCH({more2}, ""0"", """", ""dupe"", """") != """",
+                SWITCH({more3}, ""0"", """", ""dupe"", """") != """"
+            ),
+            ""\n"", """"
+        ),
+        SWITCH({more3}, ""0"", """", ""dupe"", """", ""\n"" & {more3})
+    )
+)"
+PEfLWWW4,xl-let check for named range,joedigital,VBScript,Thursday 23rd of October 2025 07:55:24 PM CDT,"=LET(
+ matchQA,ISNUMBER(IFERROR(SEARCH(""qa"",D2),""not qa"")),
+ matchTest,ISNUMBER(IFERROR(SEARCH(""test"",D2),""not test"")),
+ matchProd,ISNUMBER(IFERROR(SEARCH(""prod"",D2),""not qa"")),
+ whichEnv,
+  IF(matchQA,""env_qa"",
+   IF(matchTest,""env_test"",
+    IF(matchProd,""env_prod"",""missing named env"")
+   )
+  ),
+    IF(whichEnv=""missing named env"",""invalid env"",ISREF(INDIRECT(whichEnv)))
+)"
+jqR0jnfe,⭐MAKE $5OO IN 15 MIN⭐ ✅📌,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 07:39:51 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: ut082pabrb7l6vtbat6bwgw6qs7lblseyhz1n30nbkcb5rrmub
+"
+7vAiVaeJ,MQ-135 Monitoring rev_03,pleasedontcode,Arduino,Thursday 23rd of October 2025 07:18:24 PM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: MQ-135 Monitoring
+	- Source Code NOT compiled for: XIAO ESP32S3
+	- Source Code created on: 2025-10-24 00:16:05
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Integrate a gas sensor module (e.g., MQ-135) with */
+	/* the XIAO ESP32S3 to enable real-time air quality */
+	/* measurement, providing alerts when pollutant */
+	/* levels exceed thresholds. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <MQUnifiedsensor.h>\t//https://github.com/miguel5612/MQSensorsLib
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF ANALOG INPUT PINS *****/
+const uint8_t sensor_MQ135_AOUT_PIN_A0\t\t= A0;
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+// Gas sensor MQ-135 connected to analog A0 of the XIAO ESP32S3
+// Board string to identify the MCU family
+#define BOARD_STRING_MQ135        (""XIAO-ESP32S3"")
+
+// ADC and voltage resolution specifics for ESP32
+#define VOLTAGE_RESOLUTION         (3.3) // ESP32 typically 3.3V reference
+#define ADC_BIT_RESOLUTION         (12)  // 12-bit ADC on ESP32
+#define MQ135_SENSOR_TYPE            (""MQ-135"")
+
+// Clean air RS/R0 ratio (from datasheet/examples)
+#define RatioMQ135CleanAir         (3.6)
+
+// LED alert output (optional, connect a LED with current limiting resistor to this pin)
+#define LED_ALERT_PIN              (25)
+
+// MQ-135 object
+MQUnifiedsensor MQ135(BOARD_STRING_MQ135, VOLTAGE_RESOLUTION, ADC_BIT_RESOLUTION, sensor_MQ135_AOUT_PIN_A0, MQ135_SENSOR_TYPE);
+
+
+void setup(void)
+{
+	// put your setup code here, to run once:
+
+	// Initialize serial communication for debugging
+	Serial.begin(115200);
+	// Optional: set LED pin mode
+	pinMode(LED_ALERT_PIN, OUTPUT);
+	digitalWrite(LED_ALERT_PIN, LOW);
+
+	// Gas concentration model for CO2 (common MQ-135 calibration data)
+	// You can switch to another gas by setting A/B with MQ135.setA()/setB()
+	MQ135.setRegressionMethod(1); //_PPM =  a*ratio^b
+	MQ135.setA(110.47); MQ135.setB(-2.862); // Configure CO2 concentration equation
+
+	// Initialize the sensor
+	MQ135.init(); 
+
+	// Calibrate in clean air (RS/R0 ratio)
+	Serial.print(""Calibrating please wait."");
+	float calcR0 = 0;
+	for(int i = 1; i <= 10; i++)
+	{
+		MQ135.update(); // read voltage from analog pin
+		calcR0 += MQ135.calibrate(RatioMQ135CleanAir);
+		Serial.print(""."");
+		delay(100);
+	}
+	MQ135.setR0(calcR0/10);
+	Serial.println(""  done!."");
+
+	if(isinf(calcR0)) {Serial.println(""Warning: Connection issue, R0 is infinite (Open circuit detected) please check your wiring and supply""); while(1);}
+	if(calcR0 == 0){Serial.println(""Warning: Connection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply""); while(1);}
+	
+	// Optional: print debug header information
+	MQ135.serialDebug(true);
+}
+
+void loop(void)
+{
+	static uint32_t lastMillis = 0;
+	const uint32_t INTERVAL_MS = 1000; // 1 second interval for real-time updates
+
+	uint32_t now = millis();
+	if(now - lastMillis >= INTERVAL_MS)
+	{
+		lastMillis = now;
+		MQ135.update();
+		float correctionFactor = 0.0f; // can be extended with temperature/humidity compensation
+		float co2ppm = MQ135.readSensor(false, correctionFactor); // CO2 ppm estimation using CO2 model
+		// Print reading
+		Serial.print(""CO2 (ppm): ""); Serial.println(co2ppm);
+
+		// Simple alert mechanism: alert when CO2 exceeds threshold
+		const float CO2_THRESHOLD = 1000.0f; // threshold in ppm
+		if(co2ppm > CO2_THRESHOLD)
+		{
+			// Turn on alert LED (or buzzer)
+			digitalWrite(LED_ALERT_PIN, HIGH);
+			Serial.println(""ALERT: CO2 concentration above threshold!"");
+		}
+		else
+		{
+			digitalWrite(LED_ALERT_PIN, LOW);
+		}
+	}
+}
+
+/* END CODE */
+"
+tmjVRQhs,⭐Make $15OO in 2O minutes⭐ ✅🔥,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 06:49:48 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: qc0gjn0h8aq1kne201vnzcu1kmnnqjmdag8nyhbkymxbehhl0s
+"
+5jQ8qegf,⭐Profit Method⭐ ✅✅,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 05:59:41 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: 4pzxhfctdwn475jp5apb7q1xq9q11bw08utg0shg19211hll8u
+"
+0tQLfTxQ,Draconic Reactor Dashboard (ComputerCraft),ExaChad,Lua,Thursday 23rd of October 2025 05:59:41 PM CDT,"r = peripheral.wrap(""bottom"")
+m = peripheral.wrap(""monitor_0"")
+
+term.clear()
+m.clear()
+
+local y_padding = 2
+local x_padding = 3
+local value_align = 25
+
+local width, height = m.getSize()
+
+-- Rainbow colors for border animation
+local rainbow_colors = {colors.red, colors.orange, colors.yellow, colors.lime, colors.cyan, colors.blue, colors.purple, colors.magenta}
+
+-- Function to draw progress bar
+local function drawProgressBar(x, y, value, min_val, max_val, target, unit, bar_width, force_color, min_indicator)
+  bar_width = bar_width or 20
+  local percentage = math.max(0, math.min(100, ((value - min_val) / (max_val - min_val)) * 100))
+  local filled_chars = math.floor((percentage / 100) * bar_width)
+  
+  -- Color coding based on proximity to target
+  local color = colors.red
+  if force_color then
+    color = force_color
+  elseif target then
+    local target_percentage = ((target - min_val) / (max_val - min_val)) * 100
+    local diff = math.abs(percentage - target_percentage)
+    if diff < 10 then
+      color = colors.lime
+    elseif diff < 25 then
+      color = colors.yellow
+    end
+  else
+    -- Default color grading for values without targets
+    if percentage > 66 then
+      color = colors.lime
+    elseif percentage > 33 then
+      color = colors.yellow
+    end
+  end
+  
+  m.setCursorPos(x, y)
+  m.setTextColor(colors.gray)
+  m.write(""["")
+  
+  -- Calculate minimum indicator position if provided
+  local min_indicator_pos = nil
+  if min_indicator then
+    min_indicator_pos = math.floor(((min_indicator - min_val) / (max_val - min_val)) * bar_width)
+  end
+  
+  -- Draw filled portion
+  for i = 1, bar_width do
+    if min_indicator_pos and i == min_indicator_pos then
+      m.setTextColor(colors.cyan)
+      m.write(""|"")
+    elseif i <= filled_chars then
+      m.setTextColor(color)
+      m.write(""="")
+    else
+      m.setTextColor(colors.gray)
+      m.write(""-"")
+    end
+  end
+  
+  m.setTextColor(colors.gray)
+  m.write(""] "")
+  m.setTextColor(colors.white)
+  m.write(string.format(""%.2f %s"", value, unit))
+end
+
+m.setTextScale(1)
+m.clear()
+
+-- Phase 2: Moving rainbow border with centered text
+local title_lines = {""Lag 4 President"", ""Draconic Reactor"", ""Quantum Monitor v1.0"", "" ~ By THCoder aka David""}
+local corner_text = ""Kennst du eigentlich Andi? :D""
+
+for frame = 1, 25 do
+  m.clear()
+  
+  -- Draw moving rainbow border
+  local color_offset = frame % #rainbow_colors
+  
+  -- Top and bottom borders
+  for x = 1, width do
+    local color_index = ((x + color_offset - 1) % #rainbow_colors) + 1
+    m.setTextColor(rainbow_colors[color_index])
+    m.setCursorPos(x, 1)
+    m.write(""="")
+    m.setCursorPos(x, height)
+    m.write(""="")
+  end
+  
+  -- Left and right borders
+  for y = 2, height - 1 do
+    local color_index = ((y + color_offset - 1) % #rainbow_colors) + 1
+    m.setTextColor(rainbow_colors[color_index])
+    m.setCursorPos(1, y)
+    m.write(""|"")
+    m.setCursorPos(width, y)
+    m.write(""|"")
+  end
+  
+  -- Draw centered title text with rainbow colors
+  local start_y = math.floor((height - #title_lines) / 2)
+  for i, line in ipairs(title_lines) do
+    local x_pos = math.floor((width - #line) / 2) + 1
+    local line_color = rainbow_colors[((i - 1) % #rainbow_colors) + 1]
+    
+    if frame > i * 3 then
+      for j = 1, math.min(#line, frame - i * 3) do
+        m.setTextColor(line_color)
+        m.setCursorPos(x_pos + j - 1, start_y + i)
+        m.write(line:sub(j, j))
+      end
+    end
+  end
+  
+  -- Draw corner text (bottom right)
+  if frame > 15 then
+    m.setTextColor(colors.cyan)
+    m.setCursorPos(width - #corner_text - 2, height - 2)
+    m.write(corner_text)
+  end
+  
+  sleep(0.1)
+end
+
+sleep(3)
+
+while true do
+  -- Get reactor information
+  local info = r.getReactorInfo()
+  
+  -- Debug: Print all available info to terminal
+  term.clear()
+  term.setCursorPos(1,1)
+  print(""Available reactor data:"")
+  for key, value in pairs(info) do
+    print(key .. "": "" .. tostring(value))
+  end
+  
+  -- Clear and prepare monitor
+  m.clear()
+  m.setTextScale(1)
+  
+  -- Header line
+  m.setCursorPos(x_padding + 8, 1)
+  m.setTextColor(colors.white)
+  m.write(""* "")
+  m.setTextColor(colors.red)
+  m.write(""Lag4President"")
+  m.setTextColor(colors.white)
+  m.write("" - "")
+  m.setTextColor(colors.purple)
+  m.write(""Draconic Reactor"")
+  m.setTextColor(colors.white)
+  m.write("" *"")
+  
+  -- Extract data
+  local status = info[""status""]
+  local temp = info[""temperature""]
+  local energyOut = info[""generationRate""] / 1000 -- Convert to kRF/t
+  local shieldIn = info[""fieldDrainRate""] / 1000 -- Convert to kRF/t
+  local netEnergy = energyOut - shieldIn
+  local fieldStrength = (info[""fieldStrength""] / info[""maxFieldStrength""]) * 100
+  local saturation = (info[""energySaturation""] / info[""maxEnergySaturation""]) * 100
+  
+  -- Check for fuel-related data
+  local fuelConversion = info[""fuelConversion""] or 0
+  local maxFuelConversion = info[""maxFuelConversion""] or 1
+  local fuelConversionRate = info[""fuelConversionRate""] or 0
+  
+  -- Calculate fuel percentage if available
+  local fuelPercentage = 0
+  if maxFuelConversion > 0 then
+    fuelPercentage = (fuelConversion / maxFuelConversion) * 100
+  end
+  
+  -- Calculate field percentage for emergency shutdown
+  local fieldPercent = fieldStrength / 100
+  
+  local row = y_padding + 1  -- Start below header
+  
+  -- Status (no progress bar)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Reactor Status:"")
+  m.setCursorPos(value_align, row)
+  if status == ""running"" or status == ""online"" then
+    m.setTextColor(colors.lime)
+    m.write(""Running"")
+  elseif status == ""cooling"" then
+    m.setTextColor(colors.yellow)
+    m.write(""Shutting Down..."")
+  elseif status == ""cold"" then
+    m.setTextColor(colors.red)
+    m.write(""Offline / Powered off"")
+  elseif status == ""charging"" then
+    m.setTextColor(colors.yellow)
+    m.write(""Charging"")
+  elseif status == ""charged"" then
+    m.setTextColor(colors.lime)
+    m.write(""Charged - Ready for Activation"")
+  else
+    m.setTextColor(colors.gray)
+    m.write(""Unknown State"")
+  end
+  row = row + 2
+  
+  -- Temperature progress bar (0-8000, with minimum indicator at 2000)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Temperature:"")
+  drawProgressBar(value_align, row, temp, 0, 8000, 7500, ""C"", 15, nil, 2000)
+  row = row + 2
+  
+  -- Energy Output progress bar with efficiency scaling
+  -- Draconic reactor efficiency increases with fuel conversion
+  -- Formula: efficiency = 1 + (fuelPercentage / 100) * 1.5
+  -- This means at 0% fuel conversion: 1x efficiency
+  -- At 100% fuel conversion: 2.5x efficiency
+  local base_output = 4000  -- Base expected output at 0% fuel conversion
+  local efficiency_multiplier = 1 + (fuelPercentage / 100) * 1.5
+  local expected_output = base_output * efficiency_multiplier
+  local max_output = base_output * 2.5  -- Maximum at 100% fuel conversion
+  
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Energy Output:"")
+  drawProgressBar(value_align, row, energyOut, 0, max_output, expected_output, ""kRF/t"", 15)
+  row = row + 2
+  
+  -- Field Input progress bar (0-2000, target 1400)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Field Input:"")
+  drawProgressBar(value_align, row, shieldIn, 0, 2000, 1400, ""kRF/t"", 15)
+  row = row + 2
+  
+  -- Net Energy (just value with color grading)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Net Energy:"")
+  m.setCursorPos(value_align, row)
+  if netEnergy < 0 then
+    m.setTextColor(colors.red)
+  elseif netEnergy < 1000 then
+    m.setTextColor(colors.yellow)
+  else
+    m.setTextColor(colors.lime)
+  end
+  m.write(string.format(""%.2f kRF/t"", netEnergy))
+  row = row + 2
+  
+  -- Field Strength progress bar (0-100, target 15)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Field Strength:"")
+  drawProgressBar(value_align, row, fieldStrength, 0, 100, 25, ""%"", 15)
+  row = row + 2
+  
+  -- Energy Saturation progress bar (0-100, target 15)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Energy Saturation:"")
+  drawProgressBar(value_align, row, saturation, 0, 100, 15, ""%"", 15)
+  row = row + 2
+  
+  -- Fuel Conversion progress bar (0-100) - white color
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Fuel Progress:"")
+  drawProgressBar(value_align, row, fuelPercentage, 0, 100, nil, ""%"", 15, colors.white)
+  row = row + 2
+  
+  -- Fuel Rate progress bar (0-5)
+  m.setCursorPos(x_padding, row)
+  m.setTextColor(colors.white)
+  m.write(""Fuel Rate:"")
+  drawProgressBar(value_align, row, fuelConversionRate / 1000, 0, 5, nil, ""nb/t"", 15)
+  
+  -- Bottom warning notes
+  m.setCursorPos(x_padding + 5, height - 3)
+  m.setTextColor(colors.red)
+  m.write(""NOTE:"")
+  m.setTextColor(colors.orange)
+  m.write("" NEVER exceed 8000 C temperature!"")
+  m.setCursorPos(x_padding + 11, height - 2)
+  m.write(""NEVER let shield drop below 10%!"")
+  m.setCursorPos(x_padding + 11, height - 1)
+  m.write(""But making it close is quite rewarding :)"")
+  
+  -- Emergency Shutdown
+  if (status == ""online"" or status == ""running"") and (fieldPercent <= 0.1 or (saturation/100) <= 0.1) then
+    r.stopReactor()
+    m.clear()
+    m.setCursorPos(x_padding, y_padding)
+    m.setTextColor(colors.red)
+    m.write(""EMERGENCY SHUTDOWN"")
+    m.setCursorPos(x_padding, y_padding + 1)
+    m.write(""Critical levels detected"")
+    sleep(2)
+  end
+  
+  sleep(0.5)
+end"
+kbSXpYa9,⭐MAKE $9OO INSTANTLY ⭐ 📌📝,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 05:09:36 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: 56fvmkm860217dgy3lsnpxbkw97clhxwbvxqrax2ob5b5x7cpu
+"
+VBkerxwq,Untitled,Casey1872,Lua,Thursday 23rd of October 2025 04:26:25 PM CDT,"--[[
+神龙反应堆控制器（ComputerCraft: Tweaked 版）
+作者：ChatGPT
+结构：双PID + 预测辅助安全限幅
+依赖接口：
+  reactor: activateReactor(), chargeReactor(), getReactorInfo(), stopReactor(), toggleFailSafe()
+  flow_gate: getFlow(), setFlowOverride(), setOverrideEnabled(), getOverrideEnabled()
+--]]
+
+-- ===== 手动 peripheral 配置 =====
+local reactor = peripheral.wrap(""reactor_0"")
+local inGate  = peripheral.wrap(""flow_gate_in"")
+local outGate = peripheral.wrap(""flow_gate_out"")
+local monitor = peripheral.wrap(""monitor_0"") -- 可选
+
+-- ===== 参数配置 =====
+local TARGET_TEMP = 8000
+local TARGET_FIELD = 0.05
+local SAFETY_TEMP = 8300
+local MIN_FIELD = 0.02
+local CHARGE_INPUT_MAX = 64000000
+local MAIN_SLEEP = 0.2
+local GUI_UPDATE_INTERVAL = 0.5
+local PREDICT_STEPS = 10
+local ALLOW_TOUCH_START = true
+
+-- ===== 反应堆信息封装 =====
+local function info() return reactor.getReactorInfo() end
+local function temp() return info().temperature or 0 end
+local function field() return info().fieldStrength or 0 end
+local function fieldMax() return info().maxFieldStrength or 1 end
+local function energy() return info().energySaturation or 0 end
+local function energyMax() return info().maxEnergySaturation or 1 end
+local function genRate() return info().generationRate or 0 end
+local function status() return tostring(info().status) end
+
+-- ===== PID 控制 =====
+local function newPID(kp,ki,kd)
+  return {kp=kp,ki=ki,kd=kd,lastErr=0,int=0,step=function(self,target,cur,dt)
+    local e=target-cur
+    self.int=self.int+e*dt
+    local d=(e-self.lastErr)/dt
+    self.lastErr=e
+    return self.kp*e+self.ki*self.int+self.kd*d
+  end}
+end
+
+-- 主PID（温控基于能空率）
+local pidTemp = newPID(0.5,0.02,0.3)
+-- 次PID（场强维持）
+local pidField = newPID(20000000,10000,0)
+
+-- ===== 预测模块（辅助限幅） =====
+local function predict(steps)
+  local t=temp()
+  local f=field()
+  local e=energy()
+  local fmax=fieldMax()
+  local emax=energyMax()
+  for _=1,steps do
+    local erate=(1-e/emax)*99
+    local trate=(t/20000)*50
+    local upIndex=(erate^3)/(100-erate+1e-9)+444.7
+    local upResist=(trate^4)/(100-trate+1e-9)
+    local rise=(upIndex+upResist*(0.5-1))/1000+0.5
+    t=t+rise
+    f=f-(1-e/emax)
+    e=e+(1-(e/emax))*5000
+  end
+  return t,f
+end
+
+-- ===== 控制函数 =====
+local function setIn(v)
+  if not inGate then return end
+  if v<0 then v=0 end
+  if v>CHARGE_INPUT_MAX then v=CHARGE_INPUT_MAX end
+  inGate.setFlowOverride(v)
+  inGate.setOverrideEnabled(true)
+end
+
+local function setOut(v)
+  if not outGate then return end
+  if v<0 then v=0 end
+  if v>CHARGE_INPUT_MAX then v=CHARGE_INPUT_MAX end
+  outGate.setFlowOverride(v)
+  outGate.setOverrideEnabled(true)
+end
+
+-- ===== 状态机 =====
+local function emergency(reason)
+  print(""!!! 紧急停机: ""..reason)
+  setOut(0)
+  setIn(CHARGE_INPUT_MAX)
+  reactor.stopReactor()
+end
+
+local function tryActivate()
+  local fi=field()/fieldMax()
+  local ei=energy()/energyMax()
+  if fi>=0.5 and ei>=0.5 and temp()>=2500 then
+    reactor.activateReactor()
+    return true
+  end
+end
+
+-- ===== GUI =====
+local function draw()
+  if not monitor then return end
+  monitor.setTextScale(1)
+  monitor.clear()
+  monitor.setCursorPos(1,1)
+  monitor.write(""神龙反应堆控制"")
+  monitor.setCursorPos(1,2)
+  monitor.write(""状态: ""..status())
+  monitor.setCursorPos(1,3)
+  monitor.write(string.format(""温度: %.1fC"",temp()))
+  monitor.setCursorPos(1,4)
+  monitor.write(string.format(""场强: %.2f%%"",(field()/fieldMax())*100))
+  monitor.setCursorPos(1,5)
+  monitor.write(string.format(""能量: %.2f%%"",(energy()/energyMax())*100))
+  monitor.setCursorPos(1,7)
+  monitor.write(""[触摸底部启动/停止]"")
+end
+
+-- ===== 主循环 =====
+local manualStart, manualStop=false,false
+local function monitorTouch()
+  if not monitor then return end
+  while true do
+    local _,side,x,y=os.pullEvent(""monitor_touch"")
+    if y>=7 then
+      if status()==""running"" then manualStop=true else manualStart=true end
+    end
+  end
+end
+
+local function main()
+  local running=false
+  while true do
+    draw()
+    local st=status()
+    local T=temp()
+    local fRatio=field()/fieldMax()
+    local eRatio=energy()/energyMax()
+
+    -- 安全检查
+    if st==""running"" and (T>=SAFETY_TEMP or fRatio<MIN_FIELD) then
+      emergency(""温度/场异常"")
+      running=false
+    end
+
+    -- 手动控制
+    if manualStart then
+      manualStart=false
+      if st~=""running"" then
+        setIn(CHARGE_INPUT_MAX)
+        tryActivate()
+      end
+    elseif manualStop then
+      manualStop=false
+      reactor.stopReactor()
+      setOut(0)
+      setIn(CHARGE_INPUT_MAX)
+      running=false
+    end
+
+    -- 状态逻辑
+    if st==""running"" then
+      running=true
+      local energyEmpty=(1-eRatio)*99
+      -- 主PID：控制能空率以稳温
+      local predT,predF=predict(PREDICT_STEPS)
+      local predictedOverheat=(predT>=SAFETY_TEMP)
+      local outAdj=pidTemp:step(TARGET_TEMP,T,MAIN_SLEEP)
+      if predictedOverheat then
+        outAdj=outAdj*0.2 -- 限幅抑制
+      end
+      local outFlow=math.max(0,math.min(CHARGE_INPUT_MAX,genRate()+outAdj*1000))
+      setOut(outFlow)
+
+      -- 次PID：控制场强维持
+      local inAdj=pidField:step(TARGET_FIELD,fRatio,MAIN_SLEEP)
+      if predF/fieldMax()<MIN_FIELD*1.2 then
+        inAdj=inAdj+CHARGE_INPUT_MAX*0.3
+      end
+      local inFlow=math.max(0,math.min(CHARGE_INPUT_MAX,inAdj))
+      setIn(inFlow)
+    else
+      -- 非运行状态：自动充能
+      if st==""charging"" or st==""offline"" or st==""stopped"" then
+        setIn(CHARGE_INPUT_MAX)
+        tryActivate()
+      end
+    end
+
+    os.sleep(MAIN_SLEEP)
+  end
+end
+
+if monitor and ALLOW_TOUCH_START then
+  parallel.waitForAny(monitorTouch,main)
+else
+  main()
+end
+"
+abnq31ie,⭐Make $15OO in 2O minutes⭐ ✅📝,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 04:19:31 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: bw25cjssalhyrcgmyc6b4upbze8qg2j41dbb2ms4ccuolkb7vp
+"
+bsMnrBDc,Untitled,dzsonzi,Lua,Thursday 23rd of October 2025 04:00:58 PM CDT,"monitor = peripheral.wrap(""monitor_1"")
+function pos(...) return term.setCursorPos(...) end
+function cls(...) return term.clear() end
+function tCol(...) return term.setTextColor(...) end
+function bCol(...) return term.setBackgroundColor(...) end
+function box(...) return paintutils.drawFilledBox(...) end
+function line(...) return paintutils.drawLine(...) end
+function write(...) return term.write(...) end
+term.redirect(monitor)
+w, h = monitor.getSize()
+
+function getSize() w,h = monitor.getSize() end
+tCol(colors.white)
+local andes = false
+------------------------------------------------------------
+
+function drawMenu()
+    monitor.setTextScale(2)
+    getSize()
+    bCol(colors.blue)
+    box(1,1,w,h,colors.blue)
+    pos(w/2-#""MENU""/2,1)
+    write(""MENU"")
+
+    monitor.setBackgroundColor(colors.lightGray)
+    pos(5,3)
+    write(""FOUNDRY"")
+    pos(5,6)
+    write(""DYE"")
+    pos(5,9)
+    write(""BLOCKS"")
+    pos(5,12)
+    write(""LOG"")
+    pos(5,15)
+    write(""BASICS"")
+    pos(w/2,3)
+    write(""BRF1"")
+    pos(w/2,6)
+    write(""NETHER"")
+    pos(w/2,9)
+    write(""ELECTRONICS"")
+    pos(w/2,12)
+    write(""BRF2"")
+    pos(w/2,15)
+    write(""IRF"")
+    pos(1,17)
+    bCol(colors.black)
+    write(""EXIT"")
+    bCol(colors.blue)
+
+end
+
+--[[function foundry()
+    monitor.setTextScale(1.5)
+    getSize()
+    cls()
+    box(1,1,w,h,colors.yellow)
+    pos(w/2-#""FOUNDRY""/2,1)
+    write(""FOUNDRY"")
+    pos(1,h)
+    bCol(colors.black)
+    write(""EXIT"")
+    while true do
+    
+        local event, button, mx, my = os.pullEvent()
+        if event == ""monitor_touch"" then
+        
+            if mx >= 1 and mx <= (1+#""EXIT"") and my == h then
+                main()             
+            end
+        end
+    end 
+end--]]
+function foundry()
+    monitor.setTextScale(1.5)
+    getSize()
+    cls()
+    pos(w/2-#""FOUNDRY""/2,1)
+    write(""FOUNDRY"")
+    pos(5,3)
+    write(""Andesit Compound"")
+    if andes==false then
+        box(5+#""Andesit Compound""+2,3,5+#""Andesit Compound""+5,3,colors.red) else box(5+#""Andesit Compound""+2,3,5+#""Andesit Compound""+5,3,colors.lime)
+    end
+    
+    pos(5,5)
+    bCol(colors.blue)
+    write(""B.R. Concrete"")
+    box(5+#""Andesit Compound""+2,5,5+#""Andesit Compound""+5,5,colors.red)
+    pos(1,h)
+    bCol(colors.black)
+    write(""EXIT"")
+    while true do
+    
+        local event, button, mx, my = os.pullEvent()
+        if event == ""monitor_touch"" then
+        
+            if mx >= 1 and mx <= (1+#""EXIT"") and my == h then
+                main()             
+            elseif mx >= 5+#""Andesit Compound""+2 and mx <= 5+#""Andesit Compound""+5 and my == 3 then
+                andes=not andes
+                redstone.setOutput(""left"", not redstone.getOutput(""left""))
+                if andes==true then
+                    box(5+#""Andesit Compound""+2,3,5+#""Andesit Compound""+5,3,colors.lime) 
+                else box(5+#""Andesit Compound""+2,3,5+#""Andesit Compound""+5,3,colors.red)
+                    
+                end
+            end
+        end
+    end 
+end
+
+function main()
+    drawMenu()
+    
+    while true do
+    
+        local event, button, mx, my = os.pullEvent()
+        if event == ""monitor_touch"" then
+        
+            if mx >= 5 and mx <= (5+#""FOUNDRY"") and my == 3 then
+                foundry()             
+            end
+        end
+    end 
+end
+
+--------------------------------------------------------------
+
+main()
+"
+itjHJjr0,Get GPO Links & Convert OU to DN,guyrleech,PowerShell,Thursday 23rd of October 2025 03:53:06 PM CDT,"## Find all links to a GPO and convert SOM path to a Distinguished Name so can be passed to Remove-GPLink
+
+([xml](Get-GPOReport -Name ""Name of the GPO"" -ReportType Xml)).GPO.LinksTo|where sompath -match ""Regex matching OUs of interest"" | select SOMPath,Enabled,@{n='DN';e={$p = $_.SOMPath.split('/') ;""OU=$($p[($p.Count - 1)..1] -join ',OU='),DC=$($p[0].Split('.') -join ',DC=')""}}
+"
+1311KF1Q,⭐MAKE $5OO IN 15 MIN⭐ ✅📌,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 03:29:27 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: 0lwl87kq8s6th2h3hnmk06dxwbxnxkolk156uvsv5nbc8t1f10
+"
+LJRL04mj,⭐⭐MAKE $9OO INSTANTLY ⭐ 📌🚨,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 03:26:11 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: kefub5mg57wegylq6nowx7bwvz35fy9obw6bbohcp4fsbnwbrv
+"
+NUSE99b2,Untitled,Casey1872,Lua,Thursday 23rd of October 2025 03:14:33 PM CDT,"local peripheralNames = {
+  reactor = ""draconic_reactor_1"",
+  inGate  = ""flow_gate_3"",
+  outGate = ""flow_gate_2"",
+  monitor = ""right""
+}
+
+local autoStop = 0.1
+local setfield  = 0.05
+local setTemp   = 8000.4
+local fieldCoe  = {0.08, 0.03, 0.09}
+local tempCoe   = {0.05, 0.09, 0.1}
+local energyCoe = {0.045, 0.11, 0.1}
+local intgTime  = 15
+
+local TICK = 0.05
+local FIELD_INTERVAL = math.floor(0.3 / TICK + 0.5)
+local TEMP_INTERVAL  = math.floor(0.8 / TICK + 0.5)
+
+-- Safety thresholds
+local MAX_TEMP = 8300
+local MIN_FIELD_RATE = 0.02 -- 2%
+
+local reactor, inGate, outGate, monitor = nil, nil, nil, nil
+local curIn, curOut = 0, 0
+local avgOut = 0
+
+local fieldDeltaList = {}
+local tempDeltaList = {}
+local energyDeltaList = {}
+
+local state = ""idle""  -- idle, check, attach, charge, active, error
+local buttonState = ""stop"" -- start/stop text toggling on GUI
+local running = false -- whether PID control is active / we have 'started' reactor control
+
+-- PID internal trackers
+local field_it, field_eI, field_lastDelta = 0, 0.0, 0.0
+local temp_it, temp_eI, temp_lastDelta = 0, 0.0, 0.0
+local energy_it, energy_eI, energy_lastDelta = 0, 0.0, 0.0
+
+-- counters for tick-based updates
+local tickCounter = 0
+local fieldCounter = 0
+local tempCounter = 0
+
+-- monitor layout (3x2 proportion)
+local mon_w, mon_h = nil, nil
+local seg_w, seg_h = nil, nil
+
+-------------------------------------------------------------------------------
+-- Helper: safe call - check method exists before calling
+-------------------------------------------------------------------------------
+local function hasMethod(obj, name)
+  if not obj then return false end
+  return type(obj[name]) == ""function""
+end
+
+local function safeCall(obj, name, ...)
+  if not obj then return nil, ""nil object"" end
+  local f = obj[name]
+  if type(f) ~= ""function"" then
+    return nil, ""method_missing:"" .. tostring(name)
+  end
+  return pcall(f, obj, ...)
+end
+
+-------------------------------------------------------------------------------
+-- Peripheral detection helpers
+-------------------------------------------------------------------------------
+local function tryWrap(name)
+  if name and name ~= """" then
+    local ok, res = pcall(peripheral.wrap, name)
+    if ok and res then return res end
+  end
+  return nil
+end
+
+local function findReactorPeripheral()
+  for n, t in pairs(peripheral.getNames()) do
+    local p = peripheral.wrap(t)
+    if p and type(p.getReactorInfo) == ""function"" then
+      return t, p
+    end
+  end
+  return nil, nil
+end
+
+local function findGatePeripheral(exclude)
+  for n, t in pairs(peripheral.getNames()) do
+    if t ~= exclude then
+      local p = peripheral.wrap(t)
+      if p then
+        -- attempt to find a method that looks like flow control
+        if (type(p.setFlow) == ""function"")
+           or (type(p.setFlowOverride) == ""function"")
+           or (type(p.setFlowRate) == ""function"")
+           or (type(p.setOverrideEnabled) == ""function"") then
+          return t, p
+        end
+      end
+    end
+  end
+  return nil, nil
+end
+
+local function findMonitorPeripheral()
+  for n, t in pairs(peripheral.getNames()) do
+    local p = peripheral.wrap(t)
+    if p and type(p.clear) == ""function"" and type(p.setCursorPos) == ""function"" then
+      return t, p
+    end
+  end
+  return nil, nil
+end
+
+-------------------------------------------------------------------------------
+-- Peripheral assignment / self-check
+-------------------------------------------------------------------------------
+local function detectPeripherals()
+  -- attempt to wrap via explicit names first
+  reactor = tryWrap(peripheralNames.reactor)
+  inGate  = tryWrap(peripheralNames.inGate)
+  outGate = tryWrap(peripheralNames.outGate)
+  monitor = tryWrap(peripheralNames.monitor)
+
+  -- auto-detect any that are still nil
+  if not reactor then
+    local name, p = findReactorPeripheral()
+    if p then
+      reactor = p
+      peripheralNames.reactor = name
+    end
+  end
+  if not inGate then
+    local name, p = findGatePeripheral(peripheralNames.outGate)
+    if p then
+      inGate = p
+      peripheralNames.inGate = name
+    end
+  end
+  if not outGate then
+    local name, p = findGatePeripheral(peripheralNames.inGate)
+    if p then
+      outGate = p
+      peripheralNames.outGate = name
+    end
+  end
+  if not monitor then
+    local name, p = findMonitorPeripheral()
+    if p then
+      monitor = p
+      peripheralNames.monitor = name
+    end
+  end
+end
+
+local function checkAPIs()
+  -- return true if basic APIs exist
+  if not reactor then return false, ""no reactor"" end
+  if not hasMethod(reactor, ""getReactorInfo"") then return false, ""reactor.getReactorInfo missing"" end
+  -- reactor methods may vary, but check some common ones
+  if not (hasMethod(reactor, ""activateReactor"") and hasMethod(reactor, ""stopReactor"") and hasMethod(reactor, ""chargeReactor"")) then
+    -- still allow if some present: require at least getReactorInfo
+    -- but prefer to have activate/stop/charge
+  end
+
+  if not inGate or not outGate then return false, ""missing gates"" end
+  -- check flow methods on gates
+  local inOk = hasMethod(inGate, ""setFlow"") or hasMethod(inGate, ""setFlowOverride"") or hasMethod(inGate, ""setFlowRate"") or hasMethod(inGate, ""setOverrideEnabled"")
+  local outOk = hasMethod(outGate, ""setFlow"") or hasMethod(outGate, ""setFlowOverride"") or hasMethod(outGate, ""setFlowRate"") or hasMethod(outGate, ""setOverrideEnabled"")
+  if not (inOk and outOk) then return false, ""gate methods missing"" end
+
+  if monitor then
+    local monOk = hasMethod(monitor, ""clear"") and hasMethod(monitor, ""setCursorPos"") and hasMethod(monitor, ""write"")
+    if not monOk then return false, ""monitor methods missing"" end
+  end
+
+  return true, ""ok""
+end
+
+-------------------------------------------------------------------------------
+-- Flow control wrappers (tolerant to different gate APIs)
+-------------------------------------------------------------------------------
+local function setIn(value)
+  if not inGate then return false end
+  if value < 0 then value = 0 end
+  -- clamp to a large max
+  if value > 64000000 then value = 64000000 end
+  curIn = value
+  -- try several possible methods
+  if hasMethod(inGate, ""setFlowOverride"") then
+    pcall(inGate.setFlowOverride, inGate, value)
+    return true
+  elseif hasMethod(inGate, ""setFlow"") then
+    pcall(inGate.setFlow, inGate, value)
+    return true
+  elseif hasMethod(inGate, ""setFlowRate"") then
+    pcall(inGate.setFlowRate, inGate, value)
+    return true
+  elseif hasMethod(inGate, ""setOverrideEnabled"") then
+    -- set override, then set flow maybe via setFlow or similar
+    pcall(inGate.setOverrideEnabled, inGate, true)
+    if hasMethod(inGate, ""setFlow"") then pcall(inGate.setFlow, inGate, value) end
+    return true
+  else
+    return false
+  end
+end
+
+local function setOut(value)
+  if not outGate then return false end
+  if value < 0 then value = 0 end
+  if value > 64000000 then value = 64000000 end
+  curOut = value
+  if hasMethod(outGate, ""setFlowOverride"") then
+    pcall(outGate.setFlowOverride, outGate, value)
+    return true
+  elseif hasMethod(outGate, ""setFlow"") then
+    pcall(outGate.setFlow, outGate, value)
+    return true
+  elseif hasMethod(outGate, ""setFlowRate"") then
+    pcall(outGate.setFlowRate, outGate, value)
+    return true
+  elseif hasMethod(outGate, ""setOverrideEnabled"") then
+    pcall(outGate.setOverrideEnabled, outGate, true)
+    if hasMethod(outGate, ""setFlow"") then pcall(outGate.setFlow, outGate, value) end
+    return true
+  else
+    return false
+  end
+end
+
+-------------------------------------------------------------------------------
+-- Reactor info helpers (wrap original names)
+-------------------------------------------------------------------------------
+local function getInfo()
+  if not reactor then return nil end
+  local ok, info = pcall(reactor.getReactorInfo, reactor)
+  if ok and type(info) == ""table"" then return info end
+  return nil
+end
+
+local function status()
+  local info = getInfo()
+  if not info then return nil end
+  return info.status
+end
+
+local function Temp()
+  local info = getInfo()
+  if not info then return 0 end
+  return info.temperature or 0
+end
+
+local function Field()
+  local info = getInfo()
+  if not info then return 0 end
+  return info.fieldStrength or 0
+end
+
+local function maxField()
+  local info = getInfo()
+  if not info then return 1 end
+  return info.maxFieldStrength or 1
+end
+
+local function FieldRate()
+  local info = getInfo()
+  if not info then return 0 end
+  if info.maxFieldStrength and info.maxFieldStrength > 0 then
+    return (info.fieldStrength or 0) / info.maxFieldStrength
+  end
+  return 0
+end
+
+local function FieldDrain()
+  local info = getInfo()
+  if not info then return 0 end
+  return info.fieldDrainRate or 0
+end
+
+local function Energy()
+  local info = getInfo()
+  if not info then return 0 end
+  return info.energySaturation or 0
+end
+
+local function EnergyRate()
+  local info = getInfo()
+  if not info then return 0 end
+  if info.maxEnergySaturation and info.maxEnergySaturation > 0 then
+    return (info.energySaturation or 0) / info.maxEnergySaturation
+  end
+  return 0
+end
+
+local function FuelRate()
+  local info = getInfo()
+  if not info then return 0 end
+  if info.maxFuelConversion and info.maxFuelConversion > 0 then
+    return (info.fuelConversion or 0) / info.maxFuelConversion
+  end
+  return 0
+end
+
+local function eV()
+  local info = getInfo()
+  if not info then return 0 end
+  return info.generationRate or 0
+end
+
+local function startReactor()
+  if not reactor then return false end
+  if hasMethod(reactor, ""activateReactor"") then
+    pcall(reactor.activateReactor, reactor)
+    return true
+  end
+  return false
+end
+local function stopReactor()
+  if not reactor then return false end
+  if hasMethod(reactor, ""stopReactor"") then
+    pcall(reactor.stopReactor, reactor)
+    return true
+  end
+  return false
+end
+local function chargeReactor()
+  if not reactor then return false end
+  if hasMethod(reactor, ""chargeReactor"") then
+    pcall(reactor.chargeReactor, reactor)
+    return true
+  end
+  return false
+end
+
+-------------------------------------------------------------------------------
+-- Initialize reactor for activation (charging, override enabling)
+-------------------------------------------------------------------------------
+local function initializeReactor()
+  if inGate and hasMethod(inGate, ""setOverrideEnabled"") then
+    pcall(inGate.setOverrideEnabled, inGate, true)
+  end
+  if outGate and hasMethod(outGate, ""setOverrideEnabled"") then
+    pcall(outGate.setOverrideEnabled, outGate, true)
+  end
+  chargeReactor()
+  setOut(0)
+  setIn(64000000)
+  -- try to activate if thresholds satisfied
+  for i = 1, 200 do -- timeout loop (200*0.05 = 10s)
+    local t = Temp()
+    local f = Field()
+    local e = Energy()
+    if t >= 2000 and f >= 0.49 and e >= 0.49 then
+      startReactor()
+      if status() == ""running"" then return true end
+    end
+    os.sleep(TICK)
+  end
+  return false
+end
+
+-------------------------------------------------------------------------------
+-- PID update functions (called at their respective intervals)
+-------------------------------------------------------------------------------
+local function sum(tb)
+  local s = 0.0
+  for _, v in ipairs(tb) do s = s + v end
+  return s
+end
+
+local function len(tb)
+  return #tb
+end
+
+local function updateFieldPID()
+  -- fieldDelta relative to maxField
+  local fieldDelta = maxField() * setfield - Field()
+  local eP = fieldDelta * fieldCoe[1]
+  -- only integrate if eP + drain >= 0 (mimic original logic)
+  if eP + FieldDrain() >= 0 then
+    table.insert(fieldDeltaList, fieldDelta)
+    if field_it >= 3 and #fieldDeltaList >= 2 then
+      field_eI = sum(fieldDeltaList) * fieldCoe[2]
+      local last = fieldDeltaList[#fieldDeltaList - 1] or fieldDeltaList[#fieldDeltaList]
+      local eD = (fieldDelta - last) * fieldCoe[3]
+      local eT = eP + field_eI + eD
+      setIn(eT + FieldDrain())
+      field_lastDelta = fieldDelta
+    else
+      -- accumulate until integral starts
+      if field_it <= intgTime then field_it = field_it + 1 end
+      -- still compute proportional-only
+      local eT = eP + field_eI
+      setIn(eT + FieldDrain())
+      field_lastDelta = fieldDelta
+      table.insert(fieldDeltaList, fieldDelta)
+    end
+    -- limit integral history
+    if #fieldDeltaList > intgTime then
+      while #fieldDeltaList > intgTime do table.remove(fieldDeltaList, 1) end
+    end
+  else
+    -- if not allowed to integrate, still set minimal override
+    setIn(0)
+  end
+end
+
+local function updateTempEnergyPID()
+  -- Temperature PID driving target energy delta
+  local tDelta = setTemp - Temp()
+  local eP1 = tDelta * tempCoe[1]
+  table.insert(tempDeltaList, tDelta)
+  if temp_it >= 3 and #tempDeltaList >= 2 then
+    temp_eI = sum(tempDeltaList) * tempCoe[2]
+    local eD1 = (tDelta - (tempDeltaList[#tempDeltaList - 1] or tempDeltaList[#tempDeltaList])) * tempCoe[3]
+    -- eT1 total temperature PID output
+    local eT1 = eP1 + temp_eI + eD1
+    local eDelta = eT1 * 100
+    -- now energy PID (use eDelta as input)
+    local eP2 = eDelta * energyCoe[1]
+    if eP2 + eV() >= 0 then
+      table.insert(energyDeltaList, eDelta)
+      if energy_it >= 3 and #energyDeltaList >= 2 then
+        energy_eI = sum(energyDeltaList) * energyCoe[2]
+        local eD2 = (eDelta - (energyDeltaList[#energyDeltaList - 1] or energyDeltaList[#energyDeltaList])) * energyCoe[3]
+        local eT2 = eP2 + energy_eI + eD2
+        setOut(eV() + eT2)
+      else
+        -- still use proportional-only
+        setOut(eV() + eP2)
+      end
+    end
+    -- trim histories
+    if #tempDeltaList > intgTime then
+      while #tempDeltaList > intgTime do table.remove(tempDeltaList, 1) end
+    end
+    if #energyDeltaList > intgTime then
+      while #energyDeltaList > intgTime do table.remove(energyDeltaList, 1) end
+    end
+  else
+    -- initial accumulation: still set baseline outputs
+    temp_it = math.min(temp_it + 1, intgTime + 1)
+    energy_it = math.min(energy_it + 1, intgTime + 1)
+    -- set conservative out to current generation (no extra)
+    setOut(eV())
+  end
+end
+
+-------------------------------------------------------------------------------
+-- GUI drawing (monitor proportional to 3x2)
+-------------------------------------------------------------------------------
+local function initMonitorLayout()
+  if not monitor then return end
+  local ok, w, h = pcall(monitor.getSize, monitor)
+  if ok and w and h then
+    mon_w, mon_h = w, h
+  else
+    -- fallback
+    mon_w, mon_h = 51, 19
+  end
+  seg_w = math.floor(mon_w / 3)
+  seg_h = math.floor(mon_h / 2)
+end
+
+local function monClear()
+  if not monitor then return end
+  pcall(monitor.clear, monitor)
+  pcall(monitor.setCursorPos, monitor, 1, 1)
+end
+
+local function drawCentered(x, y, text)
+  if not monitor then return end
+  local txt = tostring(text)
+  local len = #txt
+  local col = math.max(1, math.floor((seg_w - len) / 2))
+  pcall(monitor.setCursorPos, monitor, (x - 1) * seg_w + col, (y - 1) * seg_h + 1)
+  pcall(monitor.write, monitor, txt)
+end
+
+local function drawGUI()
+  if not monitor then return end
+  monClear()
+  -- Title
+  pcall(monitor.setCursorPos, monitor, 2, 1)
+  pcall(monitor.write, monitor, ""Draconic Reactor Control"")
+  -- Status region (left-top segment)
+  local st = (""State: %s""):format(state:upper())
+  pcall(monitor.setCursorPos, monitor, 1, 3)
+  pcall(monitor.write, monitor, st)
+
+  -- Data region (middle-top)
+  pcall(monitor.setCursorPos, monitor, seg_w + 2, 3)
+  local fRate = FieldRate() * 100
+  local eRate = EnergyRate() * 100
+  local fuelPct = (1 - FuelRate()) * 100
+  pcall(monitor.write, monitor, (""Field: %.2f%%""):format(fRate))
+  pcall(monitor.setCursorPos, monitor, seg_w + 2, 4)
+  pcall(monitor.write, monitor, (""Energy: %.2f%%""):format(eRate))
+  pcall(monitor.setCursorPos, monitor, seg_w + 2, 5)
+  pcall(monitor.write, monitor, (""Fuel Left: %.2f%%""):format(fuelPct))
+
+  -- Temp region (right-top)
+  pcall(monitor.setCursorPos, monitor, 2 * seg_w + 2, 3)
+  pcall(monitor.write, monitor, (""TEMP: %d C""):format(Temp()))
+  pcall(monitor.setCursorPos, monitor, 2 * seg_w + 2, 4)
+  pcall(monitor.write, monitor, (""Out: %.2f RF/t""):format(curOut - curIn))
+
+  -- Center: big Field percent
+  pcall(monitor.setCursorPos, monitor, seg_w + 2, seg_h - 2)
+  pcall(monitor.write, monitor, (""Field Strength: %.2f%%""):format(FieldRate() * 100))
+
+  -- Bottom area: button
+  local btnY = mon_h - 2
+  pcall(monitor.setCursorPos, monitor, 2, btnY)
+  local btnText = (running and ""[ STOP REACTOR ]"" or ""[ START REACTOR ]"")
+  pcall(monitor.write, monitor, btnText)
+
+  -- If error state, show warning
+  if state == ""error"" then
+    pcall(monitor.setCursorPos, monitor, 2, btnY - 2)
+    pcall(monitor.write, monitor, ""!!! ERROR / SAFETY STOPPED !!!"")
+  end
+end
+
+-------------------------------------------------------------------------------
+-- Touch handling: check if touch inside button area, toggle start/stop
+-- Uses proportional layout (bottom-left segment area)
+-------------------------------------------------------------------------------
+local function handleMonitorTouch(x, y)
+  if not monitor or not mon_w or not mon_h then return end
+  local btnY = mon_h - 2
+  -- simplify: if y >= btnY and x between 1..mon_w, toggle
+  if y >= btnY then
+    if state ~= ""error"" then
+      if running then
+        -- stop reactor control: stop PIDs, try to stop reactor
+        running = false
+        -- stop reactor and zero outputs
+        stopReactor()
+        setOut(0)
+        setIn(64000000)
+      else
+        running = true
+        -- attempt initialize/attach
+        initializeReactor()
+      end
+    else
+      -- if in error, clicking does nothing (could be extended to reset)
+    end
+  end
+end
+
+-------------------------------------------------------------------------------
+-- Emergency supervise (single-step check inside main loop)
+-------------------------------------------------------------------------------
+local function emergencyCheck()
+  if state == ""active"" and (Temp() >= MAX_TEMP or FieldRate() <= MIN_FIELD_RATE) then
+    -- immediate protective actions
+    setOut(0)
+    setIn(64000000)
+    pcall(stopReactor)
+    state = ""error""
+    running = false
+  end
+end
+
+-------------------------------------------------------------------------------
+-- State machine handlers
+-------------------------------------------------------------------------------
+local function handleIdle()
+  -- waiting for peripherals
+  detectPeripherals()
+  local ok, msg = checkAPIs()
+  if ok then
+    state = ""check""
+  else
+    state = ""idle""
+  end
+end
+
+local function handleCheck()
+  local ok, msg = checkAPIs()
+  if ok then
+    state = ""attach""
+  else
+    state = ""idle""
+  end
+end
+
+local function handleAttach()
+  -- try to attach to existing reactor state (charge, activate if needed)
+  -- keep previous running flag
+  if initializeReactor() then
+    -- if reactor is running already, accept control
+    if status() == ""running"" then
+      state = ""active""
+      running = true
+    else
+      -- if not running but charged, go to charge and then active
+      state = ""charge""
+    end
+  else
+    -- initialization failed, wait a bit and retry
+    state = ""charge""
+  end
+end
+
+local function handleCharge()
+  -- charge until thresholds reached then try activate
+  chargeReactor()
+  setOut(0)
+  setIn(64000000)
+  local t = Temp()
+  local f = Field()
+  local e = Energy()
+  if t >= 2000 and f >= 0.49 and e >= 0.49 then
+    startReactor()
+    if status() == ""running"" then
+      state = ""active""
+      running = true
+    else
+      -- keep charging / waiting
+      state = ""charge""
+    end
+  else
+    state = ""charge""
+  end
+end
+
+local function handleActive()
+  emergencyCheck()
+  if state == ""error"" then return end
+  -- when running flag false, interpret as user stop
+  if not running then
+    -- stop PIDs and attempt to stop reactor
+    stopReactor()
+    state = ""idle""
+    return
+  end
+  -- update PID based on tick counters handled in main loop
+end
+
+local function handleError()
+  -- show error and keep outputs safe
+  setOut(0)
+  setIn(64000000)
+  -- wait until user reconnects peripherals and manually restart by clicking Start
+end
+
+-------------------------------------------------------------------------------
+-- MAIN loop: uses os.startTimer + os.pullEvent for precise tick & non-blocking touch
+-------------------------------------------------------------------------------
+local function main()
+  -- initial detection
+  detectPeripherals()
+  initMonitorLayout()
+  monClear()
+  if monitor then
+    pcall(monitor.setCursorPos, monitor, 1, 1)
+    pcall(monitor.write, monitor, ""Detecting peripherals..."")
+  end
+
+  -- start a repeating timer for ticks
+  local timerId = os.startTimer(TICK)
+
+  while true do
+    local ev = { os.pullEvent() }
+    if ev[1] == ""timer"" and ev[2] == timerId then
+      -- schedule next tick
+      timerId = os.startTimer(TICK)
+      tickCounter = tickCounter + 1
+      fieldCounter = fieldCounter + 1
+      tempCounter = tempCounter + 1
+
+      -- refresh detection occasionally (every 1s)
+      if tickCounter % math.floor(1 / TICK) == 0 then
+        detectPeripherals()
+        initMonitorLayout()
+      end
+
+      -- run state machine dispatcher
+      if state == ""idle"" then handleIdle()
+      elseif state == ""check"" then handleCheck()
+      elseif state == ""attach"" then handleAttach()
+      elseif state == ""charge"" then handleCharge()
+      elseif state == ""active"" then handleActive()
+      elseif state == ""error"" then handleError()
+      end
+
+      -- PID updates on their own intervals (only if running and state active)
+      if running and state == ""active"" then
+        if fieldCounter >= FIELD_INTERVAL then
+          updateFieldPID()
+          fieldCounter = 0
+        end
+        if tempCounter >= TEMP_INTERVAL then
+          updateTempEnergyPID()
+          tempCounter = 0
+        end
+        -- avgOut sample (simple)
+        avgOut = curOut - curIn
+      end
+
+      -- emergency check each tick
+      emergencyCheck()
+
+      -- draw GUI each tick (cheap)
+      pcall(drawGUI)
+
+    elseif ev[1] == ""monitor_touch"" then
+      -- monitor touch event: params vary but typically (side, x, y)
+      local side = ev[2]
+      local tx = ev[3]
+      local ty = ev[4]
+      -- ensure event belongs to our monitor (if monitor.name matches 'side')
+      if monitor and peripheralNames.monitor ~= """" then
+        if side == peripheralNames.monitor then
+          handleMonitorTouch(tx, ty)
+        end
+      else
+        -- if monitor auto-detected, we cannot get side easily; still handle by touch
+        handleMonitorTouch(tx, ty)
+      end
+
+    elseif ev[1] == ""terminate"" then
+      -- user requested stop; cleanup
+      setOut(0)
+      setIn(64000000)
+      stopReactor()
+      break
+    else
+      -- ignore other events
+    end
+  end
+end
+
+-------------------------------------------------------------------------------
+-- Entry point
+-------------------------------------------------------------------------------
+local ok, msg = pcall(main)
+if not ok then
+  -- best effort safe shutdown
+  pcall(setOut, 0)
+  pcall(setIn, 64000000)
+  pcall(stopReactor)
+  -- print error
+  print(""Script terminated with error:"", msg)
+end"
+KTLN2LyA,مسئلة قحبة تانى,ABDELRHMAN_SAEED007,C++,Thursday 23rd of October 2025 02:54:47 PM CDT,"#include <bits/stdc++.h>
+using namespace std;
+#define ld long double
+#define F first
+#define S second
+#define Lnode 2*node+1
+#define Rnode 2*node+2
+#define MID (l+r>>1)
+#define el '\n'
+#define coutf(x) for(auto v:(x)) cout<<v<<' '; cout<<el
+#define coutp(x) for(auto v:(x)) cout<<v.F<<' '<<v.S<<el
+#define cinl(x) for(auto &v:(x)) cin>>v;
+#define all(x)  x.begin(),x.end()
+#define ll long long
+#define sz(x)  (int)x.size()
+#define pi pair<ll,ll>
+#define pii pair<ll,pair<ll,ll>>
+#define vi vector<ll>
+using ull = unsigned long long;
+vector<int>lcp (const string& s)
+{
+    int n=s.size();
+    vector<int>phi(n,0);
+    for (int i=1,k=0;i<n;i++)
+    {
+        k=phi[i-1];
+        while (k>0&&s[i]!=s[k])k=phi[k-1];
+        if (s[i]==s[k])k++;
+        phi[i]=k;
+    }
+    return phi;
+
+}
+
+pi mancher(const string&s)
+{
+    int c=0,r=0;
+    string t=""#"";
+    for (auto it:s)t+=it,t+=""#"";
+    // for (auto it:t)cout<<it<<"" "";
+    int n=t.size();
+    vector<int>p(n,0);
+    for (int i=0;i<n;i++){
+        if (i<r)
+        {
+            int miror = 2*c-i;
+            p[i]=min(r-i,p[miror]);
+        }
+        int left=i-p[i]-1;
+        int right=i+p[i]+1;
+        while (left>=0&&right<n&&t[left]==t[right])right++,left--,p[i]++;
+        if (i+p[i]>r)r=i+p[i],c=i;
+    }
+    int mxlen=0,mx=0;
+    for (int i=1;i<n-1;i++)
+    {
+
+        if (p[i]>mx)
+        {
+            if ((i-p[i])/2<=0||((i-p[i])/2)+p[i]>=s.size())
+            {
+
+            mx=p[i];
+            mxlen=i;
+            }
+        }
+    }
+    int start=(mxlen-mx)/2;
+    return {start,mx};
+}
+void solve()
+{
+string s;
+    cin>>s;
+    string  rev1=s;
+    string ss=s;
+    string rev=s;
+    reverse(all(rev));
+    rev+=""#""+s;
+    reverse(all(rev1));
+    s+=""#""+rev1;
+
+    auto pref=lcp(rev);
+    int ps=0;
+    for (int i=rev.size()/2+1;i<rev.size()&&pref[i];i++)ps=max(ps,pref[i]);
+    int mxs=pref[rev.size()-1];
+    auto pref2=lcp(s);
+    int mxp=pref2[s.size()-1];
+
+
+    string ns=ss.substr(ps,ss.size()-(2*ps));
+    auto pal=mancher(ns);
+    string ans="""";
+
+    ans+=ss.substr(0,ps);
+    ans+=ns.substr(pal.first,pal.second);
+    if (2*ps<=ss.size())
+    ans+=ss.substr(ss.size()-ps,ps);
+
+
+    string prefix=s.substr(0,mxp);
+    string suffix=s.substr(ss.size()-mxs,mxs);
+
+    if (ans.size()>prefix.size()){
+
+        if (ans.size()>suffix.size())cout<<ans<<""\n"";
+        else cout<<suffix<<""\n"";
+    }
+    else if (prefix.size()>suffix.size())cout<<prefix<<""\n"";
+    else
+        cout<<suffix<<""\n"";
+
+
+}
+
+int32_t main() {
+    #ifndef ONLINE_JUDGE
+        freopen(""in.txt"", ""r"", stdin);
+        freopen(""out.txt"", ""w"", stdout);
+    #endif
+
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
+
+    int tc=1;
+   cin>>tc;
+    for (int i=1;i<=tc;i++){solve();}
+    return 0;
+}"
+GDZJaVZL,colors,fushi,Python,Thursday 23rd of October 2025 02:40:51 PM CDT,"#!/usr/bin/env pybricks-micropython
+from pybricks.hubs import EV3Brick
+from pybricks.ev3devices import (Motor, TouchSensor, ColorSensor,
+                                 InfraredSensor, UltrasonicSensor, GyroSensor)
+from pybricks.parameters import Port, Stop, Direction, Button, Color
+from pybricks.tools import wait, StopWatch, DataLog
+from pybricks.robotics import DriveBase
+from pybricks.media.ev3dev import SoundFile, ImageFile
+
+
+# This program requires LEGO EV3 MicroPython v2.0 or higher.
+# Click ""Open user guide"" on the EV3 extension tab for more information.
+
+
+# Create your objects here.
+ev3 = EV3Brick()
+left_motor = Motor(Port.C)
+right_motor = Motor(Port.B)
+color = DriveBase(left_motor, right_motor, wheel_diameter=57.15, axle_track=88.9)
+pause=1000
+# wait is in MS
+# I made a function because I didn't wanna change all the waits. I am very lazy.
+
+while True:
+    ev3.light.on(Color.RED)
+    wait(pause)
+    ev3.light.on(Color.ORANGE)
+    wait(pause)
+    ev3.light.on(Color.GREEN)
+    wait(pause)
+    ev3.light.on(Color.YELLOW)
+    wait(pause)
+ev3.speaker.beep
+# I was trying to do R,B,G but Blue is apparently invalid! It doesn't display any color, which is labeled as a incorrect value in the documents
+# Apparently Red/Orange/Green are the only values allowed in the MINDSTORMs program, but Yellow works perfectly fine.
+# Setting pause to 0 is probably an epilepsy inducer and it hurts my eyes. 0/10 would not recommend
+# Having no waits inbetween will cause it to remain on the last color (its too fast)
+# Indents are required. Only indented stuff below a loop will be looped. Tripped me up because C++ needs parentheses."
+kmN0pCwC,metronibus,vitormartinotti,C++,Thursday 23rd of October 2025 02:36:22 PM CDT,"#include<bits/stdc++.h>
+#define pii pair<int,int>
+#define MAXN 100010
+
+using namespace std;
+
+const int INF = 0x3f3f3f3f;
+
+vector<pii> grafo[2*MAXN];
+
+deque<pii> dq;
+int dist[2*MAXN];
+
+void bfs01(int s){
+    dq.push_front({s, 0});
+    dist[s] = 0;
+
+    while(!dq.empty()){
+        pii v = dq.front();
+        dq.pop_front();
+        for(auto e : grafo[v.first]){
+            int viz = e.first;
+            int w = e.second;
+            if(dist[v.first]+w < dist[viz]){
+                dist[viz] = dist[v.first]+w;
+                if(w == 1){
+                    dq.push_back(e);
+                }
+                else{
+                    dq.push_front(e);
+                }
+            }
+        }
+    }
+}
+
+int main(){
+    int n, k1, k2, p;
+    scanf(""%d %d %d %d"", &n, &k1, &k2, &p);
+
+    for(int i = 0; i < k1; i++){
+        int a, b; scanf(""%d %d"", &a, &b);
+        grafo[2*a-1].push_back({2*b-1, 0});
+        grafo[2*b-1].push_back({2*a-1, 0});
+    }
+
+    for(int i = 0; i < k2; i++){
+        int a, b; scanf(""%d %d"", &a, &b);
+        grafo[2*a].push_back({2*b, 0});
+        grafo[2*b].push_back({2*a, 0});
+    }
+
+    int ini, fim; scanf(""%d %d"", &ini, &fim);
+
+    for(int i = 1; i <= 2*n; i+=2){
+        if(grafo[i].size() != 0 && grafo[i+1].size() != 0){
+            grafo[i].push_back({i+1, 1});
+            grafo[i+1].push_back({i, 1});
+        }
+    }
+
+    int resp1=INF, resp2=INF, resp;
+    if(grafo[ini*2-1].size() != 0){
+        memset(dist, INF, sizeof dist);
+        bfs01(ini*2-1);
+        resp1 = min(dist[fim*2-1], dist[fim*2]);
+    }
+    if(grafo[ini*2].size() != 0){
+        memset(dist, INF, sizeof dist);
+        bfs01(ini*2);
+        resp2 = min(dist[fim*2-1], dist[fim*2]);
+    }
+
+    resp = min(resp1, resp2);
+
+    if(resp == INF){
+        printf(""-1"");
+        return 0;
+    }
+
+    printf(""%d"", (resp+1)*p);
+}
+"
+U4RYbpEs,cosci_utils.ahk,cosci,Autohotkey,Thursday 23rd of October 2025 02:32:35 PM CDT,"#SingleInstance Force
+#NoEnv  ; Recommended for performance and compatibility with future AutoHotkey releases.
+; #Warn  ; Enable warnings to assist with detecting common errors.
+
+; author: https://cosci.de
+
+; https://www.autohotkey.com/docs/Tutorial.htm
+; https://www.autohotkey.com/docs/commands/SoundSet.htm
+
+; Windows Terminal
+
+; STRG+ALT
+^!T::
+    WinActivate Program Manager ; desktop
+    RUN wt.exe
+return
+
+; Windows Terminal Elevated/Admin User
+; STRG+ALT+SHIFT
+^!+T::
+    WinActivate Program Manager ; desktop
+    RUN *RunAs wt.exe
+return
+
+
+
+; Mouse Volume Control
+
+; Mouse Forward - Volume Up
+XButton2::
+    Send {Volume_Up}
+;repeats the hotkey while holding the buttons
+; while(GetKeyState(""XButton2"",""P"")){
+;     Send {Volume_Up}
+;     Sleep, 100
+; }
+return
+
+; Mouse Back - Volume Down
+XButton1::
+	Send {Volume_Down}
+	; SoundSet,-5 ;Volume -5
+return
+    
+
+
+
+
+
+
+
+
+
+; Mouse Window Control
+
+; Mouse Thumb Forward - Tab Right
+XButton2 & LButton::
+    ;repeats the hotkey while holding the buttons
+    while(GetKeyState(""XButton2"",""P"") && GetKeyState(""LButton"",""P"")){
+        Send ^+{Tab}
+        Sleep, 400
+    }
+return
+
+; Mouse Thumb Forward - Tab Left
+XButton2 & RButton::
+    while(GetKeyState(""XButton2"",""P"") && GetKeyState(""RButton"",""P"")){
+        Send ^{Tab}
+        Sleep, 400
+    }
+return
+
+; Mouse Thumb Forward - Reload
+XButton2 & MButton::
+	Send ^R
+return
+
+
+; Mouse Thumb Back - Virtual Desktop Left
+XButton1 & LButton::
+    Send #^{LEFT}
+return
+
+; Mouse Thumb Back - Virtual Desktop Right
+XButton1 & RButton::
+    Send #^{Right}
+return
+
+; Mouse Thumb Back - Close Tab
+XButton1 & MButton::
+    ;Send ^W
+	Send ^{F4}
+return
+
+
+; Wheel Up - Move Window Left
+XButton2 & WheelUp::
+    Send #{LEFT}
+return
+    
+; Wheel Down - Move Window Right
+XButton2 & WheelDown::
+    Send #{RIGHT}
+return
+
+; Wheel Up - Zoom In
+XButton1 & WheelUp::
+    Send ^{WheelUp}
+return
+    
+; Wheel Down - Zoom Out
+XButton1 & WheelDown::
+    Send ^{WheelDown}
+return
+
+
+
+
+
+
+
+
+
+
+; Media Control on Keyboard
+
+; WIN+CTRL+SHIFT
+#^+UP::
+; SoundSet,+5 ;Volume +5
+    Send {Volume_Up}
+return
+
+#^+DOWN::
+    Send {Volume_Down}
+return
+
+#^Numpad0::
+    SoundSet,0 ; set Volume to 10
+    Send {Volume_Mute} ; Volume mute
+; SoundSet,0 ; Volume mute
+return
+
+#^Numpad1::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,10 ; set Volume to 10
+return
+
+#^Numpad2::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,20 ; set Volume to 20
+return
+
+#^Numpad3::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,30 ; set Volume to 30
+return
+
+#^Numpad4::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,40 ; set Volume to 30
+return
+
+#^Numpad5::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,50 ; set Volume to 30
+return
+
+#^Numpad6::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,60 ; set Volume to 30
+return
+
+#^Numpad7::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,70 ; set Volume to 30
+return
+
+#^Numpad8::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,80 ; set Volume to 30
+return
+
+#^Numpad9::
+    Send {Volume_Up} ; shows the Windows Volume Overlay
+    SoundSet,90 ; set Volume to 30
+return
+"
+CwWyN1WR,⭐⭐Make $15OO in 2O minutes⭐ 🔥🔥,xxscarfacexx,JavaScript,Thursday 23rd of October 2025 02:30:22 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/1-5zBr1XAR6FRYphwQ-sS-AFwLtcK24Pp-mOtDa9lnwA
+
+Post hash: y0461swhg4ejssa63gpup3a5o7k5h0us6e8lzrul78ka2lb9rm
+"
+4rbEvEHb,Untitled,nimajneb,C++,Thursday 23rd of October 2025 02:01:19 PM CDT,"#include <Arduino.h>
+#include <U8g2lib.h>
+#include <Wire.h>
+
+//display
+U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
+
+//variables
+int startx = 0;
+const int buttonUp = 5;
+const int buttonDown = 6;
+const int buttonEnter = 9;
+const int mainLoopLED = 10;
+const int menuIndex0LED = 11;
+const int menuIndex1LED = 12;
+const char *menuList[] = {
+  ""LED 1"",
+  ""Option 2"",
+  ""Option 3"",
+  ""Option 4"",
+  //""Option 5"",
+};
+int numberOfItems = 0;
+int menuSelection;
+int buttonUpState = 0;
+int lastButtonUpState = 0;
+int buttonDownState = 0;
+int lastButtonDownState = 0;
+int buttonEnterState = 0;
+int lastButtonEnterState = 0;
+int menuIndex = 0;
+int cursorY = 34;
+int frameY = 0;
+bool mainMenu = true;
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  while (!Serial && millis() < 10000UL)
+    ;
+  Serial.println(""started"");
+  u8g2.begin();
+  u8g2.clearBuffer();
+  u8g2.sendBuffer();
+  pinMode(buttonUp, INPUT);
+  pinMode(buttonDown, INPUT);
+  pinMode(buttonEnter, INPUT);
+  pinMode(mainLoopLED, OUTPUT);
+  pinMode(menuIndex0LED, OUTPUT);
+  pinMode(menuIndex1LED, OUTPUT);
+}
+
+void drawMenu() {
+  // Writes the menuList to the display
+  u8g2.setFont(u8g2_font_gb24st_t_1);
+  u8g2.setCursor(1, 12);
+  u8g2.print(""Menu"");
+  u8g2.drawHLine(0, 15, 128);
+  //int numberOfItems = sizeof(menuList) / sizeof (menuList[0]);
+  /*
+  cursorY = 34;
+  for (int x = 0; x < 2; x++) {
+    u8g2.setCursor(5, cursorY);
+    u8g2.print(menuList[x]);
+    cursorY = cursorY + 20;
+  }
+  */
+}
+void drawFrame() {
+  // Draws a frame around current menuIndex
+  /*
+  if (menuIndex == 0) {
+    frameY = 19;
+  } else {
+    frameY = 19 + (menuIndex * 20);
+  }
+  
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, frameY, 128, 17);  //frameY = 19
+  */
+  u8g2.drawFrame(0, 40, 128, 17);
+}
+void serialPrintStuff() {
+  Serial.print(""menuIndex: "");
+  Serial.print(menuIndex);
+  Serial.print("" numberOfItems: "");
+  Serial.print(numberOfItems);
+  //Serial.print("" menuIndex: "");
+  //Serial.print(menuIndex);
+  Serial.println();
+}
+void loop() {
+  numberOfItems = sizeof(menuList) / sizeof(menuList[0]);
+  //Serial.println(numberOfItems);
+
+  while (mainMenu == true) {
+    u8g2.clearBuffer();
+    drawMenu();
+    u8g2.sendBuffer();
+    mainMenu = false;
+    digitalWrite(mainLoopLED, HIGH);
+    delay(1000);
+  }
+  digitalWrite(mainLoopLED, LOW);
+
+  buttonUpState = digitalRead(buttonUp);
+  buttonDownState = digitalRead(buttonDown);
+
+  //if (buttonUpState == HIGH && lastButtonUpState == LOW && menuIndex >= 0) {
+  if (buttonUpState != lastButtonUpState && menuIndex > 0) {
+    if (buttonUpState == HIGH) {
+      digitalWrite(mainLoopLED, HIGH);
+      if (menuIndex >= 0) {
+        menuIndex--;
+      }
+      u8g2.clearBuffer();
+      serialPrintStuff();
+      if (menuIndex == 0) {
+      } else {
+        u8g2.setCursor(5, 34);
+        u8g2.print(menuList[menuIndex - 1]);
+      }
+
+      u8g2.setCursor(5, 54);
+      u8g2.print(menuList[menuIndex]);
+
+
+      if (menuIndex > numberOfItems + 1) {
+      } else {
+        u8g2.setCursor(5, 74);
+        u8g2.print(menuList[menuIndex + 1]);
+      }
+
+      drawFrame();
+      drawMenu();
+      u8g2.sendBuffer();
+      delay(50);
+    }
+  }
+  lastButtonUpState = buttonUpState;
+
+  //if (buttonDownState == HIGH && lastButtonDownState == LOW && menuIndex <= 2) {
+  if (buttonDownState != lastButtonDownState && menuIndex < numberOfItems + 1) {
+    if (buttonDownState == HIGH) {
+      digitalWrite(mainLoopLED, HIGH);
+      if (menuIndex < numberOfItems) {
+        menuIndex++;
+      }
+      u8g2.clearBuffer();
+      serialPrintStuff();
+      if (menuIndex == 0) {
+      } else {
+        u8g2.setCursor(5, 34);
+        u8g2.print(menuList[menuIndex - 1]);
+      }
+      u8g2.setCursor(5, 54);
+      u8g2.print(menuList[menuIndex]);
+      if (menuIndex > numberOfItems) {
+      serialPrintStuff();
+      u8g2.print(""end"");
+      } else {
+      u8g2.setCursor(5, 74);
+      u8g2.print(menuList[menuIndex + 1]);
+      }
+      drawFrame();
+      drawMenu();
+      u8g2.sendBuffer();
+      delay(50);
+    }
+  }
+  lastButtonDownState = buttonDownState;
+  buttonEnterState = digitalRead(buttonEnter);
+  if (buttonEnterState != lastButtonEnterState) {
+    if (buttonEnterState == HIGH) {
+      if (menuIndex == 0) {
+        digitalWrite(menuIndex0LED, !digitalRead(menuIndex0LED));
+      }
+      if (menuIndex == 1) {
+        digitalWrite(menuIndex1LED, !digitalRead(menuIndex1LED));
+      }
+    }
+    delay(50);
+  }
+  lastButtonEnterState = buttonEnterState;
+}
+"
+dgvYm7HJ,⭐⭐⭐MAKE $1000 INSTANTLY⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:53:56 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+6sy7CH8d
+"
+uYEFMC31,⭐⭐⭐Make $1500 in 20 minutes⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:53:45 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+9fI4riL1
+"
+3119B2sq,⭐⭐⭐Profit Method⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:53:33 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+UuS4dABb
+"
+wKfj90XY,⭐⭐⭐Profit Method⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:53:22 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+XIfMa54r
+"
+HQMqQfnn,⭐⭐⭐Instant Profit Method⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:53:11 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+9yXJFc8F
+"
+VAQ8EVt6,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:52:59 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+KuGExemf
+"
+hWQP9QV0,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:52:48 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+w0o04cSj
+"
+G4Y7JSzb,⭐⭐⭐MAKE $9OO INSTANTLY D M⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:52:37 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+O86nwwOr
+"
+BRHETgRv,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:52:26 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+poXL7fxl
+"
+SXxwG2VR,⭐⭐⭐Exchange Exploit⭐⭐,kmspico11,Java,Thursday 23rd of October 2025 01:52:14 PM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://tinyurl.com/mu48ncds
+
+L6zC4eS1
+"
+LZHs2nWd,test,Anthcny,JavaScript,Thursday 23rd of October 2025 01:27:40 PM CDT,"console.log(1);
+console.log(""salkut"");
+"
+7aywWXPz,networkchecker,neleon,Kotlin,Thursday 23rd of October 2025 01:17:00 PM CDT,"class NetworkChecker(private val context: Context) { // provided by Koin
+
+    private val connectivityManager by lazy {
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+
+    // Quick check for potential connectivity
+    fun isNetworkConnected(): Boolean {
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+
+        return when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+            else -> false
+        }
+    }
+
+    // Actual internet connectivity check
+    suspend fun hasInternetAccess(timeout: Long = 3000L): Boolean {
+        return withContext(Dispatchers.IO) {
+
+        if (!isNetworkConnected()) return@withContext false
+
+            try {
+                withTimeout(timeout) {
+                    val url = URL(""http://example.com"")
+                    val urlConnection = url.openConnection() as HttpURLConnection
+                    urlConnection.setRequestProperty(""Connection"", ""close"")
+                    urlConnection.connectTimeout = timeout.toInt()
+                    urlConnection.connect()
+                    urlConnection.responseCode == 200 || urlConnection.responseCode == 204
+                }
+            } catch (e: Exception) {
+                Timber.e(""hasInternetAccess exception: $e"")
+                false
+            }
+        }
+    }
+
+}"
+8W96zzw9,ss,tawgi,Java,Thursday 23rd of October 2025 01:07:16 PM CDT,"using System;
+using UnityEngine;
+ 
+public class PlayerMoveState : PlayerState
+{
+    public PlayerMoveState(Player player) : base(player) { }
+ 
+    public override void Enter()
+    {
+        base.Enter();
+        
+ 
+    }
+ 
+    public override void Update()
+    {
+ 
+        base.Update();
+        if(AttackPressed && combat.CanAttack)
+        
+            player.ChangeState(player.attackState);"
+H9hp92Hy,Untitled,tawgi,JavaScript,Thursday 23rd of October 2025 01:06:10 PM CDT,"using System;
+using UnityEngine;
+
+public class PlayerMoveState : PlayerState
+{
+    public PlayerMoveState(Player player) : base(player) { }
+
+    public override void Enter()
+    {
+        base.Enter();
+        
+
+    }
+
+    public override void Update()
+    {
+
+        base.Update();
+        if(AttackPressed && combat.CanAttack)
+        
+            player.ChangeState(player.attackState);
+        
+        
+        else if (JumpPressed)
+        {
+
+            player.ChangeState(player.jumpState);
+        }
+        else if (Mathf.Abs(MoveInput.x) < 0.1f)
+        {
+            player.ChangeState(player.idleState);
+        }
+        else if (player.isGrounded && RunPressed && MoveInput.y < -0.1f)
+        {
+            player.ChangeState(pewewlayer.slideState);
+        }
+        elseassa
+                {
+                    anim.SetBool(""isWalking"", !RunPressed);
+                    anim.SetBool(""isRunning"", RunPressed);
+                }
+    }
+
+    public override void FixedUpdate()
+    {
+        base.FixedUpdate();
+        float speed = RunPressed ? player.runSpeed : player.walkSpeed;
+        rb.linearVelocity = new Vector2(speed * player.faceDirection, rb.linearVelocity.y);
+    }
+
+    public override void Exit()
+    {
+        base.Exit();
+        anim.SetBool(""isWalking"", false);
+        anim.SetBool(""isRunning"", false);
+    }
+    
+}
+aq23"
