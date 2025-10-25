@@ -1,0 +1,5421 @@
+id,title,username,language,date,content
+mqBmdMxi,Dynamic AntiHGF Timer,maku_kenesu19,Lua,Saturday 25th of October 2025 12:02:55 AM CDT,"script_name(""Dynamic AntiHGF"")
+script_author(""Maku Kenesu"")
+script_version(""1.0"")
+
+require ""lib.moonloader""
+require ""lib.sampfuncs""
+local inicfg = require ""inicfg""
+
+local LABEL_PREFIX = ""[AntiHGF] ""
+local FULL_LABEL_PREFIX = ""[AntiHGF by Maku Kenesu] ""
+local CONFIG_DIR_FALLBACK = getWorkingDirectory() .. ""\\config\\""
+local CONFIG_FILE_PATH = CONFIG_DIR_FALLBACK .. ""AntiHGF.ini""
+
+if not doesDirectoryExist(CONFIG_DIR_FALLBACK) then createDirectory(CONFIG_DIR_FALLBACK) end
+if not doesFileExist(CONFIG_FILE_PATH) then
+  local file = io.open(CONFIG_FILE_PATH, ""w"")
+  file:write("" "")
+  file:close()
+  local defaultIni = inicfg.load({
+    Options = {
+      isScriptEnabled = true,
+      safeSecondsFromNow = 11,
+      posX = 640,
+      posY = 540,
+      fontSize = 14,
+      fontName = ""Arial Bold"",
+      safeText = ""SAFE TO HEAL"",
+      unsafeText = ""NOT SAFE TO HEAL"",
+      safeColor = ""008000"",
+      unsafeColor = ""800000""
+    }
+  }, CONFIG_FILE_PATH)
+  inicfg.save(defaultIni, CONFIG_FILE_PATH)
+end
+
+local configIni = inicfg.load(nil, CONFIG_FILE_PATH)
+inicfg.save(configIni, CONFIG_FILE_PATH)
+
+local COLOR_PRIMARY = ""{FF8400}""
+local COLOR_ACCENT = ""{FFC100}""
+local COLOR_WHITE = ""{FFFFFF}""
+local COLOR_ALERT = ""{FF2222}""
+local COLOR_SAFE = ""{22FF22}""
+
+local wasPlayerHit = false
+local lastHitTimestamp = 0
+local healSafeTimestamp = configIni.Options.safeSecondsFromNow
+local isFirstHitDetected = true
+local renderFontHandle = nil
+local textPosX = configIni.Options.posX or 640
+local textPosY = configIni.Options.posY or 540
+local fontSize = configIni.Options.fontSize or 14
+local fontName = configIni.Options.fontName or ""Arial Bold""
+local selectingPosition = false
+local cursorVisible = false
+
+configIni.Options.safeText = configIni.Options.safeText or ""SAFE TO HEAL""
+configIni.Options.unsafeText = configIni.Options.unsafeText or ""NOT SAFE TO HEAL""
+configIni.Options.safeColor = configIni.Options.safeColor or ""008000""
+configIni.Options.unsafeColor = configIni.Options.unsafeColor or ""800000""
+
+function main()
+  while not isSampAvailable() do wait(100) end
+  sampAddChatMessage(COLOR_PRIMARY .. FULL_LABEL_PREFIX .. COLOR_WHITE ..
+    ""Loaded successfully. "" .. COLOR_ACCENT .. ""Timer: "" .. COLOR_WHITE .. configIni.Options.safeSecondsFromNow .. ""s"", -1)
+  sampAddChatMessage(COLOR_PRIMARY .. FULL_LABEL_PREFIX .. COLOR_WHITE ..
+    ""Use "" .. COLOR_ACCENT .. ""/hgf.help"" .. COLOR_WHITE .. "" for commands."", -1)
+  sampRegisterChatCommand(""hgf"", cmdToggleScript)
+  sampRegisterChatCommand(""hgf.help"", cmdHelp)
+  sampRegisterChatCommand(""hgf.h"", cmdMiniHelp)
+  sampRegisterChatCommand(""hgf.pos"", cmdEnablePositionMode)
+  sampRegisterChatCommand(""hgf.size"", cmdChangeFontSize)
+  sampRegisterChatCommand(""hgf.text"", cmdChangeText)
+  sampRegisterChatCommand(""hgf.color"", cmdChangeColor)
+  sampRegisterChatCommand(""hgf.font"", cmdChangeFont)
+  renderFontHandle = renderCreateFont(fontName, fontSize, 8)
+  while true do
+    wait(0)
+    if configIni.Options.isScriptEnabled then
+      detectGunfightHit()
+      updateHealSafeTimer()
+    end
+    drawHealStatusText()
+    if selectingPosition then handleMouseClickPlacement() end
+  end
+end
+
+function renderfont(x, y, text, color)
+  local black = 0xFF000000
+  renderFontDrawText(renderFontHandle, text, x + 1, y + 1, black)
+  renderFontDrawText(renderFontHandle, text, x - 1, y + 1, black)
+  renderFontDrawText(renderFontHandle, text, x + 1, y - 1, black)
+  renderFontDrawText(renderFontHandle, text, x - 1, y - 1, black)
+  renderFontDrawText(renderFontHandle, text, x, y, color)
+end
+
+function detectGunfightHit()
+  local WEAPON_IDS = {22, 23, 24, 25, 27, 28, 29, 30, 31, 32, 33, 34}
+  for _, weaponId in ipairs(WEAPON_IDS) do
+    if hasCharBeenDamagedByWeapon(PLAYER_PED, weaponId) or isCharShooting(PLAYER_PED) then
+      if isFirstHitDetected then
+        sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT .. configIni.Options.unsafeText, -1)
+        addOneOffSound(0.0, 0.0, 0.0, 1053)
+        isFirstHitDetected = false
+      end
+      lastHitTimestamp = os.time()
+      healSafeTimestamp = lastHitTimestamp + configIni.Options.safeSecondsFromNow
+      wasPlayerHit = true
+      clearCharLastWeaponDamage(PLAYER_PED)
+      break
+    end
+  end
+end
+
+function updateHealSafeTimer()
+  local currentTime = os.time()
+  if wasPlayerHit and currentTime >= healSafeTimestamp then
+    wasPlayerHit = false
+    isFirstHitDetected = true
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_SAFE .. configIni.Options.safeText, -1)
+    addOneOffSound(0.0, 0.0, 0.0, 1052)
+  end
+end
+
+function drawHealStatusText()
+  if not renderFontHandle then return end
+  local displayText, displayColor
+  if configIni.Options.isScriptEnabled then
+    if wasPlayerHit then
+      displayText = configIni.Options.unsafeText
+      displayColor = tonumber(""0xFF"" .. configIni.Options.unsafeColor)
+    else
+      displayText = configIni.Options.safeText
+      displayColor = tonumber(""0xFF"" .. configIni.Options.safeColor)
+    end
+    renderfont(textPosX, textPosY, displayText, displayColor)
+  else
+    renderfont(textPosX, textPosY, LABEL_PREFIX .. ""Disabled"", 0xFFAAAAAA)
+  end
+  if selectingPosition then
+    renderfont(20, 20, LABEL_PREFIX .. ""Click anywhere to set text position"", 0xFFFFFF00)
+  end
+end
+
+function showCursorState(show)
+  if show then
+    if not cursorVisible then
+      showCursor(true)
+      lockPlayerControl(true)
+      cursorVisible = true
+    end
+  else
+    if cursorVisible then
+      showCursor(false)
+      lockPlayerControl(false)
+      cursorVisible = false
+    end
+  end
+end
+
+function handleMouseClickPlacement()
+  showCursorState(true)
+  if wasKeyPressed(VK_LBUTTON) then
+    local mx, my = getCursorPos()
+    if mx and my then
+      textPosX, textPosY = mx, my
+      configIni.Options.posX, configIni.Options.posY = mx, my
+      inicfg.save(configIni, CONFIG_FILE_PATH)
+      selectingPosition = false
+      showCursorState(false)
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_WHITE ..
+        ""Position saved at X: "" .. COLOR_ACCENT .. mx .. COLOR_WHITE .. "" Y: "" .. COLOR_ACCENT .. my, -1)
+    end
+  end
+end
+
+function cmdEnablePositionMode()
+  selectingPosition = not selectingPosition
+  local stateText = selectingPosition and (COLOR_SAFE .. ""Enabled"") or (COLOR_ALERT .. ""Disabled"")
+  sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_WHITE ..
+    ""Position selection mode: "" .. stateText, -1)
+  if not selectingPosition then showCursorState(false) end
+end
+
+function cmdToggleScript()
+  configIni.Options.isScriptEnabled = not configIni.Options.isScriptEnabled
+  local statusText = configIni.Options.isScriptEnabled and (COLOR_SAFE .. ""Enabled"") or (COLOR_ALERT .. ""Disabled"")
+  sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_WHITE .. statusText, -1)
+  inicfg.save(configIni, CONFIG_FILE_PATH)
+end
+
+function cmdChangeFontSize(arg)
+  local size = tonumber(arg)
+  if size and size > 5 and size <= 40 then
+    configIni.Options.fontSize = size
+    inicfg.save(configIni, CONFIG_FILE_PATH)
+    renderFontHandle = renderCreateFont(configIni.Options.fontName, size, 8)
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_WHITE ..
+      ""Font size set to "" .. COLOR_ACCENT .. size, -1)
+  else
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.size [6-40]"", -1)
+  end
+end
+
+function cmdChangeFont(arg)
+  if not arg or arg == """" then
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.font [font name]"", -1)
+    return
+  end
+  configIni.Options.fontName = arg
+  inicfg.save(configIni, CONFIG_FILE_PATH)
+  renderFontHandle = renderCreateFont(arg, configIni.Options.fontSize, 8)
+  sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_WHITE ..
+    ""Font changed to "" .. COLOR_ACCENT .. arg, -1)
+end
+
+function cmdChangeText(arg)
+  if not arg or arg == """" then
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.text [safe | unsafe] [your text]"", -1)
+    return
+  end
+  local t, text = arg:match(""^(%S+)%s+(.+)$"")
+  if t and text then
+    if t == ""safe"" then
+      configIni.Options.safeText = text
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_SAFE ..
+        ""Safe text updated: "" .. COLOR_WHITE .. text, -1)
+    elseif t == ""unsafe"" then
+      configIni.Options.unsafeText = text
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+        ""Unsafe text updated: "" .. COLOR_WHITE .. text, -1)
+    else
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+        ""Use: "" .. COLOR_ACCENT .. ""/hgf.text safe [text]"" .. COLOR_WHITE .. "" or "" ..
+        COLOR_ACCENT .. ""/hgf.text unsafe [text]"", -1)
+      return
+    end
+    inicfg.save(configIni, CONFIG_FILE_PATH)
+  else
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.text [safe | unsafe] [your text]"", -1)
+  end
+end
+
+function cmdChangeColor(arg)
+  if not arg or arg == """" then
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.color [safe | unsafe] [RRGGBB]"", -1)
+    return
+  end
+  local t, hex = arg:match(""^(%S+)%s+([A-Fa-f0-9]+)$"")
+  if t and hex then
+    if #hex ~= 6 then
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+        ""Color must be 6-digit hex like "" .. COLOR_ACCENT .. ""FF2222"", -1)
+      return
+    end
+    if t == ""safe"" then
+      configIni.Options.safeColor = hex
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_SAFE ..
+        ""Safe color set to "" .. COLOR_ACCENT .. hex, -1)
+    elseif t == ""unsafe"" then
+      configIni.Options.unsafeColor = hex
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+        ""Unsafe color set to "" .. COLOR_ACCENT .. hex, -1)
+    else
+      sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+        ""Use: "" .. COLOR_ACCENT .. ""/hgf.color safe [RRGGBB]"" .. COLOR_WHITE .. "" or "" ..
+        COLOR_ACCENT .. ""/hgf.color unsafe [RRGGBB]"", -1)
+      return
+    end
+    inicfg.save(configIni, CONFIG_FILE_PATH)
+  else
+    sampAddChatMessage(COLOR_PRIMARY .. LABEL_PREFIX .. COLOR_ALERT ..
+      ""Usage: "" .. COLOR_ACCENT .. ""/hgf.color [safe | unsafe] [RRGGBB]"", -1)
+  end
+end
+
+function cmdHelp()
+  sampAddChatMessage(COLOR_WHITE .. ""-------------- "" .. COLOR_PRIMARY .. FULL_LABEL_PREFIX .. COLOR_WHITE .. ""--------------"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf"" .. COLOR_WHITE .. "" - Enable/Disable script"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.pos"" .. COLOR_WHITE .. "" - Click to choose text position"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.size [6-40]"" .. COLOR_WHITE .. "" - Change font size"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.font [font]"" .. COLOR_WHITE .. "" - Change font name"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.text [safe | unsafe] [text]"" .. COLOR_WHITE .. "" - Change displayed text"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.color [safe | unsafe] [RRGGBB]"" .. COLOR_WHITE .. "" - Change colors"", -1)
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf.help"" .. COLOR_WHITE .. "" or "" ..
+    COLOR_ACCENT .. ""/hgf.h"" .. COLOR_WHITE .. "" - Show help"", -1)
+  sampAddChatMessage(COLOR_WHITE .. ""-----------------------------------------------------------------"", -1)
+end
+
+function cmdMiniHelp()
+  sampAddChatMessage(COLOR_ACCENT .. ""/hgf"" .. COLOR_WHITE ..
+    "", /hgf.pos, /hgf.size, /hgf.font, /hgf.text, /hgf.color, /hgf.help"", -1)
+end
+"
+ZPqP6uk4,reactor_gui,MrElders,Lua,Friday 24th of October 2025 11:31:39 PM CDT,"-- === Reactor Monitor & Control Script ===
+-- CC:Tweaked - Extreme Reactors (ATM10)
+-- Monitor GUI + Auto Control + Manual Button
+-- Ethan Edition
+
+local REACTOR_NAME = ""BigReactors-Reactor_0""  -- Adjust if different
+local MONITOR_NAME = ""monitor_0""             -- Adjust if different
+
+local autoControl = true
+local reactor = peripheral.wrap(REACTOR_NAME)
+local monitor = peripheral.wrap(MONITOR_NAME)
+
+local function centerText(line, text)
+  local w, _ = monitor.getSize()
+  monitor.setCursorPos(math.floor((w - #text) / 2) + 1, line)
+  monitor.write(text)
+end
+
+local function drawButton(label, active)
+  local w, h = monitor.getSize()
+  monitor.setCursorPos(2, h - 1)
+  if active then
+    monitor.setBackgroundColor(colors.red)
+    monitor.setTextColor(colors.white)
+  else
+    monitor.setBackgroundColor(colors.lime)
+    monitor.setTextColor(colors.black)
+  end
+  monitor.write("" [ "" .. label .. "" ] "")
+  monitor.setBackgroundColor(colors.black)
+end
+
+local function drawGUI()
+  monitor.clear()
+  monitor.setTextColor(colors.cyan)
+
+  centerText(1, ""=== Reactor Control ==="")
+
+  monitor.setTextColor(colors.white)
+  monitor.setCursorPos(1, 3)
+  monitor.write(""Status: "")
+  monitor.setTextColor(reactor.getActive() and colors.lime or colors.red)
+  monitor.write(reactor.getActive() and ""ONLINE"" or ""OFFLINE"")
+
+  monitor.setTextColor(colors.white)
+  monitor.setCursorPos(1, 4)
+  monitor.write(string.format(""RF/t:      %.0f"", reactor.getEnergyProducedLastTick()))
+
+  monitor.setCursorPos(1, 5)
+  monitor.write(string.format(""Fuel:      %.2f%%"", reactor.getFuelAmount() / reactor.getFuelAmountMax() * 100))
+
+  monitor.setCursorPos(1, 6)
+  monitor.write(string.format(""Temp:      %.1f C"", reactor.getFuelTemperature()))
+
+  monitor.setCursorPos(1, 7)
+  monitor.write(string.format(""Energy:    %.0f / %.0f RF"",
+    reactor.getEnergyStored(), reactor.getEnergyCapacity()))
+
+  monitor.setCursorPos(1, 8)
+  monitor.write(""Mode: "" .. (autoControl and ""AUTO"" or ""MANUAL""))
+
+  drawButton(reactor.getActive() and ""TURN OFF"" or ""TURN ON"", not autoControl)
+end
+
+local function toggleReactor()
+  reactor.setActive(not reactor.getActive())
+end
+
+local function toggleControlMode()
+  autoControl = not autoControl
+end
+
+local function handleTouch(x, y)
+  local _, h = monitor.getSize()
+  if y == h - 1 then
+    if autoControl then
+      toggleControlMode()
+    else
+      toggleReactor()
+    end
+  end
+end
+
+local function autoControlLogic()
+  local stored = reactor.getEnergyStored()
+  local max = reactor.getEnergyCapacity()
+
+  if stored / max >= 0.95 then
+    reactor.setActive(false)
+  elseif stored / max <= 0.20 then
+    reactor.setActive(true)
+  end
+end
+
+-- === Startup ===
+monitor.setTextScale(1)
+monitor.setBackgroundColor(colors.black)
+monitor.clear()
+monitor.setCursorBlink(false)
+
+-- === Event Loop ===
+while true do
+  drawGUI()
+
+  if autoControl then
+    autoControlLogic()
+  end
+
+  local event, side, x, y = os.pullEvent()
+
+  if event == ""monitor_touch"" then
+    handleTouch(x, y)
+  end
+end
+"
+TPdbAWCc,Chess Function canBeCaptured,natsi,Java,Friday 24th of October 2025 10:46:20 PM CDT,"   private static int[][] d = new int[][]{{1, 1, 'P', 'b'}, {-1, 1, 'P'}, {1, -1, 'p'}, {-1, -1, 'p'}};
+   private static int[][] o = new int[][]{{0, 1, '.', 'r'}, {0, -1, '.'}, {1, 0, '.'}, {-1, 0, '.'}};
+   private static int[][][] all = {d, o};
+
+    public static boolean canBeCaptured(int x, int y, char[][] board) {
+
+        char color = color(board[y][x]);
+        for (int[][] d_o : all) {
+            for (int[] dir : d_o) {
+                for (int i = 1; i < 8; i++) {
+                    char square = get(x + i * dir[0], y + i * dir[1], board);
+                    if (square == ' ') {
+                        continue;
+                    }
+                    if (color(square) == color|| square=='x') {
+                        break;
+                    }
+                    if (sameLtr(square, 'q') || sameLtr(square, (char) d_o[0][3]) || (i == 1 && (square == dir[2] || sameLtr(square, 'k')))) {
+                        return true;
+                    }
+                    break;
+                }
+            }
+        }
+for (int[] dir : d) {
+            for (int[] n : new int[][]{{2, 1}, {1, 2}}) {
+                char square = get(x + n[0] * dir[0], y + n[1] * dir[1], board);
+                if (sameLtr(square, 'n') && color(square) != color) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+
+
+ private static char get(int x, int y, char[][] board) {
+       return (x > 7 || x < 0 || y > 7 || y < 0) ? 'x' : board[y][x];
+    }
+ private static boolean sameLtr(char ch, char ch2) {
+        return Character.toUpperCase(ch) == Character.toUpperCase(ch2);
+    }
+private static char color(char ch) {        
+        return Character.isUpperCase(ch) ? 'W' : 'b';      
+    }"
+dvhw9cs5,Deberesdemates.lua,nullchef,Lua,Friday 24th of October 2025 10:00:42 PM CDT,"-- This file was protected using Luraph Obfuscator v14.4.2 [https://lura.ph/]
+
+return({cS=function(G,G,A,e,r,S)S=A[1][0X2C][G];e=0b1011101;r=#S;return e,r,S;end,V=coroutine.yield,KS=function(G,G,A,e)local r,S,y=0X2_0;while true do if r==0X20 then S=A[0X1][31]();y=S/0X2;r=(82);if S%0B010==0x0 then e[G]=y-y%0x1_;else local S,l=(37);while true do if S==0X25 then G=A[1][0X001f_]();S=(0X40);l=A[0X1][0X1F]();else if S~=0X40 then else for A=y-y%0B1,G,0X1 do(e)[A]=(l);end;break;end;end;end;end;else if r~=0B1010010 then else break;end;end;end;return G;end,qF=string.char,QS=function(G,G,A,e,r)G=(0X6f);(r[1][0B10011])[A+0X2]=e;return G;end,OS=function(G,G,A,e,r)(e[1][19])[G+0B001]=(A);e[1][19][G+0X2]=r;end,tS=function(G,A,e)e[0X149F__]=0b1111100+((G.VF((G.FF(e[0X4398__]))-e[0X5dBA]))-e[20945]);e[22898]=115+(G.iF((G.BF((G.FF(e[0X444C]))-e[23994],e[0X4195],e[16270]))));A=0XaE+((G.iF((e[16789]~=G.g[0B111]and G.g[0X7]or G.g[0X7])~=e[0X2F__25]and e[0X1_0f6]or e[24828]))-e[0X6_0fc]);e[0X1640_]=A;return A;end,YS=function(G,G,A,e,r)e=G[2](A);r=0X30;return e,r;end,j=unpack,SS=function(G,A,e)if e~=0B10010 then e=G:zS(e);return 0X52d5,e,A;else e=(0x49);A=(nil);return 21205,e,A;end;return nil,e,A;end,K=function(G,A)local e,r,S=(0b1001100);repeat e,r,S=G:e(A,e,S);if r==0X4c40 then break;else if r~=0XbD25 then else continue;end;end;until false;return{S};end,aS=function(G,G,A,e)e=(#A[0b1][0X13]);G=0X00__3F;return G,e;end,mS=function(G,A)local e,r,S;for y=0b11001,0X00A7,0X29 do if y>0X6B then S=(A[0B1][0X1E]()~=0X0);break;elseif y>0X42 and y<0x9_4 then A[0X1][44]=A[2](r);elseif y<66 then G:oS(A);continue;else if not(y<0X6B and y>25)then else r=(A[0b1][0X24]()-82773);end;end;end;if A[0X1][0B10_010]==A[0X1][0B1010_11_]then else(A[0x01])[0B0100_111]=(S);end;for y=1,r do local l,g,v=0X12;while true do if not(l<=20)then if l<0B001__100011 then v,l,g=G:XS(v,l,A,g);else if A[0b1][0X14]==A[0B11]then e=G:yS(A);return{G.j(e)};else if not(S)then A[0X1][0B00101100][y]=g;else A[0x1][0X2__c][y]={[0x00__]=g};end;end;break;end;else e,l,g=G:SS(g,l);if e~=0X52d5 then else continue;end;end;end;end;r=nil;local y,l=0X4E;while true do if y>48 and y<79 then y,r=G:TS(y,r,A);continue;elseif y<85 and y>0X4e then for g=0x1,r do(l)[g]=A[0B110]();end;break;elseif y<78 then A[1][0B100__1_1]=A[0X2](r*0X3);y=0x004f__;continue;else if not(y>0B1001111)then else l,y=G:YS(A,r,l,y);continue;end;end;end;for r=1,#A[1][0B1_0011],3 do A[0x001][0X13][r][A[0B1][0X13][r+0X1]]=(l[A[1][0B10011][r+2]]);end;y=nil;for r=0x1d,230,0x19 do e,y=G:pS(l,A,r,S,y);if e==3798 then continue;else if e~=nil then return{G.j(e)};end;end;end;return nil;end,b=function(G,G)local A=G[1][0b10_0100]();if not(A>=G[1][34])then else return{A-G[0X001][0xE]};end;return{A};end,PF=(function(G)local A,e,r=({});r=G:c(A,r);local S;S=G:Q(S,r,A);S=G:w(r,A,S);S=G:h(r,S,A);S=G:A(r,A,S);S=G:u(r,S,A);S=G:vS(S,A,r);local y,l;l,y,S=G:ZS(y,A,l,r,S);local g;e,g,S=G:vF(S,l,y,A,g,r);if e==nil then else return G.j(e);end;return A[0B101_110](g,A[0B11_100]);end),uS=function(G)end,vF=function(G,A,e,r,S,y,l)local g;y=(nil);A=(0x13);repeat if not(A<=0X13)then if not(A>=0X56)then(S[0X028])[0Xd]=G.GF;break;else if S[0X1e]~=S[28]then else if not(S[0B1__0])then else return{},y,A;end;end;if not l[27177]then l[11636]=(0Xd+((G.rF((G.FF((G.UF(l[0X3F8e_],(l[0X07217]))))),l[11571]))==l[15969]and G.g[0X5]or l[0X444C]));A=(0X3d+(G.FF((G.UF((G.BF(l[0x7217],l[0X2F25])),(l[26762])))-l[0x51D1])));l[27177]=A;else A=G:JS(A,l);end;continue;end;else y,A=G:fS(r,y,A,l);continue;end;until false;(S[0b101000])[9]=G.FF;(S[40])[11]=G.r;S[0X28][0XF]=G.I.rshift;(S[0B101000])[0X6]=G.v;A=(0x77);while true do if A<=0B1000001 then S[0X28][0x0010]=(G.I.bnot);break;else g,A=G:EF(S,A,l);if g==58348 then continue;end;end;end;(S[0X28])[0X7__]=G.LF;A=0X10;repeat if A==16 then(S[0X28])[0b1110]=G.rF;(S[0X28])[0B1100]=G.iF;if not(not l[0x827])then A=(l[2087]);else A=(-0X4C+((G.iF((G.GF(l[0x149F]-l[0X333b]))))+l[0x4398]));l[0X82__7]=(A);end;continue;else if A==47 then y=S[0X2e](y,S[0X1C])(r,G.W,S[0B1_0],e,S[0X23],S[30],S[0X1F],G.g,S[0X1D],S[0B101110]);break;end;end;until false;return nil,y,A;end,ZS=function(G,A,e,r,S,y)e[44]=(nil);(e)[0b101101]=nil;e[0X2e]=(nil);y=(0x52_);while true do if y==82 then(e)[0B101100]=G.N;if not(not S[3934])then y=(S[3934]);else y=-0X1F+(G.BF((G.rF((G.rF((G.IF(S[16270],(S[21469]))),S[143])))),S[0X6B9_9]));(S)[3934]=y;end;elseif y==0x009__ then(e)[0X2D]=(G.G.match);if not(not S[12069])then y=S[0X2f25];else y=0X029+((G.RF(S[21469],(S[0X688A])))+S[0X444__c]-S[0X8F]>G.g[0X5]and y or S[4342]);S[0x2F25]=y;end;continue;else if y==0X54 then(e)[46]=function(S,l)local g=({e[0X11],e[0x29],e,e[25],e[0X2A],e[0X20]});local v,t,Q=S[0b100],S[0XA],(S[0X9__]);local o,b,J,Y,Z,d,T=S[0X6],S[0B10],S[0X3],S[11],S[8],(S[0x001]);T=function(...)local O,c=g[0X1](v),0x0;local v,H=g[0x2__](...);local z,L,q,R,i,W,j,B,F=0X0__01,0X1,(g[0b11][12]()),0X1;local K,M,s,x=g[0X4](function()repeat local D=(Q[R]);if D<0X3e then if D<31 then if D>=0B1111 then if not(D<23)then if D<0X1__B then if not(D<0B1100__1)then if D==0X1a then(O)[Z[R]]=(g[3][0X4](O[Y[R]],J[R]));else if not(not O[Y[R]])then else R=(b[R]);end;end;else if D~=0X18 then if W then for h,P in W do if h>=0X1 then P[0X3]=(P);P[0X1]=(O[h]);(P)[0B10]=(1);(W)[h]=nil;end;end;end;local h=(b[R]);return false,h,h+Y[R]-0X2;else O[b[R]]=-O[Y[R]];end;end;else if D<0X1d then if D~=0X1C then O[b[R]]=o[R]==d[R];else O[Z[R]]=(O[Y[R]]);end;else if D~=0X1E then local h=(l[Y[R]]);h[3][h[0x2]]=O[Z[R]];else for h=0B1,Z[R]do(O)[h]=(H[h]);end;end;end;end;else if D>=0X13 then if D<0B10101 then if D==0b10100 then(O)[b[R]]=Z;else(O)[Y[R]]=J[R]%o[R];end;else if D==0X16 then(l[Z[R]])[O[Y[R]]]=(J[R]);else(O)[Z[R]]=O[Y[R]]%J[R];end;end;else if not(D<0B10001)then if D~=0X12 then(O)[Y[R]]=g[0X1](Z[R]);else(O)[b[R]]=(l[Y[R]][o[R]]);end;else if D==0X0010 then if not(not(o[R]<=O[b[R]]))then else R=Y[R];end;else O[b[R]]=O[Z[R]][O[Y[R]]];end;end;end;end;else if not(D<7)then if not(D>=0B1011)then if not(D<0X9)then if D~=0B1010 then O[Z[R]]=O[b[R]][d[R]];else(O)[b[R]]=(l[Y[R]]);end;else if D~=8 then(O)[b[R]]=(O[Y[R]]>o[R]);else O[Z[R]]=O[b[R]]+O[Y[R]];end;end;else if not(D<0B1101)then if D==0B111_0 then if not(not(o[R]<O[Y[R]]))then else R=b[R];end;else O[Z[R]]=J[R]..O[Y[R]];end;else if D~=0XC then if O[Z[R]]==d[R]then R=b[R];end;else if O[Y[R]]then R=(Z[R]);end;end;end;end;else if D<3 then if D<1 then local h=l[b[R]];O[Z[R]]=h[0x3][h[0B10]][d[R]];else if D~=0B10 then O[Z[R]]=(J[R]-d[R]);else O[Y[R]]=O[Z[R]]%O[b[R]];end;end;else if D>=0X5 then if D==6 then(O[Y[R]])[o[R]]=(J[R]);else O[Z[R]]=(O[b[R]]*O[Y[R]]);end;else if D==0X4 then if not(not(O[Y[R]]<O[Z[R]]))then else R=b[R];end;else c=Z[R];for h=1,c do O[h]=(H[h]);end;L=c+0X1;end;end;end;end;end;else if not(D>=0x2__e)then if not(D<0x26)then if not(D<42)then if D<44 then if D~=43 then O[Z[R]]=(l[b[R]][O[Y[R]]]);else O[b[R]]=(q[d[R]]);end;else if D~=0X2D then O[Z[R]]=(O[Y[R]]/O[b[R]]);else local h=(l[b[R]]);(h[3][h[0X2]])[o[R]]=(d[R]);end;end;else if not(D>=40)then if D~=0B0100111 then(O)[Z[R]]=(O[Y[R]]-J[R]);else for h=b[R],Y[R]do O[h]=(nil);end;end;elseif D==0X29 then(O)[b[R]]=O[Z[R]]>=O[Y[R]];else(O[b[R]])[d[R]]=O[Z[R]];end;end;else if not(D<0x22)then if not(D<0B100100)then if D==37 then local h=Y[R];z=(h+b[R]-0X1);O[h]=O[h](g[3][0Xb](z,O,h+1));z=(h);else(O)[Z[R]]=O[b[R]]==d[R];end;else if D~=0X0023 then local h=(l[Y[R]]);h[0X3][h[0X2]][J[R]]=O[Z[R]];else local h=(o[R]);local P=(h[5]);local N=(#P);local _=N>0 and{};local I=g[0x3][0B101110](h,_);g[0x6](I,q);O[Y[R]]=I;if not(_)then else for X=0x1,N do I=(P[X]);h=I[3];local P=I[0B10];if h==0X0 then if not W then W={};end;local N=(W[P]);if not N then N=({[2]=P,[0B11]=O});W[P]=(N);end;_[X-1]=N;elseif h~=1 then _[X-0X1]=(l[P]);else _[X-0X01]=(O[P]);end;end;end;end;end;else if D<32 then local h,P=Y[R],O[b[R]];O[h+0X01]=P;(O)[h]=P[o[R]];else if D==0X21 then F=(i[1]);B=i[0B11];j=(i[2]);i=(i[0B100]);else O[Y[R]]=(O[b[R]]..o[R]);end;end;end;end;else if not(D>=0X36)then if not(D<0x32)then if not(D<0x34)then if D==0B110101 then local h=Z[R];O[h]=O[h](g[0b11][0XB](z,O,h+0X1));z=h;else local h=(Z[R]);local P,N,_=F();if not(P)then else O[h+0b1]=N;O[h+0B10__]=_;R=(b[R]);end;end;else if D==0B110011 then O[Y[R]]=nil;else local h,P=Y[R],b[R];local N=(O[h]);(g[3][0X8])(O,h+1,h+Z[R],P+0X1,N);end;end;else if not(D>=48)then if D==0X002F__ then(O[b[R]])[O[Z[R]]]=(O[Y[R]]);else(O)[Y[R]]=(g[3][0X4](O[Z[R]],O[b[R]]));end;else if D~=0B110001 then i=({[1]=F,[0x3]=B,[0B0100]=i,[0X2]=j});z=(Y[R]);local h=g[0B101](function(...)g[0X3][0B11_01]();for P,N in...do g[0B11][0Xd](true,P,N);end;end);(h)(O[z],O[z+0B1__],O[z+0B10]);F=h;R=(b[R]);else local h=l[b[R]];(h[0X3])[h[0x2]]=o[R];end;end;end;else if D>=0X003A then if not(D>=0x3c__)then if D==0B1__1__1__011 then O[Z[R]]=(O[Y[R]]^O[b[R]]);else R=(b[R]);end;else if D~=0B111101 then(l[Z[R]])[d[R]]=(O[b[R]]);else i={[0X1]=F,[0X3]=B,[0X4]=i,[2]=j};local i=(b[R]);j=(O[i+0b10]+0X0);B=(O[i+0X1]+0B0);F=O[i]-j;R=Y[R];end;end;else if not(D<56)then if D~=0x39 then O[b[R]]=(d[R]>=o[R]);else(O)[Y[R]]=(J[R]<o[R]);end;else if D~=55 then local i=(l[Y[R]]);O[b[R]]=i[3][i[0B10]][O[Z[R]]];else local i=(l[Y[R]]);i[0B11][i[0x2]][O[Z[R]]]=O[b[R]];end;end;end;end;end;end;else if D<0X5d then if D>=0X4D then if not(D<0x55)then if D>=0b1011001 then if not(D<0B10110_11)then if D==0X5c then(O)[Z[R]]=not O[Y[R]];else O[Z[R]]=(O[b[R]]/d[R]);end;else if D~=0X5a then O[b[R]]=Q;else O[Y[R]]=H[L];end;end;else if not(D>=0B1010111)then if D==0X056 then(O)[b[R]]=O[Y[R]]*o[R];else O[Y[R]]=o[R]-O[b[R]];end;else if D~=88 then if W then for i,h in W do if i>=1 then(h)[0X03]=(h);(h)[0B1]=O[i];h[2]=(1);W[i]=(nil);end;end;end;return true,b[R],1;else if not(not(O[Y[R]]<=J[R]))then else R=Z[R];end;end;end;end;else if D>=0X51 then if D<0x53 then if D==0X52 then local i,h,P,N,_=(72);while true do if i==72 then _=0X24;i=(-0X47F1fF9+(g[3][40][7]((g[0X3][0B101000][0x6]((g[3][40][0x7](i,(0B001010_))),i,D))-D,(10))));elseif i==0b111 then h=(0X00);i=(-31+((i+i-D>=D and D or i)+D));elseif i==0B11_1010 then P=(4503599627370495);i=(-2684354480+(g[0X3][0X28][0B1_0_00]((g[0B11][0X28][0X9]((g[0b11][0X28][10](D+D,(21))))),(g[0X3][0X28][11](""<\1058"",""\29\0\0\0\0\0\0\0"")))));continue;elseif i~=0x5_1 then else h*=P;P=(g[0b11][0X28]);break;end;end;local I,X;i=(0X31);while true do if not(i<=0X31)then if not(i<0X6E)then N=0X7;break;else P=(P[I]);i=-0B10100011+(((g[0X3][40][0X8]((g[3][40][0b1100](i)),(0b011100__)))<D and i or i)+D);continue;end;else if i<0X31 then I=g[0X3][40];i=0x1C+((g[3][0B101000][0B1010_]((g[0b1_1][0X28][0XA](i<i and D or D,(i))),(i)))>i and D or D);else I=0B110;i=10+((g[3][0B10__1000][12]((i~=i and D or D)+i))+D);end;end;end;i=0XC;while true do if not(i<=12)then if i~=123 then X=(Q[R]);break;else N=D;i=-0X5d+((g[3][0B101000][6](D,i,D))+D-i>i and D or i);end;else I=I[N];i=(0X7B+(g[0B11][0B1010_00][0XC]((g[0X3][40][0Xc](i+i<=i and i or D)))));end;end;i=(0X70);while true do if i<0B1110000 then X=(D);break;elseif not(i>0B1111)then else N-=X;i=0X2D+((i+D-i~=D and i or D)-i);end;end;N=N~=X;i=33;while true do if not(i<=0B1__100)then if not(i<=0X21)then N=(N~=X);if not(N)then else N=(Q[R]);end;break;else if N then N=(D);end;i=0b1010+(g[3][0X28][0B1100]((g[0x3][0x28][0XE]((g[3][40][9](i))+D))));end;else if not(not N)then else N=(D);end;X=D;i=(111+((g[0X3__][0B1010__00][13](D,D,D))-D+D>D and i or i));continue;end;end;i=(0b101_000);while true do if i==0X67 then N-=X;X=(0X1B);break;else if not N then N=(Q[R]);end;X=D;i=(0XB9+((g[0x3][40][0b1111]((g[0x3][0x28][0XE](D+D,D)),(22)))-D));end;end;i=(0b100__011);while true do if i==0x26 then N=D;I=(I~=N);break;else I=I(N,X);i=-618+(g[0b11][0X28][0Xd]((g[3][0X28][0Xf]((g[0B11][0B101000][0Xa]((g[0X3][0b101000][0Xe__](D,D)),(0Xa))),(0x13)))));end;end;if not(I)then else I=D;end;i=(0B1001001);while true do if i==0B1001001 then if not(not I)then else I=(D);end;N=(D);i=(-0B10000+((g[0X3][40][0X009]((g[0B11__][40][0b1001](D))))+D-i));continue;elseif i==0X14 then I-=N;i=(0B1111010+((g[0B11][0x28][6]((g[0X3][40][0X9](i))+i,i))-D));continue;elseif i==0x63 then N=Q[R];i=182+((g[0B11][0X28][0XF]((g[0X3][40][0b1110](D))+D,(0X6)))-D);elseif i==0X66 then X=D;i=(0XD+(g[0x3][40][0x9]((g[0B11][0B101000][0B10000](i-D+D)))));continue;elseif i~=0B1101 then else P=P(I,N,X);break;end;end;i=0X1a;while true do if i==0X1a then h+=P;i=(0X17+((g[0b11][0X28][0Xf]((g[0B11][0X28][0b110](D,D,i))-i,(i)))<=D and i or D));elseif i==0X31 then _+=h;i=(122+((g[0X3_][0X28][0X00C]((g[0X3][0X28][0X7](D,(0x2)))))+i-D));continue;elseif i==0X05c then(Q)[R]=_;_=O;i=-4293623797+(g[0X3][0b101000][0X7]((g[3][0B101000][10](D+i,(0X9)))-D,(0B1110)));continue;elseif i==0Xb then h=Z[R];i=(83+(g[0X3][0X2__8][0B1_0_01](D-D+i+i)));elseif i~=0b110_1110 then else P=(O);break;end;end;i=(0X2__a);while true do if i>0B101010 then I=(d[R]);P=(P==I);break;elseif i<0B101010 then P=(P[I]);i=(-56+((D~=D and D or D)+i-i+D));elseif i<108 and i>0X1 then I=(b[R]);i=-0X51+((g[0X3][0x28][12](i+i>i and i or D))~=i and D or D);end;end;(_)[h]=P;else(O)[Y[R]]={};end;elseif D~=0X54 then z=(Z[R]);(O)[z]=O[z]();else(O)[Z[R]]=(O[Y[R]]~=O[b[R]]);end;else if not(D>=0x4F)then if D==0b1001110 then(O)[Z[R]]=O[Y[R]]>O[b[R]];else if not(O[Y[R]]<o[R])then R=b[R];end;end;else if D~=80 then z=Z[R];(O[z])();z-=0X1;else O[b[R]][O[Z[R]]]=(d[R]);end;end;end;end;else if D>=0x45 then if not(D<0X49)then if not(D<0X4B)then if D==76 then local i,h=Z[R],(b[R]);if h~=0X0 then z=i+h-0x1;end;local P,N,_=(Y[R]);if h~=0x1__ then N,_=g[0B10](O[i](g[3][11](z,O,i+0X1)));else N,_=g[0X2](O[i]());end;if P~=1 then if P==0X0 then N=N+i-0B1;z=(N);else N=i+P-0X2;z=N+0X1;end;h=(0);for P=i,N do h+=0X1;(O)[P]=_[h];end;else z=i-0X1;end;else O[Z[R]]=g[0b11][0X28][Y[R]];end;else if D~=0B1001010 then else local i=Y[R];z=(i+b[R]-1);(O[i])(g[3][0XB](z,O,i+0x1));z=(i-0X1);end;end;else if not(D<0X47)then if D==0X48 then if not(W)then else for i,h in W do if not(i>=1)then else h[0x3]=(h);(h)[0B01]=(O[i]);h[0B10]=1;W[i]=nil;end;end;end;local i=(Y[R]);return false,i,i;else local i=(Y[R]);O[i]=O[i](O[i+0X1]);z=(i);end;else if D~=0X46 then(O)[b[R]]=b;else(O)[Y[R]]=(J[R]>o[R]);end;end;end;else if not(D>=0X41)then if not(D<63)then if D==0X40 then(O)[b[R]]=o[R]^O[Y[R]];else local i=(b[R]);if not(W)then else for h,P in W do if not(h>=i)then else P[3]=P;P[0b1]=(O[h]);(P)[0X2]=0X1;W[h]=(nil);end;end;end;end;else if not(W)then else for i,h in W do if i>=0b1 then h[0X3]=(h);h[0X1]=O[i];(h)[0x2]=0B1__;W[i]=nil;end;end;end;return;end;else if not(D>=67)then if D==0X42 then local i,h=Z[R],(Y[R]);z=(i+h-0X1);if W then for P,N in W do if P>=1 then(N)[0X3]=(N);N[0B1]=(O[P]);N[0B10_]=(0X1);(W)[P]=(nil);end;end;end;return true,i,h;else local i=b[R];O[i](g[0X3][0Xb](z,O,i+0B1));z=(i-0X1);end;else if D==0X0044 then(O)[b[R]]=o[R]~=d[R];else(O)[Y[R]]=O[b[R]]-O[Z[R]];end;end;end;end;end;else if D>=0x6d then if not(D<0b1110101)then if not(D>=0X79)then if not(D>=0x77)then if D==0x76 then local i,h=v-c-0X1,0X0;if not(i<0X0)then else i=-1;end;local v=b[R];for c=v,v+i do(O)[c]=H[L+h];h+=0B1;end;z=(v+i);else(O)[Z[R]]=(d[R]);end;else if D~=0B1_1__11000 then local v=false;F+=j;if j<=0X0 then v=F>=B;else v=(F<=B);end;if v then O[Z[R]+3]=F;R=(Y[R]);end;else if W then for v,c in W do if v>=1 then(c)[3]=c;(c)[0X001]=O[v];(c)[2]=0X1;(W)[v]=nil;end;end;end;local v=(Y[R]);z=(v+0x01);return true,v,0X2;end;end;else if not(D<0X7B)then if D~=124 then O[Z[R]]=d[R]*O[b[R]];else if W then for v,c in W do if v>=0X1 then c[0b11]=(c);(c)[0X1]=O[v];c[0X2]=(0B1);(W)[v]=(nil);end;end;end;return false,b[R],z;end;else if D==122 then l[Z[R]][O[Y[R]]]=(O[b[R]]);else local v,c=Y[R],(Z[R]);local H=(O[v]);g[0B11][0x8](O,v+0X1,z,c+0X1,H);end;end;end;else if D<0X71 then if D<111 then if D~=0X6E then if O[b[R]]~=O[Y[R]]then else R=(Z[R]);end;else O[b[R]]=(O[Y[R]]+o[R]);end;else if D~=0X070 then(O)[Z[R]]=(#O[Y[R]]);else if O[b[R]]==d[R]then else R=(Z[R]);end;end;end;else if not(D>=115)then if D~=0b1110010_ then(O)[Y[R]]=O[b[R]]..O[Z[R]];else local v,c,H,L,i,j=0B110,(0X74);while true do if c>0X43 then if c>0B1_000110_ then H=(0X98);i=0;c=(0X3+(g[0X3][0X28][0X8]((g[0x3][0X28][0X10]((g[0X3][0X28][0Xe](D,D))-c)),(0X6))));else j=(g[0X3][0B101000]);break;end;else j=(4503599627370495);i*=j;c=(-0X2c_+((g[0B11][0X0028][0B10000]((g[0B11][0x28][0Xe](D,D,D))))-c>c and D or D));continue;end;end;local B;c=(0X001E);while true do if c>0X0 then if c==0X1e then j=j[v];c=(-4294967171+((g[0X3][40][14](c-D))+c+c));else v=(g[0X03][0X28]);c=(-31+((g[0X3][0X28][0xd](D,c,c))+D-c-c));continue;end;else L=(0X10);break;end;end;c=0x13;local F;while true do if not(c>0B10011)then v=v[L];L=g[0B11][0b10100__0];c=(0x56+(g[0b011][40][0B1001]((g[0X3][0X28][12](c+c))-D)));continue;else if c~=0X56 then L=(L[B]);break;else B=0b1110;c=61+(g[0x3][40][0B110]((c-D<=c and D or c)-D));end;end;end;c=(0X6A);while true do if not(c<=0x2c)then if c<=0B1000001 then B=(B<F);c=-0X77+((g[0B00__11][0B10100_0][0B110__]((g[3][0X2_8][0xe](D))+D,c,c))-c);else B=Q[R];F=(D);c=(-49+(((g[0b11][0X28][14](D,D,c))>D and D or D)-D>c and D or D));continue;end;else if c>0x1b then if B then B=D;end;if not B then B=Q[R];end;c=(0X37+((g[0x3][0B01__01000][0XE]((g[0X3][0B101000][0X9]((g[0X3][0X28][6](c,c,D)))),D,D))-c));else F=(Q[R]);break;end;end;end;c=99;while true do if not(c>13)then L=D;break;else if c==0X63 then L=L(B,F);c=-40+(g[3][40][0B1101]((g[0b11][0X28][15](D+D,(3)))+D));else v=v(L);c=(-0B1100+(g[3][0B00101000][0B1001]((g[0b11][0X28][0b1100]((g[0B11_][40][6](c,D,D))))>D and D or c)));continue;end;end;end;j=j(v,L);v=Q[R];c=0X44;while true do if c>0B10110 and c<0X5__3 then j+=v;c=0X51+(g[0X3][0X28][0xE]((g[0X3][0X28][0x10]((g[0B11][0B101000][12](c))+D)),D,D));continue;elseif c>0X44 then v=(Q[R]);c=-0X147fff__EA+(g[0x3][0x28][0XA]((g[0x3][0X28][14]((g[0b11][0X28][0B1000](D,(0X7)))+D,c,c)),(0Xa)));elseif not(c<0B1000100)then else j=j<=v;break;end;end;if j then j=D;end;if not j then j=D;end;v=(Q[R]);j-=v;v=(D);c=(0X5_6);while true do if not(c>0X56)then if c==0X3d then i+=j;c=120+(g[0X3][0X28][0X9_]((g[0X3][0B101000][0b1101](D-D-c))));else j-=v;c=(-0X0_47__+((g[0b011][0X28_][0Xe]((g[0x3][40][0XA](c-D,(30))),D))+D));end;else if c<=0b1__101010 then H=O;i=Z[R];break;else if c~=0X77 then H+=i;c=(0b1__110100_1+((g[0X3][0X28][0X8]((g[3][0X28][15](c-D,(0X15))),(26)))-D));continue;else(Q)[R]=H;c=-4294967185+(g[0X3][40][0b1110](c-c+D-c));end;end;end;end;j=O;v=Y[R];j=j[v];c=29;while true do if c==0X58 then(H)[i]=j;break;else v=(J[R]);j-=v;c=88+(g[0B1__1][0X2__8][0XE]((g[0b011][40][0XF]((g[0B1_1][0B101000][14]((g[0X003][0B101000][0B1000](D,(c))))),(c))),c,c));continue;end;end;end;else if D~=116 then(O)[Y[R]]=o[R]<=J[R];else if not(W)then else for v,c in W do if v>=0X1 then c[0X3]=c;c[0X1]=(O[v]);(c)[0B10]=(0B01);W[v]=(nil);end;end;end;return true,Z[R],0X0;end;end;end;end;elseif not(D<101)then if not(D>=105)then if D<0X67 then if D==0X66 then q[o[R]]=(O[b[R]]);else local v=l[b[R]];(O)[Z[R]]=v[0X3][v[0b10__]];end;else if D~=0X68 then local v,c,H,L,q,i,j=13,Y[R],0Xd,(0X3d);while true do if L==0x3D then q=(O);L=(0X5__E+(g[0X3][0B101_000][9]((g[0B11][0X28][0xE](D-D,D))==L and L or L)));continue;elseif L==0B1111000 then i=b[R];L=(0b1__111+((g[3][40][0Xc__](D+D-L))+D));continue;elseif L==119 then q=q[i];L=(-198+((g[0x3][0X28][0x6_]((g[0B11][40][0B110](L+D,D))))+L));continue;elseif L==0x6A then i=(0X86);break;end;end;local B=0;L=(0X5e);while true do if L==0b1011_110 then j=4503599627370495;L=-4294967258+(g[0X3][0B10_1000][0B1__101_]((g[0B11__][0B0101000][12](L))+L-D,L,D));continue;elseif L==0B1001__01 then B*=j;break;end;end;j=(g[0B11][0b1010_00]);local F;L=(0x40);while true do if not(L>=0X40)then F=g[3][0X28];break;else F=12;j=j[F];L=(-4294967097+(g[0x3][0X28][0X10](L+D+L-L)));continue;end;end;L=0X2b;while true do if L~=14 then F=F[v];L=-0X16__c+(g[0X3][0b101000][0Xa]((g[0X3][0x28][0X06](L+L+D,L,L)),(0B11111)));continue;else v=g[0b11][0B101000];break;end;end;v=(v[H]);H=D;local h=(D);v=v(H,h);L=(0x6f);while true do if not(L<=2)then H=(Q[R]);L=-0B1101101+((D-L+D>=L and L or D)>L and D or L);else v-=H;break;end;end;H=(D);v-=H;L=75;while true"
+TaxZqUvY,Longest Substring Without Repeating Characters - LeetCode,titan2400,Java,Friday 24th of October 2025 09:01:53 PM CDT,"// Longest Substring Without Repeating Characters - https://leetcode.com/problems/longest-substring-without-repeating-characters/description/?source=submission-ac
+
+class Solution {
+
+    // Time Complexity: O(N^2)
+    // Space Complexity; O(k) 
+    //  where k is the length of longest substring
+    // public int lengthOfLongestSubstring(String s) {
+
+    //     int maxLength = 0;
+    //     for(int i = 0; i < s.length(); i++) {
+    //         Set<Character> set = new HashSet<>();
+
+    //         set.add(s.charAt(i));
+    //         int currentLength = 1;
+
+    //         for(int j = i + 1; j < s.length(); j++) {
+    //             if(set.contains(s.charAt(j))) {
+    //                 break;
+    //             }
+    //             set.add(s.charAt(j));
+    //             currentLength++;
+    //         }
+
+    //         if(currentLength > maxLength) {
+    //             maxLength = currentLength;
+    //         }
+    //     }
+
+    //     return maxLength;
+    // }
+
+    // Time Complexity: O(n)
+    // Space Complexity: O(k)
+    //  where n is the string length 
+    //  and k is the size of the character set
+    // public int lengthOfLongestSubstring(String s) {
+    //     Set<Character> window = new HashSet<>();
+
+    //     int left = 0, right = 0, maxLength = 0;
+    //     for(; right < s.length(); right++) {
+    //         Character c = s.charAt(right);
+
+    //         while(window.contains(c)) {
+    //             window.remove(s.charAt(left));
+    //             left++;
+    //         }
+
+    //         window.add(c);
+    //         maxLength = Math.max(maxLength, right - left + 1);
+    //     }
+
+    //     return maxLength;
+    // }
+
+    // Time Complexity: O(n)
+    // Space Complexity: O(k)
+    //  where k is the size of the character set
+    public int lengthOfLongestSubstring(String s) {
+        if (s == null || s.length() == 0) {
+            return 0;
+        }
+
+        // Assuming ASCII character set (128 characters)
+        // We store the last index where we saw each character.
+        int[] lastSeenIndex = new int[128];
+        Arrays.fill(lastSeenIndex, -1); // -1 means ""not seen yet""
+
+        int maxLength = 0;
+        int left = 0; // The left boundary of the sliding window
+
+        for (int right = 0; right < s.length(); right++) {
+            char c = s.charAt(right);
+
+            // Check if the character was seen before and if its last
+            // occurrence is inside our current window [left, right].
+            if (lastSeenIndex[c] >= left) {
+                // Duplicate found in the window.
+                // Move the left pointer to the position after the last occurrence.
+                left = lastSeenIndex[c] + 1;
+            }
+
+            // Update the last seen index for this character to the current position.
+            lastSeenIndex[c] = right;
+
+            // Calculate the length of the current window and update max.
+            maxLength = Math.max(maxLength, right - left + 1);
+        }
+
+        return maxLength;
+    }
+}"
+mzRdBHFy,Top K Frequent Elements - LeetCode,titan2400,Java,Friday 24th of October 2025 08:49:26 PM CDT,"// Top K Frequent Elements - https://leetcode.com/problems/top-k-frequent-elements/description/?source=submission-ac
+
+class Solution {
+
+    // Time Complexity: O(nlogn)
+    public int[] topKFrequent(int[] nums, int k) {
+        Map<Integer, Integer> map = new HashMap<>();
+
+        for (int i = 0; i < nums.length; i++) {
+            int count = map.getOrDefault(nums[i], 0);
+            map.put(nums[i], count + 1);
+        }
+
+        // Sorted in descending order by count
+        PriorityQueue<Element> pq = new PriorityQueue<>(
+            (el1, el2) -> Integer.compare(el2.j, el1.j)
+        );
+
+        for(Map.Entry<Integer, Integer> entry: map.entrySet()) {
+            System.out.println(entry.getKey() + "" "" + entry.getValue());
+            pq.offer(new Element(entry.getKey(), entry.getValue()));
+        }
+
+        int[] result = new int[k];
+        for (int i = 0; i < k && !pq.isEmpty(); i++) {
+            Element el = pq.poll();
+            result[i] = el.i;
+        }
+
+        return result;
+    }
+
+    class Element {
+        int i, j;
+
+        Element(int i, int j) {
+            this.i = i;
+            this.j = j;
+        }
+    }
+
+    Time Complexity: O(Nlogk)
+    Space Complexity: O(N + k)
+    public int[] topKFrequent(int[] nums, int k) {
+        Map<Integer, Integer> count = new HashMap<>();
+
+        for (int n: nums) {
+            count.put(n, count.getOrDefault(n, 0) + 1);
+        }
+
+        // Sorted in descending order by count
+        Queue<Integer> minHeap = new PriorityQueue<>(
+            (n1, n2) -> 
+                Integer.compare(count.get(n1), 
+                    count.get(n2))
+        );
+
+        for(int n: count.keySet()) {
+            minHeap.offer(n);
+            if(minHeap.size() > k) {
+                minHeap.poll();
+            }
+        }
+
+        int[] top = new int[k];
+        for (int i = k - 1; i >= 0; i--) {
+            top[i] = minHeap.poll();
+        }
+
+        return top;
+    }
+}"
+gZ590ijH,Two Sum - LeetCode,titan2400,Java,Friday 24th of October 2025 08:47:14 PM CDT,"// https://leetcode.com/problems/two-sum/description/?source=submission-ac
+
+class Solution {
+
+    // Time complexity: O(nlogn)
+    // Dry runs
+    // Example 1: [1, 2, 3, 4, 5], target = 7
+    // Example 2: [5, 6, 3, 1] , target = 7
+
+    // Below solution works for scenario where we are looking for two numbers that add upto target but not for indices
+    // This is because we are sorting and that would change the indices
+    // public int[] twoSum(int[] nums, int target) {
+    //     Arrays.sort(nums);
+    //     int i = 0, j = nums.length - 1;
+
+    //     while(i < j) {
+    //         if (nums[i] + nums[j] == target) {
+    //             return new int[]{nums[i], nums[j]};
+    //         }
+    //         else if (nums[i] + nums[j] > target) {
+    //             j--;
+    //         }
+    //         else {
+    //             i++;
+    //         }
+    //     }
+
+    //     return new int[]{};
+        
+    // }
+
+    // Time complexity: O(n)
+    // Space complexity: O(n)
+    // I initially though below solution would not work for duplicates however that assumption was wrong
+    // public int[] twoSum(int[] nums, int target) {
+    //     HashMap<Integer, Integer> map = new HashMap<>();
+
+    //     for(int i = 0; i < nums.length; i++) {
+    //         map.put(nums[i], i);
+    //     }
+
+    //     for(int i = 0; i < nums.length; i++) {
+    //         if(map.get(target - nums[i]) != null) {
+    //             int j = map.get(target - nums[i]);
+    //             if (i == j) continue;
+    //             return new int[]
+    //                 {i, map.get(target - nums[i])};
+    //         }
+    //     }
+
+    //     return new int[]{};
+    // }
+
+    // Brute force
+    // Time Complexity: O(n^2)
+    // Space Complexity: O(1)
+    // public int[] twoSum(int[] nums, int target) {
+    //     for (int i = 0; i < nums.length; i++) {
+    //         for (int j = i + 1; j < nums.length; j++) {
+    //             if(nums[i] + nums[j] == target) {
+    //                 return new int[]{i, j};
+    //             }
+    //         }
+    //     }
+
+    //     return new int[]{};
+    // }
+
+    // Time complexity: O(n)
+    // Space complexity: O(n)
+    // Two pass hash table
+    // public int[] twoSum(int[] nums, int target) {
+    //     Map<Integer, Integer> map = new HashMap<>();
+    //     for (int i = 0; i < nums.length; i++) {
+    //         map.put(nums[i], i);
+    //     }
+
+    //     for (int i = 0; i < nums.length; i++) {
+    //         int complement = target - nums[i];
+
+    //         if(map.containsKey(complement) && map.get(complement) != i) {
+    //             return new int[] {i, map.get(complement)};
+    //         }
+    //     }
+
+    //     return new int[]{};
+    // }
+
+    // Time complexity: O(n)
+    // Space complexity: O(n)
+    // One pass hash table
+    public int[] twoSum(int[] nums, int target) {
+        Map<Integer, Integer> map = new HashMap<>();
+        for (int i = 0; i < nums.length; i++) {
+            int complement = target - nums[i];
+            if(map.containsKey(complement)) {
+                return new int[]{map.get(complement), i};
+            }
+
+            map.put(nums[i], i);
+        }
+
+        return new int[]{};
+    }
+
+}"
+e18JLhAh,"""AudioManager.gd"" v1",Kitomas,GDScript,Friday 24th of October 2025 08:22:43 PM CDT,"## Script for the AudioManager singleton
+extends Node
+
+
+
+## Volume of Master bus (0.0 -> 1.0, affects all other busses)
+var vol_Master: float:
+	set(volume): vol_Master = __set_bus_volume(__idx_Master, volume)
+
+## Volume of User Interface SFX bus (0.0 -> 1.0)
+var vol_UI: float:
+	set(volume): vol_UI = __set_bus_volume(__idx_UI, volume)
+
+## Volume of DSP Effects bus (0.0 -> 1.0, affects Music and SFX busses)
+var vol_DSP: float:
+	set(volume): vol_DSP = __set_bus_volume(__idx_DSP, volume)
+
+## Volume of Music bus (0.0 -> 1.0)
+var vol_Music: float:
+	set(volume): vol_Music = __set_bus_volume(__idx_Music, volume)
+
+## Volume of Sound Effects bus (0.0 -> 1.0)
+var vol_SFX: float:
+	set(volume): vol_SFX = __set_bus_volume(__idx_SFX, volume)
+
+
+
+
+
+## Plays a non-spatial, oneshot sound effect
+func play_sfx(stream:AudioStream, volume:float = 1.0) -> void:
+	var player := AudioStreamPlayer.new()
+
+	player.bus = &""SFX""
+	player.stream = stream
+	player.volume_linear = vol_Master * vol_SFX * volume
+
+	add_child(player)
+	player.play()
+
+	# Notes for this (in the future, double check if this info is correct):
+	# AudioStreamOggVorbis                       [*] Works as expected
+	# AudioStreamWAV                             [*] Works for non-looping WAVs
+	# AudioStreamMP3                             [*] Works as expected
+	# AudioStreamRandomPitch/AudioStreamPlaylist [*] Emits after last entry
+	# AudioStreamGenerator                       [ ] Infinite stream, never ""finishes""
+	# AudioStreamPolyphonic                      [ ] Manages multiple sources
+	'''
+	player.finished.connect(player.queue_free)
+	'''
+	# Potential improvement?
+	var duration := player.stream.get_length()
+	get_tree().create_timer(duration).timeout.connect(player.queue_free)
+
+
+
+
+
+func play_music(stream:AudioStream, fade_time_seconds:float = 1.0) -> void:
+	# If same track is already playing, return early
+	if __player_Music.stream == stream and __player_Music.playing: return
+
+	# If a track is already playing, fade-out before playing the next track
+	if __player_Music.playing:
+		if __tween_Music: __tween_Music.kill()
+		__tween_Music = get_tree().create_tween()
+		__tween_Music.set_trans(Tween.TRANS_SINE)
+		__tween_Music.set_ease(Tween.EASE_IN_OUT)
+
+		# Set fade-out tween
+		__tween_Music.tween_property(__player_Music, ""volume_db"", __MUSIC_DB_MIN, fade_time_seconds)
+		# 'Fade-in and switch track' is called after fade-out
+		__tween_Music.tween_callback(Callable(self, ""__switch_music_track"").bind(stream, fade_time_seconds))
+
+	# Otherwise, simply fade-in
+	else:
+		__switch_music_track(stream, fade_time_seconds)
+
+
+
+
+
+#region Overrides and Signals
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-
+
+func _ready() -> void:
+	# This should be redundant, but just in case
+	__clear_all_busses()
+
+	# Set up busses
+	__idx_UI = __append_bus(&""UI"")
+	__idx_DSP = __append_bus(&""DSP"")
+	__idx_Music = __append_bus(&""Music"", &""DSP"")
+	__idx_SFX = __append_bus(&""SFX"", &""DSP"")
+
+	# Initialize volumes (should invoke their setter functions)
+	vol_Master = 1.0
+	vol_UI = 1.0
+	vol_DSP = 1.0
+	vol_Music = 1.0
+	vol_SFX = 1.0
+
+	# Set up music player
+	__player_Music = AudioStreamPlayer.new()
+	__player_Music.bus = &""Music""
+	# (Technically, it's not necessary to add this as a child, given that this
+	#  is an autoload script, and there's only one instance of __player_Music,
+	#  that's created the moment the game runs. However, there's not much of a
+	#  reason *not* to either, and it's idiomatic to do so anyway.)
+	add_child(__player_Music)
+
+
+
+
+
+#endregion Overrides and Signals
+#region Internals
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-
+
+## Used to sync relevant resource accesses if multithreading is eventually added
+#var __mutex := Mutex.new()
+
+
+
+## Added for consistency, since this is always 0
+const __idx_Master: int = 0
+
+## Bus index for user interface sounds (should ignore DSP effects, and is sent straight to Master)
+var __idx_UI: int
+
+## Bus index for the DSP (Digital Signal Processing) audio effects' send bus.
+## While both Music and SFX are sent to this bus, its usage may be limited, given
+## that its main purpose is for applying effects that affect both Music and SFX.
+var __idx_DSP: int
+
+## Bus index for music; output is sent to DSP
+var __idx_Music: int
+
+## Bus index for sound effects; output is sent to DSP
+var __idx_SFX: int
+
+
+
+## The decibel level that music fades in from, and fades out to
+const __MUSIC_DB_MIN: float = -80.0
+
+## Used for tweening music fade ins/outs
+var __tween_Music: Tween
+
+## The stream player used for music
+var __player_Music: AudioStreamPlayer
+
+
+
+
+
+## Removes all busses except for Master (which can't be removed anyway),
+## as well as removing any effects from Master.
+func __clear_all_busses() -> void:
+	# Remove busses
+	while AudioServer.bus_count > 1:
+		AudioServer.remove_bus(AudioServer.bus_count-1)
+
+	# Remove effects
+	while AudioServer.get_bus_effect_count(__idx_Master) > 0:
+		var last_effect_index: int = AudioServer.get_bus_effect_count(__idx_Master)-1
+		AudioServer.remove_bus_effect(__idx_Master, last_effect_index)
+
+
+
+
+
+## Appends a bus to the list, with an optional bus to send to (i.e. target)
+func __append_bus(bus_name:String, send_name:StringName = &""Master"") -> int:
+	# Will be equal to bus_count-1 after adding the new one
+	var new_index: int = AudioServer.bus_count
+
+	AudioServer.add_bus()
+	AudioServer.set_bus_name(new_index, bus_name)
+	AudioServer.set_bus_send(new_index, send_name)
+
+	return new_index
+
+
+
+
+
+func __set_bus_volume(bus_index:int, volume:float) -> float:
+	volume = clampf(volume, 0.0, 1.0)
+	AudioServer.set_bus_volume_linear(bus_index, volume)
+	return volume
+
+
+
+
+
+func __switch_music_track(stream:AudioStream, fade_in_seconds: float) -> void:
+	__player_Music.stop()
+	__player_Music.stream = stream
+	__player_Music.volume_db = __MUSIC_DB_MIN # Set decibels to this initially
+	__player_Music.play()
+
+	if __tween_Music: __tween_Music.kill()
+
+	__tween_Music = get_tree().create_tween()
+	__tween_Music.set_trans(Tween.TRANS_SINE)
+	__tween_Music.set_ease(Tween.EASE_IN_OUT)
+
+	__tween_Music.tween_property(__player_Music, ""volume_db"",
+								 linear_to_db(1.0), fade_in_seconds)
+
+
+
+
+
+#endregion Internals
+
+# TODO:
+# add dsp effects
+
+# (EOF)
+"
+X13sAHjL,Untitled,pastabowl,Python,Friday 24th of October 2025 08:07:12 PM CDT,"#!/usr/bin/env python3
+
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
+    QFrame, QLabel, QSizePolicy, QSpacerItem
+)
+from PyQt6.QtGui import QPainter, QPaintEvent, QColor, QPen, QBrush, QMouseEvent, QFont
+from PyQt6.QtCore import pyqtSignal
+import sys
+
+
+class BitButton(QWidget):
+    binaryStateChanged = pyqtSignal(int, bool)
+
+    def __init__(self):
+        super().__init__()
+        self.power: int = 0
+        self.state: bool = False
+        self.setFixedSize(24, 24)
+
+    def mouseReleaseEvent(self, a0):
+        self.setBinaryState(not self.state)
+
+    def setBinaryState(self, newState: bool):
+        self.state = newState
+        self.update()
+
+    def setFromBase10(self, withinValue: int):
+        self.setBinaryState(False if withinValue & 2**self.power == 0 else True)
+
+    def paintEvent(self, pe: QPaintEvent):
+        pen_color: QColor = QColor(""#30aa53"") if self.state else QColor(""#204023"")
+        brush_color: QColor = QColor(""#78ffa3"") if self.state else QColor(""#258022"")
+        valueChar: str = ""1"" if self.state else ""0""
+        p: QPainter = QPainter(self)
+        p.setPen(QPen(pen_color, 3))
+        p.setBrush(brush_color)
+        p.drawRoundedRect(self.rect().toRectF(), 4.0, 4.0)
+        p.setFont(QFont(""FreeMono"", 12, QFont.Weight.DemiBold))
+        offset: QPoint = p.fontMetrics().boundingRectChar(valueChar).center()
+        p.drawText(self.rect().center() - offset, valueChar)
+
+class ByteBox(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setContentsMargins(5, 3, 5, 3)
+        self.build_ui()
+
+    def build_ui(self):
+        hLayout: QHBoxLayout = QHBoxLayout()
+        hLayout.setContentsMargins(2, 2, 2, 2)
+        self.sizePolicy().setHorizontalPolicy(QSizePolicy.Policy.Minimum)
+        self.sizePolicy().setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        for b in range(8):
+            bit: Bitton = BitButton()
+            bit.power = b
+            hLayout.addWidget(bit)
+            if b == 3: hLayout.addSpacing(6)
+        self.setLayout(hLayout)
+
+    def paintEvent(self, a0):
+        bg_color: QColor = QColor()
+        bg_color.setAlpha(0)
+        p: QPainter = QPainter(self)
+        p.setPen(QPen(QColor(""#ffffff""), 3))
+        p.setBrush(bg_color)
+        p.drawRoundedRect(self.rect().toRectF(), 4.0, 4.0)
+
+
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(""Nonbinary, the Decimal/Binary/Hex Calculator"")
+        self.resize(400, 400)
+        self.build_ui()
+
+        self.grandValue = 0
+
+    def build_ui(self):
+        vBoxLayout: QVBoxLayout = QVBoxLayout()
+        for r in range(2):
+            row: QHBoxLayout = QHBoxLayout()
+            for bb in range(4):
+                byteBox: ByteBox = ByteBox()
+                row.addWidget(byteBox)
+            vBoxLayout.addLayout(row)
+        self.setLayout(vBoxLayout)
+
+def main():
+    app = QApplication(sys.argv)
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == ""__main__"":
+    main()
+
+"
+MdsRJN2W,44qYaVHpLreEb3cisNpNsPEZWqzMxqVz4SNRF1hnAGYDZ8TdMsBTZQVZ6yhThqG2EREbHKrLuRs2i4pULuoBbXDR5tPEERZ KEKS,KekSec420,C,Friday 24th of October 2025 07:09:21 PM CDT,"Donate to KEKSEC 44qYaVHpLreEb3cisNpNsPEZWqzMxqVz4SNRF1hnAGYDZ8TdMsBTZQVZ6yhThqG2EREbHKrLuRs2i4pULuoBbXDR5tPEERZ
+
+Y'all want peer to peer while here you go out 😜 with me"
+US70X20G,Untitled,Cipher404,Python,Friday 24th of October 2025 07:04:41 PM CDT,"import kagglehub
+from kagglehub import KaggleDatasetAdapter
+import pandas as pd
+import json
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from sklearn.metrics import f1_score
+import numpy as np
+from datasets import Dataset
+
+# Set random seed for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+
+# 1. Load Datasets
+train_file_path = ""train.jsonl""  # Update if different (e.g., for Subtask A)
+test_file_path = ""test.jsonl""    # Update if different
+label_map_file = ""label_to_id.json""  # Update if different
+
+# Load training and test data
+train_df = kagglehub.load_dataset(
+    KaggleDatasetAdapter.PANDAS,
+    ""daniilor/semeval-2026-task13"",
+    train_file_path
+)
+test_df = kagglehub.load_dataset(
+    KaggleDatasetAdapter.PANDAS,
+    ""daniilor/semeval-2026-task13"",
+    test_file_path
+)
+
+# Load label mappings
+label_to_id_path = kagglehub.dataset_download(""daniilor/semeval-2026-task13"", label_map_file)
+with open(label_to_id_path, 'r', encoding='utf-8') as f:
+    label_to_id = json.load(f)
+id_to_label = {v: k for k, v in label_to_id.items()}
+
+# Verify data
+print(""Training Data (first 5 records):"")
+print(train_df.head())
+print(""\nTest Data (first 5 records):"")
+print(test_df.head())
+print(""\nLabel Mappings:"", label_to_id)
+
+# 2. Preprocess Data
+# Initialize GraphCodeBERT tokenizer
+tokenizer = AutoTokenizer.from_pretrained(""microsoft/graphcodebert-base"")
+
+def tokenize_function(examples):
+    return tokenizer(examples['code'], padding=""max_length"", truncation=True, max_length=512)
+
+# Convert to Hugging Face Dataset
+train_dataset = Dataset.from_pandas(train_df[['code', 'label']])
+test_dataset = Dataset.from_pandas(test_df[['id', 'code']])
+
+# Tokenize datasets
+train_dataset = train_dataset.map(tokenize_function, batched=True)
+test_dataset = test_dataset.map(tokenize_function, batched=True)
+
+# Set format for PyTorch
+train_dataset.set_format('torch', columns=['input_ids', 'attention_mask', 'label'])
+test_dataset.set_format('torch', columns=['input_ids', 'attention_mask', 'id'])
+
+# Split training data for validation
+train_dataset, val_dataset = train_dataset.train_test_split(test_size=0.1, seed=42).values()
+
+# 3. Define Model
+model = AutoModelForSequenceClassification.from_pretrained(
+    ""microsoft/graphcodebert-base"",
+    num_labels=2  # Binary classification for Subtask A
+)
+
+# 4. Define Metrics
+def compute_metrics(pred):
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    macro_f1 = f1_score(labels, preds, average='macro')
+    return {""macro_f1"": macro_f1}
+
+# 5. Set Training Arguments
+training_args = TrainingArguments(
+    output_dir=""./graphcodebert_finetuned"",
+    evaluation_strategy=""epoch"",
+    learning_rate=2e-5,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    num_train_epochs=3,
+    weight_decay=0.01,
+    save_strategy=""epoch"",
+    load_best_model_at_end=True,
+    metric_for_best_model=""macro_f1"",
+    seed=42
+)
+
+# 6. Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+    compute_metrics=compute_metrics
+)
+
+# 7. Train Model
+trainer.train()
+
+# 8. Generate Predictions
+predictions = trainer.predict(test_dataset)
+pred_labels = np.argmax(predictions.predictions, axis=1)
+
+# 9. Prepare Submission File
+submission_df = pd.DataFrame({
+    'id': test_dataset['id'],
+    'label': pred_labels
+})
+submission_df.to_csv('submission_graphcodebert.csv', index=False)
+print(""Submission file saved as 'submission_graphcodebert.csv'"")"
+5wQ37sc8,L06_TODO_5,tomlee9876,JavaScript,Friday 24th of October 2025 05:08:09 PM CDT,"<div>
+  <span>Batch Number : </span>
+
+  <input
+    type=""text""
+    placeholder=""Batch Number""
+    value={form.batch}
+    onChange={(e) => setForm({ ...form, batch: e.target.value })}
+    className=""p-2 border rounded""
+    required
+  />
+</div>
+"
+iHpPHPD2,L06_TODO_4,tomlee9876,JavaScript,Friday 24th of October 2025 05:05:54 PM CDT,"<div>
+  <span>Date : </span>
+
+  <input
+    type=""date""
+    value={form.productionDate}
+    onChange={(e) =>
+      setForm({ ...form, productionDate: e.target.value })
+    }
+    className=""p-2 border rounded col-span-2""
+    required
+  />
+</div>
+"
+bck54Cd9,L06_TODO_3,tomlee9876,JavaScript,Friday 24th of October 2025 05:04:19 PM CDT,"<div>
+  <span>Factory : </span>
+
+  <select
+    value={form.factory}
+    onChange={(e) => setForm({ ...form, factory: e.target.value })}
+    className=""p-2 border rounded""
+    required
+  >
+    <option value="""">Select Manufacture Factory</option>
+
+    {factories.map((n) => (
+      <option key={n}>{n}</option>
+    ))}
+  </select>
+</div>
+"
+PDieHhJP,L06_TODO_2,tomlee9876,JavaScript,Friday 24th of October 2025 05:00:25 PM CDT,"<div>
+  <span>Brand Name : </span>
+
+  <select
+    value={form.brand}
+    onChange={(e) => setForm({ ...form, brand: e.target.value })}
+    className=""p-2 border rounded""
+    required
+  >
+    <option value="""">Select brand</option>
+
+    {brands.map((n) => (
+      <option key={n}>{n}</option>
+    ))}
+  </select>
+</div>
+"
+y8ujwaVn,L06_TODO_1,tomlee9876,JavaScript,Friday 24th of October 2025 04:57:05 PM CDT,"<div>
+  <span>Medicine Name : </span>
+
+  <select
+    value={form.name}
+    onChange={(e) => setForm({ ...form, name: e.target.value })}
+    className=""p-2 border rounded""
+    required
+  >
+    <option value="""">Select Medicine Name</option>
+
+    {medicineNames.map((n) => (
+      <option key={n}>{n}</option>
+    ))}
+  </select>
+</div>
+"
+1v0J8QXQ,OV Menu Inferior Acordeón - OV DIVI,oscarviedma,HTML,Friday 24th of October 2025 04:53:19 PM CDT,"<audio id=""ov-mia-snd-open"" src=""/menu-playin.mp3""></audio>
+<audio id=""ov-mia-snd-close"" src=""/menu-playout.mp3""></audio>
+<audio id=""ov-mia-snd-hover"" src=""/hover-short.mp3""></audio>
+
+<script>
+const ovMiaMenu         = document.getElementById('ov-mia-bottomMenu');
+const ovMiaHeaderBar    = document.getElementById('ov-mia-headerClick');
+const ovMiaSndOpen      = document.getElementById('ov-mia-snd-open');
+const ovMiaSndClose     = document.getElementById('ov-mia-snd-close');
+const ovMiaSndHover     = document.getElementById('ov-mia-snd-hover');
+const ovMiaToggleButton = document.getElementById('ov-mia-toggleButton');
+const ovMiaIcon         = ovMiaToggleButton ? ovMiaToggleButton.querySelector('.et-pb-icon') : null;
+let ovMiaOriginalIcon   = ovMiaIcon ? ovMiaIcon.innerHTML : '';
+
+function ovMiaPlay(snd){
+  if (snd) {
+    snd.currentTime = 0;
+    snd.play().catch(()=>{});
+  }
+}
+
+function ovMiaCloseMenu() {
+  if (ovMiaMenu.classList.contains('ov-mia-open')) {
+    ovMiaPlay(ovMiaSndClose);
+    ovMiaMenu.classList.remove('ov-mia-open');
+    if (ovMiaIcon) {
+      ovMiaIcon.innerHTML = ovMiaOriginalIcon;
+    }
+  }
+}
+
+function ovMiaToggleMenu() {
+  const opened = ovMiaMenu.classList.contains('ov-mia-open');
+  if (opened) {
+    ovMiaCloseMenu();
+  } else {
+    ovMiaPlay(ovMiaSndOpen);
+    ovMiaMenu.classList.add('ov-mia-open');
+    if (ovMiaIcon) {
+      ovMiaIcon.textContent = '✕';
+    }
+  }
+}
+
+ovMiaHeaderBar.addEventListener('click', ovMiaToggleMenu);
+
+document.addEventListener('click', e => {
+  if (e.target.closest('.ov-close-menu')) {
+    ovMiaCloseMenu();
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === ""Escape"" && ovMiaMenu.classList.contains('ov-mia-open')) {
+    ovMiaCloseMenu();
+  }
+});
+
+document.querySelectorAll('.ov-mia-blurb').forEach(blurb => {
+  blurb.addEventListener('mouseenter', () => {
+    ovMiaPlay(ovMiaSndHover);
+  });
+});
+</script>"
+KueXiDRj,EnanReactorAutoConfig_ForEEPROM,Umaler,Lua,Friday 24th of October 2025 04:36:18 PM CDT,"local function proxy(name)
+    return component.proxy(component.list(""gpu"")())
+end
+
+local gpu = proxy(""gpu"")
+local w, h = gpu.getResolution()
+
+local TARGET_INSTABILITY = 2
+local STABILIZER_ENERGY  = 10000
+local OUTPUT_RATE        = 60000
+
+local SLEEP_TIME = 3.0
+local ERROR_SLEEP_TIME = 8.0
+
+local CORE_TYPE = ""warpdriveEnanReactorCore""
+
+local function pairsByKeys(t, f)
+    local a = {}
+    for n in pairs(t) do table.insert(a, n) end
+    table.sort(a, f)
+    local i = 0
+    local iter = function ()
+        i = i + 1
+        if a[i] == nil then return nil
+            else return a[i], t[a[i]]
+        end
+    end
+    return iter
+end
+
+local function configureRelease(core)
+    local energy, capacity = core.energy()
+    local pct = energy / capacity
+    if pct > 0.9 then
+        core.releaseRate(OUTPUT_RATE)
+    else
+        core.release(false)
+    end
+end
+
+local function initialConfig(core)
+    core.stabilizerEnergy(STABILIZER_ENERGY)
+    core.instabilityTarget(100 - TARGET_INSTABILITY)
+    configureRelease(core)
+    core.enable(true)
+end
+
+local cursorY = 1
+local function print(...)
+    local resStr = """"
+    for _, v in ipairs({...}) do
+        resStr = resStr .. tostring(v) .. ""    ""
+    end
+    if gpu.set(1, cursorY, resStr) then
+        cursorY = cursorY + 1
+    end
+end
+
+local function clear()
+    gpu.fill(1, 1, w, h, ' ')
+    cursorY = 1
+end
+
+local function drawState(cores)
+    clear()
+    print(""Состояние ядер:"")
+
+    for addr, core in pairsByKeys(cores) do
+        pcall(function()
+            local instabil = {core.instability()}
+            instabil = 100.0 - (instabil[1] + instabil[2] + instabil[3] + instabil[4]) / 4.0
+            local rmode = core.releaseRate()
+            if rmode == ""at_rate"" then rmode = ""rate"" else rmode = ""hold"" end
+            print(addr, ""Energy: "" .. tostring(core.energy()), ""Stability: "" .. tostring(instabil), ""Release mode: "" .. rmode)
+        end)
+    end
+end
+
+local function main()
+    local cores = {}
+    for addr, _ in pairs(component.list(CORE_TYPE)) do
+        cores[addr] = component.proxy(addr)
+        initialConfig(cores[addr])
+    end
+
+    drawState(cores)
+
+    local lastDrawedTime = computer.uptime()
+    while true do
+        -- Get event
+        e = {computer.pullSignal(SLEEP_TIME)}
+
+        if e[1] == ""component_added"" then
+            local addr, ctype = e[2], e[3]
+            if ctype == CORE_TYPE then
+                cores[addr] = component.proxy(addr)
+                initialConfig(cores[addr])
+            end
+        elseif e[1] == ""component_removed"" then
+            local addr, ctype = e[2], e[3]
+            if ctype == CORE_TYPE then
+                cores[addr] = nil
+            end
+        end
+
+        local currentTime = computer.uptime()
+        if currentTime > (lastDrawedTime + SLEEP_TIME) then
+            for _, core in pairs(cores) do
+                pcall(configureRelease, core)
+            end
+            drawState(cores)
+            lastDrawedTime = currentTime
+        end
+    end
+end
+
+local s, e = xpcall(main(), function(err) return err .. ""\n"" .. debug.traceback(); end)
+
+if not s then
+    clear()
+    gpu.setForeground(0xFF0000)
+    print(e)
+    gpu.setForeground(0xFFFFFF)
+
+    local startTime = computer.uptime()
+    repeat
+        computer.pullSignal(ERROR_SLEEP_TIME)
+    until computer.uptime() > (startTime + ERROR_SLEEP_TIME)
+end
+"
+T1WqC7M5,Android-mirroring-Link-Generator,Sam_ALi0,C++,Friday 24th of October 2025 04:05:09 PM CDT,https://github.com/crypt0hole/Android-mirroring-Link-Generator-for-educational-purposes-
+LhFaqMYz,windows info for bug report,vulcan_,Batch,Friday 24th of October 2025 04:03:15 PM CDT,"OpenSCAD Version: 2025.10.21 (git d05aec3ed)
+System information: Microsoft Windows 11 (10.0.26120) x86_64 32 CPUs 31.77 GB RAM
+User Agent: OpenSCAD/2025.10.21 (git d05aec3ed) (Microsoft Windows 11 (10.0.26120) x86_64)
+Compiler: GCC ""14.3.0"" 64bit
+MinGW build: MingW64
+Debug build: No
+Boost version: 1_85
+Eigen version: 3.4.0
+CGAL version, kernels: 6.0.1, Cartesian<Gmpq>, Extended_cartesian<Gmpq>
+OpenCSG version: OpenCSG 1.5.0
+Clipper2 version: 1.5.2
+Manifold version: 3.2.1
+Qt version: 5.15.17
+QScintilla version: 2.11.2
+InputDrivers: 
+GLib version: 2.85.3
+lodepng version: 20230410
+libzip version: 1.5.2
+fontconfig version: 2.16.0
+freetype version: 2.13.3
+harfbuzz version: 11.4.1
+cairo version: 1.18.4
+lib3mf version: 1.8.1
+Features: roof*, input-driver-dbus, lazy-union, vertex-object-renderers-indexing, textmetrics*, import-function*, object-function*, predictible-output
+Application Path: C:/Program Files/OpenSCAD (Nightly)
+Documents Path: C:\Users\Jeff\Documents
+User Documents Path: C:\Users\Jeff\Documents
+Resource Path: C:/Program Files/OpenSCAD (Nightly)
+User Library Path: C:/Users/Jeff/Documents/OpenSCAD/libraries
+User Examples Path: C:/Users/Jeff/Documents/OpenSCAD/examples
+User Config Path: C:\Users\Jeff\AppData\Local/OpenSCAD
+Backup Path: C:/Users/Jeff/Documents/OpenSCAD/backups
+OPENSCADPATH: <not set>
+OpenSCAD library path:
+C:/Users/Jeff/Documents/OpenSCAD/libraries
+C:/Program Files/OpenSCAD (Nightly)\libraries
+
+OPENSCAD_FONT_PATH: <not set>
+OpenSCAD font path:
+C:/WINDOWS/fonts
+C:/Users/Jeff/AppData/Local/Microsoft/Windows/Fonts
+C:/Users/Jeff/AppData/Roaming/fonts
+C:/usr/local/share/fonts
+C:/usr/share/fonts
+C:/usr/X11/lib/X11/fonts
+C:/System/Library/Fonts
+C:/Library/Fonts
+C:/Users/Jeff/Library/Fonts
+GLEW version: 2.1.0
+OpenGL Version: 4.6.0 NVIDIA 581.29
+GL Renderer: NVIDIA GeForce RTX 4080/PCIe/SSE2
+GL Vendor: NVIDIA Corporation
+RGBA(8888), depth(24), stencil(8)
+GL_ARB_framebuffer_object: yes
+GL_EXT_framebuffer_object: yes
+GL_EXT_packed_depth_stencil: yes
+
+Qt graphics widget: QOpenGLWidget
+QSurfaceFormat: RGBA(8888), depth(24), stencil(8)
+
+GL Extensions:
+GL_AMD_multi_draw_indirect
+GL_AMD_seamless_cubemap_per_texture
+GL_AMD_vertex_shader_layer
+GL_AMD_vertex_shader_viewport_index
+GL_ARB_ES2_compatibility
+GL_ARB_ES3_1_compatibility
+GL_ARB_ES3_2_compatibility
+GL_ARB_ES3_compatibility
+GL_ARB_arrays_of_arrays
+GL_ARB_base_instance
+GL_ARB_bindless_texture
+GL_ARB_blend_func_extended
+GL_ARB_buffer_storage
+GL_ARB_clear_buffer_object
+GL_ARB_clear_texture
+GL_ARB_clip_control
+GL_ARB_color_buffer_float
+GL_ARB_compatibility
+GL_ARB_compressed_texture_pixel_storage
+GL_ARB_compute_shader
+GL_ARB_compute_variable_group_size
+GL_ARB_conditional_render_inverted
+GL_ARB_conservative_depth
+GL_ARB_copy_buffer
+GL_ARB_copy_image
+GL_ARB_cull_distance
+GL_ARB_debug_output
+GL_ARB_depth_buffer_float
+GL_ARB_depth_clamp
+GL_ARB_depth_texture
+GL_ARB_derivative_control
+GL_ARB_direct_state_access
+GL_ARB_draw_buffers
+GL_ARB_draw_buffers_blend
+GL_ARB_draw_elements_base_vertex
+GL_ARB_draw_indirect
+GL_ARB_draw_instanced
+GL_ARB_enhanced_layouts
+GL_ARB_explicit_attrib_location
+GL_ARB_explicit_uniform_location
+GL_ARB_fragment_coord_conventions
+GL_ARB_fragment_layer_viewport
+GL_ARB_fragment_program
+GL_ARB_fragment_program_shadow
+GL_ARB_fragment_shader
+GL_ARB_fragment_shader_interlock
+GL_ARB_framebuffer_no_attachments
+GL_ARB_framebuffer_object
+GL_ARB_framebuffer_sRGB
+GL_ARB_geometry_shader4
+GL_ARB_get_program_binary
+GL_ARB_get_texture_sub_image
+GL_ARB_gl_spirv
+GL_ARB_gpu_shader5
+GL_ARB_gpu_shader_fp64
+GL_ARB_gpu_shader_int64
+GL_ARB_half_float_pixel
+GL_ARB_half_float_vertex
+GL_ARB_imaging
+GL_ARB_indirect_parameters
+GL_ARB_instanced_arrays
+GL_ARB_internalformat_query
+GL_ARB_internalformat_query2
+GL_ARB_invalidate_subdata
+GL_ARB_map_buffer_alignment
+GL_ARB_map_buffer_range
+GL_ARB_multi_bind
+GL_ARB_multi_draw_indirect
+GL_ARB_multisample
+GL_ARB_multitexture
+GL_ARB_occlusion_query
+GL_ARB_occlusion_query2
+GL_ARB_parallel_shader_compile
+GL_ARB_pipeline_statistics_query
+GL_ARB_pixel_buffer_object
+GL_ARB_point_parameters
+GL_ARB_point_sprite
+GL_ARB_polygon_offset_clamp
+GL_ARB_post_depth_coverage
+GL_ARB_program_interface_query
+GL_ARB_provoking_vertex
+GL_ARB_query_buffer_object
+GL_ARB_robust_buffer_access_behavior
+GL_ARB_robustness
+GL_ARB_sample_locations
+GL_ARB_sample_shading
+GL_ARB_sampler_objects
+GL_ARB_seamless_cube_map
+GL_ARB_seamless_cubemap_per_texture
+GL_ARB_separate_shader_objects
+GL_ARB_shader_atomic_counter_ops
+GL_ARB_shader_atomic_counters
+GL_ARB_shader_ballot
+GL_ARB_shader_bit_encoding
+GL_ARB_shader_clock
+GL_ARB_shader_draw_parameters
+GL_ARB_shader_group_vote
+GL_ARB_shader_image_load_store
+GL_ARB_shader_image_size
+GL_ARB_shader_objects
+GL_ARB_shader_precision
+GL_ARB_shader_storage_buffer_object
+GL_ARB_shader_subroutine
+GL_ARB_shader_texture_image_samples
+GL_ARB_shader_texture_lod
+GL_ARB_shader_viewport_layer_array
+GL_ARB_shading_language_100
+GL_ARB_shading_language_420pack
+GL_ARB_shading_language_include
+GL_ARB_shading_language_packing
+GL_ARB_shadow
+GL_ARB_sparse_buffer
+GL_ARB_sparse_texture
+GL_ARB_sparse_texture2
+GL_ARB_sparse_texture_clamp
+GL_ARB_spirv_extensions
+GL_ARB_stencil_texturing
+GL_ARB_sync
+GL_ARB_tessellation_shader
+GL_ARB_texture_barrier
+GL_ARB_texture_border_clamp
+GL_ARB_texture_buffer_object
+GL_ARB_texture_buffer_object_rgb32
+GL_ARB_texture_buffer_range
+GL_ARB_texture_compression
+GL_ARB_texture_compression_bptc
+GL_ARB_texture_compression_rgtc
+GL_ARB_texture_cube_map
+GL_ARB_texture_cube_map_array
+GL_ARB_texture_env_add
+GL_ARB_texture_env_combine
+GL_ARB_texture_env_crossbar
+GL_ARB_texture_env_dot3
+GL_ARB_texture_filter_anisotropic
+GL_ARB_texture_filter_minmax
+GL_ARB_texture_float
+GL_ARB_texture_gather
+GL_ARB_texture_mirror_clamp_to_edge
+GL_ARB_texture_mirrored_repeat
+GL_ARB_texture_multisample
+GL_ARB_texture_non_power_of_two
+GL_ARB_texture_query_levels
+GL_ARB_texture_query_lod
+GL_ARB_texture_rectangle
+GL_ARB_texture_rg
+GL_ARB_texture_rgb10_a2ui
+GL_ARB_texture_stencil8
+GL_ARB_texture_storage
+GL_ARB_texture_storage_multisample
+GL_ARB_texture_swizzle
+GL_ARB_texture_view
+GL_ARB_timer_query
+GL_ARB_transform_feedback2
+GL_ARB_transform_feedback3
+GL_ARB_transform_feedback_instanced
+GL_ARB_transform_feedback_overflow_query
+GL_ARB_transpose_matrix
+GL_ARB_uniform_buffer_object
+GL_ARB_vertex_array_bgra
+GL_ARB_vertex_array_object
+GL_ARB_vertex_attrib_64bit
+GL_ARB_vertex_attrib_binding
+GL_ARB_vertex_buffer_object
+GL_ARB_vertex_program
+GL_ARB_vertex_shader
+GL_ARB_vertex_type_10f_11f_11f_rev
+GL_ARB_vertex_type_2_10_10_10_rev
+GL_ARB_viewport_array
+GL_ARB_window_pos
+GL_ATI_draw_buffers
+GL_ATI_texture_float
+GL_ATI_texture_mirror_once
+GL_EXTX_framebuffer_mixed_formats
+GL_EXT_Cg_shader
+GL_EXT_abgr
+GL_EXT_bgra
+GL_EXT_bindable_uniform
+GL_EXT_blend_color
+GL_EXT_blend_equation_separate
+GL_EXT_blend_func_separate
+GL_EXT_blend_minmax
+GL_EXT_blend_subtract
+GL_EXT_compiled_vertex_array
+GL_EXT_depth_bounds_test
+GL_EXT_direct_state_access
+GL_EXT_draw_buffers2
+GL_EXT_draw_instanced
+GL_EXT_draw_range_elements
+GL_EXT_fog_coord
+GL_EXT_framebuffer_blit
+GL_EXT_framebuffer_multisample
+GL_EXT_framebuffer_multisample_blit_scaled
+GL_EXT_framebuffer_object
+GL_EXT_framebuffer_sRGB
+GL_EXT_geometry_shader4
+GL_EXT_gpu_program_parameters
+GL_EXT_gpu_shader4
+GL_EXT_import_sync_object
+GL_EXT_memory_object
+GL_EXT_memory_object_win32
+GL_EXT_multi_draw_arrays
+GL_EXT_multiview_texture_multisample
+GL_EXT_multiview_timer_query
+GL_EXT_packed_depth_stencil
+GL_EXT_packed_float
+GL_EXT_packed_pixels
+GL_EXT_pixel_buffer_object
+GL_EXT_point_parameters
+GL_EXT_polygon_offset_clamp
+GL_EXT_post_depth_coverage
+GL_EXT_provoking_vertex
+GL_EXT_raster_multisample
+GL_EXT_rescale_normal
+GL_EXT_secondary_color
+GL_EXT_semaphore
+GL_EXT_semaphore_win32
+GL_EXT_separate_shader_objects
+GL_EXT_separate_specular_color
+GL_EXT_shader_image_load_formatted
+GL_EXT_shader_image_load_store
+GL_EXT_shader_integer_mix
+GL_EXT_shadow_funcs
+GL_EXT_sparse_texture2
+GL_EXT_stencil_two_side
+GL_EXT_stencil_wrap
+GL_EXT_texture3D
+GL_EXT_texture_array
+GL_EXT_texture_buffer_object
+GL_EXT_texture_compression_dxt1
+GL_EXT_texture_compression_latc
+GL_EXT_texture_compression_rgtc
+GL_EXT_texture_compression_s3tc
+GL_EXT_texture_cube_map
+GL_EXT_texture_edge_clamp
+GL_EXT_texture_env_add
+GL_EXT_texture_env_combine
+GL_EXT_texture_env_dot3
+GL_EXT_texture_filter_anisotropic
+GL_EXT_texture_filter_minmax
+GL_EXT_texture_integer
+GL_EXT_texture_lod
+GL_EXT_texture_lod_bias
+GL_EXT_texture_mirror_clamp
+GL_EXT_texture_object
+GL_EXT_texture_sRGB
+GL_EXT_texture_sRGB_R8
+GL_EXT_texture_sRGB_decode
+GL_EXT_texture_shadow_lod
+GL_EXT_texture_shared_exponent
+GL_EXT_texture_storage
+GL_EXT_texture_swizzle
+GL_EXT_timer_query
+GL_EXT_transform_feedback2
+GL_EXT_vertex_array
+GL_EXT_vertex_array_bgra
+GL_EXT_vertex_attrib_64bit
+GL_EXT_win32_keyed_mutex
+GL_EXT_window_rectangles
+GL_IBM_rasterpos_clip
+GL_IBM_texture_mirrored_repeat
+GL_KHR_blend_equation_advanced
+GL_KHR_blend_equation_advanced_coherent
+GL_KHR_context_flush_control
+GL_KHR_debug
+GL_KHR_no_error
+GL_KHR_parallel_shader_compile
+GL_KHR_robust_buffer_access_behavior
+GL_KHR_robustness
+GL_KHR_shader_subgroup
+GL_KTX_buffer_region
+GL_NVX_blend_equation_advanced_multi_draw_buffers
+GL_NVX_conditional_render
+GL_NVX_gpu_memory_info
+GL_NVX_gpu_multicast2
+GL_NVX_linked_gpu_multicast
+GL_NVX_multigpu_info
+GL_NVX_nvenc_interop
+GL_NVX_progress_fence
+GL_NV_ES1_1_compatibility
+GL_NV_ES3_1_compatibility
+GL_NV_alpha_to_coverage_dither_control
+GL_NV_bindless_multi_draw_indirect
+GL_NV_bindless_multi_draw_indirect_count
+GL_NV_bindless_texture
+GL_NV_blend_equation_advanced
+GL_NV_blend_equation_advanced_coherent
+GL_NV_blend_minmax_factor
+GL_NV_blend_square
+GL_NV_clip_space_w_scaling
+GL_NV_command_list
+GL_NV_compute_program5
+GL_NV_compute_shader_derivatives
+GL_NV_conditional_render
+GL_NV_conservative_raster
+GL_NV_conservative_raster_dilate
+GL_NV_conservative_raster_pre_snap
+GL_NV_conservative_raster_pre_snap_triangles
+GL_NV_conservative_raster_underestimation
+GL_NV_copy_depth_to_color
+GL_NV_copy_image
+GL_NV_depth_buffer_float
+GL_NV_depth_clamp
+GL_NV_draw_texture
+GL_NV_draw_vulkan_image
+GL_NV_explicit_multisample
+GL_NV_feature_query
+GL_NV_fence
+GL_NV_fill_rectangle
+GL_NV_float_buffer
+GL_NV_fog_distance
+GL_NV_fragment_coverage_to_color
+GL_NV_fragment_program
+GL_NV_fragment_program2
+GL_NV_fragment_program_option
+GL_NV_fragment_shader_barycentric
+GL_NV_fragment_shader_interlock
+GL_NV_framebuffer_mixed_samples
+GL_NV_framebuffer_multisample_coverage
+GL_NV_geometry_shader4
+GL_NV_geometry_shader_passthrough
+GL_NV_gpu_multicast
+GL_NV_gpu_program4
+GL_NV_gpu_program4_1
+GL_NV_gpu_program5
+GL_NV_gpu_program5_mem_extended
+GL_NV_gpu_program_fp64
+GL_NV_gpu_program_multiview
+GL_NV_gpu_shader5
+GL_NV_half_float
+GL_NV_internalformat_sample_query
+GL_NV_light_max_exponent
+GL_NV_memory_attachment
+GL_NV_memory_object_sparse
+GL_NV_mesh_shader
+GL_NV_multisample_coverage
+GL_NV_multisample_filter_hint
+GL_NV_occlusion_query
+GL_NV_packed_depth_stencil
+GL_NV_parameter_buffer_object
+GL_NV_parameter_buffer_object2
+GL_NV_path_rendering
+GL_NV_path_rendering_shared_edge
+GL_NV_pixel_data_range
+GL_NV_point_sprite
+GL_NV_primitive_restart
+GL_NV_primitive_shading_rate
+GL_NV_query_resource
+GL_NV_query_resource_tag
+GL_NV_register_combiners
+GL_NV_register_combiners2
+GL_NV_representative_fragment_test
+GL_NV_sample_locations
+GL_NV_sample_mask_override_coverage
+GL_NV_scissor_exclusive
+GL_NV_shader_atomic_counters
+GL_NV_shader_atomic_float
+GL_NV_shader_atomic_float64
+GL_NV_shader_atomic_fp16_vector
+GL_NV_shader_atomic_int64
+GL_NV_shader_buffer_load
+GL_NV_shader_storage_buffer_object
+GL_NV_shader_subgroup_partitioned
+GL_NV_shader_texture_footprint
+GL_NV_shader_thread_group
+GL_NV_shader_thread_shuffle
+GL_NV_shading_rate_image
+GL_NV_stereo_view_rendering
+GL_NV_texgen_reflection
+GL_NV_texture_barrier
+GL_NV_texture_compression_vtc
+GL_NV_texture_dirty_tile_map
+GL_NV_texture_env_combine4
+GL_NV_texture_multisample
+GL_NV_texture_rectangle
+GL_NV_texture_rectangle_compressed
+GL_NV_texture_shader
+GL_NV_texture_shader2
+GL_NV_texture_shader3
+GL_NV_timeline_semaphore
+GL_NV_transform_feedback
+GL_NV_transform_feedback2
+GL_NV_uniform_buffer_std430_layout
+GL_NV_uniform_buffer_unified_memory
+GL_NV_vertex_array_range
+GL_NV_vertex_array_range2
+GL_NV_vertex_attrib_integer_64bit
+GL_NV_vertex_buffer_unified_memory
+GL_NV_vertex_program
+GL_NV_vertex_program1_1
+GL_NV_vertex_program2
+GL_NV_vertex_program2_option
+GL_NV_vertex_program3
+GL_NV_viewport_array2
+GL_NV_viewport_swizzle
+GL_OVR_multiview
+GL_OVR_multiview2
+GL_S3_s3tc
+GL_SGIS_generate_mipmap
+GL_SGIS_texture_lod
+GL_SGIX_depth_texture
+GL_SGIX_shadow
+GL_SUN_slice_accum
+GL_WIN_swap_hint
+WGL_EXT_swap_control
+"
+bnPK4W9U,Remove Russian Songs,vasylmartyniv,Python,Friday 24th of October 2025 03:51:54 PM CDT,"""""""
+Move 'Russian' songs from your Liked Songs into a separate playlist.
+Detection heuristics:
+  1) Cyrillic characters in track name or any artist name.
+  2) Artist genres contain keywords like 'russian', 'russia', 'cccp', 'cis', 'soviet', 'рус', 'ру', etc.
+
+No likes are removed. If you want to also unlike after moving, set REMOVE_FROM_LIKED=True.
+""""""
+
+import json
+import re
+import time
+import unicodedata
+from pathlib import Path
+from typing import List, Dict, Iterable
+
+from dotenv import load_dotenv
+from spotipy import Spotify
+from spotipy.exceptions import SpotifyException
+from spotipy.oauth2 import SpotifyOAuth
+
+# Load environment variables from .env file
+load_dotenv()
+
+# -------------------- CONFIG --------------------
+PLAYLIST_NAME = ""Russian Songs (from Liked)""
+PLAYLIST_PUBLIC = False
+REMOVE_FROM_LIKED = False  # set True if you want to unlike after moving
+BATCH_SIZE = 100  # Spotify allows 100 per add/remove call
+CACHE_FILE = Path("".spotify_cache.json"")
+
+# Keywords to flag in artist genres (lowercased)
+GENRE_KEYWORDS = {
+    ""russian"", ""russia"", ""ru"", ""рус"", ""ру"", ""soviet"", ""русский"", ""cccp"", ""russkiy"", ""russky"",
+    ""russian hip hop"", ""russian rap"", ""russian pop"", ""russian rock""
+}
+
+# Optional: add specific artist IDs you want to always treat as Russian (override)
+ALWAYS_RUSSIAN_ARTIST_IDS = set()  # e.g., {""0Xb4bTQ9C7k2rgnAru8v9A""}
+
+# Optional: add specific artist IDs you want to exclude (never Russian)
+NEVER_RUSSIAN_ARTIST_IDS = set()
+
+# ------------------------------------------------
+
+def has_cyrillic(text: str) -> bool:
+    if not text:
+        return False
+    for ch in text:
+        if ""CYRILLIC"" in unicodedata.name(ch, """"):
+            return True
+    return False
+
+def chunked(iterable: Iterable, n: int) -> Iterable[List]:
+    buf = []
+    for item in iterable:
+        buf.append(item)
+        if len(buf) == n:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
+def safe_call(fn, *args, **kwargs):
+    """"""Retry on rate limits (HTTP 429).""""""
+    while True:
+        try:
+            return fn(*args, **kwargs)
+        except SpotifyException as e:
+            if e.http_status == 429:
+                retry_after = int(e.headers.get(""Retry-After"", ""2""))
+                time.sleep(retry_after + 1)
+                continue
+            raise
+
+def get_or_create_playlist(sp: Spotify, user_id: str, name: str, public: bool) -> str:
+    # Try to find existing playlist by exact name (first page or two is enough for most users)
+    results = safe_call(sp.current_user_playlists, limit=50)
+    while results:
+        for pl in results[""items""]:
+            if pl[""name""] == name and pl[""owner""][""id""] == user_id:
+                return pl[""id""]
+        if results.get(""next""):
+            results = safe_call(sp.next, results)
+        else:
+            break
+    # Create if not found
+    created = safe_call(sp.user_playlist_create, user=user_id, name=name, public=public, description=""Auto-collected Russian songs from Liked"")
+    return created[""id""]
+
+def classify_track(sp: Spotify, track_obj: Dict, artist_cache: Dict[str, Dict]) -> tuple[bool, str]:
+    """"""
+    Returns (True, reason) if the track is considered 'Russian' by heuristics.
+    Returns (False, """") otherwise.
+    """"""
+    track_name = (track_obj.get(""name"") or """").strip()
+
+    # Heuristic 1: Cyrillic in track title
+    if has_cyrillic(track_name):
+        return True, f""Cyrillic in track title: '{track_name}'""
+
+    artists = track_obj.get(""artists"") or []
+    artist_ids = [a[""id""] for a in artists if a.get(""id"")]
+    artist_names = [a.get(""name"") or """" for a in artists]
+
+    # Heuristic 2: Cyrillic in any artist name
+    for artist_name in artist_names:
+        if has_cyrillic(artist_name):
+            return True, f""Cyrillic in artist name: '{artist_name}'""
+
+    # Respect explicit overrides
+    if any(aid in ALWAYS_RUSSIAN_ARTIST_IDS for aid in artist_ids):
+        return True, ""Artist in ALWAYS_RUSSIAN_ARTIST_IDS""
+    if any(aid in NEVER_RUSSIAN_ARTIST_IDS for aid in artist_ids):
+        return False, """"
+
+    # Heuristic 3: genre-based
+    # Fetch artist details (cached)
+    to_fetch = [aid for aid in artist_ids if aid and aid not in artist_cache]
+    for chunk in chunked(to_fetch, 50):
+        if chunk:
+            arts = safe_call(sp.artists, chunk)
+            for a in arts[""artists""]:
+                artist_cache[a[""id""]] = a
+
+    for aid in artist_ids:
+        a = artist_cache.get(aid)
+        if not a:
+            continue
+        artist_name = a.get(""name"", ""Unknown"")
+        genres = [g.lower() for g in (a.get(""genres"") or [])]
+        for genre in genres:
+            for keyword in GENRE_KEYWORDS:
+                # Use word boundary matching to avoid false positives
+                # e.g., ""ru"" shouldn't match ""ruby"" or ""grunge""
+                if re.search(r'\b' + re.escape(keyword) + r'\b', genre):
+                    return True, f""Genre match: '{genre}' (artist: {artist_name}, keyword: '{keyword}')""
+
+    return False, """"
+
+def load_cache() -> Dict:
+    if not CACHE_FILE.is_file():
+        return {}
+    with CACHE_FILE.open(""r"", encoding=""utf-8"") as f:
+        return json.load(f)
+
+def save_cache(data: Dict):
+    with CACHE_FILE.open(""w"", encoding=""utf-8"") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_playlist_tracks(sp: Spotify, playlist_id: str) -> set:
+    """"""Get all track URIs currently in the playlist to avoid duplicates.""""""
+    track_uris = set()
+    results = safe_call(sp.playlist_items, playlist_id, limit=100)
+    while results:
+        for item in results.get(""items"", []):
+            track = item.get(""track"")
+            if track and track.get(""uri""):
+                track_uris.add(track[""uri""])
+        if results.get(""next""):
+            results = safe_call(sp.next, results)
+        else:
+            break
+    return track_uris
+
+def main():
+    # Auth
+    scope = ""user-library-read playlist-modify-private playlist-modify-public user-library-modify""
+    sp = Spotify(auth_manager=SpotifyOAuth(scope=scope))
+    me = safe_call(sp.current_user)
+    user_id = me[""id""]
+
+    # Load cached artist data
+    cache_data = load_cache()
+    artist_cache = cache_data.get(""artists"", {})
+
+    playlist_id = get_or_create_playlist(sp, user_id, PLAYLIST_NAME, PLAYLIST_PUBLIC)
+
+    print(f""Collecting Russian tracks from Liked Songs into playlist: {PLAYLIST_NAME}"")
+    print(f""Playlist ID: {playlist_id}"")
+
+    # Get existing playlist tracks to avoid duplicates
+    print(""Checking existing playlist contents..."")
+    existing_tracks = get_playlist_tracks(sp, playlist_id)
+    print(f""Found {len(existing_tracks)} tracks already in playlist"")
+
+    # Iterate through liked tracks
+    russian_track_uris = []
+    results = safe_call(sp.current_user_saved_tracks, limit=50)
+    total = results.get(""total"", 0)
+    processed = 0
+
+    while True:
+        items = results.get(""items"", [])
+        for item in items:
+            track = item.get(""track"")
+            if not track:
+                continue
+            processed += 1
+
+            uri = track.get(""uri"")
+
+            # Skip if already in playlist
+            if uri in existing_tracks:
+                continue
+
+            try:
+                is_russian, reason = classify_track(sp, track, artist_cache)
+                if is_russian:
+                    track_name = track.get(""name"", ""Unknown"")
+                    artists_str = "", "".join([a.get(""name"", """") for a in track.get(""artists"", [])])
+                    print(f""✓ [{track_name}] by [{artists_str}] - {reason}"")
+                    if uri:
+                        russian_track_uris.append(uri)
+            except Exception as e:
+                # Log and keep going
+                tname = (track.get(""name"") or ""Unknown"").encode(""utf-8"", ""ignore"")
+                print(f""[WARN] Failed to classify track: {tname} | {e}"")
+
+        if processed % 100 == 0:
+            print(f""Processed {processed}/{total} liked tracks..."")
+            time.sleep(0.5)  # Small delay every 100 tracks to avoid rate limits
+
+        if results.get(""next""):
+            results = safe_call(sp.next, results)
+        else:
+            break
+
+    print(f""Processed {processed}/{total} liked tracks total"")
+
+    # Add to playlist in batches
+    if russian_track_uris:
+        print(f""Found {len(russian_track_uris)} new Russian tracks to add"")
+        added = 0
+        for chunk in chunked(russian_track_uris, BATCH_SIZE):
+            safe_call(sp.playlist_add_items, playlist_id, chunk)
+            added += len(chunk)
+            print(f""Added {added}/{len(russian_track_uris)} to playlist"")
+            time.sleep(0.3)  # Small delay between batches
+
+        # Optional: unlike after moving
+        if REMOVE_FROM_LIKED:
+            removed = 0
+            # Convert URIs to IDs
+            ids = [uri.split("":"")[-1] for uri in russian_track_uris]
+            for chunk in chunked(ids, BATCH_SIZE):
+                safe_call(sp.current_user_saved_tracks_delete, chunk)
+                removed += len(chunk)
+                print(f""Removed {removed}/{len(ids)} from Liked Songs"")
+                time.sleep(0.3)  # Small delay between batches
+
+        print(f""Done. Moved {len(russian_track_uris)} new tracks to '{PLAYLIST_NAME}'."")
+    else:
+        print(""No new Russian tracks to add."")
+
+    # Save updated cache
+    save_cache({""artists"": artist_cache})
+
+if __name__ == ""__main__"":
+    main()
+"
+yh1PmUAv,Ethan's Item Caching Things,emd22,C++,Friday 24th of October 2025 03:30:45 PM CDT,"#pragma once
+
+#include <Core/FxBitset.hpp>
+#include <Core/FxHash.hpp>
+#include <Core/FxSizedArray.hpp>
+#include <map>
+
+/**
+ * @brief Cache section that can hold any number of items.
+ */
+template <typename TItemType>
+struct FxItemCacheSection_MultiItem
+{
+    FxBitset ItemsInUse;
+    FxSizedArray<TItemType> Items;
+
+public:
+    void Create(uint32 max_items)
+    {
+        Items.Create(max_items);
+        ItemsInUse.InitZero(max_items);
+    }
+
+    TItemType* RequestNewItem()
+    {
+        int index = ItemsInUse.FindNextFreeBit();
+
+        if (index == FxBitset::scNoFreeBits) {
+            return nullptr;
+        }
+
+        ItemsInUse.Set(index);
+
+        return &Items[index];
+    }
+
+    void ReleaseItem(TItemType* item)
+    {
+        auto item_index = Items.GetItemIndex(item);
+
+        // If the item was found, clear the bit
+        if (item_index != FxSizedArray<TItemType>::scItemNotFound) {
+            ItemsInUse.Unset(item_index);
+        }
+    }
+};
+
+
+/**
+ * @brief Cache section that holds a single item.
+ */
+template <typename TItemType>
+struct FxItemCacheSection_SingleItem
+{
+    using ItemType = TItemType;
+
+    TItemType* pItem = nullptr;
+    bool bInUse : 1 = 0;
+
+public:
+    void Create(uint32 max_items) { pItem = FxMemPool::Alloc<TItemType>(sizeof(TItemType)); }
+
+    TItemType* RequestNewItem()
+    {
+        if (bInUse) {
+            return nullptr;
+        }
+
+        bInUse = true;
+
+        return pItem;
+    }
+
+    void ReleaseItem(TItemType* item)
+    {
+        if (pItem != item) {
+            return;
+        }
+
+        bInUse = false;
+    }
+};
+
+template <typename T, typename TItemType>
+concept C_IsItemCacheSection =
+    C_IsAnyBaseOf<T, FxItemCacheSection_MultiItem<TItemType>, FxItemCacheSection_SingleItem<TItemType>>;
+
+template <typename TKeyType, typename TItemType, typename TCacheSectionType>
+    requires C_IsItemCacheSection<TCacheSectionType, TItemType>
+class FxItemCache
+{
+public:
+    using KeyType = TKeyType;
+
+public:
+    FxItemCache() = default;
+
+    void Create(uint32 max_items_per_section) { mItemsPerSection = max_items_per_section; }
+
+
+    bool IsItemInCache(TKeyType key)
+    {
+        auto section_it = mCache.find(key);
+
+        return (section_it == mCache.end());
+    }
+
+    TItemType* RequestGenericItem(TKeyType key)
+    {
+        auto section_it = mCache.find(key);
+
+        if (section_it == mCache.end()) {
+            CreateCacheSection(key, mItemsPerSection);
+            auto section_it = mCache.find(key);
+
+            FxAssert(section_it != mCache.end());
+        }
+
+        TCacheSectionType& section = section_it->second;
+
+        return section.RequestNewItem();
+    }
+
+    void ReleaseGenericItem(TKeyType key, TItemType* item)
+    {
+        auto section_it = mCache.find(key);
+
+        if (section_it == mCache.end()) {
+            FxLogError(""Could not find cache section to free from!"");
+            return;
+        }
+
+        TCacheSectionType& section = section_it->second;
+
+        auto item_index = section.Items.GetItemIndex(item);
+
+        // If the item was found, clear the bit
+        if (item_index != FxSizedArray<TItemType>::scItemNotFound) {
+            section.ItemsInUse.Unset(item_index);
+        }
+    }
+
+    void Destroy();
+
+    virtual ~FxItemCache() { Destroy(); }
+
+protected:
+    TCacheSectionType& CreateCacheSection(TKeyType key, uint32 number_of_items)
+    {
+        TCacheSectionType cache_section {};
+
+        cache_section.Items.InitCapacity(number_of_items);
+        cache_section.ItemsInUse.InitZero(number_of_items);
+
+        auto iter = mCache.insert({ key, std::move(cache_section) });
+
+        return iter.first->second;
+    }
+
+public:
+    std::unordered_map<TKeyType, TCacheSectionType> mCache;
+
+protected:
+    uint32 mItemsPerSection = 0;
+};
+
+/**
+ * @brief A temporary handle that is available only for the current scope.
+ */
+template <typename TKeyType, typename TItemType, typename TCacheType>
+struct FxItemCacheHandle
+{
+    using CacheType = TCacheType;
+    using KeyType = TKeyType;
+
+public:
+    FxItemCacheHandle(TCacheType* cache, TItemType* item, TKeyType key) : Item(item), Key(key), mCache(cache) {}
+    FxItemCacheHandle(const FxItemCacheHandle& other) = delete;
+    FxItemCacheHandle(FxItemCacheHandle&& other)
+    {
+        Item = other.Item;
+        Key = other.Key;
+
+        mCache = other.mCache;
+
+        other.Item = nullptr;
+    }
+
+    /**
+     * @brief Releases the handle before the destructor is called.
+     */
+    FX_FORCE_INLINE void Release()
+    {
+        if (Item == nullptr) {
+            return;
+        }
+
+        mCache->ReleaseGenericItem(Key, Item);
+    }
+
+    ~FxItemCacheHandle() { Release(); }
+
+    TItemType* operator->() { return Item; }
+    TItemType& operator*() { return *Item; }
+
+public:
+    TItemType* Item = nullptr;
+    TKeyType Key;
+
+private:
+    CacheType* mCache;
+};
+"
+unBUksiL,Donate XMR TO FREAK,KekSec420,C,Friday 24th of October 2025 03:06:23 PM CDT,"44qYaVHpLreEb3cisNpNsPEZWqzMxqVz4SNRF1hnAGYDZ8TdMsBTZQVZ6yhThqG2EREbHKrLuRs2i4pULuoBbXDR5tPEERZ
+
+Donate XMRz to Freak so he can get freaky!!!"
+3QSGZG7S,Checkpoint System,MysteriaFool,Lua,Friday 24th of October 2025 02:44:52 PM CDT,"
+local CaptureDistance = 40
+local UpdateRate = 0.5 
+local MAIN_MENU_PLACE_ID = 118884121023860
+local TELEPORT_DELAY_AFTER_SOUND = 3
+
+
+local PLAYER_WEIGHT = 1
+local DEFENDER_NPC_WEIGHT = 0.6
+local ATTACKER_NPC_WEIGHT = 0.6
+
+local TweenService = game:GetService(""TweenService"")
+local Players = game:GetService(""Players"")
+local TeamsService = game:GetService(""Teams"")
+local RunService = game:GetService(""RunService"")
+local TeleportService = game:GetService(""TeleportService"")
+local ReplicatedStorage = game:GetService(""ReplicatedStorage"")
+ 
+local PointChangedEvent = ReplicatedStorage:FindFirstChild(""PointChanged"")
+if not PointChangedEvent then
+	PointChangedEvent = Instance.new(""BindableEvent"")
+	PointChangedEvent.Name = ""PointChanged""
+	PointChangedEvent.Parent = ReplicatedStorage
+end
+
+local CaptureValues = {}
+local PartIndex = {}
+local Locked = {}
+local RobotsDefender = {}
+local RobotsAttacker = {}
+
+local parts = {}
+for _, child in ipairs(script.Parent:GetChildren()) do
+	if child:IsA(""BasePart"") or child:IsA(""Part"") then
+		table.insert(parts, child)
+	end
+end
+table.sort(parts, function(a,b) return a.Name < b.Name end)
+
+local function Tween(Obj, Prop, New, Time)
+	Time = Time or 0.1
+	local Tweened = TweenService:Create(Obj, TweenInfo.new(Time, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {[Prop] = New})
+	Tweened:Play()
+	return {Stop = function() Tweened:Cancel() end}
+end
+
+local function UpdateRobotList()
+	RobotsDefender = {}
+	RobotsAttacker = {}
+	for _, v in ipairs(workspace:GetDescendants()) do
+		if v:IsA(""Model"") and v:FindFirstChildOfClass(""Humanoid"") and v:FindFirstChild(""HumanoidRootPart"") then
+			local name = v.Name or """"
+			if name:find(""Arctic Wolf"") then
+				table.insert(RobotsDefender, v)
+			elseif name:find(""SonsOfHorus"") then
+				table.insert(RobotsAttacker, v)
+			elseif name:find(""CT-"") then
+				table.insert(RobotsDefender, v)
+			elseif name:find(""B1-"") or name:find(""B2-"") then
+				table.insert(RobotsAttacker, v)
+			end
+		end
+	end
+end
+UpdateRobotList()
+ 
+Players.PlayerAdded:Connect(function(plr)
+	plr.CharacterAdded:Connect(function()
+		task.delay(2, UpdateRobotList)
+	end)
+end)
+
+local function GetPlayersNear(Pos)
+	local DefenderCount = 0
+	local AttackerCount = 0
+	
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild(""HumanoidRootPart"") and player.Character:FindFirstChildOfClass(""Humanoid"") then
+			if (player.Character.HumanoidRootPart.Position - Pos).Magnitude <= CaptureDistance then
+				if player.Team then
+					if player.Team.Name == ""Emperor"" then
+						DefenderCount = DefenderCount + PLAYER_WEIGHT
+					elseif player.Team.Name == ""Horus"" then
+						AttackerCount = AttackerCount + PLAYER_WEIGHT
+					end
+				end
+			end
+		end
+	end
+	
+	return DefenderCount, AttackerCount
+end
+ 
+local function GetDefenderNPCsNear(Pos)
+	local Near = 0
+	for _, ally in ipairs(RobotsDefender) do
+		if ally and ally.Parent and ally:FindFirstChild(""HumanoidRootPart"") and ally:FindFirstChildOfClass(""Humanoid"") then
+			if (ally.HumanoidRootPart.Position - Pos).Magnitude <= CaptureDistance then
+				Near = Near + DEFENDER_NPC_WEIGHT
+			end
+		end
+	end
+	return Near
+end
+ 
+local function GetAttackerNPCsNear(Pos)
+	local Near = 0
+	for _, enemy in ipairs(RobotsAttacker) do
+		if enemy and enemy.Parent and enemy:FindFirstChild(""HumanoidRootPart"") and enemy:FindFirstChildOfClass(""Humanoid"") then
+			if (enemy.HumanoidRootPart.Position - Pos).Magnitude <= CaptureDistance then
+				Near = Near + ATTACKER_NPC_WEIGHT
+			end
+		end
+	end
+	return Near
+end
+
+for index, part in ipairs(parts) do
+	local capVal = part:FindFirstChild(""Captured"")
+	local isRep = part:FindFirstChild(""IsRepublic"")
+	local hudBar = nil
+	if part:FindFirstChild(""HUD"") and part.HUD:FindFirstChild(""Capturing"") then
+		hudBar = part.HUD.Capturing
+	end
+ 
+	if capVal and isRep and hudBar then
+		capVal.Value = 100
+		isRep.Value = true
+		Locked[part] = false
+		table.insert(CaptureValues, {Part = part, Captured = capVal, IsRepublic = isRep, HUD = hudBar})
+		PartIndex[part] = #CaptureValues
+	else
+		warn(""Capture part missing children:"", part:GetFullName())
+	end
+end
+ 
+local function PreviousIsCapturedByAttackers(index)
+	if index <= 1 then return true end
+	local prev = CaptureValues[index - 1]
+	if prev then
+		return (prev.Captured.Value >= 100) and (prev.IsRepublic.Value == false)
+	end
+	return false
+end
+
+local function ShowFallback(fallbackName)
+	print(""Showing fallback:"", fallbackName)
+	
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player:FindFirstChild(""PlayerGui"") and player.PlayerGui:FindFirstChild(""CaptureSystem"") then
+			local gui = player.PlayerGui.CaptureSystem
+			if gui:FindFirstChild(fallbackName) then
+				gui[fallbackName].Visible = true
+				task.delay(4, function()
+					if gui:FindFirstChild(fallbackName) then
+						gui[fallbackName].Visible = false
+					end
+				end)
+			end
+		end
+	end
+
+	local fbSound = script.Parent:FindFirstChild(""FallbackSound"")
+	if fbSound and fbSound:IsA(""Sound"") then
+		fbSound:Play()
+	end
+end
+
+local function Connection(entry)
+	local Part = entry.Part
+	local CapturedValue = entry.Captured
+	local IsRepublic = entry.IsRepublic
+	local HUDBar = entry.HUD
+	local idx = PartIndex[Part]
+ 
+	task.spawn(function()
+		local LastCaptureValue = CapturedValue.Value
+		while Part and Part.Parent do
+			task.wait(0.1)
+			if HUDBar and CapturedValue then
+				if LastCaptureValue ~= CapturedValue.Value then
+					local size = math.clamp(CapturedValue.Value / 100, 0, 1)
+					Tween(HUDBar, ""Size"", UDim2.new(1, 0, size, 0), 0.12)
+					LastCaptureValue = CapturedValue.Value
+				end
+			else
+				break
+			end
+		end
+	end)
+ 
+	while Part and Part.Parent do
+		task.wait(UpdateRate)
+		if math.random(1, 12) == 1 then
+			UpdateRobotList()
+		end
+
+		local playerDefenders, playerAttackers = GetPlayersNear(Part.Position)
+		local defendersNearby = playerDefenders + GetDefenderNPCsNear(Part.Position)
+		local attackersNearby = playerAttackers + GetAttackerNPCsNear(Part.Position)
+ 
+		if CapturedValue.Value > 100 then CapturedValue.Value = 100 end
+		if CapturedValue.Value < 0 then CapturedValue.Value = 0 end
+ 
+		if CapturedValue.Value < 1 and not Locked[Part] then
+			if defendersNearby > attackersNearby then
+				IsRepublic.Value = true
+			elseif attackersNearby > defendersNearby then
+				IsRepublic.Value = false
+			end
+		end
+ 
+		if IsRepublic.Value then
+			HUDBar.BackgroundColor3 = Color3.fromRGB(131, 255, 251)
+		else
+			HUDBar.BackgroundColor3 = BrickColor.new(""Earth green"").Color
+		end
+ 
+		local attackersAllowedToProgress = PreviousIsCapturedByAttackers(idx)
+		local isLocked = Locked[Part]
+ 
+		if CapturedValue.Value < 100 then
+			if IsRepublic.Value and defendersNearby > 0 and not isLocked then
+				CapturedValue.Value = math.min(100, CapturedValue.Value + defendersNearby)
+			elseif (not IsRepublic.Value) and attackersNearby > 0 then
+				if attackersAllowedToProgress then
+					CapturedValue.Value = math.min(100, CapturedValue.Value + attackersNearby)
+				end
+			elseif defendersNearby == 0 and attackersNearby == 0 and CapturedValue.Value > 0 and not isLocked then
+				CapturedValue.Value = math.max(0, CapturedValue.Value - 0.5)
+			end
+		end
+ 
+		if not isLocked then
+			if IsRepublic.Value and attackersNearby > defendersNearby and CapturedValue.Value > 0 then
+				CapturedValue.Value = math.max(0, CapturedValue.Value - attackersNearby)
+			elseif (not IsRepublic.Value) and defendersNearby > attackersNearby and CapturedValue.Value > 0 then
+				CapturedValue.Value = math.max(0, CapturedValue.Value - defendersNearby)
+			end
+		else
+			if not IsRepublic.Value and attackersNearby > 0 and CapturedValue.Value < 100 and attackersAllowedToProgress then
+				CapturedValue.Value = math.min(100, CapturedValue.Value + attackersNearby)
+			end
+		end
+ 
+		if CapturedValue.Value >= 100 and IsRepublic.Value == false and not Locked[Part] then
+			Locked[Part] = true
+			IsRepublic.Value = false
+			print((""Point %s locked to attackers""):format(Part.Name))
+
+			local nextPoint = nil
+			if Part.Name == ""A"" then
+				nextPoint = ""B""
+				ShowFallback(""Fallback1"")
+			elseif Part.Name == ""B"" then
+				nextPoint = ""C""
+				ShowFallback(""Fallback2"")
+			elseif Part.Name == ""C"" then
+				nextPoint = nil
+			end
+
+			if nextPoint then
+				local success, err = pcall(function()
+					PointChangedEvent:Fire(nextPoint)
+				end)
+				if not success then
+					warn(""Failed firing PointChangedEvent:"", err)
+				end
+			end
+		end
+	end
+end
+ 
+for _, entry in ipairs(CaptureValues) do
+	task.spawn(function()
+		Connection(entry)
+	end)
+end
+
+while task.wait(1) do
+	local allCapturedByAttackers = true
+	for _, entry in ipairs(CaptureValues) do
+		if not (entry.Captured.Value >= 100 and entry.IsRepublic.Value == false) then
+			allCapturedByAttackers = false
+			break
+		end
+	end
+ 
+	if allCapturedByAttackers then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player:FindFirstChild(""PlayerGui"") and player.PlayerGui:FindFirstChild(""CaptureSystem"") then
+				local gui = player.PlayerGui.CaptureSystem
+				
+				if player.Team and player.Team.Name == ""Emperor"" then
+					if gui:FindFirstChild(""Lost"") then
+						gui.Lost.Visible = true
+					end
+				elseif player.Team and player.Team.Name == ""Horus"" then
+					if gui:FindFirstChild(""Won"") then
+						gui.Won.Visible = true
+					end
+				end
+			end
+		end
+ 
+		local soundObj = script.Parent:FindFirstChild(""VictorySound"")
+		if soundObj and soundObj.Play then
+			soundObj:Play()
+		end
+ 
+		task.wait(TELEPORT_DELAY_AFTER_SOUND)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player and player.Parent then
+				local success, err = pcall(function()
+					TeleportService:Teleport(MAIN_MENU_PLACE_ID, player)
+				end)
+				if not success then
+					warn(""Teleport failed for"", player.Name, err)
+				end
+				task.wait(0.2)
+			end
+		end
+		while true do task.wait(1) end
+	end
+end"
+MbS8XRUd,useSupabaseAuth,ashkanahmadi,TypeScript,Friday 24th of October 2025 02:33:56 PM CDT,"import { supabase } from '@/utils/supabase/supabase'
+import { AppState, AppStateStatus } from 'react-native'
+
+import type { Session, User } from '@supabase/supabase-js'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+
+// Tells Supabase Auth to continuously refresh the session automatically if
+// the app is in the foreground. When this is added, you will continue to receive
+// `onAuthStateChange` events with the `TOKEN_REFRESHED` or `SIGNED_OUT` event
+// if the user's session is terminated. This should only be registered once.
+// AppState.addEventListener('change', state => {
+//   if (state === 'active') {
+//     supabase.auth.startAutoRefresh()
+//   } else {
+//     supabase.auth.stopAutoRefresh()
+//   }
+// })
+
+type AuthContextValue = {
+  isAuthLoading: boolean
+  isAuthenticated: boolean
+  session: Session | null
+  user: User | null
+  signInWithEmailAndPassword: (email: string, password: string) => Promise<{ data: { user: User | null; session: Session | null } | null; error: any }>
+  signOut: () => Promise<{ error: any }>
+}
+
+const SupabaseAuthContext = createContext<AuthContextValue | null>(null)
+
+export default function SupabaseAuthProvider({ children }: { children: React.ReactNode }) {
+  const [isAuthLoading, setIsAuthLoading] = useState(false)
+  const [session, setSession] = useState<null | Session>(null)
+  const [user, setUser] = useState<null | User>(null)
+  const isAuthenticated = !!(session && user)
+
+  // 1) Initial load + auth change subscription
+  useEffect(() => {
+    let mounted = true
+
+    ;(async () => {
+      const { data, error } = await supabase.auth.getSession()
+      if (!mounted) return
+      if (!error) {
+        setSession(data.session ?? null)
+        setUser(data.session?.user ?? null)
+      }
+      setIsAuthLoading(false)
+    })()
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession)
+      setUser(newSession?.user ?? null)
+    })
+
+    return () => {
+      mounted = false
+      sub?.subscription?.unsubscribe?.()
+    }
+  }, [])
+
+  // 2) Auto refresh while app is active (with cleanup)
+  useEffect(() => {
+    const handleAppState = (state: AppStateStatus) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh()
+      } else {
+        supabase.auth.stopAutoRefresh()
+      }
+    }
+
+    const sub = AppState.addEventListener('change', handleAppState)
+    // start immediately if already active
+    handleAppState(AppState.currentState)
+
+    return () => {
+      supabase.auth.stopAutoRefresh()
+      sub.remove()
+    }
+  }, [])
+
+  async function signInWithEmailAndPassword(email: string, password: string) {
+    // setIsAuthLoading(true)
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (data || !error) {
+      setSession(data.session)
+      setUser(data.user)
+    }
+    // setIsAuthLoading(false)
+
+    return { data, error }
+  }
+
+  async function signOut() {
+    // setIsAuthLoading(true)
+
+    const { error } = await supabase.auth.signOut()
+
+    if (!error) {
+      setSession(null)
+      setUser(null)
+    }
+
+    return { error }
+  }
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      isAuthLoading,
+      isAuthenticated,
+      session,
+      user,
+      signInWithEmailAndPassword,
+      signOut,
+    }),
+    [isAuthLoading, isAuthenticated, session, user]
+  )
+
+  return <SupabaseAuthContext.Provider value={value}>{children}</SupabaseAuthContext.Provider>
+}
+
+export const useSupabaseAuth = () => {
+  const context = useContext(SupabaseAuthContext)
+
+  if (!context) throw new Error('useSupabaseAuth must be used within SupabaseAuthProvider')
+
+  return context
+}
+"
+S4aGd1TF,Untitled,Josif_tepe,C++,Friday 24th of October 2025 02:32:32 PM CDT,"#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <queue>
+#include <cstring>
+#include <map>
+using namespace std;
+    int prefs[1000][1000];
+ 
+    int query(int row, int i, int j) {
+            if(i == 0) {
+                return prefs[row][j];
+            }
+            return prefs[row][j] - prefs[row][i - 1];
+    }
+ 
+int main()
+{
+    int n,q;
+    cin>>n>>q;
+    char x[n][n];
+    int y[n][n];
+    for(int i =0;i<n;i++){
+        for(int j = 0;j<n;j++){
+            cin>>x[i][j];
+        }
+    }
+ 
+    for(int i =0;i<n;i++){
+        for(int j = 0;j<n;j++){
+            if(x[i][j]=='*'){
+                y[i][j]=1;
+            }else if(x[i][j]=='.'){
+                y[i][j]=0;
+            }
+        }
+    }
+ 
+    int sum=0;
+ 
+    for(int i =0;i<n;i++){
+        sum=0;
+        for(int j = 0;j<n;j++){
+           sum+=y[i][j];
+           prefs[i][j]=sum;
+        }
+    }
+    int x1,y1,x2,y2;
+    for(int i=0;i<q;i++){
+        int sum=0;
+        cin>>x1>>y1>>x2>>y2;
+        x1--;
+        x2--;
+        y1--;
+        y2--;
+        for(int j =x1;j<=x2;j++){
+            int x=query(j,y1,y2);
+            sum+=x;
+        }
+        cout<<sum<<endl;
+    }
+ 
+ 
+ 
+    return 0;
+}
+"
+ZEqteU3Q,Untitled,BobMilli,PowerShell,Friday 24th of October 2025 02:12:21 PM CDT,"
+  shlink:
+    image: shlinkio/shlink:latest
+    container_name: shlink
+    restart: unless-stopped
+    ports:
+      - ""8082:8080""
+    environment:
+      - DEFAULT_DOMAIN=shrt.xxxx.fr
+      - IS_HTTPS_ENABLED=true
+      - DB_DRIVER=postgres
+      - DB_NAME=shlink
+      - DB_USER=shlink
+      - DB_PASSWORD=shlinkpass
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - GEOLITE_LICENSE_KEY=xxxxxxxxxxxxxxxxxxxxxxx
+    networks:
+      - caddy-webnet
+
+  shlink-web-client:
+    image: shlinkio/shlink-web-client:latest
+    container_name: shlink_web_client
+    restart: unless-stopped
+    environment:
+      - SHLINK_SERVER_URL=http://shlink:8082
+      - SHLINK_SERVER_API_KEY=1xxxxxxxxxxxxxxxxx
+    ports:
+      - ""3200:80""
+    networks:
+      - caddy-webnet
+    depends_on:
+      - shlink"
+qsFHuk3W,Two layers,RTS_Dmitriy,Lua,Friday 24th of October 2025 01:33:31 PM CDT,"-- 1 - obsidian
+-- 2 - quartz
+
+shrek1={
+           {},
+           {},
+           {1,1,1,1,1,1},
+           {2,0,0,0,0,1},
+           {2},
+           {2,0,0,0,0,1},
+           {1,1,1,1,1,1},
+       }
+
+shrek2={
+           {},
+           {},
+           {2,3,3,3,3,1},
+           {1,0,0,0,0,3},
+           {1},
+           {1,0,0,0,0,3},
+           {2,3,3,3,3,1},
+       }
+
+shrek3={
+           {1,0,0,0,0,1},
+           {4,0,0,0,0,1},
+           {1,3,3,3,3,1},
+           {5,0,0,0,0,3},
+           {1,0,0,0,0,3},
+           {5,0,0,0,0,3},
+           {1,3,3,3,3,1},
+           {4,0,0,0,0,1},
+           {1,0,0,0,0,1},
+       }
+
+shrek4={
+    	   {},
+           {1,0,0,0,0,1},
+           {1,1,1,1,1,1},
+           {5,0,0,0,0,1},
+           {1,0,0,0,0,1},
+           {5,0,0,0,0,1},
+           {1,1,1,1,1,1},
+           {1,0,0,0,0,1},
+       }
+
+shrek5={
+           {},
+           {},
+           {2,2,2,2,2,2},
+           {2,2,2,2,2,2},
+           {2,2,2,2,2,2},
+           {2,2,2,2,2,2},
+           {2,2,2,2,2,2},
+       }
+
+ shrek6={
+            {},
+            {},
+            {},
+            {6,6,6,6,6,6},
+            {6,6,6,6,6,6},
+            {6,6,6,6,6,6},
+        }
+ 
+shrek7={
+           {},
+           {},
+           {},
+           {},
+           {6,6,6,6,6,6}
+       }
+       
+function buildLine (colors)
+	for i = 1,#colors do
+		slot = colors[i]
+        if slot~=0 then
+ 		  turtle.select(slot)
+   	 	  turtle.placeDown()
+        end
+ 		turtle.forward()
+	end
+	turtle.turnRight()
+	turtle.forward()
+	turtle.turnLeft()
+	for e = 1,#colors do
+		turtle.back()
+	end
+end
+
+function buildLayer(image)
+    for i=1,#image do
+         line=image[i]
+         buildLine(line)
+    end
+  turtle.turnLeft()
+ for i=1,#image do
+    turtle.forward()
+  end
+  turtle.turnRight()
+  turtle.up()
+end
+
+
+buildLayer(shrek1)
+buildLayer(shrek2)
+buildLayer(shrek3)
+buildLayer(shrek4)
+buildLayer(shrek5)
+buildLayer(shrek6)
+buildLayer(shrek7)"
+A6R63i22,AE2 Pattern Checker,gelatine87,Lua,Friday 24th of October 2025 12:46:17 PM CDT,"--[[
+================================================================================
+PATTERN DETECTOR — ME Bridge Crafting Watcher (CC:Tweaked / ComputerCraft)
+================================================================================
+
+Overview:
+  Monitors Applied Energistics crafting CPUs via an ME Bridge peripheral and
+  checks whether any *watchlisted* items are currently being crafted. If so,
+  it flips a redstone output (e.g., a lamp) and shows a status UI in color
+  terminals. It also logs to a file if enabled.
+
+Key Features:
+  • Reads a watchlist from ""watchlist.txt"" (auto-creates a default if missing).
+  • Polls ME Bridge CPUs to detect active jobs for watchlisted items.
+  • Toggles a redstone line (CONFIG.redstoneSide) when any watchlisted item is
+    being crafted.
+  • Color terminal UI:
+      - Header banner
+      - Status bar showing redstone state
+      - Watchlist line (truncates if too wide)
+      - Crafting status list (with item, quantity, and CPU ID)
+  • Optional logging to a file (CONFIG.logFile).
+
+Requirements:
+  • CC:Tweaked / ComputerCraft environment with a color-capable terminal (for UI).
+  • A connected ME Bridge peripheral (from Advanced Peripherals) on any side.
+  • Redstone output wired on the configured side (CONFIG.redstoneSide).
+
+Usage:
+  • Place a computer next to or wired to an ME Bridge peripheral.
+  • Adjust CONFIG values below if needed.
+  • Create ""watchlist.txt"" with one item id per line (e.g. minecraft:stone).
+  • Run the program; it will show the UI and control redstone automatically.
+
+Notes:
+  • If ""watchlist.txt"" is missing or empty, a default file with a few items
+    is created on first run.
+  • Logging is appended to CONFIG.logFile when CONFIG.enableLogging is true.
+  • Pressing Enter switches to a simple input mode placeholder (returns immediately).
+
+================================================================================
+]]
+
+-- Configuration for polling rate, I/O files, redstone side, etc.
+local CONFIG = {
+	pollInterval = 1.0,           -- seconds between CPU checks when idle
+	redstoneSide = ""top"",          -- side used for redstone output (e.g., ""top"", ""left"")
+	watchlistFile = ""watchlist.txt"", -- file with one item id per line (e.g., minecraft:stone)
+	logFile = ""patters.log"",       -- log file path (appends); note: name kept as provided
+	enableLogging = true,          -- toggle logging on/off
+}
+
+-- Last snapshot of CPU states to compare changes between iterations
+local lastCpuSnapshot = nil
+
+-- Loaded from watchlist file; entries are { name, displayName }
+local watchlist = {}
+
+--------------------------------------------------------------------------------
+-- Logging helpers
+--------------------------------------------------------------------------------
+
+-- Writes a line to the screen and (optionally) to the log file.
+local function log(msg)
+	print(msg)
+
+	if CONFIG.enableLogging then
+		local file = fs.open(CONFIG.logFile, ""a"")
+		if file then
+			file.write(msg .. ""\n"")
+			file.close()
+		end
+	end
+end
+
+-- Writes a colored line to screen (if color is available) and to log file.
+-- Falls back to plain print on non-color terminals.
+local function logColored(msg, color)
+	if term.isColor() then
+		term.setTextColor(color)
+		print(msg)
+		term.setTextColor(colors.white)
+	else
+		print(msg)
+	end
+
+	if CONFIG.enableLogging then
+		local file = fs.open(CONFIG.logFile, ""a"")
+		if file then
+			file.write(msg .. ""\n"")
+			file.close()
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Drawing helpers (UI)
+--------------------------------------------------------------------------------
+
+-- Draws a horizontal line (full terminal width) at row y in the given color.
+local function drawLine(y, color)
+	if term.isColor() then
+		term.setTextColor(color)
+		term.setCursorPos(1, y)
+		term.write(string.rep(""="", term.getSize()))
+		term.setTextColor(colors.white)
+	end
+end
+
+-- Draws a simple bordered box with optional title.
+-- (Currently unused in the main loop but handy for future UI expansion.)
+local function drawBox(x, y, width, height, title, color)
+	if term.isColor() then
+		term.setTextColor(color)
+
+		-- Top border
+		term.setCursorPos(x, y)
+		term.write(""+"" .. string.rep(""-"", width - 2) .. ""+"")
+
+		-- Title row (if provided)
+		if title then
+			term.setCursorPos(x, y + 1)
+			term.write(""| "" .. title .. string.rep("" "", width - #title - 3) .. ""|"")
+		end
+
+		-- Middle rows (skip title’s body line if present)
+		for i = 2, height - 1 do
+			if not title or i > 1 then
+				term.setCursorPos(x, y + i)
+				term.write(""|"" .. string.rep("" "", width - 2) .. ""|"")
+			end
+		end
+
+		-- Bottom border
+		term.setCursorPos(x, y + height)
+		term.write(""+"" .. string.rep(""-"", width - 2) .. ""+"")
+
+		term.setTextColor(colors.white)
+	end
+end
+
+-- Clears the screen and prints the top header banner.
+local function showHeader()
+	if term.isColor() then
+		term.clear()
+		local termWidth, _ = term.getSize()
+		local title = ""PATTERN DETECTOR""
+		local titleX = math.floor((termWidth - #title) / 2) + 1
+
+		term.setCursorPos(1, 1)
+		term.setBackgroundColor(colors.blue)
+		term.setTextColor(colors.white)
+		term.write(string.rep("" "", termWidth))
+		term.setCursorPos(titleX, 1)
+		term.write(title)
+		term.setBackgroundColor(colors.black)
+		term.setTextColor(colors.white)
+	end
+end
+
+-- Shows a centered status bar indicating whether the redstone output is ON/OFF.
+local function showStatusBar(redstoneOn)
+	if term.isColor() then
+		local termWidth, _ = term.getSize()
+		local statusOn = ""Redstone Lamp: ON""
+		local statusOff = ""Redstone Lamp: OFF""
+		local status = redstoneOn and statusOn or statusOff
+		local color = redstoneOn and colors.green or colors.gray
+
+		local barY = 5
+		term.setCursorPos(1, barY)
+		term.setBackgroundColor(colors.black)
+		term.write(string.rep("" "", termWidth))
+
+		-- Centered text
+		local barX = math.floor((termWidth - #status) / 2) + 1
+		term.setCursorPos(barX, barY)
+		term.setTextColor(color)
+		term.write(status)
+		term.setTextColor(colors.white)
+	end
+end
+
+-- Renders the ""Watchlist:"" line (names joined by "", "", truncated if needed).
+-- Falls back to logging in non-color terminals.
+local function showWatchlist()
+	if term.isColor() then
+		local y = 7
+		local termWidth, _ = term.getSize()
+		local label = ""Watchlist:""
+		local names = {}
+		for i, item in ipairs(watchlist) do
+			table.insert(names, item.displayName)
+		end
+		local namesStr = (#watchlist == 0) and ""(empty)"" or table.concat(names, "", "")
+
+		-- Compose and maybe truncate to terminal width
+		local line = label .. "" "" .. namesStr
+		if #line > termWidth then
+			local maxNamesLen = termWidth - #label - 4
+			if maxNamesLen < 0 then
+				maxNamesLen = 0
+			end
+			namesStr = namesStr:sub(1, maxNamesLen) .. ""...""
+			line = label .. "" "" .. namesStr
+		end
+
+		-- Clear line then draw colored label + content
+		term.setCursorPos(1, y)
+		term.setBackgroundColor(colors.black)
+		term.write(string.rep("" "", termWidth))
+
+		term.setCursorPos(1, y)
+		term.setTextColor(colors.cyan)
+		term.write(label)
+		term.setTextColor(#watchlist == 0 and colors.orange or colors.white)
+		term.write("" "" .. namesStr)
+		term.setTextColor(colors.white)
+	else
+		-- Non-color: print to log
+		if #watchlist == 0 then
+			log(""Watchlist: (empty)"")
+		else
+			local names = {}
+			for i, item in ipairs(watchlist) do
+				table.insert(names, item.displayName)
+			end
+			log(""Watchlist: "" .. table.concat(names, "", ""))
+		end
+	end
+end
+
+-- Displays the crafting status block.
+-- Lists each watchlisted item currently being crafted with quantity and CPU id.
+local function showCraftingStatus(craftingPatterns)
+	if term.isColor() then
+		local termWidth, _ = term.getSize()
+		local title = ""CRAFTING STATUS""
+		local y = 9
+
+		-- Clear an area that can fit title + up to N lines of jobs
+		local linesNeeded = 1 + math.max(1, #craftingPatterns)
+		for i = 0, linesNeeded do
+			term.setCursorPos(1, y + i)
+			term.setBackgroundColor(colors.black)
+			term.write(string.rep("" "", termWidth))
+		end
+
+		-- Title centered
+		local titleX = math.floor((termWidth - #title) / 2) + 1
+		term.setCursorPos(titleX, y)
+		term.setTextColor(colors.cyan)
+		term.write(title)
+		term.setTextColor(colors.white)
+
+		-- Lines with content or a single ""no items"" message
+		if #craftingPatterns > 0 then
+			local craftingLines = {}
+			local maxLineLen = 0
+			for i, crafting in ipairs(craftingPatterns) do
+				local line = ""+ ""
+					.. crafting.displayName
+					.. "" x""
+					.. crafting.quantity
+					.. "" (CPU ""
+					.. crafting.cpuId
+					.. "")""
+				if #line > termWidth then
+					line = line:sub(1, termWidth - 3) .. ""...""
+				end
+				craftingLines[i] = line
+				if #line > maxLineLen then
+					maxLineLen = #line
+				end
+			end
+
+			local blockWidth = maxLineLen
+			local blockX = math.floor((termWidth - blockWidth) / 2) + 1
+			for i, line in ipairs(craftingLines) do
+				term.setCursorPos(blockX, y + i)
+				term.setTextColor(colors.green)
+				term.write(line)
+				term.setTextColor(colors.white)
+			end
+		else
+			local msg = ""- No watchlisted items being crafted""
+			if #msg > termWidth then
+				msg = msg:sub(1, termWidth - 3) .. ""...""
+			end
+			local msgX = math.floor((termWidth - #msg) / 2) + 1
+			term.setCursorPos(msgX, y + 1)
+			term.setTextColor(colors.orange)
+			term.write(msg)
+			term.setTextColor(colors.white)
+		end
+	else
+		-- Non-color fallback to log output
+		log(""CRAFTING STATUS:"")
+		if #craftingPatterns > 0 then
+			for _, crafting in ipairs(craftingPatterns) do
+				log("" "" .. crafting.displayName .. "" x"" .. crafting.quantity .. "" (CPU "" .. crafting.cpuId .. "")"")
+			end
+		else
+			log(""- No watchlisted items being crafted"")
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Data loading / input
+--------------------------------------------------------------------------------
+
+-- Loads the watchlist file. If missing/empty, writes a default file and returns it.
+local function loadWatchlist()
+	local items = {}
+
+	if fs.exists(CONFIG.watchlistFile) then
+		local file = fs.open(CONFIG.watchlistFile, ""r"")
+		if file then
+			local line = file.readLine()
+			while line do
+				-- Trim whitespace
+				local trimmed = line:gsub(""^%s*(.-)%s*$"", ""%1"")
+				-- Skip empty lines and comments starting with '#'
+				if trimmed ~= """" and not trimmed:match(""^#"") then
+					table.insert(items, {
+						name = trimmed,
+						-- Tidy display: drop common namespaces
+						displayName = trimmed:gsub(""minecraft:"", """"):gsub(""ftbmaterials:"", """"),
+					})
+				end
+				line = file.readLine()
+			end
+			file.close()
+		end
+	end
+
+	-- Provide a default list if nothing loaded, and create the file for convenience
+	if #items == 0 then
+		items = {
+			{ name = ""minecraft:stone"",       displayName = ""Stone"" },
+			{ name = ""minecraft:iron_ingot"",  displayName = ""Iron Ingot"" },
+		}
+
+		local file = fs.open(CONFIG.watchlistFile, ""w"")
+		if file then
+			for _, item in ipairs(items) do
+				file.write(item.name .. ""\n"")
+			end
+			file.close()
+		end
+	end
+
+	return items
+end
+
+-- Placeholder for handling typed user input when in ""control mode"".
+-- Currently normalizes input but does nothing and exits control mode immediately.
+local function handleUserInput()
+	local input = read()
+	if not input then
+		return false
+	end
+
+	-- Normalize
+	input = input:lower():gsub(""^%s*(.-)%s*$"", ""%1"")
+	-- No commands implemented; return false to exit control mode.
+end
+
+--------------------------------------------------------------------------------
+-- ME Bridge integration
+--------------------------------------------------------------------------------
+
+-- Finds and returns the first wrapped peripheral that looks like an ME Bridge
+-- (i.e., has getCraftingCPUs). Tries ""bottom"" first, then other sides.
+local function findMeBridge()
+	if peripheral.isPresent(""bottom"") then
+		local bridge = peripheral.wrap(""bottom"")
+		if bridge and bridge.getCraftingCPUs then
+			return bridge
+		end
+	end
+
+	-- Try other sides if not at ""bottom""
+	for _, side in ipairs({ ""left"", ""right"", ""front"", ""back"", ""top"" }) do
+		if peripheral.isPresent(side) then
+			local bridge = peripheral.wrap(side)
+			if bridge and bridge.getCraftingCPUs then
+				return bridge
+			end
+		end
+	end
+
+	return nil
+end
+
+-- Takes a snapshot of crafting CPUs with minimal fields needed for display/compare.
+local function takeCpuSnapshot(bridge)
+	local snapshot = {}
+
+	if bridge.getCraftingCPUs then
+		-- Use pcall to be resilient against peripheral/API errors
+		local success, cpus = pcall(bridge.getCraftingCPUs, bridge)
+		if success and cpus then
+			for i, cpu in ipairs(cpus) do
+				snapshot[i] = {
+					isBusy = cpu.isBusy,               -- boolean
+					name = cpu.name,                   -- string
+					storage = cpu.storage,             -- number or details (depends on API)
+					craftingJob = cpu.craftingJob,     -- table with job info
+				}
+			end
+		end
+	end
+
+	return snapshot
+end
+
+-- Inspects current CPU snapshot and collects jobs matching the watchlist.
+-- Returns a list of crafting entries for the UI/log: { pattern, cpuId, cpuName, quantity, displayName }
+local function checkCraftingPatterns(bridge)
+	local craftingPatterns = {}
+
+	-- Capture the current CPU states
+	local currentCpuSnapshot = takeCpuSnapshot(bridge)
+
+	-- Quick check: if no CPUs are busy, we can skip deeper analysis
+	local anyBusyCPUs = false
+	for cpuId, cpu in pairs(currentCpuSnapshot) do
+		if cpu.isBusy then
+			anyBusyCPUs = true
+		end
+	end
+
+	if not anyBusyCPUs then
+		lastCpuSnapshot = currentCpuSnapshot
+		return craftingPatterns
+	end
+
+	-- If we have a previous snapshot, scan active jobs for watchlist matches
+	if lastCpuSnapshot then
+		for cpuId, currentCpu in pairs(currentCpuSnapshot) do
+			if currentCpu.isBusy and currentCpu.craftingJob then
+				local job = currentCpu.craftingJob
+				if job.resource and job.resource.name then
+					-- Exact id match against the watchlist entry names
+					for _, watchlistItem in ipairs(watchlist) do
+						if job.resource.name == watchlistItem.name then
+							table.insert(craftingPatterns, {
+								pattern = watchlistItem,
+								cpuId = cpuId,
+								cpuName = currentCpu.name,
+								quantity = job.quantity,
+								displayName = job.resource.displayName or job.resource.name,
+							})
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Persist snapshot for next compare
+	lastCpuSnapshot = currentCpuSnapshot
+
+	return craftingPatterns
+end
+
+--------------------------------------------------------------------------------
+-- Redstone control
+--------------------------------------------------------------------------------
+
+-- Sets the redstone output to ON/OFF on the configured side.
+local function setRedstoneLamp(on)
+	if on then
+		redstone.setOutput(CONFIG.redstoneSide, true)
+	else
+		redstone.setOutput(CONFIG.redstoneSide, false)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Main loop
+--------------------------------------------------------------------------------
+
+-- Initializes UI, loads watchlist, finds the ME Bridge, and starts the monitor loop.
+local function runMonitor()
+	showHeader()
+	watchlist = loadWatchlist()
+
+	local bridge = findMeBridge()
+	if not bridge then
+		logColored(""ERROR: No ME Bridge found!"", colors.red)
+		return
+	end
+
+	local lastState = false     -- last redstone state we set
+	local controlMode = false   -- toggled when user presses Enter (char ""\r"")
+
+	while true do
+		if controlMode then
+			-- If we ever implement commands, this is where they'd be handled
+			if handleUserInput() then
+				sleep(0.1)
+			else
+				-- Exit control mode and redraw the header
+				controlMode = false
+				showHeader()
+			end
+		else
+			-- Event polling for simple key/timer handling in color terminals
+			if term.isColor() then
+				local timer = os.startTimer(2)
+				local event, param = os.pullEvent()
+
+				if event == ""timer"" and param == timer then
+					-- Timer triggered; continue to work loop
+				elseif event == ""char"" and param == ""\r"" then
+					-- Enter pressed: enter control mode
+					controlMode = true
+				end
+			end
+
+			-- Check for watchlisted crafting jobs
+			local craftingPatterns = checkCraftingPatterns(bridge)
+
+			-- Redstone is ON iff we have any matching jobs
+			local currentState = #craftingPatterns > 0
+
+			-- Update redstone output only when it changes
+			if currentState ~= lastState then
+				setRedstoneLamp(currentState)
+				lastState = currentState
+			end
+
+			-- Refresh UI sections
+			showStatusBar(currentState)
+			showWatchlist()
+			showCraftingStatus(craftingPatterns)
+
+			-- Throttle loop to the configured poll interval
+			sleep(CONFIG.pollInterval)
+		end
+	end
+end
+
+-- Entry point
+runMonitor()"
+bABrN0Yf,Untitled,sanovskiy,JavaScript,Friday 24th of October 2025 12:45:05 PM CDT,(_=>(([][[]]+[])[(_<<_<<_)+_]+({}+[])[(_<<_<<_)+(_+_)+_]+(![]+[])[_]+(([]-[]).constructor+[])[(_<<_<<_<<_)+(_+_)+_]+({}+[])[(_<<_<<_)+(_+_)+_]+({}+[])[(_<<_<<_<<_)+(_<<_<<_)]+({}+[])[_]+([][[]]+[])[_]+(![]+[])[[]-[]]+([][[]]+[])[[]-[]]+(![]+[])[_+_+_]+(!![]+[])[_+_+_]+([][[]]+[])[_+_]))(-(-!![]))
+Ctxx2Etz,Untitled,paste30022,JavaScript,Friday 24th of October 2025 12:40:11 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CCddff"
+P55wG4x9,Untitled,paste30022,Java,Friday 24th of October 2025 12:40:05 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CCsc"
+1YHrQTuh,Untitled,paste30022,JavaScript,Friday 24th of October 2025 12:39:11 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil tfhen
+    else
+CC"
+zjJUQ6QS,Untitled,paste30022,JavaScript,Friday 24th of October 2025 12:39:04 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",ss
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CC"
+k8xGW1u2,Untitled,paste30022,Java,Friday 24th of October 2025 12:38:58 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CCw"
+zErcGFEq,Untitled,paste30022,Java,Friday 24th of October 2025 12:38:51 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    elses
+CC"
+XRUYnX3r,valores_tvs.json,ShockWav3,JSON,Friday 24th of October 2025 12:11:51 PM CDT,"{
+    ""Globo São Paulo"": {
+      ""Bom Dia São Paulo"": 27316,
+      ""Fantástico"": 649900,
+      ""Jornal Hoje"": 243400,
+      ""Bom Dia Brasil"": 114200,
+      ""SP1"": 24875,
+      ""SP2"": 112730,
+      ""Jornal Nacional"": 852400,
+      ""Jornal da Globo"": 69436,
+      ""Hora um da notícia"": 9993,
+      ""Encontro"": 105100,
+      ""Domingão com Huck"": 375200,
+      ""Antena Paulista"": 3694,
+      ""Paulistar"": 28880,
+      ""Bom Dia Sábado"": 13469
+    },
+    ""Globo RJ"": {
+      ""Comunidade"": 944,
+      ""Bom Dia RJ"": 6554,
+      ""RJ1"": 20241
+    },
+    ""Globo"": {
+      ""Fantástico"": 649900,
+      ""Jornal Hoje"": 243400,
+      ""Bom Dia Brasil"": 114200,
+      ""Jornal Nacional"": 852400,
+      ""Jornal da Globo"": 69436,
+      ""Hora um da notícia"": 9993,
+      ""Encontro"": 105100,
+      ""Domingão com Huck"": 375200,
+      ""Antena Paulista"": 3694
+    },
+    ""EPTV Ribeirão Preto"": {
+      ""Bom Dia Cidade"": 1282,
+      ""Jornal da EPTV 1ª Edição"": 4050,
+      ""Jornal da EPTV 2ª Edição"": 9850,
+      ""EP Agro"": 1815
+    },
+    ""EPTV Campinas"": {
+      ""Bom Dia Brasil"": 5033,
+      ""Bom Dia Cidade"": 2578,
+      ""Jornal da EPTV 1ª Edição"": 6164,
+      ""Jornal da EPTV 2ª Edição"": 20752,
+      ""EP Agro"": 3415,
+      ""EPTV CIDADE"": 16405
+    },
+    ""EPTV Central"": {
+      ""Bom Dia Cidade"": 576,
+      ""Jornal da EPTV 1ª Edição"": 1853,
+      ""Jornal da EPTV 2ª Edição"": 4437,
+      ""EP Agro"": 829
+    },
+    ""TV TEM Bauru e Marília"": {
+      ""Bom Dia Cidade"": 925,
+      ""TEM Notícias 1ª Edição"": 2427,
+      ""TEM Notícias 2ª Edição"": 5412,
+      ""Mais Você"": 1298,
+      ""Vale a Pena Ver de Novo"": 1246
+    },
+    ""TV Fronteira"": {
+      ""Bom Dia Fronteira"": 534,
+      ""Fronteira Notícias 1ª Edição"": 1421,
+      ""Fronteira Notícias 2ª Edição"": 2456
+    },
+    ""TV TEM São José do Rio Preto e Araçatuba"": {
+      ""Bom Dia Cidade"": 1058,
+      ""TEM Notícias 1ª Edição"": 3243,
+      ""TEM Notícias 2ª Edição"": 6518
+    },
+    ""TV TEM Sorocaba e Jundiaí"": {
+      ""G1 Notícia"": 7258
+    },
+    ""TV Tribuna de Santos"": {
+      ""Bom Dia Região"": 1230,
+      ""Jornal Tribuna 1ª Edição"": 3449,
+      ""Jornal Tribuna 2ª Edição"": 9501,
+      ""Tribuna Esporte"": 2138,
+      ""Vai Nessa"": 1812,
+      ""Papo Tribuna"": 1708
+    },
+    ""RPC Curitiba - Globo"": {
+      ""Meio Dia Paraná"": 9712
+    },
+    ""TV Globo Minas"": {
+      ""Bom Dia MG"": 3466,
+      ""MGTV 1ª Edição"": 823,
+      ""MGTV 2ª Edição"": 22555,
+      ""Jornal Hoje"": 10628,
+      ""Hora 1"": 36100
+    },
+    ""Globo News"": {
+      ""Edição das 06h"": 680,
+      ""Edição da Meia-Noite"": 3440,
+      ""Edição 0"": 3440,
+      ""Edição 16"": 995,
+      ""Edição das 18"": 3545,
+      ""Conexão"": 5740,
+      ""Conexão GloboNews"": 5740,
+      ""Em Ponto"": 680,
+      ""Globo News Mais"": 760,
+      ""Edição das 20h"": 3830,
+      ""Edição do Meio-Dia"": 810,
+      ""Edição das 15"": 810,
+      ""Em Pauta"": 4180,
+      ""Edição das 08h"": 680,
+      ""Edição das 07h"": 680,
+      ""Especial de Domingo"": 15600,
+      ""Estúdio i"": 6200,
+      ""Jornal Globo News"": 4310,
+      ""Jornal GNews"": 4310,
+      ""J10"": 4180
+    },
+    ""SporTV 2"": {
+      ""Superliga B De Vôlei Feminino"": 12020,
+      ""Superliga Feminina 24/25"": 19200
+    },
+    ""TV Diário"": {
+      ""Bom Dia Diário"": 627.75,
+      ""Diário TV 1ª Edição"": 1512,
+      ""Diário TV 2ª Edição"": 2892,
+      ""Diário Comunidade"": 464
+    },
+    ""SBT RP"": {
+      ""SBT Verdade"": 2300,
+      ""SBT Regional Notícias"": 2300,
+      ""A Voz da População"": 3932
+    },
+    ""SBT News"": {
+      ""SBT News na TV"": 34530
+    },
+    ""SBT Interior"": {
+      ""Primeiro Impacto Interior"": 1824,
+      ""SBT Interior 1ª Edição"": 1824,
+      ""SBT Interior 2ª Edição"": 5968.85,
+      ""Tá na Hora Interior"": 6225,
+      ""TH+ Notícias"": 3205
+    },
+    ""SBT"": {
+        ""Chega Mais"": 48800,
+        ""Programa do Ratinho"": 114388.2,
+        ""Primeiro Impacto"": 24097.5,
+        ""SBT Brasil"": 184945.77,
+        ""Tá na Hora"": 90400,
+        ""Repórter SBT"": 115025.4,
+        ""Programa Pé na Estrada"": 3852.44,
+        ""SBT News"": 34530,
+        ""SBT News manhã"": 34530,
+        ""SBT Notícias"": 27400,
+        ""Alô Você"": 48800,
+        ""SBT Manhã"": 29500,
+        ""Aqui Agora"": 98800
+      },
+      ""SBT Central"": {
+        ""Noticidade"": 1158.15,
+        ""Noticidade Manhã"": 1158.15,
+        ""SBT Regional Notícias"": 1158.15,
+        ""SBT Regional Notícias Manhã"": 1158.15,
+        ""Primeiro Impacto"": 1158.15,
+        ""A Voz da População"": 3932
+      },
+      ""VTV Litoral"": {
+        ""VTV da Gente"": 3176,
+        ""Jornal da VTV"": 5110.4
+      },
+      ""VTV Campinas"": {
+        ""VTV da Gente"": 3176,
+        ""Jornal da VTV"": 5110.4,
+        ""A Voz da População"": 3932
+      },
+      ""TV Clube RP"": {
+        ""Jornal da Clube 1ª Edição"": 3769,
+        ""Jornal da Clube 2ª Edição"": 6127,
+        ""Programa do Léo"": 3038,
+        ""Programa do Léo 2ª Edição"": 3038,
+        ""Programa Igor Oliveira"": 3038
+      },
+      ""Band Paulista"": {
+        ""Band Cidade 1ª Edição"": 4708,
+        ""Band Cidade 2ª Edição"": 5403,
+        ""Brasil Urgente"": 5196,
+        ""Band Notícias"": 114388.2
+      },
+      ""Band Mais Campinas"": {
+        ""Acontece"": 2762,
+        ""Band Cidade"": 6400,
+        ""Band Cidade 2ª Edição"": 7958,
+        ""Brasil Urgente"": 7712,
+        ""Bora SP"": 1823,
+        ""Band Mulher"": 3296
+      },
+      ""Band"": {
+        ""Band Cidades Excelentes"": 401996,
+        ""Bora SP"": 7848,
+        ""Jornal da Noite"": 28397,
+        ""Jornal da Band"": 79597,
+        ""Bora Brasil"": 4559,
+        ""Boa Tarde São Paulo"": 27451,
+        ""1o Jornal"": 7029,
+        ""Band Esporte Clube"": 128600
+      },
+      ""Band São Paulo"": {
+        ""Prêmio Band Cidades Excelentes"": 401996,
+        ""Bora SP"": 7848,
+        ""Brasil Urgente"": 56184,
+        ""Jornal da Band"": 79597,
+        ""Bora Brasil"": 4559,
+        ""Jornal da Noite"": 28397,
+        ""Boa Tarde São Paulo"": 27451,
+        ""Olhar do Repórter"": 12390,
+        ""+INFO"": 23757,
+        ""Melhor da Tarde"": 27451,
+        ""1º Jornal"": 7029,
+        ""Melhor da Noite"": 112736
+      },
+      ""Band News"": {
+        ""Jornal Gente"": 1059.6,
+        ""Manhã Band News"": 1059.6,
+        ""Band News no Meio do Dia"": 1059.6,
+        ""Tarde Band News"": 567,
+        ""Jornal da Noite"": 1199.6,
+        ""Madrugada Band News"": 578.2,
+        ""Jornal Band News - Edição da Noite"": 578.2,
+        ""Jornal BandNews 1º edição"": 486,
+        ""Jornal BandNews 2º Edição"": 578.2,
+        ""Fim de Semana BandNews"": 1259.2,
+        ""Jornal da Band"": 21100,
+        ""Primeiro Jornal"": 3126,
+        ""Entre Nós"": 567,
+        ""Jornal Terra Viva"": 578.2,
+        ""No Meio do Dia"": 1059.6,
+        ""Jornal Band News TV"": 7998,
+        ""Edição da Noite"": 20456
+      },
+      ""BandSports"": {
+        ""BandSports News"": 535.6
+      },
+      ""Record TV"": {
+        ""Jornal da Record"": 303097,
+        ""Fala Brasil"": 60938
+      },
+      ""Record TV Interior SP"": {
+        ""Balanço Geral"": 2505,
+        ""Cidade Alerta Interior"": 2463,
+        ""SP Record"": 2505,
+        ""Visita na Record"": 1586
+      },
+      ""Record TV Paulista"": {
+        ""Balanço Geral"": 2329
+      },
+      ""Record TV Litoral / Vale"": {
+        ""Balanço Geral Litoral"": 2656,
+        ""Balanço Geral"": 3628,
+        ""Visita na Record"": 2656,
+        ""SP Record"": 5626
+      },
+      ""Record São Paulo"": {
+        ""Balanço Geral Manhã"": 17070,
+        ""Cidade Alerta"": 42060,
+        ""Fala Brasil"": 50260,
+        ""Hoje em Dia"": 36990,
+        ""Jornal da Record"": 260050,
+        ""Domingo Espetacular"": 247020,
+        ""Balanço Geral"": 35560,
+        ""JR 24H"": 1250
+      },
+      ""Record TV Rio Preto"": {
+        ""Balanço Geral"": 2711,
+        ""SP Record"": 3716
+      },
+      ""Record News"": {
+        ""Hora News"": 50260,
+        ""News 19 Horas"": 22000,
+        ""Alerta Brasil"": 6450,
+        ""Link"": 6450,
+        ""Conexão Record News"": 7000,
+        ""Jornal da Record News"": 1800,
+        ""JR News"": 3101,
+        ""Brasil Caminhoneiro"": 47869
+      },
+      ""TV Cultura"": {
+        ""Jornal da Tarde"": 5360,
+        ""Esta Manhã"": 3920,
+        ""Jornal da Cultura"": 29470,
+        ""Entrelinhas"": 1568,
+        ""Repórter Cultura"": 5383,
+        ""Metrópolis"": 24100
+      },
+      ""TV Cultura Litoral"": {
+        ""CAFÉ DA MANHÃ"": 4743.2,
+        ""Jornalismo Cultura Litoral"": 4743.2,
+        ""Opinião"": 4743.2,
+        ""Notícias do momento"": 4743.2,
+        ""Jornal Litoral"": 4743.2,
+        ""Café com Zaidan"": 4743.2
+      },
+      ""RedeTV!"": {
+        ""RedeTV! News"": 4082.04,
+        ""Brasil que Faz"": 1850.82,
+        ""Leitura Dinâmica"": 1643.76,
+        ""Vou te contar"": 1986.9,
+        ""Manhã do Ronnie"": 45746,
+        ""A Hora da Ação"": 136031,
+        ""TV Fama"": 239657,
+        ""Brasil do Povo"": 152800
+      },
+      ""TV Thathi Ribeirão Preto"": {
+        ""Thathi Repórter"": 1400,
+        ""Thathi Cidade"": 2587,
+        ""Larga Brasa"": 1365,
+        ""Hora da Verdade"": 1800,
+        ""Jornal NovaBrasil"": 1700,
+        ""Estúdio Thathi"": 1619,
+        ""Cobertura Agrishow 2024"": 1400,
+        ""Mentoria"": 1389,
+        ""TH+ Repórter"": 1887,
+        ""TH+ Cidade"": 1665,
+        ""Estúdio TH+"": 1329
+      },
+      ""TV Thathi Record Campinas"": {
+        ""Balanço Geral"": 2879.4,
+        ""Balanço Geral Manhã"": 1469.4,
+        ""Cidade Alerta"": 3780,
+        ""Jornal da TV Thathi"": 12473,
+        ""Tha com Tudo"": 4111
+      },
+      ""TV Thathi Band Litoral"": {
+        ""Thathi Cidade"": 1509,
+        ""Litoral Urgente"": 2324,
+        ""Band Litoral"": 664,
+        ""Jornal da Thathi"": 11169,
+        ""TH+ CIDADE"": 1765
+      },
+      ""CNN Brasil"": {
+        ""Agora CNN"": 2520,
+        ""CNN Novo Dia"": 3180,
+        ""Novo Dia"": 3180,
+        ""CNN 360°"": 7200,
+        ""Visão CNN"": 4200,
+        ""Live CNN"": 3870,
+        ""Jornal da CNN"": 14400,
+        ""CNN Breaking News"": 9600,
+        ""CNN Brasil"": 9600,
+        ""CNN Brasil Meio Dia"": 2760,
+        ""CNN PrimeTime"": 12000,
+        ""Bastidores CNN"": 2760,
+        ""CNN Arena"": 16000,
+        ""CNN Money"": 5300
+      },
+      ""Santa Cecília TV"": {
+        ""Ponto de Vista"": 2500,
+        ""Caderno Regional"": 3600,
+        ""ACS na TV"": 2200,
+        ""Hora Geral"": 2700,
+        ""Bom Dia Cidades"": 2200,
+        ""OAB no Ar"": 2200,
+        ""Porto & Negócio"": 2800,
+        ""Alta Qualidade"": 4900
+      },
+      ""TV Osasco"": {
+        ""TV Cioeste"": 1600,
+        ""TV Osasco Noticias"": 1600,
+        ""TV Osasco Notícias"": 1600
+      },
+      ""Alpha Channel TV"": {
+        ""Alpha Channel News"": 1750
+      },
+      ""TV Rede Vida"": {
+        ""MATUTINO"": 12000,
+        ""VESPERTINO"": 25900,
+        ""NOTURNO"": 37000
+      },
+      ""STZ TV"": {
+        ""STZ Noticias"": 562.5
+      },
+      ""RIT TV"": {
+        ""Jornal Das 13h00"": 10066.7,
+        ""Jornal das 22"": 8000
+      },
+      ""Terraviva"": {
+        ""Dia Dia Rural"": 1226
+      },
+      ""TV Claret"": {
+        ""RC Notícias"": 520,
+        ""Notícia 106"": 402
+      },
+      ""Jovem Pan"": {
+        ""JP News"": 6825,
+        ""Morning Show"": 6300,
+        ""Jornal da Manhã"": 6449.4
+      },
+      ""TV Jovem Pan News"": {
+        ""Jovem Pan News"": 1050,
+        ""Jornal da Manhã"": 2930,
+        ""JP News"": 8116,
+        ""Morning Show"": 2706
+      },
+      ""TV Rede Família"": {
+        ""Edição Manhã"": 2812.5,
+        ""Alerta Total"": 2531.25,
+        ""Tá No Ar Campinas"": 2000,
+        ""RF News"": 2500,
+        ""Reportagens Especiais"": 3500.03
+      },
+      ""Rede Família"": {
+        ""Edição Manhã"": 2812.5,
+        ""Alerta Total"": 2531.25,
+        ""Ta No Ar Campinas"": 2000,
+        ""RF News"": 2500,
+        ""Reportagens Especiais"": 3500.03
+      },
+      ""Rede Família Campinas"": {
+        ""Edição Manhã"": 2812.5,
+        ""Alerta Total"": 2531.25,
+        ""Ta No Ar Campinas"": 2000,
+        ""RF News"": 2500,
+        ""Reportagens Especiais"": 3500.03,
+        ""Boletim de Notícias"": 3268.55
+      },
+      ""TV Canal 4 Marília"": {
+        ""4 Notícias"": 1200
+      },
+      ""TV Cidade Marília"": {
+        ""Ponto de Vista"": 1200
+      },
+      ""TV Gazeta"": {
+        ""Jornal da Gazeta"": 19500,
+        ""Revista da Cidade"": 5200
+      },
+      ""TV Canção Nova"": {
+        ""Canção Nova Notícias"": 37000,
+        ""Boletim de Notícia"": 10095
+      },
+      ""TV Alesp"": {
+        ""Informe SP"": 980
+      },
+      ""Assembleia Legislativa do Estado de São Paulo"": {
+        ""Informe SP"": 980
+      },
+      ""Tv TVR Pompéia"": {
+        ""Breaking News"": 1200
+      },
+      ""TV GOV"": {
+        ""Canal Gov"": 1200,
+        ""Brasil em dia"": 1200
+      },
+      ""Canal GOV"": {
+        ""Canal Gov"": 1200,
+        ""Brasil em Dia"": 1200,
+        ""GOV Agora"": 980
+      },
+      ""STVI WEBTV"": {
+        ""STVI NO AR"": 1800
+      },
+      ""TV Folha"": {
+        ""TV Folha"": 273
+      },
+      ""TV Prevê"": {
+        ""Diário do Brasil"": 2427,
+        ""Diário do Brasil Edição da Noite"": 2427
+      },
+      ""TV Câmara Bauru"": {
+        ""Espaço Aberto"": 1200
+      },
+      ""TV Câmara Assis"": {
+        ""Câmara em Ação"": 1030
+      },
+      ""TV Câmara São Paulo"": {
+        ""Espaço Aberto"": 320
+      },
+      ""TV Câmara Campinas"": {
+        ""Câmara Notícia"": 980
+      },
+      ""TV Brasil"": {
+        ""Repórter São Paulo"": 12000,
+        ""Repórter Brasil"": 12000,
+        ""Stadium"": 9000,
+        ""Brasil Central"": 5400
+      },
+      ""TV Brasil Central"": {
+        ""Jornal Brasil Central"": 4743.2,
+        ""Boa Noite Goiás"": 2400
+      },
+      ""TV Paraguaçu"": {
+        ""Paraguaçu Paulista"": 1200
+      },
+      ""TV Mais - Canal 13"": {
+        ""Agora Interior"": 1158.15
+      },
+      ""Vale TV"": {
+        ""Jornal do Meio-Dia"": 2587,
+        ""Cidade News"": 1480,
+        ""Mais Barretos"": 2587
+      },
+      ""Rede Alto Tietê TV"": {
+        ""Alto Tietê News"": 3500,
+        ""Rede Alto Tietê News"": 3500,
+        ""Jornal Metrópole"": 3500,
+        ""Debate em Foco"": 3500
+      },
+      ""Rede Brasil"": {
+        ""Brasil News"": 4200
+      },
+      ""ESPN BRASIL"": {
+        ""Bola da vez"": 8600
+      },
+      ""Canal do Boi"": {
+        ""Canal do Boi News"": 2000,
+        ""Bom dia produtor."": 1500,
+        ""Domingão do Carlão"": 7000
+      },
+      ""CNT SP"": {
+        ""CNT Notícias"": 2700,
+        ""CNT Jornal"": 6000
+      },
+      ""TVCOM Maceió"": {
+        ""Seu Jornal"": 4437
+      },
+      ""TV Meio Norte"": {
+        ""Brasil 40"": 4050,
+        ""Programa da Tarde"": 800
+      },
+      ""Nova Brasil FM"": {
+        ""Nova Manhã"": 152
+      },
+      ""TV Portal RC1"": {
+        ""Esporte e Notícia"": 1158.15
+      },
+      ""TV Onix"": {
+        ""Jornal da TV Onix"": 575
+      },
+      ""Fonte TV"": {
+        ""Fonte Noticias"": 1560
+      },
+      ""TV UFSC"": {
+        ""UFSC Entrevista"": 935,
+        ""Papo Saúde"": 935,
+        ""UFSC Cidade Revista"": 935,
+        ""Minuto saúde digital"": 935,
+        ""Caminho Verde"": 935,
+        ""Repórter Brasil"": 935,
+        ""Sessão Doc"": 935
+      },
+      ""TV Franca - Canal 23"": {
+        ""Programa Estilo AP"": 1365
+      },
+      ""TV Integração - Dos Vales"": {
+        ""MGTV 1ª Edição"": 1015,
+        ""MGTV 2ª Edição"": 2317,
+        ""Bom Dia Minas"": 266,
+        ""InterTV Notícias"": 1015,
+        ""Inter TV Notícia"": 1015,
+        ""InterTV Notícias 2ª Edição"": 2317
+      },
+      ""TV Integração - Grande Minas"": {
+        ""Inter TV 1ª Edição"": 1514,
+        ""InterTV 2ª Edição"": 2081,
+        ""Bom Dia Minas"": 368,
+        ""Inter TV Notícia"": 379
+      },
+      ""TV Integração - Triângulo Mineiro"": {
+        ""MGTV 1ª Edição"": 2563,
+        ""MGTV 2ª Edição"": 5622,
+        ""Bom Dia MG"": 501,
+        ""Integração Notícia"": 644
+      },
+      ""TV Integração - Zona da Mata"": {
+        ""MGTV 2ª Edição"": 4270
+      },
+      ""O Tempo"": {
+        ""Tempo News 1ª Edição"": 1134,
+        ""Tempo News 2ª Edição"": 567
+      },
+      ""TV Bandeirantes Triângulo"": {
+        ""Minas Urgente"": 2908,
+        ""BandCidade 1ª Edição"": 1791,
+        ""BandCidade 2ª Edição"": 4022,
+        ""Band Entrevista"": 4022
+      },
+      ""TV Leste"": {
+        ""Balanço Geral MG"": 1012,
+        ""Balanço Geral"": 1012,
+        ""MG Record"": 1426,
+        ""Cidade Alerta"": 812,
+        ""MG no Ar"": 389
+      },
+      ""Rede Minas"": {
+        ""Jornal da Cultura"": 4007,
+        ""Jornal da Inconfidência"": 2849,
+        ""Jornal Minas 1ª Edição"": 4007,
+        ""Jornal Minas 2ª Edição"": 4007,
+        ""Minas em Ação"": 4007
+      },
+      ""TV Paranaíba"": {
+        ""JP"": 4303,
+        ""Balanço Geral"": 2744,
+        ""Cidade Alerta"": 3663,
+        ""Fala Povo"": 1584
+      },
+      ""TV AgroMais"": {
+        ""Agro Manhã"": 3218
+      },
+      ""CNBC Brazil - Times Brasil"": {
+        ""Agora"": 5500,
+        ""Real Time"": 5500,
+        ""Money times"": 7000,
+        ""Radar"": 24000,
+        ""Jornal Times Brasil"": 24000,
+        ""Times Brasil"": 24000,
+        ""Conexão"": 18500,
+        ""Segredos Corporativos"": 18500,
+        ""Marcas Icônicas"": 18500,
+        ""Ciência Para Negócios"": 18500,
+        ""Passaporte CNBC"": 18500,
+        ""Life Prime"": 18500,
+        ""Planeta CNBC"": 18500
+      },
+      ""Band Minas"": {
+        ""Boa Tarde Minas"": 15850,
+        ""Jornal Band Minas"": 14925,
+        ""Band Cidade 2ª Edição"": 2204,
+        ""Brasil Urgente Minas"": 19095,
+        ""Band Cidade"": 15850
+      },
+      ""TV Alterosa Zona da Mata"": {
+        ""Tá na Hora Minas"": 10436,
+        ""Jornal da Alterosa"": 10436,
+        ""Jornal do Meio Dia"": 1966
+      },
+      ""Rede Mais Varginha"": {
+        ""MG no Ar"": 2849,
+        ""Balanço Geral"": 1554
+      },
+      ""TV Serra Dourada - SBT Goiás"": {
+        ""Jornal do Meio Dia"": 5641,
+        ""Jornal Serra Dourada"": 10436,
+        ""SBT Notícias"": 5641,
+        ""Agro Negócio"": 8035,
+        ""Tá na Hora Goiás"": 10436
+      },
+      ""SBT Brasília"": {
+        ""SBT Brasília 1ª Edição"": 3077,
+        ""SBT Brasília 2ª Edição"": 5693,
+        ""SBT Brasil"": 12154,
+        ""Tá na Hora DF"": 5693
+      },
+      ""Record TV Goiás"": {
+        ""GO Record"": 9615,
+        ""Balanço Geral"": 8105,
+        ""GO no Ar"": 2478,
+        ""Cidade Alerta Goiás"": 7571
+      },
+      ""NTV Patos de Minas"": {
+        ""NTV News"": 500,
+        ""Programa Guy Boa Ventura"": 600,
+        ""Papo dcast"": 350,
+        ""30 minutos"": 600
+      },
+      ""Tv Anhanguera Goiânia"": {
+        ""JA 1ª Edição"": 6390,
+        ""JA 2ª Edição"": 12125,
+        ""BOM DIA GO"": 1694,
+        ""Encontro Com Patrícia Poeta"": 1570,
+        ""Jornal da Globo"": 2748
+      },
+      ""TV Sucesso - Band Goiânia"": {
+        ""Brasil Urgente GO"": 4102,
+        ""Bora Brasil"": 1191,
+        ""Bandcidade"": 5800,
+        ""Band Cidade Interior"": 5800
+      },
+      ""Record TV Minas"": {
+        ""MG Record"": 10970,
+        ""MG no Ar"": 3447,
+        ""Cidade Alerta"": 6687,
+        ""Balanço Geral MG"": 15056,
+        ""Brasil Caminhoneiro"": 7684
+      },
+      ""TV Norte Rondônia"": {
+        ""Tá na Hora Rondônia"": 2134
+      },
+      ""TV COM - Santos"": {
+        ""Jornal Enfoque"": 2400,
+        ""Hora Geral"": 2700,
+        ""Cidades em Debate"": 500
+      },
+      ""TV COM - Sorocaba"": {
+        ""Hora Geral"": 2700
+      },
+      ""TV Assembléia Belo Horizonte"": {
+        ""Mundo Político"": 980,
+        ""Comissão"": 980,
+        ""Compacto de Reunião"": 980,
+        ""Jornalistico"": 980,
+        ""Assembléia em Destaque"": 980
+      },
+      ""TV Alterosa - Varginha"": {
+        ""Jornal da Alterosa"": 4586
+      },
+      ""Igreja Presbiteriana de Pinheiros"": {
+        ""Notícias do Bem"": 2000
+      },
+      ""Tv Sudoeste"": {
+        ""Manhã Notícias"": 499,
+        ""Sudoeste Notícias"": 360
+      },
+      ""TV Rio Verde"": {
+        ""Rio Verde Jornal 1ª Edição"": 8500,
+        ""Rio Verde Jornal 2ª Edição"": 8500
+      },
+      ""TV Sudoeste Jataí"": {
+        ""Sudoeste Notícias"": 360,
+        ""Manhã Notícias"": 200,
+        ""Cidade Urgente"": 250,
+        ""Sucesso no Campo"": 217.5,
+        ""Cidade em Foco"": 200
+      },
+      ""Rede Capital TV"": {
+        ""Jornal da Capital"": 900,
+        ""Alerta Goiás"": 900
+      },
+      ""TV ALTEROSA LESTE"": {
+        ""Alterosa Alerta"": 1513
+      },
+      ""PUC TV Goiás"": {
+        ""TJ Goiás"": 980
+      },
+      ""Globo Brasília"": {
+        ""DF2"": 6948
+      },
+      ""Canal Rural"": {
+        ""Giro do Boi"": 7000
+      },
+      ""TV Horizonte"": {
+        ""Rede Notícia"": 4743.2
+      },
+      ""Arte 1"": {
+          ""Arte 1 Em Movimento"": 4008.8,
+          ""Teatros no Brasil"": 4008.8,
+          ""MINIDocs"": 4008.8,
+          ""ARTE 1 NA DANÇA"": 4008.8,
+          ""ARTE 1 NACIONAL"": 4008.8,
+          ""ARTE 1 Encontra"": 4008.8,
+          ""BIO ARTE 1"": 4008.8,
+          ""SÉRIE: Arte na Tecnologia"": 4008.8,
+          ""Arte 1 Documenta"": 4008.8,
+          ""Tela Sobre Tinta"": 4008.8,
+          ""Hquem"": 4008.8,
+          ""Arte 1 Apresenta"": 4008.8,
+          ""Arte 1 Visual"": 4008.8,
+          ""Arte 1 em Série"": 4008.8,
+          ""Arte 1 em Preto e Branco"": 4008.8,
+          ""Arte na Tecnologia"": 4008.8,
+          ""Cine Clube Arte 1"": 4008.8,
+          ""Buscando Buskers"": 4008.8,
+          ""Estilo Arte1"": 4008.8,
+          ""Especial Arte 1"": 4008.8,
+          ""Um Artista"": 4008.8,
+          ""Design da Ciência"": 4008.8,
+          ""In Concert"": 4008.8,
+          ""Dancing Casablanca"": 4008.8,
+          ""Curta Arte1"": 4008.8,
+          ""Um Show Só"": 4008.8,
+          ""Agenda Arte 1"": 4008.8,
+          ""Papo Musical"": 4008.8,
+          ""Blink"": 4008.8,
+          ""Hilda Hilst Entre Estações"": 4008.8,
+          ""Pela Janela"": 4008.8,
+          ""Baloise Session"": 4008.8,
+          ""The Lady in Number 6"": 4008.8,
+          ""Propaganda"": 4008.8,
+          ""Sesc em Cartaz"": 4008.8
+      },
+    ""TV UFMA"": {
+      ""JTV UFMA"": 975,
+      ""Giro de Notícias"": 975,
+      ""Sem Filtro"": 975,
+      ""Cidadania"": 975,
+      ""JTV UFMA Destaques"": 975,
+      ""Propaganda"": 975,
+      ""Segue o Curso"": 975
+    },
+    ""TV Serra Azul"": {
+      ""Jornal a nossa voz"": 415.16
+    }
+}
+"
+xXEWurhk,Untitled,paste30022,Java,Friday 24th of October 2025 12:06:13 PM CDT,"if o
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CC"
+4m6MdnDd,voretz,paste30022,JavaScript,Friday 24th of October 2025 12:05:42 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+  gg.searchNumber(""-15.0F;0.10000000149F;0.05999999866F:37"", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1, 0)
+CC"
+CH1iKt80,Untitled,paste30022,Java,Friday 24th of October 2025 12:05:25 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+"
+riFyKB89,Untitled,paste30022,JavaScript,Friday 24th of October 2025 12:05:05 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+  gg.searchNumber(""-15.0F;0.10000000149F;0.05999999866F:37"", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1, 0)
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+"
+hTc7J5nx,JS,paste30022,JavaScript,Friday 24th of October 2025 12:04:54 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+  gg.searchNumber(""-15.0F;0.10000000149F;0.05999999866F:37"", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1, 0)
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+CC"
+LfkVZjHD,Untitled,paste30022,Java,Friday 24th of October 2025 12:04:36 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+  gg.searchNumber(""-15.0F;0.10000000149F;0.05999999866F:37"", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1, 0)
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+"
+UAZcJJ2M,Untitled,paste30022,JavaScript,Friday 24th of October 2025 12:04:21 PM CDT,"if os.date(""%Y%m%d"") > ""20251029"" then
+gg.alert(""SEDANG DALAM PERBAIKAN  "")
+os.exit()
+end
+ 
+gg.setVisible(false)
+  gg.alert(""╔═════════════════╗\n   Owner : ᴇxɪㄵ \n   Versi SCRIPT : V2 \n   New Update\n  \n╚═════════════════╝ "", ""Install 📍"", """")
+  gg.searchNumber(""-15.0F;0.10000000149F;0.05999999866F:37"", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1, 0)
+revert = gg.getResults(100, nil, nil, nil, nil, nil, nil, nil, nil)
+gg.alert(""SCRIPT NEW UPDATE SELESAI DI INSTALL"", "" LANJUTKAN ➡️"")
+ 
+ 
+  function HOME()
+    SN = gg.choice({
+      ""📂 Menu"",
+      ""⛓️‍💥 Sepesial Fitur"",
+      ""🔚 Exit""
+    }, nil, ""MENU SCRIPT"")
+    if SN == nil then
+    else
+            if SN == 1 then
+        MAIN()   
+        return     
+      end
+      if SN == 2 then
+      NEW()
+      return 
+      end
+      if SN == 3 then
+        EXIT0()
+      end
+    end
+    PUBGMH = -1
+  end
+ 
+ 
+spesial = "" OFF🔴""
+mmk11 = "" ON🟢""
+test11 = spesial
+ 
+spesial = "" OFF🔴""
+mmk11 = "" ON🟢""
+test11 = spesial
+ 
+function NEW()
+local Password = {""djsjsjsjsn"",""emensjns"",""emensj"",""iky""}
+local Menu = gg.prompt({""Masukan Password :""},nil,{""text""})
+if not Menu then return end
+for l , l in pairs(Password) do
+if Menu[1] == l then A = true end
+end
+if A ~= true then gg.alert(""Salah password"") return else
+gg.toast(""Benar password"") end
+neww = gg.choice({
+    ""FLY 0,5 SPEED 30"" .. test11,
+    ""EXIT""},
+    {},(""VIP ONLY""))     
+    if neww == 1 then
+    if test11 == spesial then
+    gg.alert(""Fitur ini hanya untuk perbayar"")
+    test11 = mmk11
+    else
+    if test1 == mmk11 then
+    gg.alert(""OFF!"")
+    test11 = spesial
+    end
+    if neww == 2 then
+        HOME()
+       end
+      
+    
+    PUBGMH = -1
+  
+    end
+    end
+    
+    end"
+HAcxTPPw,shell_install.ps1,exception_cpp,PowerShell,Friday 24th of October 2025 11:52:34 AM CDT,"<# =======================
+  Windows Terminal Pro Stack (no WSL)
+  - Windows Terminal
+  - PowerShell 7 (default)
+  - Git + Git Bash profile
+  - oh-my-posh + posh-git + PSReadLine
+  - Nerd Font (Cascadia Code NF)
+  - Pretty prompt (Powerlevel10k-style)
+======================== #>
+
+$ErrorActionPreference = 'Stop'
+
+function Install-WingetPackage {
+  param(
+    [Parameter(Mandatory)] [string] $Id
+  )
+  Write-Host "">> Installing $Id via winget..."" -ForegroundColor Cyan
+  winget install --id $Id --silent --accept-source-agreements --accept-package-agreements | Out-Null
+}
+
+# 1) Base apps
+Install-WingetPackage Microsoft.WindowsTerminal
+Install-WingetPackage Microsoft.PowerShell
+Install-WingetPackage Git.Git
+Install-WingetPackage JanDeDobbeleer.OhMyPosh
+Install-WingetPackage NerdFonts.CascadiaCode
+# Скачивает и ставит Cascadia Code Nerd Font (Regular + Bold + Italic)
+Invoke-WebRequest -Uri ""https://github.com/ryanoasis/nerd-fonts/releases/latest/download/CascadiaCode.zip"" -OutFile ""$env:TEMP\CascadiaCode.zip""
+Expand-Archive ""$env:TEMP\CascadiaCode.zip"" -DestinationPath ""$env:TEMP\CascadiaCodeNF"" -Force
+Get-ChildItem ""$env:TEMP\CascadiaCodeNF"" -Filter ""*.ttf"" | ForEach-Object { $_.FullName | ForEach-Object { Write-Host ""Installing font: $_""; Copy-Item $_ ""$env:WINDIR\Fonts\"" -Force } }
+
+
+# Paths
+$PwshPath = ""${env:ProgramFiles}\PowerShell\7\pwsh.exe""
+if (-not (Test-Path $PwshPath)) {
+  # Sometimes installed per-user
+  $PwshPath = ""${env:LocalAppData}\Microsoft\PowerShell\pwsh.exe""
+}
+if (-not (Test-Path $PwshPath)) {
+  throw ""PowerShell 7 (pwsh.exe) not found after install.""
+}
+
+# 2) PS modules (install into PowerShell 7 scope)
+$moduleInstallCmd = @'
+Install-Module posh-git -Scope CurrentUser -Force
+Install-Module PSReadLine -Scope CurrentUser -Force -SkipPublisherCheck
+'@
+
+& $PwshPath -NoProfile -NoLogo -Command $moduleInstallCmd
+
+# 3) PowerShell profile setup (pretty prompt with oh-my-posh)
+$ProfilePath = & $PwshPath -NoLogo -NoProfile -Command '$PROFILE'
+$ProfileDir  = Split-Path $ProfilePath -Parent
+if (-not (Test-Path $ProfileDir)) { New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null }
+
+# oh-my-posh themes path (winget EXE install)
+$PoshThemes = Join-Path $env:LOCALAPPDATA 'Programs\oh-my-posh\themes'
+$ThemeFile  = Join-Path $PoshThemes 'powerlevel10k_modern.omp.json'
+if (-not (Test-Path $ThemeFile)) {
+  # fallback
+  $ThemeFile = Join-Path $PoshThemes 'jandedobbeleer.omp.json'
+}
+
+$ProfileContent = @""
+# ---------- Pro Prompt ----------
+Import-Module posh-git
+Import-Module PSReadLine
+
+# Oh My Posh init (needs EXE installed by winget)
+oh-my-posh init pwsh --config ""$ThemeFile"" | Invoke-Expression
+
+# PSReadLine: history & suggestions
+Set-PSReadLineOption -EditMode Windows
+Set-PSReadLineOption -PredictionSource History
+Set-PSReadLineOption -PredictionViewStyle ListView
+
+# QoL
+Set-Alias reload '& `$PROFILE'
+""@
+
+Set-Content -Path $ProfilePath -Value $ProfileContent -Encoding UTF8
+Write-Host "">> PowerShell profile configured at: $ProfilePath"" -ForegroundColor Green
+
+# 4) Windows Terminal settings patch (set pwsh default, add Git Bash profile, set Nerd Font)
+# Detect settings.json location(s)
+$WTSettingsCandidates = @(
+  (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\settings.json')
+) | Where-Object { $_ -ne $null }
+
+$WTSettings = $WTSettingsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $WTSettings) {
+  # Create minimal settings.json if missing (Store app usually generates it on first run)
+  $FallbackDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal'
+  if (-not (Test-Path $FallbackDir)) { New-Item -ItemType Directory -Path $FallbackDir -Force | Out-Null }
+  $WTSettings = Join-Path $FallbackDir 'settings.json'
+  '{ ""profiles"": { ""list"": [] } }' | Set-Content -Path $WTSettings -Encoding UTF8
+}
+
+Write-Host "">> Patching Windows Terminal settings: $WTSettings"" -ForegroundColor Cyan
+
+# Load JSON safely
+$raw = Get-Content $WTSettings -Raw
+try { $json = $raw | ConvertFrom-Json -ErrorAction Stop } catch {
+  throw ""Cannot parse Windows Terminal settings.json. Open once and save settings from UI, then rerun.""
+}
+
+if (-not $json.profiles) { $json | Add-Member -NotePropertyName profiles -NotePropertyValue (@{}) }
+if (-not $json.profiles.list) { $json.profiles.list = @() }
+
+function Set-Or-AddProperty {
+  param(
+    [Parameter(Mandatory)] $Object,
+    [Parameter(Mandatory)] [string] $Name,
+    [Parameter()] $Value
+  )
+  if ($null -ne $Object.PSObject.Properties[$Name]) {
+    $Object.$Name = $Value
+  } else {
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+  }
+}
+
+function Ensure-Profile {
+  param(
+    [Parameter(Mandatory)][string] $Name,
+    [Parameter(Mandatory)][string] $Cmd,
+    [Parameter()][string] $Args,
+    [Parameter()][string] $FontFace = 'Cascadia Code NF',
+    [Parameter()][string] $Icon
+  )
+
+  # Найдём существующий профиль по имени
+  $existing = $json.profiles.list | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+
+  $cmdline = if ($Args) { ""$Cmd $Args"" } else { $Cmd }
+
+  if (-not $existing) {
+    # Создаём новый профиль
+    $existing = [pscustomobject]@{
+      guid             = ([guid]::NewGuid()).ToString(""B"")
+      name             = $Name
+      commandline      = $cmdline
+      startingDirectory= $null
+      hidden           = $false
+      font             = @{ face = $FontFace }
+    }
+    if ($Icon) { $existing | Add-Member -NotePropertyName icon -NotePropertyValue $Icon }
+    $json.profiles.list += $existing
+  } else {
+    # Обновляем/добавляем свойства безопасно
+    Set-Or-AddProperty -Object $existing -Name 'commandline' -Value $cmdline
+    Set-Or-AddProperty -Object $existing -Name 'hidden' -Value $false
+
+    # font: может отсутствовать или быть простым строковым полем в старых схемах
+    if ($null -eq $existing.PSObject.Properties['font'] -or $existing.font -isnot [object]) {
+      Set-Or-AddProperty -Object $existing -Name 'font' -Value (@{ face = $FontFace })
+    } else {
+      Set-Or-AddProperty -Object $existing.font -Name 'face' -Value $FontFace
+    }
+
+    if ($Icon) { Set-Or-AddProperty -Object $existing -Name 'icon' -Value $Icon }
+  }
+
+  return $existing
+}
+
+# Ensure PowerShell 7 profile (default)
+$pwshProf = Ensure-Profile -Name 'PowerShell 7' -Cmd $PwshPath -Args '' -FontFace 'Cascadia Code NF' -Icon ''
+# Ensure Git Bash profile
+$GitBash = 'C:\Program Files\Git\bin\bash.exe'
+$gitIcon = 'C:\Program Files\Git\mingw64\share\git\git-for-windows.ico'
+$gitArgs = '--login -i'
+$gitProf = $null
+if (Test-Path $GitBash) {
+	$iconPath = if (Test-Path $gitIcon) { $gitIcon } else { $null }
+	$gitProf = Ensure-Profile -Name 'Git Bash' -Cmd $GitBash -Args $gitArgs -FontFace 'Cascadia Code NF' -Icon $iconPath
+}
+
+# Set default profile to PowerShell 7
+$json.defaultProfile = $pwshProf.guid
+
+# Save JSON (preserve formatting reasonably)
+($json | ConvertTo-Json -Depth 10) | Set-Content -Path $WTSettings -Encoding UTF8
+
+Write-Host ""`n✅ Done. Please restart Windows Terminal."" -ForegroundColor Green
+Write-Host ""   PowerShell 7 is the default profile with a pretty Git-aware prompt.""
+Write-Host ""   Font set to: Cascadia Code Nerd Font""
+Write-Host ""   Extra profile added: Git Bash"" -ForegroundColor DarkGray
+"
+QqyqUyUA,Proximity Indicator rev_02,pleasedontcode,Arduino,Friday 24th of October 2025 11:09:19 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Proximity Indicator
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-10-24 16:06:14
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* his code will connections | Component | Arduino */
+	/* Pin | | ------------------------ | */
+	/* ------------------------------------- | | IR */
+	/* Sensor OUT | D2 | | Ultrasonic TRIG | D3 | | */
+	/* Ultrasonic ECHO | D4 | | Road Green LED | D5 | | */
+	/* Footpath Green LED | D6 | | */
+/****** SYSTEM REQUIREMENT 2 *****/
+	/* connections | Component | Arduino Pin | | */
+	/* ------------------------ | */
+	/* ------------------------------------- | | IR */
+	/* Sensor OUT | D2 | | Ultrasonic TRIG | D3 | | */
+	/* Ultrasonic ECHO | D4 | | Road Green LED | D5 | | */
+	/* Footpath Green LED | D6 | | Road Red LED | */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+#include <Ultrasonic.h>	//https://github.com/ErickSimoes/Ultrasonic
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF DIGITAL INPUT PINS *****/
+const uint8_t IR_SENSOR_PIN		= 2; // Sensor OUT (IR)
+
+/***** DEFINITION OF ANALOG INPUT PINS *****/
+const uint8_t VariableControlPotentiometer_Potentiometer_Vout_PIN_A0		= A0; // Potentiometer for threshold tuning
+
+/***** DEFINITION OF DIGITAL OUTPUT PINS *****/
+const uint8_t ROAD_GREEN_LED_PIN		= 5; // Road Green LED
+const uint8_t FOOTPATH_GREEN_LED_PIN	= 6; // Footpath Green LED
+const uint8_t ROAD_RED_LED_PIN		= 7; // Road Red LED
+
+/****** DEFINITION OF LIBRARIES CLASS INSTANCES*****/
+const uint8_t ULTRASONIC_TRIG_PIN	= 3; // Ultrasonic TRIG
+const uint8_t ULTRASONIC_ECHO_PIN	= 4; // Ultrasonic ECHO
+Ultrasonic ultrasonic(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+
+void setup(void)
+{
+	// put your setup code here, to run once:
+
+	pinMode(IR_SENSOR_PIN, INPUT);
+	pinMode(ROAD_GREEN_LED_PIN, OUTPUT);
+	pinMode(FOOTPATH_GREEN_LED_PIN, OUTPUT);
+	pinMode(ROAD_RED_LED_PIN, OUTPUT);
+	
+	// Potentiometer is read as analog input; no need to pinMode
+	// Initialize outputs
+	digitalWrite(ROAD_GREEN_LED_PIN, LOW);
+	digitalWrite(FOOTPATH_GREEN_LED_PIN, LOW);
+	digitalWrite(ROAD_RED_LED_PIN, LOW);
+
+}
+
+
+void loop(void)
+{
+	// Read distance in centimeters (default unit CM)
+	int distanceCM = ultrasonic.read();
+	// Read potentiometer to adjust threshold dynamically (20-100 cm)
+	int threshold = map(analogRead(VariableControlPotentiometer_Potentiometer_Vout_PIN_A0), 0, 1023, 20, 100);
+	// Read IR sensor (ACTIVE HIGH means object detected)
+	bool irDetected = digitalRead(IR_SENSOR_PIN) == HIGH;
+
+	if (irDetected) {
+		// If IR detects something (e.g., obstacle), show stop
+		digitalWrite(ROAD_GREEN_LED_PIN, LOW);
+		digitalWrite(FOOTPATH_GREEN_LED_PIN, LOW);
+		digitalWrite(ROAD_RED_LED_PIN, HIGH);
+	} else {
+		// Otherwise use distance threshold
+		if (distanceCM > threshold) {
+			digitalWrite(ROAD_GREEN_LED_PIN, HIGH);
+			digitalWrite(FOOTPATH_GREEN_LED_PIN, HIGH);
+			digitalWrite(ROAD_RED_LED_PIN, LOW);
+		} else {
+			digitalWrite(ROAD_GREEN_LED_PIN, LOW);
+			digitalWrite(FOOTPATH_GREEN_LED_PIN, LOW);
+			digitalWrite(ROAD_RED_LED_PIN, HIGH);
+		}
+	}
+
+	delay(100);
+}
+
+/* END CODE */
+"
+dZcTBQNn,Potentiometer Setup rev_01,pleasedontcode,Arduino,Friday 24th of October 2025 11:04:45 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Potentiometer Setup
+	- Source Code NOT compiled for: Arduino Uno
+	- Source Code created on: 2025-10-24 16:03:14
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* his code will connections | Component | Arduino */
+	/* Pin | | ------------------------ | */
+	/* ------------------------------------- | | IR */
+	/* Sensor OUT | D2 | | Ultrasonic TRIG | D3 | | */
+	/* Ultrasonic ECHO | D4 | | Road Green LED | D5 | | */
+	/* Footpath Green LED | D6 | | */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+
+
+/* START CODE */
+
+/****** DEFINITION OF LIBRARIES *****/
+
+/****** FUNCTION PROTOTYPES *****/
+void setup(void);
+void loop(void);
+
+/***** DEFINITION OF ANALOG INPUT PINS *****/
+const uint8_t VariableControlPotentiometer_Potentiometer_Vout_PIN_A0		= A0;
+
+void setup(void)
+{
+	// put your setup code here, to run once:
+
+	pinMode(VariableControlPotentiometer_Potentiometer_Vout_PIN_A0,	INPUT);
+
+}
+
+
+void loop(void)
+{
+	// put your main code here, to run repeatedly:
+
+}
+
+/* END CODE */
+
+"
+rC1HPVTX,Batch transcoder — transcode imgs & vids via ffmpeg from a folder,competentEnough,Bash,Friday 24th of October 2025 10:37:32 AM CDT,"#!/usr/bin/env bash
+DEBUG=0 # set to 1 for dry running with stdout verbosity
+        # will still populate INTERFOLDER
+
+        ### README
+    ## DEPENDENCIES
+# ffmpeg
+# libheif-examples
+# renrot
+# INSTALL VIA apt install ffmpeg libheif-examples renrot -y
+
+#################################################################
+### START OF CONFIG #############################################
+
+        ### CONFIG OF FOLDERS
+# tmp folder
+INTERFOLDER=""~/.mediatmp""
+# drop folder, if not specified FULL PATH in SECOND parameter
+DROPFOLDER=""~/Videos/transcode/in""
+# out folder, can be specified FULL PATH by FIRST parameter
+OUTFOLDER=""~/Videos/transcode/out""
+
+        ### CONFIG OF FFMPEG (OBLIGATORY)
+
+    ## VIDEOS
+# minimum byte-size (not kB/MB/GB!) of file to process (smaller will be skipped)
+SMALLVID=0
+# api for scaling. ""scale"" if on CPU, ""scale_vaapi"" if on GPU via VAAPI, check documentation for other apis scaling hook
+VIDSCALEAPI=""scale_vaapi""
+# video target bitrate. you can use e.g. ""512k"" or ""4M""
+VIDEOBITS=""4M""
+# target size in pixels on LONGER side
+VIDEOSIZE=1920
+# main function to tune
+VIDFFMPEG() {
+    ffmpeg -hide_banner \
+        -hwaccel vaapi -hwaccel_output_format vaapi \
+        -i ""$v"" $VF \
+        -c:v hevc_vaapi \
+        -extbrc 1  -look_ahead_depth 40 \
+        -b:v ""$VIDEOBITS"" \
+        -c:a copy \
+        ""$OUTFOLDER/$VIDNEWNAME.mp4""
+    }
+
+    ## IMAGES
+# api for scaling. ""scale"" if on CPU, ""scale_vaapi"" if on GPU via VAAPI, check documentation for other apis scaling hook
+PICSCALEAPI=""scale""
+# quality factor - lower is better (i.e. bigger byte-size)
+IMAGECRF=22
+# target size in pixels on SHORTER side
+IMAGESIZE=2000
+# main function to tune
+PICFFMPEG() {
+    ffmpeg -hide_banner -i ""$i"" $VF \
+        -c:v libaom-av1 -crf ""$IMAGECRF"" \
+        -cpu-used 0 ""$OUTFOLDER/${i%.*}.avif""
+    }
+
+
+##### OPTIONAL config below #####################################
+
+        ### FILETYPE ARRAYS
+    ## generally no need to change that.
+# ""good"" are usually well-compressed to begin with and will be COPIED
+goodVariant=( ""avif"" ""AVIF"" ""webp"" ""WEBP"" )
+# ffmpeg chokes on HEIF, thus conversion out of that format
+heifVariant=( ""heic"" ""heif"" ""HEIC"" ""HEIF"" )
+# jpegs, due to poor renrot compatibility
+jpegVariant=( ""jpeg"" ""jpg"" ""JPEG"" ""JPG"" )
+# the rest, compatible with ffmpeg
+otherVariant=( ""jxl"" ""JXL"" ""tif"" ""tiff"" ""TIF"" ""TIFF"" ""png"" ""PNG"" ""bmp"" ""BMP"" )
+# videos
+vidVariant=( ""mov"" ""MOV"" ""mp4"" ""MP4"" ""mkv"" ""MKV"" )
+
+### END OF CONFIG ###############################################
+#################################################################
+
+
+
+# PREP
+if [[ ! -d ""$INTERFOLDER"" ]]; then mkdir -p ""$INTERFOLDER"" ; fi
+if [[ ! -z $1 ]]; then OUTFOLDER=""$1"" ; fi
+if [[ ! -z $2 ]]; then DROPFOLDER=""$2"" ; fi
+
+if [[ `ls ""$DROPFOLDER"" | wc -c` -eq 0 ]]; then
+    echo ""Drop folder empty or absent. (Be sure to use FULL PATHs, or tilde expansion.)""
+    exit
+fi
+shopt -s extglob
+
+# DEFINE FUNCTIONS
+function IMAGETRANSCODE {
+    VIDDATA=`ffprobe ""$i"" 2>&1 | grep Video:`
+    if [[ $VIDDATA =~ ([0-9]{3,4})x([0-9]{3,4}) ]]; then
+        width=""${BASH_REMATCH[1]}""
+        height=""${BASH_REMATCH[2]}""
+
+    # SET UP SIZING
+        #check if vertical
+        if [[ $width -le $IMAGESIZE ]] && [[ $height -le $IMAGESIZE ]]; then
+            test $DEBUG = 1 && echo ""# resizing $i not necessary""
+            VF=""""
+        else
+            if [[ $height -gt $width ]]; then   # vertical aspect
+                VF=""-vf $PICSCALEAPI=$IMAGESIZE:-2""
+            else                                # horizontal aspect
+                VF=""-vf $PICSCALEAPI=-2:$IMAGESIZE""
+            fi
+        fi
+
+        if [[ $DEBUG = 1 ]]; then echo ""FFMPEG $i with res '$VF'""
+        else
+            PICFFMPEG || echo ""$i crashed ffmpeg!"" >> ""$DROPFOLDER/.errors.log""
+        fi
+
+    else # error logging
+        if [[ ${i:0:1} -ne ""*"" ]]; then
+            if [[ $DEBUG = 1 ]]; then echo ""# resolution of $i failed to be established""
+            else
+                echo ""$i couldn't be processed."" >> ""$DROPFOLDER/.errors.log""
+            fi
+        fi
+    fi
+    }
+
+function VIDEOTRANSCODE {
+    VIDDATA=`ffprobe ""$v"" 2>&1 | grep Video:`
+
+    # Read MOV metadata from iPhones
+    if [[ ${v:0:4} -eq ""IMG_"" ]]; then
+        test $DEBUG = 1 && echo ""# renaming $v""
+        VIDSTAMP=`ffprobe ""$v"" 2>&1 | grep com.apple.quicktime.creationdate | cut -c39-`
+        if [[ -z $VIDSTAMP ]]; then
+            test $DEBUG = 1 && echo ""# unable to find creationdate""
+            VIDNEWNAME=""${v%.*}""
+        else
+            VIDNEWNAME=""${VIDSTAMP:0:4}${VIDSTAMP:5:2}${VIDSTAMP:8:2}_${VIDSTAMP:11:2}${VIDSTAMP:14:2}${VIDSTAMP:17:2}""
+            echo ""Renaming $v to $VIDNEWNAME.mp4.""
+        fi
+    else
+        VIDNEWNAME=""${v%.*}""
+    fi
+
+    # determine scale
+    if [[ $VIDDATA =~ ([0-9]{3,4})x([0-9]{3,4}) ]]; then
+        width=""${BASH_REMATCH[1]}""
+        height=""${BASH_REMATCH[2]}""
+
+        if [[ $width -le $VIDEOSIZE ]] && [[ $height -le $VIDEOSIZE ]]; then
+            test $DEBUG = 1 && echo ""# resizing $v not necessary""
+            VF=""""
+        else
+            if [[ $height -gt $width ]]; then   # vertical aspect
+                VF=""-vf $VIDSCALEAPI=-2:$VIDEOSIZE""
+            else                                # horizontal aspect
+                VF=""-vf $VIDSCALEAPI=$VIDEOSIZE:-2""
+            fi
+        fi
+
+        if [[ $DEBUG = 1 ]]; then echo ""FFMPEG $v with res '$VF' and new name $VIDNEWNAME""
+        else
+            VIDFFMPEG || echo ""$v crashed ffmpeg!"" >> ""$DROPFOLDER/.errors.log""
+        fi
+
+    else # error logging
+        if [[ ${v:0:1} -ne ""*"" ]]; then
+            if [[ $DEBUG = 1 ]]; then echo ""# resolution of $v failed to be established""
+            else
+                echo ""$v couldn't be processed."" >> ""$DROPFOLDER/.errors.log""
+            fi
+        fi
+    fi
+    }
+
+
+
+                cd ""$DROPFOLDER""
+        ### START ACTUAL WORK
+    ## copy good images without processing
+test $DEBUG = 1 && echo ""### START ###""
+for img in ""${goodVariant[@]}"" ; do
+    test $DEBUG = 1 && echo ""# copying $img files""
+    cp *.$img ""$OUTFOLDER/""
+done
+
+    ## HEVC imgs convert
+for heimg in ""${heifVariant[@]}""; do
+    for h in *.$heimg ; do
+        test $DEBUG = 1 && echo ""# converting HEIC $h""
+        heif-convert -q 100 ""$h"" ""$INTERFOLDER/$h.jpg""
+    done
+done
+
+    ## copy images to actually transcode
+for jpimg in ""${jpegVariant[@]}"" ""${otherVariant[@]}"" ; do
+    cp *.$jpimg ""$INTERFOLDER/""
+done
+
+
+
+
+                cd ""$INTERFOLDER""
+        ### WORK ON PICTURES
+    ## rename files
+for n in !([0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]*) ; do
+# jpegs via renrot
+    if [[ ${jpegVariant[@]} =~ ${n##*.} ]]; then
+        test $DEBUG = 1 && echo ""# attempting renrot of $n""
+        renrot -n %Y%m%d_%H%M%S ""$n""
+    fi # TODO: some universal FFPROBE&REGEX method of doing that not just for JPEGs
+done
+
+    ## transcode all
+for i in * ; do
+    test $DEBUG = 1 && echo ""# function image transcode $i""
+    IMAGETRANSCODE
+done
+
+    ## cleanup
+rm ""$INTERFOLDER/""*
+
+
+
+                cd ""$DROPFOLDER""
+    ## VIDEOS
+for vid in ""${vidVariant[@]}"" ; do
+    for v in *.$vid ; do
+
+# if small file then not worth it
+        SIZE=`stat ""$v"" | grep Size: | cut -c9-19`
+        if [[ $SIZE -le $SMALLVID ]]; then
+            if [[ $DEBUG -eq 1 ]]; then echo ""# just moving $v (small size)""
+            else cp ""$v"" ""$OUTFOLDER/""
+            fi
+
+        else
+            test $DEBUG = 1 && echo ""# function video transcode $v""
+            VIDEOTRANSCODE
+        fi
+    done
+done
+
+echo ""### FINISHED ###""
+"
+wjDXRLR6,Untitled,alrel1408,Bash,Friday 24th of October 2025 10:33:46 AM CDT,"#!/usr/bin/env bash
+set -euo pipefail
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+SSHD=""/etc/ssh/sshd_config""
+BACKUP=""${SSHD}.backup.${TIMESTAMP}""
+REVERT_SCRIPT=""/root/sshd_config_revert_${TIMESTAMP}.sh""
+FALLBACK_USER=""recovery""
+
+if [ ""$(id -u)"" -ne 0 ]; then
+  echo ""Script harus dijalankan sebagai root atau via sudo. Mengulangi dengan sudo...""
+  exec sudo bash ""$0"" ""$@""
+fi
+
+echo ""=== Backup konfigurasi SSH ke: $BACKUP ===""
+cp -a ""$SSHD"" ""$BACKUP"" || { echo ""Gagal backup $SSHD""; exit 1; }
+
+# minta password root
+while true; do
+  read -s -p ""Masukkan password baru untuk root: "" ROOTPW
+  echo
+  read -s -p ""Konfirmasi password root: "" ROOTPW2
+  echo
+  [ ""$ROOTPW"" = ""$ROOTPW2"" ] && break
+  echo ""Password tidak cocok — coba lagi.""
+done
+
+# juga buat fallback user untuk mencegah terkunci
+if id ""$FALLBACK_USER"" >/dev/null 2>&1; then
+  echo ""User fallback '$FALLBACK_USER' sudah ada. Tidak akan dibuat ulang.""
+  USE_FALLBACK=false
+else
+  USE_FALLBACK=true
+  echo ""Membuat user fallback: $FALLBACK_USER (dengan password yang sama seperti root)""
+fi
+
+# tulis revert script (agar mudah kembali)
+cat > ""$REVERT_SCRIPT"" <<EOF
+#!/usr/bin/env bash
+set -e
+cp -a ""$BACKUP"" ""$SSHD""
+systemctl restart ssh || service ssh restart || true
+echo ""Konfigurasi SSH dikembalikan dari $BACKUP""
+EOF
+chmod +x ""$REVERT_SCRIPT""
+echo ""Jika perlu revert, jalankan: sudo $REVERT_SCRIPT""
+
+# ubah/menambahkan setting di sshd_config
+# fungsi bantu: replace atau append jika tidak ada
+replace_or_add() {
+  local key=""$1""; local val=""$2""; local file=""$3""
+  if grep -Eiq ""^[#[:space:]]*${key}[[:space:]]"" ""$file""; then
+    sed -ri ""s|^[#[:space:]]*(${key}).*|\1 ${val}|I"" ""$file""
+  else
+    echo ""${key} ${val}"" >> ""$file""
+  fi
+}
+
+echo ""Mengubah konfigurasi SSH...""
+replace_or_add ""PermitRootLogin"" ""yes"" ""$SSHD""
+replace_or_add ""PasswordAuthentication"" ""yes"" ""$SSHD""
+replace_or_add ""ChallengeResponseAuthentication"" ""no"" ""$SSHD""
+# biarkan PubkeyAuthentication tetap ada — supaya key tetap bisa dipakai
+replace_or_add ""PubkeyAuthentication"" ""yes"" ""$SSHD""
+
+# pastikan shell root tidak disable
+if passwd -S root 2>/dev/null | grep -q ""L""; then
+  passwd -u root || true
+fi
+
+# set password root
+echo ""root:${ROOTPW}"" | chpasswd
+echo ""Password root di-set.""
+
+# buat fallback user (jika perlu) dan tambahkan ke sudo
+if [ ""$USE_FALLBACK"" = true ]; then
+  useradd -m -s /bin/bash ""$FALLBACK_USER"" || true
+  echo ""${FALLBACK_USER}:${ROOTPW}"" | chpasswd
+  # tambahkan ke sudoers jika ada grup sudo/wheel
+  if getent group sudo >/dev/null 2>&1; then
+    usermod -aG sudo ""$FALLBACK_USER"" || true
+  elif getent group wheel >/dev/null 2>&1; then
+    usermod -aG wheel ""$FALLBACK_USER"" || true
+  else
+    echo ""Tidak menemukan grup sudo/wheel; fallback user mungkin tidak punya sudo.""
+  fi
+  echo ""Fallback user '${FALLBACK_USER}' dibuat dengan password yang sama seperti root.""
+  echo ""Login test: ssh ${FALLBACK_USER}@<IP-VPS>""
+fi
+
+# restart ssh dengan deteksi systemctl/service
+echo ""Mere-start layanan SSH...""
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl restart ssh || systemctl restart sshd || true
+else
+  service ssh restart || service sshd restart || true
+fi
+
+echo
+echo ""Selesai. Sekarang kamu seharusnya bisa login sebagai root via:""
+echo ""  ssh root@IP-VPS""
+echo
+echo ""Catatan penting:""
+echo "" - Jangan tutup sesi SSH yang sedang aktif sampai kamu berhasil login root di sesi baru.""
+echo "" - Jika terjadi masalah, jalankan revert: sudo $REVERT_SCRIPT""
+echo "" - Setelah berhasil, pertimbangkan untuk menonaktifkan Login root via password untuk keamanan:""
+echo ""     sudo sed -ri 's|^PermitRootLogin.*|PermitRootLogin prohibit-password|' $SSHD && sudo systemctl restart ssh || sudo service ssh restart"""
+0Bfi1adQ,ДЗ: Кадровый учет,NikaBang,C#,Friday 24th of October 2025 09:25:45 AM CDT,"using System;
+
+internal class Program
+{
+    static void Main(string[] args)
+    {
+        const string CommandExit = ""Exit"";
+        const string CommandAddDossier = ""1"";
+        const string CommandShowAllDossier = ""2"";
+        const string CommandRemoveDossier = ""3"";
+        const string CommandSearchByLastName = ""4"";
+
+        string[] employeeFullNames;
+        string[] employeePositions;
+        bool inProgram = true;
+
+        while (inProgram)
+        {
+            string userInput = Console.ReadLine();
+
+            switch (userInput)
+            {
+                case CommandAddDossier:
+                    AddDossier();
+                    break;
+                case CommandShowAllDossier:
+                    ShowAllDossier();
+                    break;
+                case CommandRemoveDossier:
+                    RemoveDossier();
+                    break;
+                case CommandSearchByLastName:
+                    SearchByLastName();
+                    break;
+                case CommandExit:
+                    inProgram = false;
+                    break;
+                default:
+                    Console.WriteLine(""Ошибка ввода."");
+                    break;
+            }
+        }
+    }
+
+    static void AddDossier()
+    {
+
+    }
+
+    static void ShowAllDossier()
+    {
+
+    }
+
+    static void RemoveDossier()
+    {
+
+    }
+
+    static void SearchByLastName()
+    {
+
+    }
+
+}"
