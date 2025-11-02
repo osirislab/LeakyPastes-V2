@@ -1,0 +1,1133 @@
+id,title,username,language,date,content
+Cfdm64bB,Stripminer2.0+,freddiecas,Lua,Sunday 2nd of November 2025 06:04:39 AM CDT,"-- Strip Mining Program V2.0.0 --
+-- Includes anti-gravel protocol --
+-- Mines until full, then terminates --
+-- Connects to central monitor to relay inventory information --
+-- Version 2 introduces a more automated algorithm, allowing for deposition of items once full and returning to mining
+
+-- Tunnels are always two wide, 3 high in current version -- 
+-- use ""label set MiningTurtleX"" to name turtles, and set ""chn"" to the same number
+
+-- Config -- 
+ver = ""V2.0.0""
+Mside = ""left"" -- set to whatever side the modem is on the turtle
+chn = 1 -- set to channel you want to transmit on
+
+
+
+
+
+-- Defining tables and variables --
+
+local ores = {
+	[""minecraft:diamond_ore""]=true,
+	[""minecraft:emerald_ore""]=true,
+	[""minecraft:emerald_ore""]=true,
+	[""minecraft:gold_ore""]=true,
+	[""minecraft:iron_ore""]=true,
+	[""minecraft:redstone_ore""]=true,
+	[""minecraft:lapis_ore""]=true,
+	[""minecraft:coal_ore""]=true,
+	[""ic2:blockmetal""]=true,
+	[""galacticraftcore:basic_block_core""] = true
+}
+
+local gravel = {
+	[""minecraft:gravel""]=true
+}
+
+local chest = 0
+local inv = {}
+local Cscan = {}
+local logFile = fs.open(""minelog"", ""a"")
+
+
+-- Assinging functions --
+
+function log(data) -- function to write data into minelog file
+	logFile.writeLine(data)
+end
+
+
+function minenup(repeats) -- turtle moving up then mining
+cl()
+print(""Mining..."")
+	for i = 1,repeats do
+		turtle.up()
+		turtle.dig()
+		scan()
+		cl()
+	print(""Mining..."")
+	end
+end
+
+function minend(repeats) -- turtle moving down then mining
+cl()
+print(""Mining..."")
+	for l = 1,repeats do
+		turtle.down()
+		turtle.dig()
+		scan()
+		cl()
+	print(""Mining..."")
+	end
+end
+
+function scan() -- scanning blocks around turtle
+	cl()
+	print(""Scanning surroundings..."")
+	
+	success, Cscan = turtle.inspectUp()
+	if ores[Cscan.name] then
+		turtle.digUp()
+		log(Cscan.name)
+	end
+	
+	success, Cscan = turtle.inspectDown()
+	if ores[Cscan.name] then
+		turtle.digDown()
+		log(Cscan.name)
+	end
+			
+	
+	for i = 1,4 do
+		success, Cscan = turtle.inspect()
+		if ores[Cscan.name] then 
+			log(Cscan.name)
+			turtle.dig()
+			turtle.turnRight()
+		elseif gravel[Cscan.name] then
+			while gravel[Cscan.name] do
+				turtle.dig()
+				success, Cscan = turtle.inspect()
+			end
+			turtle.turnRight()
+		else
+			turtle.turnRight()
+		end
+	end
+end
+
+function mineLayer()
+	cl()
+	print(""Mining..."")
+	for k = 1,2 do
+		readInv()
+		scan()
+		turtle.dig()
+		minenup(2)
+		turtle.turnLeft()
+		turtle.forward()
+		turtle.turnRight()
+		turtle.dig()
+		scan()
+		minend(2)
+		turtle.forward()
+		turtle.turnRight()
+		scan()
+		turtle.forward()
+		turtle.turnLeft()
+		chest = chest + 1
+		
+	end
+end
+
+function cl()
+	term.clear()
+	term.setCursorPos(1,1)
+end
+
+function writeFull() -- obsolete
+	local startup = fs.open(""startup"", ""w"")
+	startup.writeLine(""term.clear()"")
+	startup.writeLine(""term.setCursorPos(1,1)"")
+	startup.writeLine(""_G.printError('Inventory full, terminating program...')"")
+	startup.close()
+end
+
+function inList(str, list)
+	for _,row in ipairs(list) do
+		if row[1] == str then
+			return true
+		end
+	end
+	return false
+end
+
+
+
+function readInv() 
+	cl()
+	print(""Reading inventory..."")
+	sleep(0.5)
+	local inv = {}
+	table.insert(inv, {""Slot"", ""Name"", ""Count""})
+	turtle.select(1)
+	
+	for i = 1,16 do
+		turtle.select(i)
+		local detail = turtle.getItemDetail(i, true)
+		if detail then
+			table.insert (inv, {tostring(i), detail.name, tostring(detail.count)})
+		end
+	end
+	turtle.select(1)
+	trans(inv)
+	check = inList(""16"", inv)
+	if check == true then
+		rtb()
+	end
+end		
+
+
+function rtb() -- function to return to start and deposit, then go back and carry on
+	cl()
+	_G.printError(""Inventory full, depositing..."")
+	turtle.turnRight()
+	turtle.turnRight()
+	for i = 0,chest do
+		turtle.forward()
+	end
+	for i = 1,16 do 
+		turtle.select(i)
+		turtle.dropDown()
+	end
+	turtle.select(1)
+	turtle.turnRight()
+	turtle.turnRight()
+	readInv()
+	for i = 0,chest do
+		turtle.forward()
+	end
+end
+
+
+
+-- Rednet -- 
+
+modem = peripheral.wrap(Mside)
+open =  rednet.isOpen()
+modem.open(chn)
+
+if open == false then
+	cl()
+	print(""Opening modem..."")
+	rednet.open(Mside)
+	sleep(0.5)
+end
+
+function trans(msg)
+	cl()
+	print(""Transmitting to base on channel "" .. chn .. ""..."")
+	modem.transmit(chn, 999, msg)
+	sleep(0.5)
+end
+
+
+
+
+
+
+
+-- Start of program --
+
+cl()
+
+print(""Initialising strip mining program "" .. ver .. ""..."")
+
+sleep(1)
+
+-- Main WHILE loop --
+
+repeat
+	mineLayer()
+until check == true
+
+-- Main WHILE loop --
+
+-- TESTING AREA -- 
+
+
+
+
+if logFile then
+	logFile.close() -- closing log file, if still open
+end"
+FfjFYA1G,⭐⭐⭐Profit Method⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 06:02:38 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+IIhe1QSx
+"
+JEKx4Dfu,⭐⭐⭐Free Giftcards Method⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 06:02:07 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+GbdrBqqf
+"
+Bqtg3SEp,⭐⭐⭐Crypto Accounts⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 06:01:31 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+ili5SMpF
+"
+EUxJGsLT,⭐⭐⭐MAKE $9OO INSTANTLY D M⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 06:01:00 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+eNYeCeFH
+"
+csBxTvTv,⭐⭐⭐Profit Method⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 06:00:29 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+NUQ052a8
+"
+1sn28hEQ,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:59:59 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+Br6oXjQY
+"
+z8YVSYfa,⭐⭐⭐MAKE $9OO INSTANTLY D G⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:59:28 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+DmwItkva
+"
+FbPyrNNr,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:58:57 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+xQHL0x9r
+"
+aVBy9wD3,⭐⭐⭐Profit Method⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:58:27 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+rKKAN9G0
+"
+QBMNhy1B,⭐⭐⭐Exchange Exploit T 3⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:57:56 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+flYFSl1c
+"
+sAC7na2B,Bricks Builder Typography and Spacing Framework,tommyosheawebdesign,CSS,Sunday 2nd of November 2025 05:57:48 AM CDT,"/* ===========================================
+   FLUID TYPE & SPACING SYSTEM FOR BRICKS BUILDER
+   =========================================== */
+
+:root {
+
+  /* ===========================================
+     TEXT SIZE SCALE
+     =========================================== */
+  /* https://www.fluid-type-scale.com/calculate?minFontSize=16&minWidth=320&minRatio=1.125&maxFontSize=18&maxWidth=1280&maxRatio=1.2&steps=xs,s,m,l,xl&baseStep=m&prefix=text&decimals=2&useRems=on&remValue=16&previewFont=Inter */
+
+  --text-xs: clamp(0.79rem, -0.01vw + 0.79rem, 0.78rem);
+  --text-s: clamp(0.89rem, 0.08vw + 0.87rem, 0.94rem);
+  --text-m: clamp(1rem, 0.21vw + 0.96rem, 1.13rem);
+  --text-l: clamp(1.13rem, 0.37vw + 1.05rem, 1.35rem);
+  --text-xl: clamp(1.27rem, 0.59vw + 1.15rem, 1.62rem);
+
+  /* ===========================================
+     HEADING SIZE SCALE
+     =========================================== */
+  /* https://www.fluid-type-scale.com/calculate?minFontSize=20&minWidth=320&minRatio=1.25&maxFontSize=22&maxWidth=1280&maxRatio=1.333&steps=6,5,4,3,2,1,title&baseStep=4&prefix=h */
+
+  --h6: clamp(0.8rem, -0.04vw + 0.81rem, 0.77rem);
+  --h5: clamp(1rem, 0.05vw + 0.99rem, 1.03rem);
+  --h4: clamp(1.25rem, 0.21vw + 1.21rem, 1.38rem);
+  --h3: clamp(1.56rem, 0.45vw + 1.47rem, 1.83rem);
+  --h2: clamp(1.95rem, 0.82vw + 1.79rem, 2.44rem);
+  --h1: clamp(2.44rem, 1.36vw + 2.17rem, 3.26rem);
+  --h-title: clamp(3.05rem, 2.15vw + 2.62rem, 4.34rem);
+
+  /* ===========================================
+     GAP SCALE
+     =========================================== */
+  /* https://utopia.fyi/space/calculator?c=320,16,1.2,1280,18,1.25,5,2,&s= */
+  --gap-xxxs: clamp(0.25rem, 0.15rem + 0.52vw, 0.56rem);
+  --gap-xxs: clamp(0.5rem, 0.38rem + 0.63vw, 0.88rem);
+  --gap-xs: clamp(0.75rem, 0.63rem + 0.63vw, 1.13rem);
+  --gap-s: clamp(1rem, 0.77rem + 1.15vw, 1.69rem);
+  --gap-m: clamp(1.5rem, 1.25rem + 2.25vw, 3rem);
+  --gap-l: clamp(2rem, 1.54rem + 2.29vw, 3.38rem);
+  --gap-xl: clamp(3rem, 2.5rem + 2.5vw, 4.5rem);
+  --gap-xxl: clamp(4rem, 3.08rem + 4.58vw, 6.75rem);
+
+  /* ===========================================
+     SECTION PADDING SCALE
+     =========================================== */
+  /* https://utopia.fyi/space/calculator?c=320,16,1.2,1280,40,1.25,5,2,&s= */
+  --section-xxxs: clamp(0.38rem, 0.08rem + 1.46vw, 1.25rem);
+  --section-xxs: clamp(0.75rem, 0.38rem + 1.88vw, 1.88rem);
+  --section-xs: clamp(1.13rem, 0.67rem + 2.29vw, 2.5rem);
+  --section-s: clamp(1.5rem, 0.75rem + 3.75vw, 3.75rem);
+  --section-m: clamp(2.25rem, 1.33rem + 4.58vw, 5rem);
+  --section-l: clamp(3rem, 1.5rem + 7.5vw, 7.5rem);
+  --section-xl: clamp(4.5rem, 2.67rem + 9.17vw, 10rem);
+
+  /* ===========================================
+     CONTEXTUAL GAP VARIABLES
+     =========================================== */
+  --grid-gap: var(--gap-m);        /* Gap between columns */
+  --content-gap: var(--gap-s);     /* Gap between content elements */
+  --container-gap: var(--gap-m);   /* Gap between multiple containers in a section */
+}
+
+/* ===========================================
+   TEXT SIZE UTILITY CLASSES
+   =========================================== */
+
+.text-xl { font-size: var(--text-xl); line-height: 1.4; }
+.text-l  { font-size: var(--text-l);  line-height: 1.5; }
+body, .text-m { font-size: var(--text-m); line-height: 1.5; }
+.text-s  { font-size: var(--text-s); line-height: 1.6; }
+.text-xs { font-size: var(--text-xs); line-height: 1.7; }
+
+/* ===========================================
+   HEADING SIZE UTILITY CLASSES
+   =========================================== */
+
+.h-title { font-size: var(--h-title); line-height: 1.05; }
+h1, .h1  { font-size: var(--h1); line-height: 1.1; }
+h2, .h2  { font-size: var(--h2); line-height: 1.2; }
+h3, .h3  { font-size: var(--h3); line-height: 1.3; }
+h4, .h4  { font-size: var(--h4); line-height: 1.4; }
+h5, .h5  { font-size: var(--h5); line-height: 1.5; }
+h6, .h6  { font-size: var(--h6); line-height: 1.6; }
+
+/* ===========================================
+   TYPOGRAPHY SPACING & RESET
+   =========================================== */
+
+body :is(p, h1, h2, h3, h4, h5, h6, ul, ol, li) { margin: 0; }
+body :is(p, ul, ol) { margin-block-end: 1em; }
+body :is(p:last-of-type) { margin-block-end: 0; }
+body :is(h1, h2, h3, h4, h5, h6) { margin-block-end: 0.5em; }
+
+body .brxe-text * + :is(h1, h2, h3, h4, h5, h6),
+body .brxe-post-content:not([data-source=""bricks""]) * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-block-start: 1em;
+}
+
+body .brxe-text * + li,
+body .brxe-post-content:not([data-source=""bricks""]) * + li {
+  margin-block-end: 0.5em;
+}
+
+body .brxe-text * + :is(ul, ol),
+body .brxe-post-content:not([data-source=""bricks""]) * + :is(ul, ol) {
+  padding-left: 16px;
+  margin-top: 0;
+}
+
+/* Makes H2s within Rich Text and blog posts one size smaller */
+.brxe-text h2,
+.brxe-post-content h2 {
+  font-size: var(--h3);
+}
+
+/* ===========================================
+   SPACING UTILITY CLASSES
+   =========================================== */
+
+.grid-gap { gap: var(--grid-gap); }
+.content-gap { gap: var(--content-gap); }
+.content-gap-s { gap: calc(var(--content-gap) / 1.5); }
+.container-gap { gap: var(--container-gap); }
+
+/* “Imperfect” fix for tighter heading/paragraph spacing */
+.content-gap :is(p, h1, h2, h3, h4, h5, h6),
+.content-gap-s :is(p, h1, h2, h3, h4, h5, h6) {
+  margin-block-end: -0.2em;
+}
+"
+kfE02NnQ,⭐⭐⭐MAKE $1000 INSTANTLY⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:57:25 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+kaCx1dsl
+"
+ZCqVGzL8,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:56:54 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+WrvS247r
+"
+psEz1KHF,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:56:24 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+04jfj5Gc
+"
+Bdk555Xt,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,Anaya456,Java,Sunday 2nd of November 2025 05:55:53 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+vaH5MCeG
+"
+1i9E7gaW,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:43:29 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+p2j1FsCt
+"
+j9CzmQX7,⭐⭐⭐Instant Profit Method⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:42:59 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+1DbVVPXN
+"
+sB511mEJ,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:42:28 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+VzUDGa2n
+"
+fXmYfsAr,Prison Life,Mytxhic,Lua,Sunday 2nd of November 2025 05:42:26 AM CDT,"--[[==================================================
+     PLAYER VISUAL + AIM LOCK SCRIPT (ALL-IN-ONE)
+     - Display name + health (side by side, lifted higher)
+     - Team color outlines
+     - Q key aim-lock
+     - Includes Infinite Yield Admin
+==================================================]]
+
+-- Load Infinite Yield Admin
+loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
+
+-----------------------------------------------------
+-- Services
+-----------------------------------------------------
+local Players = game:GetService(""Players"")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService(""RunService"")
+local Camera = workspace.CurrentCamera
+local UIS = game:GetService(""UserInputService"")
+
+-----------------------------------------------------
+-- Variables
+-----------------------------------------------------
+local mouse = LocalPlayer:GetMouse()
+local holding = false
+local lockedTarget = nil
+
+-----------------------------------------------------
+-- 1. NAME TAG + HEALTH (SIDE BY SIDE, LIFTED)
+-----------------------------------------------------
+local function addNameTag(character, plr)
+	local head = character:WaitForChild(""Head"", 5)
+	local humanoid = character:FindFirstChildOfClass(""Humanoid"")
+	if not head or not humanoid then return end
+
+	local billboard = Instance.new(""BillboardGui"")
+	billboard.Parent = head
+	billboard.Adornee = head
+	billboard.Size = UDim2.new(0, 200, 0, 50)
+	billboard.StudsOffset = Vector3.new(0, 3.2, 0) -- raised higher above the head
+	billboard.AlwaysOnTop = true
+
+	local frame = Instance.new(""Frame"")
+	frame.Parent = billboard
+	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.new(1, 0, 1, 0)
+
+	-- Display name
+	local nameLabel = Instance.new(""TextLabel"")
+	nameLabel.Parent = frame
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	nameLabel.Position = UDim2.new(0.5, -20, 0.5, 0)
+	nameLabel.Text = plr.DisplayName
+	nameLabel.TextColor3 = Color3.new(1, 1, 1)
+	nameLabel.TextStrokeTransparency = 0.5
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextScaled = false
+	nameLabel.TextSize = 18
+
+	-- Health (right next to name)
+	local healthLabel = Instance.new(""TextLabel"")
+	healthLabel.Parent = frame
+	healthLabel.BackgroundTransparency = 1
+	healthLabel.AnchorPoint = Vector2.new(0, 0.5)
+	healthLabel.Position = UDim2.new(0.5, nameLabel.TextBounds.X / 2 + 10, 0.5, 0)
+	healthLabel.Text = tostring(math.floor(humanoid.Health))
+	healthLabel.TextColor3 = Color3.new(1, 1, 1)
+	healthLabel.TextStrokeTransparency = 0.5
+	healthLabel.Font = Enum.Font.GothamBold
+	healthLabel.TextScaled = false
+	healthLabel.TextSize = 16
+
+	-- Update scaling + position + health
+	RunService.RenderStepped:Connect(function()
+		if head and head:IsDescendantOf(workspace) and humanoid then
+			local distance = (Camera.CFrame.Position - head.Position).Magnitude
+			local size = math.clamp(30 - distance / 4, 10, 30)
+			nameLabel.TextSize = size
+			healthLabel.TextSize = math.clamp(size * 0.8, 8, 22)
+			healthLabel.Text = tostring(math.floor(humanoid.Health))
+			healthLabel.Position = UDim2.new(0.5, nameLabel.TextBounds.X / 2 + 8, 0.5, 0)
+		end
+	end)
+end
+
+-----------------------------------------------------
+-- 2. TEAM OUTLINE (CHARM)
+-----------------------------------------------------
+local function addOutline(character, teamColor)
+	for _, part in pairs(character:GetChildren()) do
+		if part:IsA(""BasePart"") then
+			local highlight = Instance.new(""Highlight"")
+			highlight.Parent = part
+			highlight.Adornee = part
+			highlight.FillTransparency = 1
+			highlight.OutlineColor = teamColor.Color
+			highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		end
+	end
+end
+
+-----------------------------------------------------
+-- 3. AIM LOCK (Q TO LOCK)
+-----------------------------------------------------
+local function getClosestTorso()
+	local closest, shortest = nil, math.huge
+	for _, plr in pairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild(""HumanoidRootPart"") then
+			local torso = plr.Character.HumanoidRootPart
+			local pos, onScreen = Camera:WorldToViewportPoint(torso.Position)
+			if onScreen then
+				local dist = (Vector2.new(pos.X, pos.Y) - Vector2.new(mouse.X, mouse.Y)).Magnitude
+				if dist < shortest then
+					shortest = dist
+					closest = torso
+				end
+			end
+		end
+	end
+	return closest
+end
+
+RunService.RenderStepped:Connect(function()
+	if holding and lockedTarget then
+		if lockedTarget.Parent and lockedTarget:IsDescendantOf(workspace) then
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, lockedTarget.Position)
+		else
+			lockedTarget = nil
+		end
+	end
+end)
+
+UIS.InputBegan:Connect(function(input, gp)
+	if not gp and input.KeyCode == Enum.KeyCode.Q then
+		if not holding then
+			lockedTarget = getClosestTorso()
+			holding = true
+		end
+	end
+end)
+
+UIS.InputEnded:Connect(function(input, gp)
+	if not gp and input.KeyCode == Enum.KeyCode.Q then
+		holding = false
+		lockedTarget = nil
+	end
+end)
+
+-----------------------------------------------------
+-- 4. APPLY TAGS + OUTLINES TO ALL PLAYERS
+-----------------------------------------------------
+local function onCharacterAdded(character, plr)
+	task.wait(0.5)
+	addNameTag(character, plr)
+	local teamColor = plr.TeamColor or BrickColor.new(""White"")
+	addOutline(character, teamColor)
+end
+
+for _, plr in pairs(Players:GetPlayers()) do
+	if plr ~= LocalPlayer then
+		plr.CharacterAdded:Connect(function(char)
+			onCharacterAdded(char, plr)
+		end)
+		if plr.Character then
+			onCharacterAdded(plr.Character, plr)
+		end
+	end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+	if plr ~= LocalPlayer then
+		plr.CharacterAdded:Connect(function(char)
+			onCharacterAdded(char, plr)
+		end)
+	end
+end)
+"
+apQCdag5,⭐⭐⭐Crypto Accounts⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:41:57 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+N830pWns
+"
+grYqEZza,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:41:26 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+GPMucyq1
+"
+KPYLWAMp,ESP32_Empty_for_OTA,DuboisP,C++,Sunday 2nd of November 2025 05:41:06 AM CDT,"/*
+   This small program prepares an ESP32 module to be flashed Over The Air with a .bin file
+   
+   In the Tools menu make sure that you have the following settings:
+
+   Board: ""ESP32 Dev Module""
+   Flash Size: ""4MB (32Mb)""
+   Partition Scheme with OTA is needed
+   Partition Scheme: Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)
+   or
+   Partition Scheme: Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)
+   Core Debug Level: ""None""
+   PS RAM: ""Disabled""
+   Port: ""COMX""  (please enter your COM port number instead of X)
+
+   Once you upload this firmware to the ESP32 module, it will be prepaired to receive the .bin file. 
+   You will notice that an Access Point with ssid ESP32_Empty_for_OTA is created. 
+   Default IP is 192.168.4.1 in Autonomous mode. Default password is 12345678.
+   Then in a browser you type serverIP ou serverIP/update. 
+*/
+
+#include <ArduinoOTA.h>
+#include <AsyncTCP.h>               // name=Async TCP             https://github.com/ESP32Async/AsyncTCP.git
+#include <ElegantOTA.h>             // name=ElegantOTA            https://github.com/ayushsharma82/ElegantOTA  
+									// warning if library is updated https://docs.elegantota.pro/getting-started/async-mode
+#include <ESPAsyncWebServer.h>      // name=ESP Async WebServer   https://github.com/ESP32Async/ESPAsyncWebServer
+#include <ESPmDNS.h>
+#include <WiFi.h>
+
+#define HOSTNAME        ""ESP32_Empty_for_OTA""     
+
+#define SSID_NAME_STA   ""*********""
+#define PASSWORD_STA    ""*********""
+
+#define SSID_NAME_AP    HOSTNAME
+#define PASSWORD_AP     ""12345678""  // Mini. 8 car
+
+// Initialize HTTP server
+AsyncWebServer server(80);
+
+void setup() {
+   Serial.begin(38400); 
+   
+   WiFi.mode(WIFI_AP_STA);
+   WiFi.setHostname(HOSTNAME);   
+   
+   WiFi.begin(SSID_NAME_STA, PASSWORD_STA);
+   while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(""."");
+   }
+   Serial.println(""\nIP server in External mode:   "" + WiFi.localIP().toString());
+   
+   WiFi.softAP(SSID_NAME_AP, PASSWORD_AP);
+   delay(500);
+   Serial.println(""IP server in Autonomous mode: "" + WiFi.softAPIP().toString());
+   
+   OTA_Init();
+   
+   server.on(""/"", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->redirect(""/update"");
+   });
+
+   server.on(""/default"", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->send(200, ""text/plain"", ""Hello from ESP32 redirect\n\nOnly enter serverIP or serverIP/update"");
+   });
+   
+   ElegantOTA.begin(&server);    // Start ElegantOTA  warning if library is updated https://docs.elegantota.pro/getting-started/async-mode
+   // Start HTTP server
+   server.begin();
+}
+
+void loop() {
+   ArduinoOTA.handle();
+   ElegantOTA.loop();
+}
+
+void OTA_Init(){
+   ArduinoOTA.setHostname(HOSTNAME);               // Hostname defaults to esp3232-[MAC]
+   ArduinoOTA.setPassword(PASSWORD_AP);            // No authentication by default
+   //ArduinoOTA.setHostname(APSTAHostName.c_str());     // Hostname defaults to esp3232-[MAC]
+   //ArduinoOTA.setPassword(Global_PASSWORD.c_str());  // No authentication by default
+   ArduinoOTA
+   .onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+         type = ""sketch"";
+      else // U_SPIFFS
+         type = ""filesystem"";
+         // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println(""Start updating "" + type);
+   })
+   .onEnd([]() {
+      Serial.println(""\nEnd"");
+   })
+   .onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf(""Progress: %u%%\r"", (progress / (total / 100)));
+   })
+   .onError([](ota_error_t error) {
+      Serial.printf(""Error[%u]: "", error);
+      if (error == OTA_AUTH_ERROR) Serial.println(""Auth Failed"");
+      else if (error == OTA_BEGIN_ERROR) Serial.println(""Begin Failed"");
+      else if (error == OTA_CONNECT_ERROR) Serial.println(""Connect Failed"");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println(""Receive Failed"");
+      else if (error == OTA_END_ERROR) Serial.println(""End Failed"");
+   });
+   ArduinoOTA.begin();
+}
+"
+kBKAEKqm,⭐⭐⭐Make $1500 in 20 minutes⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:40:55 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+Nrmo0tZY
+"
+AYJ17hkw,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:40:24 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+wlCdEPHW
+"
+MZ7pdY7w,⭐⭐⭐Instant Profit Method⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:39:54 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+7H3u6aDW
+"
+KSLs7uhb,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:39:23 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+PfPhbf7y
+"
+WZ5bRN6v,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:38:52 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+FYndEOvX
+"
+mK58E0iv,⭐⭐⭐MAKE $900 INSTANTLY⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:38:21 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+mhY2S2sR
+"
+znerAQ4G,⭐⭐⭐Make $15OO in 2O minutesV G⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:37:51 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+harvaxdm
+"
+MLE0SWjQ,⭐⭐⭐MAKE $1000 INSTANTLY⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:37:20 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+yoSJSBzt
+"
+LMxixJzU,⭐⭐⭐Instant Profit Method⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:36:50 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+kBG5KwtF
+"
+D3SHnejM,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐,Domse_Cross,Java,Sunday 2nd of November 2025 05:36:19 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+yDtZDkJ2
+"
+hgHLkDHL,⭐⭐⭐Make $15OO in 2O minutesV G⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:35:46 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+szF0hzTY
+"
+shR2YxfB,⭐⭐⭐MAKE $9OO INSTANTLY D M⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:35:15 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+jFSoNvVN
+"
+U5L48AW6,⭐⭐⭐MAKE $9OO INSTANTLY D A⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:34:44 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+RwNklWpd
+"
+B3ELxrC6,⭐⭐⭐Free Giftcards Method⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:34:13 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+UaM9Raj4
+"
+0GKGRbcb,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:33:42 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+GZ1GhNIs
+"
+rD3KZfHw,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:33:11 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+jdRFUq8d
+"
+v2K9Qqc7,⭐⭐⭐Profit Method⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:32:40 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+R3UntlE5
+"
+X5Zi6Mw1,⭐⭐⭐MAKE $500 IN 15 MIN⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:32:09 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+DQ40BSrt
+"
+hsCKyYxq,⭐⭐⭐Instant Profit Method⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:31:37 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+jRfeoR5d
+"
+nEzLPRM1,⭐⭐⭐Instant Profit Method⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:31:06 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+zzqblsDf
+"
+7PuCqiFT,⭐⭐⭐MAKE $9OO INSTANTLY D A⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:30:35 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+YoxcwhoU
+"
+v5YsAg7c,⭐⭐⭐GMAIL Logs (2FA disabled)⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:30:04 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+Qd73enHG
+"
+NNzN71TW,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:29:33 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+BGtFaD7j
+"
+gEUQecLV,⭐⭐⭐Make $15OO in 2O minutesV E⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:29:02 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+xqBqgS1A
+"
+kVz9S5N6,⭐⭐⭐Exchange Exploit T 3⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:28:30 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+X2V0s1W0
+"
+6MNEKXE5,⭐⭐⭐Exploit 500$ in 15 Minutes⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:27:59 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+I9y9W0rl
+"
+LKSxKXPf,⭐⭐⭐Instant Profit Method⭐⭐,martinezjeanclaude,Java,Sunday 2nd of November 2025 05:27:28 AM CDT,"
+
+
+JOIN USING THE LINK BELOW
+
+
+https://discord.gg/6FfbB8nE
+
+cZi8hmEx
+"
