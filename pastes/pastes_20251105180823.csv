@@ -1,0 +1,3813 @@
+id,title,username,language,date,content
+E1epBpw9,⭐ 💎 Exchange profit method 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 12:00:22 PM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: irtDvFfnDFqZWuxRBbHnodjnzaTJxYSUbsaFweJZQKul"
+dpFgz3Ce,MangroveFarmer,Blackhome,Lua,Wednesday 5th of November 2025 11:54:00 AM CDT,"
+
+local turtlePos, direction
+local startPos, startDir
+
+local function getGPSPosition()
+    local x, y, z = gps.locate()
+    if not x then print(""Error: GPS not available"") return nil end
+    return {x = math.floor(x), y = math.floor(y), z = math.floor(z)}
+end
+
+local function negative(vec)
+    return {x = -vec.x, y = -vec.y, z = -vec.z}
+end
+
+local function add(vec1, vec2)
+    return {x = vec1.x + vec2.x, y = vec1.y + vec2.y, z = vec1.z + vec2.z}
+end
+local function sub(vec1, vec2)
+    return add(vec1, negative(vec2))
+end
+
+local function multiply(s, vec)
+    return {x = s * vec.x, y = s * vec.y, z = s * vec.z}
+end
+
+local function getSign(number)
+    return number / math.abs(number)
+end
+
+local function isEqual(vec1, vec2)
+    return vec1.x == vec2.x and vec1.y == vec2.y and vec1.z == vec2.z
+end
+
+
+-- === Basic Movement ===
+
+local function moveForward()
+    if turtle.forward() then
+        turtlePos = add(turtlePos, direction)
+        return true
+    end
+    return false
+end
+local function moveUp()
+    if turtle.up() then
+        turtlePos.y = turtlePos.y + 1
+        return true
+    end
+    return false
+end
+
+local function moveDown()
+    if turtle.down() then
+        turtlePos.y = turtlePos.y - 1
+        return true
+    end
+    return false
+end
+
+local function forceMoveForward()
+    while not moveForward() do turtle.dig() end
+end
+
+local function forceMoveUp()
+    while not moveUp() do turtle.digUp() end
+end
+
+local function forceMoveDown()
+    while not moveDown() do turtle.digDown() end
+end
+
+-- === Basic Turning ===
+
+local function turnInDirection(dir)
+    if not direction then return end
+    if dir == ""left"" then
+        turtle.turnLeft()
+        direction = {x = direction.z, y = 0, z = -direction.x}
+    elseif dir == ""right"" then
+        turtle.turnRight()
+        direction = {x = -direction.z, y = 0, z = direction.x}
+    elseif dir == ""around"" then
+        turtle.turnLeft()
+        turtle.turnLeft()
+        direction = {x = -direction.x, y = 0, z = -direction.z}
+    end
+end
+
+local function getTurnDirection(from, to)
+    local function vectorsEqual(a, b)
+        return a.x == b.x and a.z == b.z
+    end
+
+    if vectorsEqual(from, to) then return nil end
+    local left  = {x = from.z, y = 0, z = -from.x}
+    local right = {x = -from.z, y = 0, z = from.x}
+    local back  = {x = -from.x, y = 0, z = -from.z}
+    if vectorsEqual(to, left) then
+        return ""left""
+    elseif vectorsEqual(to, right) then
+        return ""right""
+    elseif vectorsEqual(to, back) then
+        return ""around""
+    else
+        error(""Invalid target direction"")
+    end
+end
+
+local function getDirection()
+    local pos1 = getGPSPosition()
+    if not pos1 then error(""GPS failure, cannot get direction"") end
+
+    for i = 1, 4 do
+        if turtle.forward() then
+            local pos2 = getGPSPosition()
+            if not pos2 then error(""GPS failure after move"") end
+            -- turtlePos = pos2
+            -- Richtung berechnen
+            direction = sub(pos2, pos1)
+
+            -- zurück zur ursprünglichen Position
+            turnInDirection(""around"")
+            forceMoveForward()
+
+            -- Sicherheitsprüfung
+            local posBack = getGPSPosition()
+            if not isEqual(pos1, posBack) then
+                error(""Warnung: Position hat sich beim Rückweg verschoben!"")
+                turtlePos = posBack -- explizit wieder auf GPS setzen
+            else
+                turtlePos = pos1
+            end
+
+            turnInDirection(""around"")
+            return
+        else
+            turtle.turnLeft()
+        end
+    end
+
+    error(""Unable to move forward in any direction for direction detection"")
+end
+
+
+-- === Positioning ===
+
+local function goToPos(coord)
+    local deltaX = coord.x - turtlePos.x
+    local deltaY = coord.y - turtlePos.y
+    local deltaZ = coord.z - turtlePos.z
+
+    local dirX = startDir.x
+    local dirZ = startDir.z
+
+    local function moveToEqualX()
+        while not (deltaX == 0) do
+            turnInDirection(getTurnDirection(direction, {x = getSign(deltaX), y = 0, z = 0}))
+            forceMoveForward()
+            deltaX = coord.x - turtlePos.x
+        end
+    end
+
+    local function moveToEqualZ()
+        while not (deltaZ == 0) do
+            turnInDirection(getTurnDirection(direction, {x = 0, y = 0, z = getSign(deltaZ)}))
+            forceMoveForward()
+            deltaZ = coord.z - turtlePos.z
+        end
+    end
+
+    local function moveToEqualY()
+        while not (deltaY == 0) do
+            if deltaY > 0 then
+                forceMoveUp()
+            elseif deltaY < 0 then
+                forceMoveDown()
+            end
+            deltaY = coord.y - turtlePos.y
+        end
+    end
+
+    
+    if dirX == 0 then
+        moveToEqualZ()
+        moveToEqualX()
+    elseif dirZ == 0 then
+        moveToEqualX()
+        moveToEqualZ()
+    end
+
+    if not (deltaY == 0) then
+        moveToEqualY()
+        deltaX = coord.x - turtlePos.x
+        deltaZ = coord.z - turtlePos.z
+    end
+end
+
+local function goToStartOfTree()
+    startTreePos = add(startPos, multiply(7, startDir))
+    goToPos(startTreePos)
+    turnInDirection(getTurnDirection(direction, startDir))
+end
+
+-- === Tasks ===
+
+local function isSapling(item)
+    if not item or not item.name then return false end
+
+    local saplingSuffix = ""_propagule""
+    return item.name:match("":.*"" .. saplingSuffix .. ""$"") ~= nil
+end
+
+local function isBoneMeal(item)
+    if not item or not item.name then return false end
+    return item.name == ""minecraft:bone_meal""
+end
+
+local function isLog(item)
+    if not item or not item.name then return false end
+
+    local logSuffix = ""_log""
+    return item.name:match("":.*"" .. logSuffix .. ""$"") ~= nil
+end
+
+local function getBoneMealCount()
+    local num = 0
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        
+        if isBoneMeal(item) then
+            num = num + turtle.getItemCount(i)
+        end
+    end
+    return num
+end
+
+local function selectSaplingSlot()
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        
+        if isSapling(item) then
+            turtle.select(i)
+            return true
+        end
+    end
+    return false
+end
+
+local function selectBoneMealSlot()
+    for i = 1, 16 do
+        local item = turtle.getItemDetail(i)
+        
+        if isBoneMeal(item) then
+            turtle.select(i)
+            return true
+        end
+    end
+    return false
+end
+
+local function plantSapling()
+    if not selectSaplingSlot() then return false end
+    if not turtle.place() then return false end
+    return true
+end
+
+local function fellBranch(bDown)
+    -- if turtle goes down the tree
+    bDown = bDown or false
+
+    local suc, item = turtle.inspect()
+    if not(suc and isLog(item)) then
+        return false
+    end
+    if bDown then
+        forceMoveDown()
+        fellBranch()
+        forceMoveUp()
+    end
+
+    branchDir = direction
+
+
+    forceMoveForward()
+
+    local function advanceInBranch()
+        forceMoveForward()
+        local suc, item = turtle.inspectUp()
+        if suc and isLog(item) then
+            forceMoveUp()
+            advanceInBranch()
+            forceMoveDown()
+        end
+        turnInDirection(getTurnDirection(direction, negative(branchDir)))
+        forceMoveForward()
+    end
+
+    advanceInBranch()
+    turnInDirection(getTurnDirection(direction, negative(branchDir)))
+    forceMoveForward()
+    turnInDirection(getTurnDirection(direction, branchDir))
+    return true
+end
+
+local function fellTree()
+    forceMoveForward()
+
+    cnt = 0
+    suc, item = turtle.inspectUp()
+    while not (suc and isLog(item)) do
+        forceMoveUp()
+        suc, item = turtle.inspectUp()
+        cnt = cnt + 1
+        if cnt >= 25 then
+            goToStartOfTree()
+            return false
+        end
+    end
+
+    forceMoveUp()
+    startLogY = turtlePos.y
+
+    fellBranch()
+
+    suc, item = turtle.inspectUp()
+    while suc and isLog(item) do
+        forceMoveUp()
+        fellBranch()
+        suc, item = turtle.inspectUp()
+    end
+
+    endLogY = turtlePos.y
+
+    turnInDirection(""right"")
+    fellBranch(true)
+    while not (turtlePos.y == startLogY) do
+        forceMoveDown()
+        fellBranch(true)
+    end
+    turnInDirection(""right"")
+    fellBranch()
+    while not (turtlePos.y == endLogY) do
+        forceMoveUp()
+        fellBranch()
+    end
+    turnInDirection(""right"")
+    fellBranch(true)
+    while not (turtlePos.y == startLogY) do
+        forceMoveDown()
+        fellBranch(true)
+    end
+    goToStartOfTree()
+
+    return true
+end
+
+
+
+-- === Initialization ===
+
+local function saveStartingParameters()
+    local parameterList = {pos = turtlePos, dir = direction}
+
+    local file = fs.open(""startingParameters.txt"", ""w"")
+    file.write(textutils.serialize(parameterList))
+    file.close()
+end
+
+local function loadStartingParameters()
+    if not fs.exists(""startingParameters.txt"") then return false end
+
+    local file = fs.open(""startingParameters.txt"", ""r"")
+    local data = textutils.unserialize(file.readAll())
+
+    file.close()
+
+    startPos = data.pos
+    startDir = data.dir
+    return true
+end
+
+local function initProgram()
+    turtlePos = getGPSPosition()
+    if not turtlePos then error(""GPS failure, cannot run the program"") end
+    
+    getDirection()
+
+    if not loadStartingParameters() then
+        startPos = turtlePos
+        startDir = direction
+        saveStartingParameters()
+    end
+end
+
+
+
+-- === Main ===
+
+local function main()
+    initProgram()
+    goToStartOfTree()
+    fellTree()
+end
+
+main()"
+ReAMDZMW,✅ 💎 Instant BTC Profit Method ✅ Working 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 11:40:21 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: QvkBUvHprntGjfmChNkxhgBnSamHXRIsrdRlQjvoPgUD"
+MwibktNL,📌 Free Crypto Method 🔥 🚨,Danielhelper,JavaScript,Wednesday 5th of November 2025 11:20:02 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: qAIbEeoLnewDoLgSxTJsJYdTaXXWkeNoxaHqspDGvwEb"
+eyAABtNX,Untitled,yiyanplayz,Lua,Wednesday 5th of November 2025 11:15:26 AM CDT,"local L_1_=game;local L_2_=L_1_.GetService;local L_3_=L_2_(L_1_,""Players"")local L_4_=L_2_(L_1_,""UserInputService"")local L_5_=L_2_(L_1_,""TweenService"")local L_6_=L_2_(L_1_,""RunService"")local L_7_=L_2_(L_1_,""ReplicatedStorage"").GameRemotes.SortItem;local L_8_=Instance.new(""ScreenGui"")L_8_.Name=""FloatingButton""L_8_.Parent=L_3_.LocalPlayer:WaitForChild(""PlayerGui"")local L_9_=Instance.new(""TextButton"")L_9_.Size=UDim2.new(0,60,0,40)L_9_.Position=UDim2.new(0,20,0.5,-20)L_9_.BackgroundColor3=Color3.fromRGB(85,170,85)L_9_.Text=""Dupe""L_9_.TextScaled=true;L_9_.ZIndex=10;L_9_.Parent=L_8_;L_9_.AutoButtonColor=true;L_9_.BackgroundTransparency=0.2;local L_10_=false;local L_11_;local L_12_;local L_13_;local function L_14_(L_15_arg1)local L_16_=L_15_arg1.Position-L_12_;L_9_.Position=UDim2.new(L_13_.X.Scale,L_13_.X.Offset+L_16_.X,L_13_.Y.Scale,L_13_.Y.Offset+L_16_.Y)end;L_9_.InputBegan:Connect(function(L_17_arg1)if L_17_arg1.UserInputType==Enum.UserInputType.MouseButton1 or L_17_arg1.UserInputType==Enum.UserInputType.Touch then L_10_=true;L_12_=L_17_arg1.Position;L_13_=L_9_.Position;L_17_arg1.Changed:Connect(function()if L_17_arg1.UserInputState==Enum.UserInputState.End then L_10_=false end end)end end)L_9_.InputChanged:Connect(function(L_18_arg1)if L_18_arg1.UserInputType==Enum.UserInputType.MouseMovement or L_18_arg1.UserInputType==Enum.UserInputType.Touch then L_11_=L_18_arg1 end end)L_4_.InputChanged:Connect(function(L_19_arg1)if L_10_ and L_19_arg1==L_11_ then L_14_(L_19_arg1)end end)L_9_.MouseButton1Click:Connect(function()for L_20_=36,62 do L_7_:InvokeServer(L_20_)end;print(""Items Duplicated!"")end)L_4_.InputBegan:Connect(function(L_21_arg1,L_22_arg1)if L_21_arg1.KeyCode==Enum.KeyCode.Z and not L_22_arg1 then for L_23_=36,62 do L_7_:InvokeServer(L_23_)end;print(""Duplication Activated!"")end end)if L_6_:IsStudio()or L_4_.TouchEnabled then L_9_.BackgroundColor3=Color3.fromRGB(255,140,0)end;print(""Script Loaded - Use Button or Z Key"")"
+i2L6bkqp,⭐ 💎 Exchange profit method 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 11:00:00 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: remIJdoxWeIigxwcrsViXAjBVqGUbfvzUjMuYjJxyGci"
+2XMk3KYL,Untitled,Josif_tepe,C++,Wednesday 5th of November 2025 10:59:46 AM CDT,"#include <iostream>
+#include <vector>
+#include <bits/stdc++.h>
+using namespace std;
+
+typedef long long ll;
+const int maxn = 1004;
+const int INF = 2e9;
+const ll MOD = 1e9 + 7;
+int n, m;
+char mat[maxn][maxn];
+ll dp[maxn][maxn];
+
+ll rec(int i, int j) {
+    if(i == n - 1 and j == m - 1) {
+        return 1;
+    }
+    if(dp[i][j] != -1) {
+        return dp[i][j];
+    }
+    
+    ll res = 0;
+    if(i + 1 < n and mat[i + 1][j] != '*') {
+        res += rec(i + 1, j);
+        res %= MOD;
+    }
+    if(j + 1 < m and mat[i][j + 1] != '*') {
+        res += rec(i, j + 1);
+        res %= MOD;
+    }
+    
+    
+    dp[i][j] = res;
+    return res;
+}
+int main()
+{
+    cin >> n;
+    m = n;
+    
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < m; j++) {
+            cin >> mat[i][j];
+        }
+    }
+    if(mat[0][0] == '*') {
+        cout << 0 << endl;
+        return 0;
+    }
+    memset(dp, -1, sizeof dp);
+    cout << rec(0, 0) << endl;
+     return 0;
+}
+
+// 345263555
+// 35345263800
+"
+UUiqhzqm,Server Hardware And Disk Health (AI Generated),loayai,Bash,Wednesday 5th of November 2025 10:51:58 AM CDT,"command -v smartctl >/dev/null || missing=""${missing}smartmontools ""; command -v dmidecode >/dev/null || missing=""${missing}dmidecode""; echo -e '\n===== System Information =====\nHostname: '""$(hostname)""'\nUptime: '""$(uptime -p)""'\nCPU: '""$(lscpu | awk -F': +' '/Model name/{print $2; exit}')""'\nCPU Cores: '""$(nproc)""' ('""$(lscpu | awk -F': +' '/^CPU\(s\):/{print $2}')""' threads)'; if command -v dmidecode >/dev/null 2>&1; then dmi_mem=$(dmidecode -t memory 2>/dev/null); echo ""RAM Size: $(echo ""$dmi_mem"" | awk '/Size: [0-9]+ GB/{s+=$2} /Size: [0-9]+ MB/{s+=$2/1024} END{printf ""%.1f GB"", s}')""; echo ""RAM Type: $(echo ""$dmi_mem"" | awk -F': +' '/Type: DDR|Type: SDR/{if($2!=""Unknown"" && $2!=""""){print $2; exit}}')""; echo ""RAM Speed: $(echo ""$dmi_mem"" | awk -F': +' '/Speed: [0-9]+ MT/{print $2; exit}')""; echo ""RAM ECC: $(echo ""$dmi_mem"" | awk -F': +' '/Error Correction Type/{if($2==""None"")print ""Non-ECC"";else print ""ECC""; exit}')""; echo ""Motherboard: $(dmidecode -t baseboard 2>/dev/null | awk -F': +' '/Manufacturer:/{m=$2} /Product Name:/{p=$2} END{print m"" ""p}')""; else echo ""RAM/Motherboard info: dmidecode not installed""; fi; echo -e '\n===== GPU Information =====\n'""$(lspci | grep -iE 'VGA|Display|3D controller' | grep -iv 'NVMe' | sed 's/^.*: //' || echo ""No GPU detected"")""'\n\n===== Disk Information =====\n'""$(lsblk -bdno NAME,SIZE,ROTA 2>/dev/null | awk 'BEGIN{printf ""%-12s %-10s %-8s\n"",""DEVICE"",""SIZE"",""TYPE""} {type=($3==1?""HDD"":""SSD/NVMe""); printf ""%-12s %-10s %-8s\n"", ""/dev/""$1, sprintf(""%.1f GB"",$2/1000000000), type}')""'\n\n===== Detailed Disk Health & Age ====='; if ! command -v smartctl >/dev/null 2>&1; then echo ""smartmontools not installed - disk health data unavailable""; else for d in $(lsblk -dno NAME,TYPE 2>/dev/null | awk '$2~/disk|nvme/{print $1}'); do echo -e ""\n--- /dev/$d ---""; full_smart=$(smartctl -a /dev/$d 2>/dev/null); model=$(echo ""$full_smart"" | awk -F': +' '/Device Model|Model Number/{print $2; exit}'); [ -n ""$model"" ] && echo ""Model: $model""; health=$(echo ""$full_smart"" | awk -F': +' '/SMART overall-health|SMART Health Status/{print $2; exit}'); echo ""Health: ${health:-N/A}""; poh=$(echo ""$full_smart"" | awk '/Power_On_Hours|Power On Hours/{print $NF; exit}' | sed 's/,//g'); if [[ ""$poh"" =~ ^[0-9]+$ ]] && [ ""$poh"" -gt 0 ]; then echo ""$poh"" | awk '{gsub(/,/,"""",$1); days=int($1/24); years=$1/24/365; printf ""Power-On: %s hours (%d days / ~%.1f years)\n"", $1, days, years}'; fi; pcc=$(echo ""$full_smart"" | awk '/Power_Cycle_Count|Power Cycles/{print $NF; exit}'); [ -n ""$pcc"" ] && echo ""Power Cycles: $(echo $pcc | sed 's/,//g')""; temp=$(echo ""$full_smart"" | awk '/Temperature_Celsius/{print $10; exit} /Temperature:/{print $2; exit}'); [ -n ""$temp"" ] && echo ""Temperature: ${temp}°C""; tbw=$(echo ""$full_smart"" | awk '/Data Units Written/{val=$(NF-1); gsub(/,/,"""",val); if(val>0){tb=val*512000/1000000000000; printf ""%.2f"", tb; exit}}'); if [ -z ""$tbw"" ] || [ ""$tbw"" = ""0.00"" ]; then tbw=$(echo ""$full_smart"" | awk '/Total_LBAs_Written/{for(i=1;i<=NF;i++){if($i~/^[0-9]+$/ && $i>1000){lba=$i; tb=lba*512/1000000000000; printf ""%.2f"", tb; exit}}}'); fi; if [ -z ""$tbw"" ] || [ ""$tbw"" = ""0.00"" ]; then tbw=$(echo ""$full_smart"" | awk '/Host_Writes|Logical Sectors Written/{for(i=1;i<=NF;i++){if($i~/^[0-9,]+$/ && $i>1000){gsub(/,/,"""",$i); val=$i; tb=val*512/1000000000000; printf ""%.2f"", tb; exit}}}'); fi; [ -n ""$tbw"" ] && [ ""$tbw"" != ""0.00"" ] && echo ""Total Written: ${tbw} TB""; wear=$(echo ""$full_smart"" | awk '/Percentage Used/{print $NF; exit}' | sed 's/%//'); [ -n ""$wear"" ] && echo ""Wear Level: ${wear}%""; realloc=$(echo ""$full_smart"" | awk '$2==""Reallocated_Sector_Ct""{print $NF; exit}'); [ -n ""$realloc"" ] && echo ""Reallocated Sectors: $realloc""; pending=$(echo ""$full_smart"" | awk '$2==""Current_Pending_Sector""{print $NF; exit}'); [ -n ""$pending"" ] && echo ""Pending Sectors: $pending""; offline=$(echo ""$full_smart"" | awk '$2==""Offline_Uncorrectable""{print $NF; exit}'); [ -n ""$offline"" ] && echo ""Offline Uncorrectable: $offline""; done; fi; echo -e '\n===== OS Information =====\nOS: '""$(cat /etc/os-release 2>/dev/null | awk -F'=' '/^PRETTY_NAME/{gsub(/""/, """", $2); print $2}')""'\nKernel: '""$(uname -r)""'\nArchitecture: '""$(uname -m)""'\n'; if [ -n ""$missing"" ]; then echo -e ""\n========================================\nWARNING: Missing packages: $missing""; echo ""Install with: sudo apt install $missing # Debian/Ubuntu""; echo ""         or: sudo dnf install $missing # RHEL/Fedora""; fi"
+PRTnn3RM,✅ 💡 ChangeNOW Profit Exploit 💎 💵,Danielhelper,JavaScript,Wednesday 5th of November 2025 10:39:59 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: mTPOSfFpximHarJZfEztriuHvtTYabNSXTfiTflhegSZ"
+4RwCfM7v,Untitled,Josif_tepe,C++,Wednesday 5th of November 2025 10:38:19 AM CDT,"#include <iostream>
+#include <vector>
+#include <bits/stdc++.h>
+using namespace std;
+
+const int maxn = 30005;
+const int INF = 2e9;
+int n, a[maxn];
+int dp[maxn][4];
+int rec(int at, int medal) {
+    if(at == n) {
+        return 0;
+    }
+    if(dp[at][medal] != -1) {
+        return dp[at][medal];
+    }
+    int res = INF;
+    
+    if(medal == 1) {
+        for(int new_medal = 1; new_medal <= 3; new_medal++) {
+            int promena = 0;
+            
+            if(medal != a[at]) {
+                promena = 1;
+            }
+            res = min(res, rec(at + 1, new_medal) + promena);
+        }
+    }
+    else if(medal == 2) {
+        for(int new_medal = 2; new_medal <= 3; new_medal++) {
+            int promena = 0;
+            if(medal != a[at]) {
+                promena = 1;
+            }
+            
+            res = min(res, rec(at + 1, new_medal) + promena);
+        }
+    }
+    else {
+        int promena = 0;
+        if(medal != a[at]) {
+            promena = 1;
+        }
+        res = min(res, rec(at + 1, 3) + promena);
+    }
+    
+    dp[at][medal] = res;
+    return res;
+}
+int main()
+{
+    cin >> n;
+    for(int i = 0; i < n; i++) {
+        cin >> a[i];
+    }
+    
+    memset(dp, -1, sizeof dp);
+    int res = INF;
+    for(int i = 1; i <= 3; i++) {
+        res = min(res, rec(0, i));
+    }
+    
+    reverse(a, a + n);
+    memset(dp, -1, sizeof dp);
+    for(int i = 1; i <= 3; i++) {
+        res = min(res, rec(0, i));
+    }
+    
+    cout << res << endl;
+
+     return 0;
+}
+"
+aYai1z0g,📌 Make 3000$ in 20 minutes 💵 💎,Danielhelper,JavaScript,Wednesday 5th of November 2025 10:19:52 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: hhQVMLBQAwRyrbDLKexvujnpkgBOOHcHGlVZTxtVgQPk"
+MuKbVZ63,📌 Crypto Swap Glitch ✅ Still works 💎 💵,Danielhelper,JavaScript,Wednesday 5th of November 2025 09:59:48 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: BCYCBolGPpUrpfBCmBiTErNSBAqFFsAFyOkHFuUlnRgd"
+PmDMZ5fY,MapMaintCode,eisterman,Python,Wednesday 5th of November 2025 09:50:08 AM CDT,"          map_park_list.value = map_park_list.value.filter(p => p.has_contract);
+          map_park_list.value = map_park_list.value.filter(p => p.contract_validity_from !== null);
+          map_park_list.value.forEach(p => {
+            const theoretical_date = new Date(p.contract_validity_from);
+            theoretical_date.setFullYear(theoretical_date.getFullYear() + 1);
+            if (p.latest_preventive_maintenance_date === null) {
+              p.next_maint_date = theoretical_date.toISOString().split('T')[0];
+            } else {
+              const last_maint = new Date(p.latest_preventive_maintenance_date);
+              const theoretical_update = new Date(theoretical_date.getTime());
+              theoretical_update.setFullYear(last_maint.getFullYear() + 1);
+              if (last_maint.getTime() < theoretical_update.getTime() - 4 * monthMs) {
+                p.next_maint_date = theoretical_update.toISOString().split('T')[0];
+              } else { // if (Math.abs(theoretical_update.getTime() - last_maint.getTime()) < 6 * months) {
+                const date = new Date(theoretical_update.getTime());
+                date.setFullYear(date.getFullYear() + 1);
+                p.next_maint_date = date.toISOString().split('T')[0];
+                // } else {
+                //   p.next_maint_date = new Date(theoretical_update.getTime() + 24 * months).toISOString().split('T')[0];
+              }
+            }
+          });
+          // se la prossima manutenzione e' a piu' di 6 mesi nel futuro, non mostro il parco
+          // map_park_list.value = map_park_list.value.filter(p => Date.now() > (Date.parse(p.next_maint_date!) - 6 * months));
+          // tengo tutti i parchi la cui prossima manutenzione cade prima della scadenza del contratto (+1 mese)"
+Rtcg8fVL,ShutUp,maku_kenesu19,Lua,Wednesday 5th of November 2025 09:44:28 AM CDT,"script_name(""Shut Up"")
+script_author(""Maku Kenesu"")
+
+require ""lib.moonloader""
+require ""lib.sampfuncs""
+local ev = require ""lib.samp.events""
+local inicfg = require ""inicfg""
+
+------------------------------------------------------------
+-- BASIC CONFIG
+------------------------------------------------------------
+local PRIMARY_COLOR = 0xFF5A5A
+local LABEL_COLOR = ""{FF5A5A}""  -- primary cool red
+local ACCENT_COLOR = ""{00CED1}"" -- accent teal
+local label = LABEL_COLOR .. ""[Shut Up]{FFFFFF} ""
+local iniFilePath = ""ShutUp.ini""
+
+-- Load or create INI
+local config = inicfg.load({
+  global = {},
+  newbie = {},
+  anywhere = {}
+}, iniFilePath)
+
+------------------------------------------------------------
+-- HELPERS
+------------------------------------------------------------
+local function saveConfig()
+  inicfg.save(config, iniFilePath)
+end
+
+-- Ensure the INI file exists on first run
+if not doesFileExist(iniFilePath) then
+  saveConfig()
+end
+
+local function cleanName(name)
+  if not name then return """" end
+  return name:gsub(""_"", "" ""):lower()
+end
+
+local function formatName(name)
+  return (name:gsub(""(%a)([%w_']*)"", function(first, rest)
+    return first:upper() .. rest:lower()
+  end))
+end
+
+local function nameInTable(tbl, name)
+  local checkName = cleanName(name)
+  for _, n in ipairs(tbl) do
+    if cleanName(n) == checkName then return true end
+  end
+  return false
+end
+
+local function removeName(tbl, name)
+  local checkName = cleanName(name)
+  for i, n in ipairs(tbl) do
+    if cleanName(n) == checkName then
+      table.remove(tbl, i)
+      return true
+    end
+  end
+  return false
+end
+
+------------------------------------------------------------
+-- CHAT FILTER
+------------------------------------------------------------
+function ev.onServerMessage(color, text)
+  for _, n in ipairs(config.anywhere) do
+    if text:lower():find(cleanName(n)) then
+      sampAddChatMessage(label .. ""[Blocked Chat Anywhere]: "" .. formatName(n), PRIMARY_COLOR)
+      return false
+    end
+  end
+
+  local globalName = text:match(""%(%(.-%s([%w_]+%s?[%w_]*)%:%s"")
+  if globalName and nameInTable(config.global, globalName) then
+    sampAddChatMessage(label .. ""[Blocked Global Chat]: "" .. formatName(globalName), PRIMARY_COLOR)
+    return false
+  end
+
+  local newbieName = text:match(""%*%*%s.-%s([%w_]+%s?[%w_]*)%:%s"")
+  if newbieName and nameInTable(config.newbie, newbieName) then
+    sampAddChatMessage(label .. ""[Blocked Newbie Chat]: "" .. formatName(newbieName), PRIMARY_COLOR)
+    return false
+  end
+end
+
+------------------------------------------------------------
+-- MAIN LOOP / COMMANDS
+------------------------------------------------------------
+function main()
+  while not isSampAvailable() do wait(100) end
+  sampAddChatMessage(label .. ""loaded. Type /shutup.help for commands."", PRIMARY_COLOR)
+
+  sampRegisterChatCommand(""shutup.help"", function()
+    sampAddChatMessage(LABEL_COLOR .. ""====== Shut Up Commands ======"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/shutup.g [Name]{FFFFFF} - Block player's global chat messages"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/shutup.n [Name]{FFFFFF} - Block player's newbie messages"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/shutthefuckup [Name]{FFFFFF} - Block player's chat anywhere"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/noshutup.g [Name]{FFFFFF} - Unblock player's global chat messages"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/noshutup.n [Name]{FFFFFF} - Unblock player's newbie"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/noshutthefuckup [Name]{FFFFFF} - Unblock player's chat anywhere"", PRIMARY_COLOR)
+    sampAddChatMessage(ACCENT_COLOR .. ""/shutup.list{FFFFFF} - Show blocked list"", PRIMARY_COLOR)
+  end)
+
+  sampRegisterChatCommand(""shutup.g"", function(param)
+    if not param or param == """" then
+      sampAddChatMessage(label .. ""Usage: /shutup.g [Name]"", PRIMARY_COLOR)
+      return
+    end
+    local cleaned = cleanName(param)
+    if not nameInTable(config.global, cleaned) then
+      table.insert(config.global, cleaned)
+      saveConfig()
+      sampAddChatMessage(label .. ""Blocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} in global."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} already blocked in global."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""shutup.n"", function(param)
+    if not param or param == """" then
+      sampAddChatMessage(label .. ""Usage: /shutup.n [Name]"", PRIMARY_COLOR)
+      return
+    end
+    local cleaned = cleanName(param)
+    if not nameInTable(config.newbie, cleaned) then
+      table.insert(config.newbie, cleaned)
+      saveConfig()
+      sampAddChatMessage(label .. ""Blocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} in newbie."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} already blocked in newbie."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""shutthefuckup"", function(param)
+    if not param or param == """" then
+      sampAddChatMessage(label .. ""Usage: /shutup.a [Name]"", PRIMARY_COLOR)
+      return
+    end
+    local cleaned = cleanName(param)
+    removeName(config.global, cleaned)
+    removeName(config.newbie, cleaned)
+    if not nameInTable(config.anywhere, cleaned) then
+      table.insert(config.anywhere, cleaned)
+      saveConfig()
+      sampAddChatMessage(label .. ""Blocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} everywhere."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} already blocked everywhere."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""noshutup.g"", function(param)
+    local cleaned = cleanName(param)
+    if removeName(config.global, cleaned) then
+      saveConfig()
+      sampAddChatMessage(label .. ""Unblocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} from global."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} not found in global."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""noshutup.n"", function(param)
+    local cleaned = cleanName(param)
+    if removeName(config.newbie, cleaned) then
+      saveConfig()
+      sampAddChatMessage(label .. ""Unblocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} from newbie."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} not found in newbie."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""shutthefuckup"", function(param)
+    local cleaned = cleanName(param)
+    if removeName(config.anywhere, cleaned) then
+      saveConfig()
+      sampAddChatMessage(label .. ""Unblocked "" .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} from anywhere."", PRIMARY_COLOR)
+    else
+      sampAddChatMessage(label .. ACCENT_COLOR .. formatName(cleaned) .. ""{FFFFFF} not found in anywhere."", PRIMARY_COLOR)
+    end
+  end)
+
+  sampRegisterChatCommand(""shutup.list"", function()
+    local function formatList(tbl)
+      local arr = {}
+      for _, n in ipairs(tbl) do
+        table.insert(arr, formatName(n))
+      end
+      return table.concat(arr, "", "")
+    end
+
+    sampAddChatMessage(LABEL_COLOR .. ""==== Blocked Names ===="", PRIMARY_COLOR)
+    sampAddChatMessage(""{FFFFFF}Global: "" .. ACCENT_COLOR .. formatList(config.global), PRIMARY_COLOR)
+    sampAddChatMessage(""{FFFFFF}Newbie: "" .. ACCENT_COLOR .. formatList(config.newbie), PRIMARY_COLOR)
+    sampAddChatMessage(""{FFFFFF}Anywhere: "" .. ACCENT_COLOR .. formatList(config.anywhere), PRIMARY_COLOR)
+  end)
+end"
+549KTN55,✅ 💎 Free BTC method 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 09:39:45 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: FtKAAcgFmMYXOSEYeGCKoTqPmpnBuWlBXMWsWIbRZdvb"
+rLqePLhX,Untitled,Josif_tepe,C++,Wednesday 5th of November 2025 09:38:33 AM CDT,"#include <iostream>
+#include <vector>
+using namespace std;
+
+
+int main()
+{
+    int n;
+    cin >> n;
+    
+    int niza[n];
+    for(int i = 0; i < n; i++) {
+        cin >> niza[i];
+    }
+    
+    int niza2[n];
+    for(int i = 0; i < n; i++) {
+        
+        if(niza[i] == 0) {
+            niza2[i] = 7;
+        }
+        else if(niza[i] % 2 == 0) {
+            niza2[i] = niza[i] * 2;
+        }
+        else if(niza[i] % 2 == 1) {
+            niza2[i] = niza[i] - 1;
+        }
+        
+    }
+    
+    for(int i = 0; i < n; i++) {
+        cout << niza2[i] << "" "";
+    }
+    cout << endl;
+     return 0;
+}
+"
+EbMkaJTS,Untitled,Josif_tepe,C++,Wednesday 5th of November 2025 09:31:09 AM CDT,"#include <iostream>
+#include <vector>
+using namespace std;
+
+bool dali_e_palindrom(int x) {
+    int prevrten_broj = 0;
+    int tmp = x;
+    while(tmp > 0) {
+        int cifra = tmp % 10;
+        prevrten_broj = (prevrten_broj * 10) + cifra;
+        tmp /= 10;
+    }
+    
+    if(x == prevrten_broj) {
+        return true;
+    }
+    
+    return false;
+}
+int main()
+{
+    
+    int number;
+    cin >> number;
+    
+    if(dali_e_palindrom(number)) {
+        cout << number << "" palindrome true"" << endl;
+    }
+    else {
+        cout <<  number << "" palindrome false"" << endl;
+    }
+    
+    int prv_paren_pogolem, prv_paren_pomal;
+    
+    if(number % 2 == 0) {
+        prv_paren_pomal = number - 2;
+        prv_paren_pogolem = number + 2;
+    }
+    else {
+        prv_paren_pomal = number - 1;
+        prv_paren_pogolem = number + 1;
+    }
+    
+    if(dali_e_palindrom(prv_paren_pomal)) {
+        cout << prv_paren_pomal << "" palindrome true"" << endl;
+    }
+    else {
+        cout << prv_paren_pomal << "" palindrome false"" << endl;
+    }
+    
+    if(dali_e_palindrom(prv_paren_pogolem)) {
+        cout << prv_paren_pogolem << "" palindrome true"" << endl;
+    }
+    else {
+        cout << prv_paren_pogolem << "" palindrome false"" << endl;
+    }
+    
+     return 0;
+}
+"
+dRdn5R9X,Untitled,Josif_tepe,C++,Wednesday 5th of November 2025 09:23:52 AM CDT,"#include <iostream>
+#include <vector>
+using namespace std;
+
+bool dali_e_palindrom(int x) {
+    vector<int> v;
+    
+    while(x > 0) {
+        int cifra = x % 10;
+        v.push_back(cifra);
+        
+        x /= 10;
+    }
+    
+    int i = 0;
+    int j = (int) v.size() - 1;
+    
+    while(i < j) {
+        if(v[i] != v[j]) {
+            return false;
+        }
+        i++;
+        j--;
+    }
+    return true;
+    
+    
+}
+int main()
+{
+    
+    int number;
+    cin >> number;
+    
+    if(dali_e_palindrom(number)) {
+        cout << number << "" palindrome true"" << endl;
+    }
+    else {
+        cout <<  number << "" palindrome false"" << endl;
+    }
+    
+    int prv_paren_pogolem, prv_paren_pomal;
+    
+    if(number % 2 == 0) {
+        prv_paren_pomal = number - 2;
+        prv_paren_pogolem = number + 2;
+    }
+    else {
+        prv_paren_pomal = number - 1;
+        prv_paren_pogolem = number + 1;
+    }
+    
+    if(dali_e_palindrom(prv_paren_pomal)) {
+        cout << prv_paren_pomal << "" palindrome true"" << endl;
+    }
+    else {
+        cout << prv_paren_pomal << "" palindrome false"" << endl;
+    }
+    
+    if(dali_e_palindrom(prv_paren_pogolem)) {
+        cout << prv_paren_pogolem << "" palindrome true"" << endl;
+    }
+    else {
+        cout << prv_paren_pogolem << "" palindrome false"" << endl;
+    }
+    
+     return 0;
+}
+"
+KTtHx56E,📌 EASY PROFIT GUIDE ✅ Still works 🔥 🚨,Danielhelper,JavaScript,Wednesday 5th of November 2025 09:19:43 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: FJHiSRhXEACYhCdaDWZbXwKsfCPvIrjejnQFRcWCqCOH"
+qJKp7Vk5,✅ 💎 Instant BTC Profit Method ✅ Working 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 08:59:41 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: sAbZByJyWrjymwhvqpRyWLlDuNjeJjyaAwawVAyTVwNF"
+2XEDwyep,LIS in O(NlogN),Hezov,C++,Wednesday 5th of November 2025 08:39:57 AM CDT,"// Subsir crescator de lungime maxima in O(NlogN)
+#include <iostream>
+using namespace std;
+const int mxN = 2e5, INF = 2e9;
+// dp[i] - cea mai mica valoare in care se termina un subsir crescator de lungime i
+int v[mxN+10], dp[mxN+10];
+int main()
+{
+    int n ;
+    cin >> n ;
+    dp[0] = -INF;
+    for(int i = 1;i<=n;i++)
+        cin >> v[i], dp[i] = INF;
+    for(int poz = 1;poz<=n;poz++)
+    {
+        int st = 0, dr = n-1 , mid, sol = -1;
+        while(st <= dr)
+        {
+            mid = (st + dr) / 2;
+            if(v[poz] <= dp[mid])
+                dr = mid-1;
+            else st = mid+1, sol = mid;
+
+        }
+        dp[sol+1] = min(dp[sol+1],v[poz]);
+    }
+    int sol = 0;
+    for(int i = 1;i<=n;i++)
+    {
+        if(dp[i] != INF)
+            sol = i;
+        else break;
+    }
+    cout << sol << '\n';
+    return 0;
+}
+"
+k9tzESi5,💎 ⭐ MAKE $2500 IN 15 MIN ✅ Working 💵 💎,Danielhelper,JavaScript,Wednesday 5th of November 2025 08:39:40 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: jEobtGCTjMriFsaYGWZQrWptkjhLSTAmAEfxjUnUVEGw"
+XsA0bXx0,⭐ 💎 Exchange profit method 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 08:19:33 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: SFPKnPMwhwGcvNSFucxGhwiLVUwxHWKlQHVZUowKOLSu"
+qVPxbUJC,Racing Squawks Code (For US Final),theballaam96,C,Wednesday 5th of November 2025 08:18:49 AM CDT,"void CavesSquawksCode(void) {
+	short *paad2 = CurrentActorPointer_0->paad2;
+	actorData *parent = CurrentActorPointer_0->parent;
+	initCharSpawnerActor();
+	if ((CurrentActorPointer_0->obj_props_bitfield & 0x10) == 0) {
+		modifyCharSpawnerAttributes(0x23D, 0x23D, 0x23E);
+		CurrentActorPointer_0->control_state = 2;
+		ActorPaad->counter = 0x10;
+		*paad2 = 0x78;
+		spawnTimer(0xDC, 0x2A, 0x64);
+		parent = CurrentActorPointer_0->parent;
+		parent->control_state = 2;
+		parent->control_state_progress = 0;
+		parent->shadow_intensity = 255;
+		TiedCharacterSpawner->unk_46 |= 0x24;
+		setHUDItemAsInfinite(ITEMID_CRYSTALS, 0, 1);
+	}
+	if (parent) {
+		if (parent->control_state == 5) {
+			CurrentActorPointer_0->control_state = 0x23;
+			CurrentActorPointer_0->control_state_progress = 0;
+		}
+	}
+	if (CurrentActorPointer_0->control_state == 0x23) {
+		CurrentActorPointer_0->control_state = 0x37;
+		setHUDItemAsInfinite(ITEMID_CRYSTALS, 0, 0);
+		deleteActorContainer(CurrentActorPointer_0->parent);
+	}
+	int state = ringRaceHandle(0x78, 0x10);
+	if ((state == 1) || (state == 2))  {
+		if (parent) {
+			parent->control_state = 0;
+		}
+		CurrentActorPointer_0->control_state = 0x23;
+		CurrentActorPointer_0->control_state_progress = 0;
+	}
+}"
+eMxwjuAn,Multicore Management rev_01,pleasedontcode,Arduino,Wednesday 5th of November 2025 08:08:44 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Multicore Management
+	- Source Code NOT compiled for: XIAO ESP32S3
+	- Source Code created on: 2025-11-05 14:07:56
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Include in requirements the integration of Wi-Fi */
+	/* connectivity for remote monitoring and data */
+	/* transfer, utilizing the ESP32S3’s built-in */
+	/* wireless capabilities for IoT applications. Split */
+	/* two cores managing wifi and sensor reading send */
+	/* info on wifi. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+/* START CODE */
+
+// Multicore example for XIAO ESP32S3
+// Demonstrates basic setup for a multicore enabled program
+
+// Include necessary libraries
+#include <WiFi.h>
+
+// Wi-Fi credentials
+const char* ssid = ""yourSSID"";
+const char* password = ""yourPassword"";
+
+// Function to set up Wi-Fi connection
+void setupWiFi() {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    Serial.print(""Connecting to WiFi..."");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(""."");
+    }
+    Serial.println(""Connected!"");
+    Serial.print(""IP address: "");
+    Serial.println(WiFi.localIP());
+}
+
+// Task to handle Wi-Fi connection
+void wifiTask(void* parameter) {
+    setupWiFi();
+    while (true) {
+        // Periodically check Wi-Fi connection
+        if (WiFi.status() != WL_CONNECTED) {
+            WiFi.disconnect();
+            setupWiFi();
+        }
+        vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds
+    }
+}
+
+// Task to handle sensor reading or other work
+void sensorTask(void* parameters) {
+    while (true) {
+        // Placeholder for sensor reading code
+        // For example, reading temperature, humidity, etc.
+        // Send data over Wi-Fi
+        // ....
+        vTaskDelay(1000 / portTICK_PERIOD_MS); // Run every second
+    }
+}
+
+// Setup function runs once at startup
+void setup() {
+    Serial.begin(115200);
+    while (!Serial); // Wait for serial to initialize
+    Serial.println(""Multicore Wi-Fi sensor example starting..."");
+    // Create separate tasks for Wi-Fi and sensors
+    xTaskCreatePinnedToCore(wifiTask, ""WiFi Task"", 4096, NULL, 1, NULL, 0); // Run on core 0
+    xTaskCreatePinnedToCore(sensorTask, ""Sensor Task"", 4096, NULL, 1, NULL, 1); // Run on core 1
+}
+
+// Main loop does nothing here
+void loop() {
+    delay(1000); // Idle delay
+}
+
+/* END CODE */
+"
+ZtVw8WNJ,12,nq1s788,Python,Wednesday 5th of November 2025 08:01:43 AM CDT,"#https://inf-ege.sdamgia.ru/test?theme=356
+s = '8' * 64
+while '222' in s or '888' in s:
+     if '222' in s:
+          s = s.replace('222', '8', 1)
+     else:
+          s = s.replace('888', '2', 1)
+print(s)"
+WTS1yBdQ,✅ 💎 Instant BTC Profit Method ✅ Working 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 07:59:31 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: ncjhTKThjgbbTNJSYlSQGvdoljAUPvwZJSUZZTXVmTOC"
+n3rNswdK,monitor,pastabowl,Python,Wednesday 5th of November 2025 07:48:51 AM CDT,"#!/usr/bin/env python3
+import sys
+from types import NoneType
+
+from PyQt6.QtCore import QObject, QCoreApplication, QTimer, pyqtSlot as Slot
+from PyQt6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage, QDBusVariant, QDBusReply
+
+
+class MPRISMonitor(QObject):
+    def __init__(self):
+        super().__init__()
+
+        self.session = QDBusConnection.sessionBus()
+        self.playerList: list[str] = self.getPlayers()
+
+        self.connectedService: str = """"
+        self.playerInterface: QDBusInterface = MPRISMonitor.getPlayerInterface(self.playerList[0])
+
+        self.metadata: dict = {}
+        self.state: str = """"
+        self.position: int = 0
+
+        self.playerInterface.connect(
+            service,
+            ""/org/mpris/MediaPlayer2"",
+            ""org.freedesktop.DBus.Properties"",
+            ""PropertiesChanged"",
+            handle_properties_changed
+        )
+
+    def getPlayers(self) -> list[str]:
+        """"""Return a list of all active MPRIS player service names.""""""
+        reply = self.session.interface().registeredServiceNames()
+        mediaPlayers: list[str] = []
+        for s in str(reply.value()).split(""\', \'""):
+            if s.startswith(""org.mpris.MediaPlayer2.""):
+                mediaPlayers.append(s)
+        return mediaPlayers
+
+    @staticmethod
+    def getPlayerInterface(serviceName: str):
+        """"""Get a DBus interface for a given player.""""""
+        return QDBusInterface(
+            serviceName,
+            ""/org/mpris/MediaPlayer2"",
+            ""org.freedesktop.DBus.Properties"",
+            QDBusConnection.sessionBus()
+        )
+
+    def getMetadata(self):
+        msg: QDBusMessage = self.playerInterface.call(""Get"", ""org.mpris.MediaPlayer2.Player"", ""Metadata"")
+        if msg.arguments():
+            self.metadata = msg.arguments()[0].variant()
+
+        return self.metadata
+
+    def getState(self):
+        msg = self.playerInterface.call(""Get"", ""org.mpris.MediaPlayer2.Player"", ""PlaybackStatus"")
+        if msg.arguments():
+            return msg.arguments()[0].variant()
+        return None
+
+    def getPosition(self):
+        msg = self.playerInterface.call(""Get"", ""org.mpris.MediaPlayer2.Player"", ""Position"")
+        if msg.arguments():
+            return msg.arguments()[0].variant() / 1_000_000  # µs → s
+        return 0
+
+    @Slot(QDBusMessage)
+    def handlePropertiesChanged(self, msg: QDBusMessage):
+        args = msg.arguments()
+        if len(args) < 2:
+            return
+        changed = args[1]  # dict of changed properties
+        if not isinstance(changed, dict):
+            return
+
+        if ""Metadata"" in changed:
+            cMetadata = changed[""Metadata""].variant()
+            if cMetadata != self.metadata:
+                print_metadata(metadata)
+                self.metadata = metadata
+
+        if ""PlaybackStatus"" in changed:
+            cState = changed[""PlaybackStatus""].variant()
+            if cState != self.state:
+                print(f""▶️  Playback state: {state}"")
+                self.state = state
+
+    def updatePosition(self):
+        pos = self.getPosition()
+        if abs(pos - self.position) > 2:
+            
+
+# --- Connect D-Bus signals ---
+
+
+# --- Periodic position check ---
+def update_position():
+    global last_position
+    pos = get_position()
+    if abs(pos - last_position) > 2:
+        print(f""⏱️  Position: {pos:.1f}s"")
+        last_position = pos
+
+timer = QTimer()
+timer.timeout.connect(update_position)
+timer.start(5000)  # every 5 seconds
+
+# --- Prime with current info ---
+metadata = get_metadata()
+print_metadata(metadata)
+state = get_state()
+print(f""▶️  Playback state: {state}"")
+
+print(""🎧 QtDBus MPRIS monitor started. Press Ctrl+C to quit.\n"")
+
+# --- Initialize Qt application (no GUI) ---
+app = QCoreApplication(sys.argv)
+
+# --- Run ---
+sys.exit(app.exec())
+"
+iK2MC5WV,display WordPress / PHP path and url constants,wpgenie,PHP,Wednesday 5th of November 2025 07:44:47 AM CDT,"/* display WordPress / PHP path and url constants */
+
+add_shortcode( 'wp_display_constants', 'wp_display_constants_shortcode_handler' );
+
+function wp_display_constants_shortcode_handler() {
+    
+
+return ""<pre>"".""
+Constant WP_HOME - "".WP_HOME.""
+Constant WP_SITEURL - "".WP_SITEURL.""
+
+Constant WPINC - "".WPINC.""
+
+
+Constant WP_CONTENT_DIR - "".WP_CONTENT_DIR.""
+Constant WP_CONTENT_URL - "".WP_CONTENT_URL.""
+
+Constant WP_PLUGIN_DIR - "".WP_PLUGIN_DIR.""
+Constant WP_PLUGIN_URL - "".WP_PLUGIN_URL.""
+
+Constant WPMU_PLUGIN_DIR - "".WPMU_PLUGIN_URL.""
+Constant WPMU_PLUGIN_URL - "".WPMU_PLUGIN_URL.""
+
+Constant ABSPATH - "".ABSPATH.""
+
+Constant __FILE__ - "".__FILE__.""
+Constant __DIR__ - "".__DIR__.""
+</pre>"";
+
+}"
+5DuVt6wN,✅ 💡 ChangeNOW Profit Exploit 💎 💵,Danielhelper,JavaScript,Wednesday 5th of November 2025 07:39:30 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: nPHjExSndfLSPGxcQrZelWojXqmEkQupKdiIRZCHiXCJ"
+NiyXDDv1,Untitled,xShub,JavaScript,Wednesday 5th of November 2025 07:36:43 AM CDT,"// Array bidimensionale predefinito
+let prodotti = [
+    [""ID"", ""Prodotto"", ""Prezzo"", ""Quantità""],
+    [1, ""Computer"", 899.99, 15],
+    [2, ""Mouse"", 25.50, 42],
+    [3, ""Tastiera"", 45.00, 23],
+    [4, ""Monitor"", 299.99, 8],
+    [5, ""Cuffie"", 79.99, 31]
+];
+
+let mioBottone = document.getElementById(""bottone-tabella"");
+let bottoneScomparsa = document.getElementById(""cancella-tabella"");
+mioBottone.addEventListener(""click"", creaTabella)
+bottoneScomparsa.addEventListener(""click"", cancellaTabella)
+
+function cancellaTabella() {
+    let contenitoreTabella = document.getElementById(""container"");
+    contenitoreTabella.innerHTML = """";
+}
+
+function creaTabella () {
+
+    cancellaTabella();
+    let creaTabella = document.createElement(""table"");
+    creaTabella.className = ""table-class"";
+    let contenitoreTabella = document.getElementById(""container"");
+    contenitoreTabella.appendChild(creaTabella);
+
+    for (let i = 0; i < prodotti.length; i++) {
+        let row = document.createElement(""tr"");
+        let arrayProdotti = prodotti[i];
+
+        for (let cellaData of arrayProdotti) {
+            let cella;
+
+            if (i === 0) {
+                cella = document.createElement(""th"");
+            } else {
+                cella = document.createElement(""td"");
+            }
+            cella.textContent = cellaData;
+            row.appendChild(cella);
+        }
+
+        creaTabella.appendChild(row);
+    }
+
+    // if (contenitoreTabella) {
+    //     contenitoreTabella.appendChild(creaTabella);
+    // }
+
+    let celleDati = document.querySelectorAll('.table-class');
+
+    // for (let cella of celleDati) {
+    //     cella.style.backgroundColor = '#e0f7fa';
+    // }
+
+    celleDati.forEach(cella => {
+        cella.style.backgroundColor = '#e0f7fa';
+    });
+}
+
+// creaTabella();
+
+//
+
+// HTML
+
+<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>Esercizio 3 novembre</title>
+    <script defer src=""index.js""></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Verdana, Tahoma, Arial, Helvetica, sans-serif;
+        }
+
+        button {
+            font-family: Verdana, Tahoma, Arial, Helvetica, sans-serif;
+            font-size: 1.3em;
+        }
+
+        .table-class {
+            border-collapse: collapse;
+            border: 1px solid black;
+            width: 100%;
+        }
+        .table-class th, .table-class td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        .table-class th {
+            background-color: #92cabd;
+        }
+
+    </style>
+</head>
+<body>
+<br>
+<button id=""bottone-tabella"">Cliccami per far apparire la tabella!</button>
+<br><br>
+<button id=""cancella-tabella"">Cliccami per far scomparire la tabella</button>
+
+<div id=""container"">
+
+</div>
+
+</body>
+</html>"
+rdRk2NME,💎 ⭐ MAKE $2500 IN 15 MIN ✅ Working 💵 💎,Danielhelper,JavaScript,Wednesday 5th of November 2025 07:19:28 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: FxwPaUiVrZKWkWDAZEsqueORSruZShpmavTUMCntzuGc"
+JZXy7jUH,Untitled,bruno83,Python,Wednesday 5th of November 2025 07:01:12 AM CDT,"1. zadatak:
+
+import math
+
+class Kompleks:
+    def __init__(self, a=0.0, b=0.0):
+        self.a = float(a)
+        self.b = float(b)
+
+    def __repr__(self):
+        if self.b >= 0:
+            return f""{self.a}+{self.b}i""
+        else:
+            return f""{self.a}{self.b}i""
+
+    def __add__(self, other):
+        return Kompleks(self.a + other.a, self.b + other.b)
+
+    def __sub__(self, other):
+        return Kompleks(self.a - other.a, self.b - other.b)
+
+    def __mul__(self, other):
+        real = self.a * other.a - self.b * other.b
+        imag = self.a * other.b + self.b * other.a
+        return Kompleks(real, imag)
+
+    def modul(self):
+        return math.sqrt(self.a ** 2 + self.b ** 2)
+
+
+# primjer za testiranje 
+z1 = Kompleks(3, 4)
+z2 = Kompleks(1, -2)
+
+print(""z1 ="", z1)
+print(""z2 ="", z2)
+print(""z1 + z2 ="", z1 + z2)
+print(""z1 - z2 ="", z1 - z2)
+print(""z1 * z2 ="", z1 * z2)
+print(""|z1| ="", z1.modul())
+
+
+# 2. zadatak:
+class Matrica:
+    def __init__(self, m, n, vrijednost=0):
+        if m <= 0 or n <= 0:
+            raise ValueError(""Dimenzije moraju biti pozitivne cijele vrijednosti!"")
+        self.m = m
+        self.n = n
+        self.podaci = [[vrijednost for _ in range(n)] for _ in range(m)]
+
+    def get(self, i, j):
+        if not (0 <= i < self.m and 0 <= j < self.n):
+            raise IndexError(""Indeksi izvan granica matrice!"")
+        return self.podaci[i][j]
+
+    def set(self, i, j, v):
+        if not (0 <= i < self.m and 0 <= j < self.n):
+            raise IndexError(""Indeksi izvan granica matrice!"")
+        self.podaci[i][j] = v
+
+    def transponiraj(self):
+        nova = Matrica(self.n, self.m)
+        for i in range(self.m):
+            for j in range(self.n):
+                nova.podaci[j][i] = self.podaci[i][j]
+        return nova
+
+    def __repr__(self):
+        s = """"
+        for red in self.podaci:
+            s += "" "".join(f""{x:6}"" for x in red) + ""\n""
+        return s
+
+# primjer za testiranje
+A = Matrica(2, 3)
+A.set(0, 0, 1)
+A.set(0, 1, 2)
+A.set(1, 2, 5)
+
+print(""Matrica A:"")
+print(A)
+
+print(""Transponirana matrica At:"")
+print(A.transponiraj())
+
+
+# 3. zadatak:
+class Vrijeme:
+    def __init__(self, h=0, m=0):
+        total = h * 60 + m
+        total %= 24 * 60
+        self.h = total // 60
+        self.m = total % 60
+
+    def __repr__(self):
+        return f""{self.h:02d}:{self.m:02d}""
+
+    def __add__(self, minute):
+        if not isinstance(minute, int):
+            raise TypeError(""Vrijeme se može zbrajati samo s brojem minuta (int)!"")
+        total = (self.h * 60 + self.m + minute) % (24 * 60)
+        return Vrijeme(total // 60, total % 60)
+
+    def __sub__(self, minute):
+        if not isinstance(minute, int):
+            raise TypeError(""Vrijeme se može oduzimati samo s brojem minuta (int)!"")
+        total = (self.h * 60 + self.m - minute) % (24 * 60)
+        return Vrijeme(total // 60, total % 60)
+
+    def __iadd__(self, minute):
+        if not isinstance(minute, int):
+            raise TypeError(""Vrijeme se može uvećati samo za broj minuta (int)!"")
+        total = (self.h * 60 + self.m + minute) % (24 * 60)
+        self.h, self.m = total // 60, total % 60
+        return self
+
+    def __isub__(self, minute):
+        if not isinstance(minute, int):
+            raise TypeError(""Vrijeme se može smanjiti samo za broj minuta (int)!"")
+        total = (self.h * 60 + self.m - minute) % (24 * 60)
+        self.h, self.m = total // 60, total % 60
+        return self
+
+# primjer za testiranje
+v = Vrijeme(23, 50)
+print(""Početno:"", v)
+print(""v + 30 ="", v + 30)
+print(""v - 90 ="", v - 90)
+v += 80
+print(""Nakon += 80:"", v)
+v -= 200
+print(""Nakon -= 200:"", v)
+print(""Normalizirano:"", Vrijeme(25, 70))
+
+
+# 4. zadatak:
+import math
+
+class Tocka:
+    def __init__(self, x=0.0, y=0.0):
+        self.x = float(x)
+        self.y = float(y)
+
+    def udaljenost(self, t):
+        return math.sqrt((self.x - t.x)**2 + (self.y - t.y)**2)
+
+    def __repr__(self):
+        return f""({self.x}, {self.y})""
+
+
+class Trokut:
+    def __init__(self, A, B, C):
+        self.A = A
+        self.B = B
+        self.C = C
+
+    def _stranice(self):
+        a = self.B.udaljenost(self.C)
+        b = self.A.udaljenost(self.C)
+        c = self.A.udaljenost(self.B)
+        return a, b, c
+
+    def opseg(self):
+        a, b, c = self._stranice()
+        return a + b + c
+
+    def povrsina(self):
+        a, b, c = self._stranice()
+        s = (a + b + c) / 2
+        return math.sqrt(s * (s - a) * (s - b) * (s - c))
+
+    def tip(self):
+        a, b, c = self._stranice()
+        eps = 1e-9
+        if abs(a - b) < eps and abs(b - c) < eps:
+            return ""jednakostraničan""
+        elif abs(a - b) < eps or abs(b - c) < eps or abs(a - c) < eps:
+            return ""jednakokračan""
+        else:
+            return ""raznostraničan""
+
+    def __repr__(self):
+        return f""Trokut: A={self.A}, B={self.B}, C={self.C}""
+
+# podaci za testiranje
+A = Tocka(0, 0)
+B = Tocka(3, 0)
+C = Tocka(0, 4)
+
+t = Trokut(A, B, C)
+
+print(t)
+print(""Stranice:"", t._stranice())
+print(""Opseg:"", t.opseg())
+print(""Površina:"", t.povrsina())
+print(""Tip trokuta:"", t.tip())
+
+"
+vAjS8msY,📌 Make 3000$ in 20 minutes 💵 💎,Danielhelper,JavaScript,Wednesday 5th of November 2025 06:59:26 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: jpWVbyFdOyfvzfaPSXbYWJrghQUcQyPCekIWbbKdpyqi"
+WPhbpmRN,📌 EASY PROFIT GUIDE ✅ Still works 🔥 🚨,Danielhelper,JavaScript,Wednesday 5th of November 2025 06:39:24 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: enJBmQKuhbPFUiuCZOdnSpVyNiHZyoQraWWvtDWZVOfe"
+Ef91ykT7,✅ 💎 Free BTC method 🚨 🔥,Danielhelper,JavaScript,Wednesday 5th of November 2025 06:19:11 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: HrGqzxvripkFGcmMVJZTqpsFuHcKNmYIvAjeKbGbxVKD"
+9CuJbzTn,📌 Crypto Swap Glitch ✅ Still works 💎 💵,Danielhelper,JavaScript,Wednesday 5th of November 2025 05:59:09 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: twjbyaWmckYtRWnLvcqaAiyTOFvtUorSisThMNeYupfv"
+gtktsKKP,Untitled,tibiole,HTML,Wednesday 5th of November 2025 05:50:14 AM CDT,"GTM-ben megadott beleegyezés azonosítók: (ne belevésve adjuk meg, hanem adminban rögzítettem mindegyikhez)
+
+albacross_consent
+meta_consent
+ga_consent
+gads_consent
+heap_consent
+leadfeeder_consent
+linkedin_consent
+clarity_consent
+
+
+
+
+Alap betöltéskor:
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+
+  // Alapértelmezett állapot beállítása (MINDEN DENIED)
+  // Fontos: A Google beépített típusait IS érdemes kezelni a v2 miatt.
+  gtag('consent', 'default', {
+    'ad_storage': 'denied',
+    'analytics_storage': 'denied',
+    'ad_user_data': 'denied',
+    'ad_personalization': 'denied',
+    // ... és az egyedi azonosítók:
+    'albacross_consent': 'denied',
+    'meta_consent': 'denied',
+    'ga_consent': 'denied',
+    'gads_consent': 'denied',
+    'heap_consent': 'denied',
+    'leadfeeder_consent': 'denied',
+    'linkedin_consent': 'denied',
+    'clarity_consent': 'denied',
+    'wait_for_update': 500 // Opcionális: várakozási idő a frissítésre
+  });
+  
+  // ... GTM konténer betöltése itt ...
+</script>
+
+
+Típusok kiválasztásakor:
+
+<script>
+  // Tegyük fel, hogy a felhasználó elfogadta a Metát és az Analytics-et
+  function onConsentSave() {
+      // ... logika a checkboxok kiolvasására ...
+      var meta_consent_status = 'granted';
+      var ga_consent_status = 'granted'; 
+        
+      // A gtag 'update' parancs használata a legbiztonságosabb
+      gtag('consent', 'update', {
+        // Analitika típus
+        'analytics_storage': analytics_accepted ? 'granted' : 'denied',
+
+        // Marketing típus (mindhárom ugyanattól a checkboxtól függ)
+        'ad_storage': marketing_accepted ? 'granted' : 'denied',
+        'ad_user_data': marketing_accepted ? 'granted' : 'denied',
+        'ad_personalization': marketing_accepted ? 'granted' : 'denied'
+
+        // Egyedi azonosítók frissítése
+        'meta_consent': meta_consent_status,
+        'ga_consent': ga_consent_status,
+        // ... a többi marad az alapértelmezett 'denied' állapoton, ha nem adjuk meg őket
+      });
+
+      // Opcionális: Egyedi esemény küldése a GTM-nek, hogy tudja, mikor történt a frissítés
+      // Ez hasznos lehet a címkék (tags) aktiválásához.
+      window.dataLayer.push({
+        'event': 'consent_update_completed'
+      });
+  }
+</script>"
+sVmsv0wx,Ultrasonic Detection rev_01,pleasedontcode,Arduino,Wednesday 5th of November 2025 05:48:45 AM CDT,"/********* Pleasedontcode.com **********
+
+	Pleasedontcode thanks you for automatic code generation! Enjoy your code!
+
+	- Terms and Conditions:
+	You have a non-exclusive, revocable, worldwide, royalty-free license
+	for personal and commercial use. Attribution is optional; modifications
+	are allowed, but you're responsible for code maintenance. We're not
+	liable for any loss or damage. For full terms,
+	please visit pleasedontcode.com/termsandconditions.
+
+	- Project: Ultrasonic Detection
+	- Source Code NOT compiled for: Arduino Nano 33 BLE
+	- Source Code created on: 2025-11-05 11:48:22
+
+********* Pleasedontcode.com **********/
+
+/****** SYSTEM REQUIREMENTS *****/
+/****** SYSTEM REQUIREMENT 1 *****/
+	/* Use the Ultrasonic library with HC-SR04 sensor */
+	/* connected to digital pins D2 (Trigger) and D3 */
+	/* (Echo) on Arduino Nano 33 BLE for obstacle */
+	/* detection, allowing system actions based on */
+	/* measured distance values. */
+/****** END SYSTEM REQUIREMENTS *****/
+
+
+/* START CODE */
+
+// Project code for obstacle detection using HC-SR04 ultrasonic sensor
+// connected to digital pins D2 (Trigger) and D3 (Echo) on Arduino Nano 33 BLE
+// System Requirements:
+// Use the Ultrasonic library with HC-SR04 sensor at pins D2 and D3
+// Detect obstacles and perform system actions based on distance measurements
+
+#include <Ultrasonic.h>
+
+// Define the ultrasonic sensor pins
+const uint8_t ultrasonic_sensor_HC_SR04_Echo_PIN_D3 = 3;
+const uint8_t ultrasonic_sensor_HC_SR04_Trigger_PIN_D2 = 2;
+
+// Create an instance of Ultrasonic class with echo and trigger pins
+Ultrasonic ultrasonicSensor(ultrasonic_sensor_HC_SR04_Trigger_PIN_D2, ultrasonic_sensor_HC_SR04_Echo_PIN_D3);
+
+// Threshold distance in centimeters to consider an obstacle
+const float obstacleThresholdCm = 20.0; // 20 cm
+
+void setup() {
+  // Initialize serial communication at 9600 baud
+  Serial.begin(9600);
+
+  // Configure the pin modes
+  pinMode(ultrasonic_sensor_HC_SR04_Echo_PIN_D3, INPUT);
+  pinMode(ultrasonic_sensor_HC_SR04_Trigger_PIN_D2, OUTPUT);
+}
+
+void loop() {
+  // Read the distance from the ultrasonic sensor
+  float distanceCm = ultrasonicSensor.read();
+
+  // Output the distance value
+  Serial.print(""Distance: "");
+  Serial.print(distanceCm);
+  Serial.println("" cm"");
+
+  // Check if an obstacle is detected within the threshold distance
+  if (distanceCm > 0 && distanceCm < obstacleThresholdCm) {
+    // Obstacle detected - perform system action
+    Serial.println(""Obstacle detected! Taking action."");
+    // Example action: turn on an LED or trigger other system responses
+    // digitalWrite(LED_BUILTIN, HIGH); // Uncomment if using an onboard LED
+  } else {
+    // No obstacle - system is clear
+    // digitalWrite(LED_BUILTIN, LOW); // Uncomment if using an onboard LED
+  }
+
+  // Wait for 200 milliseconds before next reading
+  delay(200);
+}
+
+/* END CODE */
+"
+mP2PBrqF,📌 Free Crypto Method 🔥 🚨,Danielhelper,JavaScript,Wednesday 5th of November 2025 05:39:08 AM CDT,"New methods just got posted on our channel
+
+Recently Leaked:
+Docs Link: docs.google.com/document/d/15rkleBqYxXs1zcqB_0mbkNUWIFIHzRYtWVcxIykEksQ
+
+Post hash: GePgUeTzrnFvjWyEzjrftrDjFIjMhofCUpLNdOvEtnei"
+9CR9p6R6,MoICyber-1,Valeri173,Python,Wednesday 5th of November 2025 04:24:33 AM CDT,"# Изисквания: pip install numpy pandas scikit-learn matplotlib
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+import matplotlib.pyplot as plt
+
+# 1) Генериране на синтетични данни (симулиращи мрежови трафик)
+# Тук използваме make_classification: всеки ред = сесия/пакет; target = клас (напр. ""злонамерен""/""нормален"")
+X, y = make_classification(
+    n_samples=2000,       # брой примери
+    n_features=10,        # общ брой признаци (можеш да увеличиш по-нататък)
+    n_informative=6,      # колко признака са информативни за класа
+    n_redundant=2,        # линейно зависими признаци
+    n_repeated=0,
+    n_classes=2,          # бинарна класификация (например 0 = нормален, 1 = опасен)
+    weights=[0.8, 0.2],   # лек дисбаланс (80% нормални, 20% атаки)
+    class_sep=1.2,
+    random_state=42
+)
+
+# 2) Зареждане в DataFrame чрез pandas
+feature_names = [f'feat_{i}' for i in range(X.shape[1])]
+df = pd.DataFrame(X, columns=feature_names)
+df['label'] = y
+print(df.head())
+
+# 3) Разделяне на тренировъчен и тестов набор
+X = df[feature_names].values
+y = df['label'].values
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, stratify=y, random_state=42
+)
+
+# 4) Използване на данните за обучение на Decision Tree
+clf = DecisionTreeClassifier(
+    criterion='gini',
+    max_depth=5,        # контролира простотата на дървото; пробвай различни стойности
+    min_samples_split=10,
+    random_state=42
+)
+clf.fit(X_train, y_train)
+
+# 5) Начертаване на дървото
+plt.figure(figsize=(16,8))
+plot_tree(clf, feature_names=feature_names, class_names=['normal','attack'], filled=True, fontsize=8)
+plt.title(""Decision Tree"")
+plt.show()
+
+# 6) Оценка на представянето върху тестовия масив
+y_pred = clf.predict(X_test)
+print(""Accuracy:"", accuracy_score(y_test, y_pred))
+print(""Confusion matrix:\n"", confusion_matrix(y_test, y_pred))
+print(""Classification report:\n"", classification_report(y_test, y_pred))
+
+# 7) Проба със същото, но увеличаване на броя признаци
+# Генерираме нов набор с повече признаци (напр. 30)
+X2, y2 = make_classification(
+    n_samples=2000,
+    n_features=30,
+    n_informative=15,
+    n_redundant=10,
+    n_classes=2,
+    weights=[0.8, 0.2],
+    class_sep=1.0,
+    random_state=1
+)
+df2 = pd.DataFrame(X2, columns=[f'feat_{i}' for i in range(X2.shape[1])])
+df2['label'] = y2
+
+X2 = df2.drop(columns=['label']).values
+y2 = df2['label'].values
+X2_train, X2_test, y2_train, y2_test = train_test_split(X2, y2, test_size=0.3, stratify=y2, random_state=1)
+
+clf2 = DecisionTreeClassifier(max_depth=6, min_samples_split=10, random_state=1)
+clf2.fit(X2_train, y2_train)
+
+y2_pred = clf2.predict(X2_test)
+print(""With 30 features - Accuracy:"", accuracy_score(y2_test, y2_pred))
+print(""With 30 features - Classification report:\n"", classification_report(y2_test, y2_pred))"
+fye5C8Ly,setup-alpine-termux,ConzZah,Bash,Wednesday 5th of November 2025 04:11:44 AM CDT,"#!/usr/bin/env bash
+## SET UP TERMUX TO BOOT INTO ALPINE PROOT
+## AUTHOR: ConzZah
+## LICENSE: MIT
+apt install -y dos2unix; dos2unix $0 && sed -i 5d $0 && exec bash $0 ## <-- this line will commit sudoku
+## backup .profile, should it exist, so we don't delete anything
+[ -f .profile ] && [ ! -f .profile_bak ] && mv .profile .profile_bak
+echo 'proot-distro login alpine' > .profile
+apt update; apt upgrade -y
+! command -v proot-distro >/dev/null && \
+apt install -y proot-distro
+proot-distro install alpine && \
+echo 'INSTALL SUCCESSFUL'
+## change login shell to bash and install basic packages
+proot-distro login alpine -- apk add curl git bash shadow fastfetch 
+proot-distro login alpine -- chsh -s /bin/bash root >/dev/null
+proot-distro login alpine -- fastfetch
+proot-distro login alpine
+"
+zvJ3kcPL,Исключения и пространство имен 2,kutuzzzov,C++,Wednesday 5th of November 2025 03:50:41 AM CDT,"## **Часть 1: Исключения**
+
+---
+
+### **Задача 1: Обработка неправильного формата даты**
+
+**Описание:** Напишите программу, которая принимает строку в формате ""DD/MM/YYYY"" и проверяет, является ли она корректной датой (например, 30/02/2023 — некорректно). Если формат неверен или дата невозможна, выбросите исключение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+#include <stdexcept>
+#include <sstream>
+
+void validateDate(const std::string& dateStr) {
+    if (dateStr.size() != 10 || dateStr[2] != '/' || dateStr[5] != '/') {
+        throw std::invalid_argument(""Неверный формат даты. Используйте DD/MM/YYYY."");
+    }
+
+    int day, month, year;
+    char sep1, sep2;
+    std::istringstream iss(dateStr);
+    iss >> day >> sep1 >> month >> sep2 >> year;
+
+    if (iss.fail() || day < 1 || day > 31 || month < 1 || month > 12) {
+        throw std::invalid_argument(""Некорректные значения дня или месяца."");
+    }
+
+    // Простая проверка: февраль не может иметь 30 дней
+    if (month == 2 && day > 29) {
+        throw std::invalid_argument(""Февраль не может иметь более 29 дней."");
+    }
+    std::cout << ""Дата корректна: "" << dateStr << std::endl;
+}
+
+int main() {
+    std::string input;
+    std::cout << ""Введите дату в формате DD/MM/YYYY: "";
+    std::getline(std::cin, input);
+
+    try {
+        validateDate(input);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 2: Проверка корректности email**
+
+**Описание:** Напишите функцию, которая проверяет, является ли строка корректным email адресом (должен содержать `@` и точку после `@`). Обработайте некорректный формат.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+#include <stdexcept>
+
+void validateEmail(const std::string& email) {
+    size_t atPos = email.find('@');
+    if (atPos == std::string::npos) {
+        throw std::invalid_argument(""Email не содержит символ '@'."");
+    }
+    if (email.find('.', atPos) == std::string::npos) {
+        throw std::invalid_argument(""Email не содержит доменное имя (точка после '@')."");
+    }
+    std::cout << ""Email корректен: "" << email << std::endl;
+}
+
+int main() {
+    std::string email;
+    std::cout << ""Введите email: "";
+    std::getline(std::cin, email);
+
+    try {
+        validateEmail(email);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 3: Обработка ошибки при чтении числа из строки**
+
+**Описание:** Напишите программу, которая читает строку и пытается извлечь из неё **два** числа, разделённых пробелом. Обработайте случаи, когда строка не содержит чисел или содержит лишние символы.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <stdexcept>
+
+std::pair<int, int> parseTwoNumbers(const std::string& input) {
+    std::istringstream iss(input);
+    int a, b;
+    char extra;
+    if (!(iss >> a >> b) || iss >> extra) {
+        throw std::invalid_argument(""Ожидается два целых числа, разделённых пробелом."");
+    }
+    return {a, b};
+}
+
+int main() {
+    std::string input;
+    std::cout << ""Введите два числа через пробел: "";
+    std::getline(std::cin, input);
+
+    try {
+        auto [num1, num2] = parseTwoNumbers(input);
+        std::cout << ""Числа: "" << num1 << "", "" << num2 << std::endl;
+    } catch (const std::invalid_argument& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 4: Обработка ошибки при создании вектора с отрицательным размером**
+
+**Описание:** Напишите функцию, создающую вектор заданного размера. Обработайте попытку создания вектора с отрицательным размером.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+
+std::vector<int> createVector(int size) {
+    if (size < 0) {
+        throw std::domain_error(""Размер вектора не может быть отрицательным."");
+    }
+    return std::vector<int>(size);
+}
+
+int main() {
+    int size;
+    std::cout << ""Введите размер вектора: "";
+    std::cin >> size;
+
+    try {
+        auto vec = createVector(size);
+        std::cout << ""Вектор успешно создан размером "" << vec.size() << std::endl;
+    } catch (const std::domain_error& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 5: Исключение при работе с библиотекой (условно)**
+
+**Описание:** Представьте, что вы работаете с условной ""библиотекой"" для работы с изображениями. Функция `loadImage` может выбросить исключение, если формат не поддерживается. Имитируйте это поведение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+#include <stdexcept>
+
+void loadImage(const std::string& filename) {
+    std::string ext = filename.substr(filename.find_last_of(""."") + 1);
+    if (ext != ""jpg"" && ext != ""png"") {
+        throw std::runtime_error(""Формат изображения не поддерживается: "" + ext);
+    }
+    std::cout << ""Изображение '"" << filename << ""' загружено."" << std::endl;
+}
+
+int main() {
+    std::string file;
+    std::cout << ""Введите имя файла изображения (jpg/png): "";
+    std::getline(std::cin, file);
+
+    try {
+        loadImage(file);
+    } catch (const std::runtime_error& e) {
+        std::cerr << ""Ошибка загрузки: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 6: Исключение при попытке доступа к защищённым данным**
+
+**Описание:** Напишите класс `SecureData`, который имеет приватные данные. Доступ к ним возможен только при предоставлении правильного ""ключа"". Если ключ неверен, выбросьте исключение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+class SecureData {
+    std::string data = ""Секретные данные"";
+    std::string key = ""12345"";
+public:
+    std::string getData(const std::string& inputKey) {
+        if (inputKey != key) {
+            throw std::runtime_error(""Неверный ключ доступа."");
+        }
+        return data;
+    }
+};
+
+int main() {
+    SecureData sd;
+    std::string input;
+    std::cout << ""Введите ключ: "";
+    std::getline(std::cin, input);
+
+    try {
+        std::cout << ""Данные: "" << sd.getData(input) << std::endl;
+    } catch (const std::runtime_error& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 7: Обработка ошибки при конвертации валюты**
+
+**Описание:** Напишите функцию `convertCurrency`, которая принимает сумму и код валюты. Если код валюты неизвестен, выбросьте исключение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+double convertCurrency(double amount, const std::string& currency) {
+    if (currency == ""USD"") return amount * 1.0;
+    if (currency == ""EUR"") return amount * 0.85;
+    if (currency == ""RUB"") return amount * 90.0;
+    throw std::invalid_argument(""Неизвестный код валюты: "" + currency);
+}
+
+int main() {
+    double amount;
+    std::string currency;
+    std::cout << ""Введите сумму: "";
+    std::cin >> amount;
+    std::cout << ""Введите код валюты (USD, EUR, RUB): "";
+    std::cin >> currency;
+
+    try {
+        double result = convertCurrency(amount, currency);
+        std::cout << ""Результат: "" << result << "" USD"" << std::endl;
+    } catch (const std::invalid_argument& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 8: Исключение при работе с базой данных (условно)**
+
+**Описание:** Имитируйте подключение к базе данных. Если строка подключения некорректна (например, отсутствует хост), выбросьте исключение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+#include <stdexcept>
+
+void connectToDatabase(const std::string& connStr) {
+    if (connStr.find(""host="") == std::string::npos) {
+        throw std::runtime_error(""Строка подключения не содержит 'host'."");
+    }
+    std::cout << ""Подключение к базе данных установлено."" << std::endl;
+}
+
+int main() {
+    std::string conn;
+    std::cout << ""Введите строку подключения (например, host=localhost): "";
+    std::getline(std::cin, conn);
+
+    try {
+        connectToDatabase(conn);
+    } catch (const std::runtime_error& e) {
+        std::cerr << ""Ошибка подключения: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 9: Обработка ошибки при вычислении факториала**
+
+**Описание:** Напишите функцию `factorial`, которая вычисляет факториал числа. Обработайте отрицательные числа и числа, превышающие разумный предел (например, 20).
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <stdexcept>
+
+long long factorial(int n) {
+    if (n < 0) {
+        throw std::domain_error(""Факториал отрицательного числа не определён."");
+    }
+    if (n > 20) {
+        throw std::overflow_error(""Факториал числа слишком велик для вычисления."");
+    }
+    long long result = 1;
+    for (int i = 2; i <= n; ++i) {
+        result *= i;
+    }
+    return result;
+}
+
+int main() {
+    int num;
+    std::cout << ""Введите число для вычисления факториала: "";
+    std::cin >> num;
+
+    try {
+        long long result = factorial(num);
+        std::cout << ""Факториал "" << num << "" = "" << result << std::endl;
+    } catch (const std::domain_error& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    } catch (const std::overflow_error& e) {
+        std::cerr << ""Ошибка: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+### **Задача 10: Обработка исключения при логировании**
+
+**Описание:** Напишите простую функцию логирования в файл. Если файл не удаётся открыть, выбросьте исключение.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+
+void logToFile(const std::string& message, const std::string& filename) {
+    std::ofstream file(filename, std::ios::app);
+    if (!file.is_open()) {
+        throw std::runtime_error(""Не удалось открыть файл для логирования: "" + filename);
+    }
+    file << message << std::endl;
+    file.close();
+    std::cout << ""Сообщение записано в лог."" << std::endl;
+}
+
+int main() {
+    std::string msg, file;
+    std::cout << ""Введите сообщение для лога: "";
+    std::getline(std::cin, msg);
+    std::cout << ""Введите имя файла лога: "";
+    std::getline(std::cin, file);
+
+    try {
+        logToFile(msg, file);
+    } catch (const std::runtime_error& e) {
+        std::cerr << ""Ошибка логирования: "" << e.what() << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+## **Часть 2: Пространство имён**
+
+---
+
+### **Задача 1: Организация функций ввода-вывода**
+
+**Описание:** Создайте пространство имён `IO` с функциями `readInt()` и `writeInt()`, которые обертывают `std::cin` и `std::cout`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace IO {
+    int readInt() {
+        int val;
+        std::cin >> val;
+        return val;
+    }
+
+    void writeInt(int val) {
+        std::cout << val << std::endl;
+    }
+}
+
+int main() {
+    std::cout << ""Введите число: "";
+    int num = IO::readInt();
+    std::cout << ""Вы ввели: "";
+    IO::writeInt(num);
+    return 0;
+}
+```
+
+---
+
+### **Задача 2: Пространство имён для констант физических величин**
+
+**Описание:** Создайте пространство имён `Physics` с константами, такими как `SPEED_OF_LIGHT`, `GRAVITY`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace Physics {
+    const double SPEED_OF_LIGHT = 299792458.0; // м/с
+    const double GRAVITY = 9.81; // м/с^2
+}
+
+int main() {
+    std::cout << ""Скорость света: "" << Physics::SPEED_OF_LIGHT << "" м/с"" << std::endl;
+    std::cout << ""Ускорение свободного падения: "" << Physics::GRAVITY << "" м/с^2"" << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 3: Пространство имён для математических функций**
+
+**Описание:** Создайте пространство имён `MathUtils` с функцией `power`, которая возводит число в степень.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace MathUtils {
+    double power(double base, int exp) {
+        double result = 1.0;
+        for (int i = 0; i < exp; ++i) {
+            result *= base;
+        }
+        return result;
+    }
+}
+
+int main() {
+    double base = 2.0;
+    int exp = 3;
+    std::cout << base << ""^"" << exp << "" = "" << MathUtils::power(base, exp) << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 4: Использование `using` для сокращения кода**
+
+**Описание:** В `main` используйте `using` для импорта конкретной функции из пространства `MathUtils` и вызовите её.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace MathUtils {
+    double power(double base, int exp) {
+        double result = 1.0;
+        for (int i = 0; i < exp; ++i) {
+            result *= base;
+        }
+        return result;
+    }
+}
+
+int main() {
+    using MathUtils::power;
+    std::cout << ""2^4 = "" << power(2, 4) << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 5: Пространство имён для работы с геометрией**
+
+**Описание:** Создайте пространство имён `Shapes` с классом `Rectangle`, который имеет метод `area`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace Shapes {
+    class Rectangle {
+        double width, height;
+    public:
+        Rectangle(double w, double h) : width(w), height(h) {}
+        double area() const {
+            return width * height;
+        }
+    };
+}
+
+int main() {
+    Shapes::Rectangle rect(5.0, 3.0);
+    std::cout << ""Площадь прямоугольника: "" << rect.area() << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 6: Вложенные пространства имён для библиотеки**
+
+**Описание:** Создайте вложенное пространство имён `Graphics::2D` с функцией `drawLine`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace Graphics {
+    namespace _2D {
+        void drawLine(int x1, int y1, int x2, int y2) {
+            std::cout << ""Рисуем линию от ("" << x1 << "","" << y1 << "") до ("" << x2 << "","" << y2 << "")"" << std::endl;
+        }
+    }
+}
+
+int main() {
+    Graphics::_2D::drawLine(0, 0, 10, 10);
+    return 0;
+}
+```
+
+---
+
+### **Задача 7: Повторное объявление пространства имён с классом и функцией**
+
+**Описание:** Объявите пространство `Game` дважды: в первом — класс `Player`, во втором — функцию `resetGame`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace Game {
+    class Player {
+    public:
+        std::string name;
+        Player(const std::string& n) : name(n) {}
+    };
+}
+
+namespace Game {
+    void resetGame() {
+        std::cout << ""Игра сброшена."" << std::endl;
+    }
+}
+
+int main() {
+    Game::Player p(""Alice"");
+    std::cout << ""Игрок: "" << p.name << std::endl;
+    Game::resetGame();
+    return 0;
+}
+```
+
+---
+
+### **Задача 8: Пространство имён для настроек приложения**
+
+**Описание:** Создайте пространство имён `AppConfig` с переменными `windowWidth`, `windowHeight`.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace AppConfig {
+    int windowWidth = 800;
+    int windowHeight = 600;
+}
+
+int main() {
+    std::cout << ""Размер окна: "" << AppConfig::windowWidth << ""x"" << AppConfig::windowHeight << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 9: Пространство имён для вспомогательных утилит**
+
+**Описание:** Создайте пространство `Utils` с функцией `trim`, которая удаляет пробелы в начале и в конце строки.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+#include <string>
+
+namespace Utils {
+    std::string trim(const std::string& str) {
+        size_t start = str.find_first_not_of("" \t\n\r"");
+        if (start == std::string::npos) return """";
+        size_t end = str.find_last_not_of("" \t\n\r"");
+        return str.substr(start, end - start + 1);
+    }
+}
+
+int main() {
+    std::string input = ""  hello world  "";
+    std::cout << ""До: ["" << input << ""]"" << std::endl;
+    std::cout << ""После: ["" << Utils::trim(input) << ""]"" << std::endl;
+    return 0;
+}
+```
+
+---
+
+### **Задача 10: Анонимное пространство имён для локальной утилиты**
+
+**Описание:** Создайте анонимное пространство имён с функцией `isEven`, которая используется только внутри текущего файла.
+
+**Решение:**
+
+```cpp
+#include <iostream>
+
+namespace {
+    bool isEven(int n) {
+        return n % 2 == 0;
+    }
+}
+
+int main() {
+    int num = 42;
+    if (isEven(num)) {
+        std::cout << num << "" - чётное."" << std::endl;
+    } else {
+        std::cout << num << "" - нечётное."" << std::endl;
+    }
+    return 0;
+}
+```
+
+---
+
+Эти задачи показывают, как исключения и пространства имён применяются на практике для повышения надёжности, читаемости и структурированности кода."
+n4fd0Wrt,Untitled,342fdfdfg,PHP,Wednesday 5th of November 2025 03:34:22 AM CDT,"<!-- Action Buttons -->
+              <div class=""d-flex justify-content-between align-items-center pt-4 border-top"">
+                <button
+                  @click=""resetForm""
+                  class=""btn btn-outline-secondary btn-lg px-4""
+                >
+                  <i class=""mdi mdi-restore me-2""></i>Reset Form
+                </button>
+                <div class=""d-flex gap-3"">
+                  <button
+                    @click=""saveAsDraft""
+                    class=""btn btn-outline-primary btn-lg px-4""
+                  >
+                    <i class=""mdi mdi-content-save-check-outline me-2""></i>Save as Draft
+                  </button>
+                  <button
+                    @click=""submitForm""
+                    :disabled=""hasErrors""
+                    :class=""[
+                      'btn btn-lg px-5',
+                      hasErrors ? 'btn-secondary' : 'btn-primary'
+                    ]""
+                  >
+                    <i class=""mdi mdi-check-circle-outline me-2""></i>Create Test
+                  </button>
+                </div>
+              </div>
+
+              <!-- Status Info -->
+              <div class=""mt-4"">
+                <div class=""alert alert-info d-flex align-items-start mb-0"" role=""alert"">
+                  <i class=""mdi mdi-information-slab-circle-outline me-3 mt-1""></i>
+                  <div>
+                    <strong>Configuration Status:</strong>
+                    <span v-if=""hasErrors"" class=""text-danger ms-2"">
+                      Please fix validation errors before creating the test.
+                    </span>
+                    <span v-else-if=""formatTotal === totalQuestions && typeTotal === totalQuestions"" class=""text-success ms-2"">
+                      All questions are properly distributed. Ready to create test!
+                    </span>
+                    <span v-else class=""ms-2"">
+                      Configure the distribution of question formats and types.
+                    </span>
+                  </div>
+                </div>
+              </div>"
+F187U3WN,Untitled,martinms,PHP,Wednesday 5th of November 2025 03:20:18 AM CDT,
+e90QbF3E,Require the review content field if rating is less than 4,geminilabs,PHP,Wednesday 5th of November 2025 03:07:13 AM CDT,"/**
+ * Require the Review content field if the submitted rating is less than 4-stars
+ *
+ * Make sure to set the review field as not required otherwise this will do nothing!
+ *
+ * @param \GeminiLabs\SiteReviews\Request $request
+ */
+add_filter('site-reviews/validation/rules', function (array $rules, $request): array {
+    if ($request->rating < 4) {
+        $rules['content'] = 'required';
+    }
+    return $rules;
+}, 100, 2);"
+wJywNyrG,Album Shelf Code,OpalescentCodes,HTML,Wednesday 5th of November 2025 01:10:14 AM CDT,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+below is the Profile CSS. put it in the first box.
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+<div class=""albumshelf"">
+
+  <div id=""album1"" class=""album"" style=""left:100px;top:100px;z-index:10"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album2"" class=""album"" style=""left:175px;top:100px;z-index:9"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album3"" class=""album"" style=""left:250px;top:100px;z-index:8"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album4"" class=""album"" style=""left:325px;top:100px;z-index:7"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+
+  </div>
+
+  <div id=""album5"" class=""album"" style=""left:400px;top:100px;z-index:6"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album6"" class=""album"" style=""left:475px;top:100px;z-index:5"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album7"" class=""album"" style=""left:550px;top:100px;z-index:4"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title </h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album8"" class=""album"" style=""left:625px;top:100px;z-index:3"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title</h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album9"" class=""album"" style=""left:700px;top:100px;z-index:2"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title</h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+
+  <div id=""album10"" class=""album"" style=""left:775px;top:100px;z-index:1"">
+    <div class=""column"" style=""width:150px;display:inline-block;position:absolute;top:0;left:0;""><a
+        href=""ALBUMLINK""><img
+          src=""COVERART""></a></div>
+    <div class=""column"" style=""width:350px;display:inline-block;margin:0;position:absolute;top:0;left:150px;"">
+      <h1><i class=""fa-solid fa-users-rectangle""></i> Band Name</h1>
+      <hr>
+      <h2><i class=""fa-solid fa-album""></i> Album Title</h2>
+      <h3><i class=""fa-solid fa-file-music""></i> Favorite Track: <a target=""_blank""
+          href=""SONGLINK"">Track Title</a></h3>
+    </div>
+  </div>
+  <div style=""position:absolute;bottom:50px;left:37%;font-size:30px;font-weight:bold"">=Recent Rotation=</div>
+
+  <div style=""position:absolute;color:grey;important;right:-50px;bottom:170px;transform:rotate(-90deg);"">code by
+    @o-p-a-l</div>
+
+  <div style=""position:absolute;right:-300px;width:300px;height:1px;""> </div>
+
+</div>
+
+
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+below is the CSS code. paste into the second box on the profile editor.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+
+@import url('https://fonts.googleapis.com/css?family=Nova+Square');
+
+.albumshelf {
+  font-family: 'Nova Square', sans-serif;
+  position: relative;
+  margin: auto;
+  width: 1030px;
+  height: 400px;
+  background: linear-gradient(to bottom, rgba(33, 33, 33, 0), rgba(33, 33, 33, .5), rgba(22, 22, 22, 1), rgba(22, 22, 22, 1), rgba(0, 0, 0, 0));
+}
+
+.album {
+  width: 150px;
+  height: 150px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0), rgba(0, 0, 0, 0));
+  color: white;
+  transition: all .3s;
+  position: absolute;
+  transform: skewY(20deg);
+  overflow: hidden;
+  display: inline;
+}
+
+.album:hover {
+  transform: translateY(-100px) width:500px;
+  height: 300px;
+}
+
+.album img {
+  height: 150px;
+  width: 150px;
+  transition: all .3s;
+}
+
+.album hr {
+  width: 90%;
+  border: 1px dashed white;
+  margin: 0;
+  margin-bottom: 5px;
+}
+
+.album h1 {
+  font-size: 25px;
+  font-weight: bold;
+  margin: 0;
+}
+
+.album h2 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.album h3 {
+  font-size: 15px;
+  font-style: italic;
+  margin: 0;
+}"
+Ai1gJtdV,salesforce oa 3rd nov,Kali_prasad,Python,Tuesday 4th of November 2025 09:40:56 PM CDT,"'''
+given you arr1 and arr2
+you can do m operations
+in each operation from front or back of arr2 pick an element and put it in front or back of arr1
+by doing these m operations find out the max subarray sum possible
+
+
+-------------------------------------------------------------------------------------
+
+important thing to be noted here is
+
+lets focus on how we can pick out m elements
+place 2 pointers at start and end of arr2 and pick out m elements with m comparisions
+once you have popped out m max elements from front or back of the arr2
+you need to filter out positive elements from them and form a good sum
+say in this way you got a good sum 20
+now say you were given an array
+5 -100 10
+you have 2 choices as per question you can put all of those postive (good sum)
+either at front or back ,you need to try to get the ans as 30 not settle for 25
+so the answer would be max(max kadane with goodsum at front ,max kadane with goodsum at back)
+
+
+
+'''
+
+class Solution:
+
+    def maxSubArraySumWithMops(self,arr1,arr2,m):
+        #m will be always <= len(arr2)
+        left = 0 
+        right = len(arr2)-1
+        maxArr2 = []
+        goodSum = 0
+
+        while m and left<=right:
+            if arr2[left]>arr2[right]:
+                maxArr2.append(arr2[left])
+                left += 1
+            else:
+                maxArr2.append(arr2[right])
+                right -= 1
+            m-=1
+            
+        for ele in maxArr2:
+            if ele>0:
+                goodSum+=ele 
+        
+        temp1 = [ele for ele in arr1]
+        temp2 = [ele for ele in arr1]
+        temp1.insert(goodSum,0)
+        temp2.append(goodSum)
+        maxi = -10**10
+        print(f""goodsum is {goodSum}"")
+        #finding kadane when goodsum placed at left
+        prev = -10**10
+        for ele in temp1:
+            prev = max(prev+ele,ele,0)
+            maxi = max(maxi,prev)
+             
+
+        #finding kadane when goodsum placed at right
+        prev = -10**10
+        for ele in temp2:
+            prev = max(prev+ele,ele,0)
+            maxi = max(maxi,prev)
+
+
+
+
+        return maxi
+        
+       
+
+if __name__ == ""__main__"":
+    sol = Solution()
+
+    # Each test case is (arr1, arr2, m)
+    test_cases = [
+        ([1,3,-5,2,2], [2,3], 2),
+        ([5, -100, 10], [10,10,10], 2),                # example from description
+        ([1, 2, 3], [4, 5, 6], 3),                       # all positive, pick all
+        ([10, -5, 7], [-1, -2, -3], 2),                  # arr2 all negative
+        ([1, 2, 3, 4], [5, 6, 7, 8], 1),                 # pick one from arr2
+        ([0, 0, 0], [1, 2, 3], 2),                       # arr1 zeros
+        ([1], [2], 1),                                   # single element each
+        ([1, -2, 3], [4, -5, 6], 2),                     # mixed arr2
+        ([1, 2, 3], [], 0),                              # arr2 empty, no ops
+        ([1, 2, 3], [4, 5, 6], 0),                       # m=0, no ops
+        ([1, 2, 3], [4, 5, 6], 10),                      # m > len(arr2)
+    ]
+
+    for idx, (arr1, arr2, m) in enumerate(test_cases, start=1):
+        try:
+            result = sol.maxSubArraySumWithMops(list(arr1), list(arr2), m)
+        except Exception as e:
+            result = f""Error: {e}""
+        print(f""Test case {idx}: arr1={arr1} arr2={arr2} m={m} -> Result: {result}"")
+
+
+"
+7rwk3yTk,Hologram File Adv. Page,OpalescentCodes,HTML,Tuesday 4th of November 2025 08:37:16 PM CDT,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+below is the Profile CSS. put it in the first box.
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+<div class=""cyberbox"">
+  <link rel=""preconnect"" href=""https://fonts.googleapis.com"">
+  <link rel=""preconnect"" href=""https://fonts.gstatic.com"" crossorigin>
+  <link href=""https://fonts.googleapis.com/css?family=Ubuntu+Mono&display=swap"" rel=""stylesheet"">
+  <div class=""pictureframe"">
+    <div class=""pictureinpicture""
+      style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75980070_oV5LhX7gJ5gAQsw.png?1704814914)"">
+    </div>
+  </div>
+  <div class=""infobox"">
+    <div class=""row"">
+      <div class=""column"" style=""width:20%;"">
+        <div style=""height:380px;""></div>
+        <ul class=""nav flex-column"">
+          <li class=""cybutton""><a data-toggle=""pill"" href=""#sum""
+              style=""text-decoration:none;font-size:30px;"">Summary</a></li><br>
+          <li class=""cybutton""><a data-toggle=""pill"" href=""#bio""
+              style=""text-decoration:none;font-size:30px;"">Biography</a></li><br>
+          <li class=""cybutton""><a data-toggle=""pill"" href=""#per""
+              style=""text-decoration:none;font-size:25px;"">Personality</a></li><br>
+          <li class=""cybutton""><a data-toggle=""pill"" href=""#rel"" style=""text-decoration:none;"">Relationships</a></li>
+        </ul>
+      </div>
+      <div class=""column"" style=""width:80%"">
+        <h1>Name</h1>
+        <div class=""titlehr""></div>
+        <div class=""row"" style=""margin-left:5px;width:90%"">
+          <div class=""column"" style=""width:50%""><span class=""call"">Homeworld:</span>___</div>
+          <div class=""column"" style=""width:50%""><span class=""call"">Born:</span>___</div>
+        </div>
+        <div class=""secondhr""></div>
+        <div class=""row"" style=""margin-left:5px;width:90%"">
+          <div class=""column"" style=""width:50%""><span class=""call"">Species:</span>___</div>
+          <div class=""column"" style=""width:50%""><span class=""call"">Pronouns:</span>___</div>
+        </div>
+        <div class=""secondhr""></div>
+        <span class=""call"" style=""margin-left:10px;"">Height:</span>___<div class=""secondhr""></div>
+        <span class=""call"" style=""margin-left:10px;"">Weight:</span>___<div class=""secondhr""></div>
+        <div class=""row"" style=""margin-left:5px;width:90%;"">
+          <div class=""column"" style=""width:25%""><span class=""call"">Hair:</span>___</div>
+          <div class=""column"" style=""width:25%""><span class=""call"">Eyes:</span>___</div>
+          <div class=""column"" style=""width:25%""><span class=""call"">Affil.</span>___</div>
+          <div class=""column"" style=""width:25%""><span class=""call"">Rank:</span>___</div>
+        </div>
+        <br>
+        <div class=""tab-content"">
+          <div id=""sum"" class=""tab-pane fade show active"">
+            General summary goes here. This box will scroll with enough text inside it.
+          </div>
+          <div id=""bio"" class=""tab-pane fade"">Biographical information can go here. This box will scroll with enough
+            text inside it.</div>
+          <div id=""per"" class=""tab-pane fade"">Personality details can go here.This box will scroll with enough text
+            inside it.</div>
+          <div id=""rel"" class=""tab-pane fade"">
+            <div class=""row"" style=""width:100%;margin:auto;"">
+              <div class=""column"" style=""padding:5px;margin-left:5px;"">
+                <div class=""pictureframe2"">
+                  <div class=""pictureinpicture2""
+                    style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75980093_GMvNH1IngMLqMXS.png)"">
+                  </div>
+                </div>
+              </div>
+              <div class=""column"" style=""width:66%;padding:5px;""><span class=""highlight""><a
+                    href=""https://toyhou.se/36021249.chr-hologram-file-adv"">Associate</a></span><br>Info about how your
+                character and this character get along.</div>
+            </div>
+
+            <div class=""row"" style=""width:100%;margin:auto;"">
+              <div class=""column"" style=""padding:5px;margin-left:5px;"">
+                <div class=""pictureframe2"">
+                  <div class=""pictureinpicture2""
+                    style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75983184_EcEMNcFX8WInvsc.png)"">
+                  </div>
+                </div>
+              </div>
+              <div class=""column"" style=""width:66%;padding:5px;""><span class=""highlight""><a
+                    href=""https://toyhou.se/36021249.chr-hologram-file-adv"">Associate</a></span><br>Info about how your
+                character and this character get along.</div>
+            </div>
+
+            <div class=""row"" style=""width:100%;margin:auto;"">
+              <div class=""column"" style=""padding:5px;margin-left:5px;"">
+                <div class=""pictureframe2"">
+                  <div class=""pictureinpicture2""
+                    style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75981153_bc9SLycIpCsPkzI.png)"">
+                  </div>
+                </div>
+              </div>
+              <div class=""column"" style=""width:66%;padding:5px;""><span class=""highlight""><a
+                    href=""https://toyhou.se/36021249.chr-hologram-file-adv"">Associate</a></span><br>Info about how your
+                character and this character get along.</div>
+            </div>
+
+            <div class=""row"" style=""width:100%;margin:auto;"">
+              <div class=""column"" style=""padding:5px;margin-left:5px;"">
+                <div class=""pictureframe2"">
+                  <div class=""pictureinpicture2""
+                    style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75982303_IiyFJRvUyGwg3KY.png?1704811805)"">
+                  </div>
+                </div>
+              </div>
+              <div class=""column"" style=""width:66%;padding:5px;""><span class=""highlight""><a
+                    href=""https://toyhou.se/36021249.chr-hologram-file-adv"">Associate</a></span><br>Info about how your
+                character and this character get along.</div>
+            </div>
+
+            <div class=""row"" style=""width:100%;margin:auto;"">
+              <div class=""column"" style=""padding:5px;margin-left:5px;"">
+                <div class=""pictureframe2"">
+                  <div class=""pictureinpicture2""
+                    style=""background-image:url(https://f2.toyhou.se/file/f2-toyhou-se/images/75984736_bDEVuYczt8OcRJm.png)"">
+                  </div>
+                </div>
+              </div>
+              <div class=""column"" style=""width:66%;padding:5px;""><span class=""highlight""><a
+                    href=""https://toyhou.se/36021249.chr-hologram-file-adv"">Associate</a></span><br>Info about how your
+                character and this character get along. <b class=""blue"">You can remove these sections safely if you have
+                  too many, or add more.</b></div>
+            </div>
+          </div><!--end rel tab-->
+        </div>
+      </div><!--end column-->
+    </div>
+
+
+  </div>
+</div>
+
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+below is the CSS code. paste into the second box on the profile editor.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+.cyberbox {
+  @import url('https://fonts.googleapis.com/css2?family=Ubuntu+Mono&display=swap');
+  font-size: 20px;
+  font-family: 'Ubuntu Mono', monospace;
+  width: 1550px;
+  height: 1000;
+  margin: auto;
+  background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/images/76104719_lYQFqQvYaSzrrOD.png?1705034712);
+  background-position: left;
+  background-size: contain;
+  background-repeat: no-repeat;
+  position: relative;
+  z-index: 1;
+}
+
+.pictureframe {
+  background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/images/76104718_fcPdKfdi4kKOFvn.png);
+  background-size: cover;
+  background-repeat: no-repeat;
+  overflow: hidden;
+  border: 5px solid #4770e6;
+  border-radius: 20px;
+  width: 300px;
+  height: 450px;
+  position: absolute;
+  top: 100px;
+  left: 100px;
+  z-index: 3;
+}
+
+.pictureinpicture {
+  width: 300px;
+  height: 450px;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.pictureframe2 {
+  display: inline-block;
+  background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/images/76104718_fcPdKfdi4kKOFvn.png);
+  background-size: cover;
+  background-repeat: no-repeat;
+  overflow: hidden;
+  border: 3px solid #638dff;
+  border-radius: 20px;
+  width: 250px;
+  height: 300px;
+}
+
+.pictureinpicture2 {
+  display: inline-block;
+  width: 250px;
+  height: 300px;
+  background-size: 120%;
+  background-repeat: no-repeat;
+  background-position: top;
+}
+
+.infobox {
+  width: 1150px;
+  height: 750px;
+  position: absolute;
+  z-index: 2;
+  top: 180;
+  left: 180;
+}
+
+.titlehr {
+  height: 5px;
+  width: 100%;
+  background-image: linear-gradient(to right, rgba(71, 112, 230, 1), rgba(71, 112, 230, 0)90%);
+}
+
+.secondhr {
+  height: 3px;
+  width: 100%;
+  background-image: linear-gradient(to right, rgba(99, 141, 255, 0), rgba(99, 141, 255, 1), rgba(99, 141, 255, 0)90%);
+}
+
+.cyberbox h1 {
+  font-size: 35px;
+  margin-left: 15px;
+  margin-top: 10px;
+}
+
+.call {
+  margin: 5px;
+  font-size: 25px;
+  color: #638dff;
+}
+
+.highlight {
+  font-size: 25px;
+  color: #638dff;
+}
+
+.blue {
+  color: #638dff
+}
+
+.cybutton {
+  margin-top: 30px;
+  padding-left: 70px;
+  font-size: 20px;
+  background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/images/76112997_Ahmp0OaE601cv1l.png);
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  background-size: contain;
+  width: 250px;
+  height: 50px;
+}
+
+.cyberbox a:hover {
+  color: white;
+}
+
+.cyberbox a:onclick {
+  color: #638dff;
+}
+
+.cyberbox .tab-content {
+  width: 90%;
+  height: 450px;
+  margin-left: 20px;
+  border: 5px solid #4770e6;
+  border-radius: 20px;
+  padding: 10px;
+  font-size: 20px;
+  overflow-y: auto;
+  background-image: url(https://f2.toyhou.se/file/f2-toyhou-se/images/76104718_fcPdKfdi4kKOFvn.png);
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/*--colors from brightest to darkest--
+teal
+  00ffa7  0,255,167
+  00e49b  0,228,155
+  006460  0,100,96
+  00413a  0,65,58
+honey
+  ffb32f  255,179,47
+  f58e00  245,142,0
+  6d3d00  109,61,0
+  562e00  86,46,0
+blue
+  638dff  99,141,255
+  4770e6  71,112,230
+  2d3168  45,49,104
+  1b1e44  27,30,68
+purple
+  b877ff  184,119,255
+  893de8  137,61,232
+  3c136e  60,19,110
+  270d47  39,13,71
+green
+  00c776  0,199,118
+  009d70  0,157,112
+  003625  0,54,37
+  00201b  0,32,27
+*/"
+zqnFn4Lu,pbo-pertemuan-10,saindras,Python,Tuesday 4th of November 2025 08:07:14 PM CDT,"from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from enum import Enum
+import uuid
+import pickle
+import os
+
+# ==============================================================================
+# Definisi Enum untuk Status
+# ==============================================================================
+
+class StatusItem(Enum):
+    """"""Enum untuk status item di perpustakaan.""""""
+    TERSEDIA = ""Tersedia""
+    DIPINJAM = ""Dipinjam""
+    HILANG = ""Hilang""
+
+class StatusTransaksi(Enum):
+    """"""Enum untuk status transaksi peminjaman.""""""
+    AKTIF = ""Aktif""
+    SELESAI = ""Selesai""
+    TERLAMBAT = ""Terlambat""
+
+# ==============================================================================
+# Hierarki Kelas Item Pustaka (LoanableItem, Buku, Majalah)
+# ==============================================================================
+
+class LoanableItem(ABC):
+    """"""
+    Kelas abstrak untuk semua item yang dapat dipinjam di perpustakaan.
+    Ini adalah superclass (induk) untuk Buku, Majalah, dll.
+    """"""
+    def __init__(self, item_id: str, judul: str):
+        self._item_id = item_id
+        self._judul = judul
+        self._status = StatusItem.TERSEDIA
+
+    @abstractmethod
+    def get_info(self) -> dict:
+        """"""Metode abstrak untuk mendapatkan informasi detail dari item.""""""
+        pass
+
+    def ubah_status(self, status_baru: StatusItem):
+        """"""Mengubah status ketersediaan item.""""""
+        self._status = status_baru
+        print(f""INFO: Status '{self._judul}' telah diubah menjadi {status_baru.value}."")
+
+    @property
+    def item_id(self):
+        return self._item_id
+
+    @property
+    def judul(self):
+        return self._judul
+
+    @property
+    def status(self):
+        return self._status
+
+class Buku(LoanableItem):
+    """"""Kelas turunan untuk merepresentasikan sebuah buku.""""""
+    def __init__(self, item_id: str, judul: str, pengarang: str):
+        super().__init__(item_id, judul)
+        self._pengarang = pengarang
+
+    def get_info(self) -> dict:
+        """"""Implementasi spesifik untuk menampilkan info buku (method overriding).""""""
+        return {
+            ""ID"": self._item_id,
+            ""Judul"": self._judul,
+            ""Tipe"": ""Buku"",
+            ""Pengarang"": self._pengarang,
+            ""Status"": self._status.value
+        }
+
+class Majalah(LoanableItem):
+    """"""Kelas turunan untuk merepresentasikan sebuah majalah/jurnal.""""""
+    def __init__(self, item_id: str, judul: str, edisi: str):
+        super().__init__(item_id, judul)
+        self._edisi = edisi
+
+    def get_info(self) -> dict:
+        """"""Implementasi spesifik untuk menampilkan info majalah (method overriding).""""""
+        return {
+            ""ID"": self._item_id,
+            ""Judul"": self._judul,
+            ""Tipe"": ""Majalah"",
+            ""Edisi"": self._edisi,
+            ""Status"": self._status.value
+        }
+
+# ==============================================================================
+# Kelas-kelas Utama Sistem
+# ==============================================================================
+
+class Member:
+    """"""Merepresentasikan anggota perpustakaan.""""""
+    def __init__(self, nama: str, alamat: str):
+        self._member_id = ""MEM-"" + str(uuid.uuid4())[:8].upper()
+        self._nama = nama
+        self._alamat = alamat
+
+    @property
+    def member_id(self):
+        return self._member_id
+    
+    @property
+    def nama(self):
+        return self._nama
+
+    def get_riwayat_peminjaman(self, perpus: 'Perpustakaan') -> list['Transaksi']:
+        """"""Mendapatkan daftar transaksi yang pernah dilakukan oleh member.""""""
+        riwayat = []
+        for transaksi in perpus.daftar_transaksi:
+            if transaksi.member.member_id == self._member_id:
+                riwayat.append(transaksi)
+        return riwayat
+
+class Transaksi:
+    """"""Merepresentasikan sebuah transaksi peminjaman.""""""
+    def __init__(self, member: Member, item: LoanableItem):
+        self._transaksi_id = ""TRX-"" + str(uuid.uuid4())[:8].upper()
+        self._member = member
+        self._item = item
+        self._tgl_pinjam = datetime.now()
+        self._tgl_kembali = self._tgl_pinjam + timedelta(days=14) # Batas peminjaman 14 hari
+        self._status = StatusTransaksi.AKTIF
+        self._denda = 0.0
+
+    @property
+    def transaksi_id(self):
+        return self._transaksi_id
+
+    @property
+    def member(self):
+        return self._member
+        
+    @property
+    def item(self):
+        return self._item
+
+    @property
+    def status(self):
+        return self._status
+
+    def hitung_denda(self) -> float:
+        """"""Menghitung denda jika pengembalian terlambat.""""""
+        if datetime.now() > self._tgl_kembali:
+            terlambat = (datetime.now() - self._tgl_kembali).days
+            self._denda = float(terlambat * 1000) # Denda 1000 per hari
+            self._status = StatusTransaksi.TERLAMBAT
+        return self._denda
+        
+    def selesaikan_transaksi(self):
+        self.hitung_denda()
+        if self._status != StatusTransaksi.TERLAMBAT:
+            self._status = StatusTransaksi.SELESAI
+
+class Perpustakaan:
+    """"""Kelas utama yang mengelola seluruh sistem perpustakaan.""""""
+    
+    # Kode sebelumnya:
+
+    # def __init__(self):
+    #    self._daftar_item = []
+    #    self._daftar_member = []
+    #    self._daftar_transaksi = []
+    #    print(""Sistem Perpustakaan berhasil dibuat."")
+
+    def __init__(self, nama_file_data=""perpustakaan.pkl""):
+        """"""
+        Inisialisasi perpustakaan.
+        Akan mencoba memuat data dari file jika ada.
+        """"""
+        self._nama_file_data = nama_file_data
+
+        # Coba muat data dulu
+        if not self.muat_data():
+            # Jika gagal (file tidak ada), buat list kosong
+            print(""INFO: File data tidak ditemukan. Membuat database baru..."")
+            self._daftar_item = []
+            self._daftar_member = []
+            self._daftar_transaksi = []
+        
+        print(""Sistem Perpustakaan berhasil dibuat."")
+
+    @property
+    def daftar_item(self):
+        return self._daftar_item
+        
+    @property
+    def daftar_member(self):
+        return self._daftar_member
+        
+    @property
+    def daftar_transaksi(self):
+        return self._daftar_transaksi
+
+    def muat_data(self) -> bool:
+        """"""
+        Memuat state perpustakaan (daftar item, member, transaksi)
+        dari file pickle.
+        Mengembalikan True jika berhasil, False jika gagal.
+        """"""
+        if not os.path.exists(self._nama_file_data):
+            return False # File tidak ada, gagal memuat
+        
+        try:
+            # Buka file dalam mode Read Binary ('rb')
+            with open(self._nama_file_data, 'rb') as f:
+                # Muat data yang disimpan
+                data_dimuat = pickle.load(f)
+                
+                # Kembalikan state objek dari dictionary
+                self._daftar_item = data_dimuat.get(""items"", [])
+                self._daftar_member = data_dimuat.get(""members"", [])
+                self._daftar_transaksi = data_dimuat.get(""transaksi"", [])
+                
+                print(f""INFO: Data perpustakaan berhasil dimuat dari {self._nama_file_data}."")
+                return True
+        except Exception as e:
+            print(f""ERROR saat memuat data: {e}"")
+            return False
+    
+    def simpan_data(self):
+        """"""
+        Menyimpan state perpustakaan (daftar item, member, transaksi)
+        ke dalam file pickle.
+        """"""
+        # Siapkan data yang akan disimpan dalam format dictionary
+        data_untuk_disimpan = {
+            ""items"": self._daftar_item,
+            ""members"": self._daftar_member,
+            ""transaksi"": self._daftar_transaksi
+        }
+        
+        try:
+            # Buka file dalam mode Write Binary ('wb')
+            with open(self._nama_file_data, 'wb') as f:
+                # Simpan data menggunakan pickle
+                pickle.dump(data_untuk_disimpan, f)
+            print(f""\nINFO: Data perpustakaan berhasil disimpan ke {self._nama_file_data}."")
+        except Exception as e:
+            print(f""ERROR saat menyimpan data: {e}"")
+    
+    def tambah_item(self, item: LoanableItem):
+        """"""Menambahkan item baru (buku/majalah) ke perpustakaan.""""""
+        self._daftar_item.append(item)
+        print(f""ITEM DITAMBAHKAN: '{item.judul}' ({item.__class__.__name__}) telah ditambahkan ke koleksi."")
+
+    def tambah_member(self, nama: str, alamat: str) -> Member:
+        """"""Mendaftarkan anggota baru.""""""
+        member_baru = Member(nama, alamat)
+        self._daftar_member.append(member_baru)
+        print(f""MEMBER BARU: {nama} dengan ID {member_baru.member_id} berhasil terdaftar."")
+        return member_baru
+
+    def cari_item(self, item_id: str) -> LoanableItem | None:
+        """"""Mencari item berdasarkan ID.""""""
+        for item in self._daftar_item:
+            if item.item_id == item_id:
+                return item
+        return None
+
+    def cari_member(self, member_id: str) -> Member | None:
+        """"""Mencari member berdasarkan ID.""""""
+        for member in self._daftar_member:
+            if member.member_id == member_id:
+                return member
+        return None
+        
+    def cari_transaksi(self, transaksi_id: str) -> Transaksi | None:
+        """"""Mencari transaksi berdasarkan ID.""""""
+        for trx in self._daftar_transaksi:
+            if trx.transaksi_id == transaksi_id:
+                return trx
+        return None
+
+    def pinjamkan_item(self, member_id: str, item_id: str) -> Transaksi:
+        """"""Memproses peminjaman item oleh member.""""""
+        member = self.cari_member(member_id)
+        item = self.cari_item(item_id)
+
+        if not member:
+            raise Exception(""ERROR: Member tidak ditemukan."")
+        if not item:
+            raise Exception(""ERROR: Item tidak ditemukan."")
+        if item.status != StatusItem.TERSEDIA:
+            raise Exception(f""ERROR: Item '{item.judul}' sedang tidak tersedia."")
+
+        transaksi_baru = Transaksi(member, item)
+        self._daftar_transaksi.append(transaksi_baru)
+        item.ubah_status(StatusItem.DIPINJAM)
+        print(f""TRANSAKSI PEMINJAMAN: '{item.judul}' dipinjam oleh {member.nama}. ID Transaksi: {transaksi_baru.transaksi_id}"")
+        return transaksi_baru
+
+    def terima_pengembalian(self, transaksi_id: str):
+        """"""Memproses pengembalian item.""""""
+        transaksi = self.cari_transaksi(transaksi_id)
+        if not transaksi:
+            raise Exception(""ERROR: Transaksi tidak ditemukan."")
+        if transaksi.status != StatusTransaksi.AKTIF:
+            raise Exception(""ERROR: Transaksi ini sudah tidak aktif."")
+        
+        transaksi.selesaikan_transaksi()
+        item = transaksi.item
+        item.ubah_status(StatusItem.TERSEDIA)
+        
+        denda = transaksi.hitung_denda()
+        print(f""TRANSAKSI PENGEMBALIAN: '{item.judul}' telah dikembalikan oleh {transaksi.member.nama}."")
+        if denda > 0:
+            print(f""   -> Dikenakan denda sebesar: Rp{denda:,.2f}"")
+        else:
+            print(""   -> Pengembalian tepat waktu."")
+
+# Modifikasi Kelas Pustakawan
+class Pustakawan:
+    """"""Merepresentasikan pustakawan yang mengelola perpustakaan.""""""
+    def __init__(self, pustakawan_id: str, nama: str):
+        self._pustakawan_id = pustakawan_id
+        self._nama = nama
+
+    def lakukan_pendaftaran(self, perpus: Perpustakaan, nama: str, alamat: str) -> Member:
+        """"""Wrapper method untuk mendaftarkan member.""""""
+        print(f""\n[Aksi Pustakawan: {self._nama}] Mendaftarkan anggota baru..."")
+        return perpus.tambah_member(nama, alamat)
+
+    # Versi Baru dengan Factory
+    def tambah_item_ke_koleksi(self, perpus: Perpustakaan, item_type: str, item_id: str, judul: str, **kwargs): 
+        """"""Wrapper method untuk menambah item baru menggunakan Factory.""""""
+        print(f""\n[Aksi Pustakawan: {self._nama}] Meminta pembuatan dan penambahan item '{judul}'..."")
+        try:
+            # Panggil Factory untuk membuat objek
+            item_baru = ItemFactory.create_item(item_type, item_id, judul, **kwargs)
+            # Tambahkan objek yang sudah jadi ke perpustakaan
+            perpus.tambah_item(item_baru)
+        except ValueError as e:
+            print(f""ERROR saat menambah item: {e}"")
+        except Exception as e:
+            print(f""ERROR tidak terduga: {e}"")
+
+    def lakukan_peminjaman(self, perpus: Perpustakaan, member_id: str, item_id: str) -> Transaksi:
+        """"""Wrapper method untuk melakukan peminjaman.""""""
+        print(f""\n[Aksi Pustakawan: {self._nama}] Memproses peminjaman..."")
+        return perpus.pinjamkan_item(member_id, item_id)
+        
+    def lakukan_pengembalian(self, perpus: Perpustakaan, transaksi_id: str):
+        """"""Wrapper method untuk melakukan pengembalian.""""""
+        print(f""\n[Aksi Pustakawan: {self._nama}] Memproses pengembalian..."")
+        perpus.terima_pengembalian(transaksi_id)
+
+# Kelas Baru: ItemFactory
+class ItemFactory:
+    """"""Kelas Factory untuk membuat instance LoanableItem.""""""
+
+    @staticmethod
+    def create_item(item_type: str, item_id: str, judul: str, **kwargs) -> LoanableItem:
+        """"""
+        Membuat objek Buku atau Majalah berdasarkan item_type.
+        kwargs bisa berisi 'pengarang' untuk Buku atau 'edisi' untuk Majalah.
+        """"""
+        if item_type.lower() == ""buku"":
+            pengarang = kwargs.get('pengarang', 'N/A') # Ambil pengarang, default N/A
+            if pengarang == 'N/A':
+                 print(""WARNING: Pengarang tidak disediakan untuk buku."")
+            return Buku(item_id, judul, pengarang)
+        elif item_type.lower() == ""majalah"":
+            edisi = kwargs.get('edisi', 'N/A') # Ambil edisi, default N/A
+            if edisi == 'N/A':
+                 print(""WARNING: Edisi tidak disediakan untuk majalah."")
+            return Majalah(item_id, judul, edisi)
+        # Bisa tambahkan tipe lain di sini (misal: Artikel)
+        # elif item_type.lower() == ""artikel"":
+        #     volume = kwargs.get('volume', 0)
+        #     return Artikel(item_id, judul, volume)
+        else:
+            raise ValueError(f""Tipe item tidak dikenal: {item_type}"")
+
+# ==============================================================================
+# CONTOH PENGGUNAAN PROGRAM (MAIN)
+# ==============================================================================
+if __name__ == ""__main__"":
+    print(""===== MEMULAI SIMULASI SISTEM PERPUSTAKAAN =====\n"")
+    
+    # 1. Inisialisasi sistem (Otomatis MUAT DATA jika file ada)
+
+    nama_file_db = ""perpus_data.pkl""
+    perpustakaan_utama = Perpustakaan(nama_file_db)
+
+    # 2. Menambahkan pustakawan
+    pustakawan_andi = Pustakawan(""P-001"", ""Andi"")
+
+    member_budi = None
+    member_citra = None
+    transaksi1 = None
+    transaksi2 = None
+    
+    # 3. Pustakawan mendaftarkan member baru
+
+    if len(perpustakaan_utama.daftar_member) == 0:
+        print(""\n--- Menjalankan setup data baru ---"")
+        member_budi = pustakawan_andi.lakukan_pendaftaran(perpustakaan_utama, ""Budi Santoso"", ""Jl. Merdeka No. 10"")
+        member_citra = pustakawan_andi.lakukan_pendaftaran(perpustakaan_utama, ""Citra Lestari"", ""Jl. Pahlawan No. 5"")
+        
+        # 4. Pustakawan menambahkan item baru
+        pustakawan_andi.tambah_item_ke_koleksi(perpustakaan_utama, ""Buku"", ""BK-001"", ""OOP Python"", pengarang=""Dr. Inovatif"")
+        pustakawan_andi.tambah_item_ke_koleksi(perpustakaan_utama, ""Majalah"", ""MGZ-001"", ""Quanta"", edisi=""Okt 2025"")
+        pustakawan_andi.tambah_item_ke_koleksi(perpustakaan_utama, ""Buku"", ""BK-002"", ""Sains Data"", pengarang=""Prof. Analitika"")
+    else:
+        print(""--- Data sudah dimuat dari file ---"")
+        if len(perpustakaan_utama.daftar_member) > 0:
+            member_budi = perpustakaan_utama.daftar_member[0] 
+        if len(perpustakaan_utama.daftar_member) > 1:
+            member_citra = perpustakaan_utama.daftar_member[1]
+    
+    if not member_budi or not member_citra:
+        print(""ERROR: Gagal menginisialisasi data member. Simulasi dihentikan."")
+        exit()
+
+    print(""\n===== STATUS KOLEKSI DAN MEMBER SAAT INI =====\n"")
+    print(""--- Daftar Item ---"")
+    # Contoh polimorfisme saat menampilkan info
+    for item in perpustakaan_utama.daftar_item:
+        print(item.get_info())
+    
+    print(""\n--- Daftar Member ---"")
+    for member in perpustakaan_utama.daftar_member:
+        print(f""ID: {member.member_id}, Nama: {member.nama}"")
+    
+    # 5. Simulasi Transaksi Peminjaman
+    print(""\n===== SIMULASI TRANSAKSI ====="")
+    try:
+        trx_budi_aktif = next((trx for trx in perpustakaan_utama.daftar_transaksi if trx.member.member_id == member_budi.member_id and trx.item.item_id == ""BK-001"" and trx.status == StatusTransaksi.AKTIF), None)
+        if trx_budi_aktif:
+            print(f""INFO: Budi sudah meminjam 'OOP Python' (ID: {trx_budi_aktif.transaksi_id})."")
+            transaksi1 = trx_budi_aktif
+        else:
+            # Budi meminjam buku OOP
+            transaksi1 = pustakawan_andi.lakukan_peminjaman(perpustakaan_utama, member_budi.member_id, ""BK-001"")
+        
+        trx_citra_aktif = next((trx for trx in perpustakaan_utama.daftar_transaksi if trx.member.member_id == member_citra.member_id and trx.item.item_id == ""MGZ-001"" and trx.status == StatusTransaksi.AKTIF), None)
+        if trx_citra_aktif:
+            print(f""INFO: Citra sudah meminjam 'Quanta' (ID: {trx_citra_aktif.transaksi_id})."")
+            transaksi2 = trx_citra_aktif
+        else:
+            # Citra meminjam majalah sains
+            transaksi2 = pustakawan_andi.lakukan_peminjaman(perpustakaan_utama, member_citra.member_id, ""MGZ-001"")
+        
+        # Budi mencoba meminjam buku yang sama lagi (akan gagal)
+        pustakawan_andi.lakukan_peminjaman(perpustakaan_utama, member_budi.member_id, ""BK-001"")
+
+    except Exception as e:
+        print(e)
+        
+    print(""\n===== STATUS SETELAH PEMINJAMAN =====\n"")
+    for item in perpustakaan_utama.daftar_item:
+        print(f""Judul: {item.judul}, Status: {item.status.value}"")
+
+    # 6. Simulasi Transaksi Pengembalian
+    try:
+        if transaksi1 and (transaksi1.status == StatusTransaksi.AKTIF or transaksi1.status == StatusTransaksi.TERLAMBAT):
+            # Budi mengembalikan buku OOP
+            pustakawan_andi.lakukan_pengembalian(perpustakaan_utama, transaksi1.transaksi_id)
+        else:
+            print(f""\nINFO: Transaksi {transaksi1.transaksi_id if transaksi1 else 'Budi'} (OOP Python) sudah dikembalikan sebelumnya."")
+        
+        if transaksi2 and (transaksi2.status == StatusTransaksi.AKTIF or transaksi2.status == StatusTransaksi.TERLAMBAT):
+            # Citra mencoba mengembalikan majalah (simulasi terlambat dengan ""memajukan"" waktu)
+            transaksi2._tgl_kembali = datetime.now() - timedelta(days=3) # Anggap terlambat 3 hari
+            pustakawan_andi.lakukan_pengembalian(perpustakaan_utama, transaksi2.transaksi_id)
+        else:
+            print(f""\nINFO: Transaksi {transaksi2.transaksi_id if transaksi2 else 'Citra'} (Quanta) sudah dikembalikan sebelumnya."")
+
+    except Exception as e:
+        print(f""ERROR SIMULASI PENGEMBALIAN: {e}"")
+        
+    print(""\n===== STATUS AKHIR SETELAH PENGEMBALIAN =====\n"")
+    for item in perpustakaan_utama.daftar_item:
+        print(f""Judul: {item.judul}, Status: {item.status.value}"")
+        
+    print(""\n===== RIWAYAT PEMINJAMAN BUDI =====\n"")
+    riwayat_budi = member_budi.get_riwayat_peminjaman(perpustakaan_utama)
+    if riwayat_budi:
+        for trx in riwayat_budi:
+            print(f""ID: {trx.transaksi_id}, Item: '{trx.item.judul}', Status: {trx.status.value}"")
+    else:
+        print(""Tidak ada riwayat peminjaman untuk Budi."")
+
+    print(""\n===== RIWAYAT PEMINJAMAN CITRA =====\n"")
+    riwayat_citra = member_citra.get_riwayat_peminjaman(perpustakaan_utama)
+    if riwayat_citra:
+        for trx in riwayat_citra:
+            print(f""ID: {trx.transaksi_id}, Item: '{trx.item.judul}', Status: {trx.status.value}"")
+    else:
+        print(""Tidak ada riwayat peminjaman untuk Citra."")
+
+    # 7. Simpan state terakhir sebelum program selesai
+    try:
+        perpustakaan_utama.simpan_data()
+    except Exception as e:
+        print(f""Gagal menyimpan data di akhir sesi: {e}"")
+        
+    print(""\n===== SIMULASI SELESAI ====="")"
