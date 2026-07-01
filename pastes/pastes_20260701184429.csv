@@ -1,0 +1,2193 @@
+id,title,username,language,date,content
+DYu6RuXm?source=archive,auctions relist for n minutes,wpgenie,PHP,Wednesday 1st of July 2026 04:17:42 AM CDT,"add_filter( 'woocommerce_simple_auctions_automatic_relist_check_time', 'custom_woocommerce_simple_auctions_automatic_relist_check_time', 10, 4 );
+function custom_woocommerce_simple_auctions_automatic_relist_check_time( $data, $auction_dates_to, $relist_delay, $product ) {
+    return current_time( 'timestamp' ) > ( strtotime( $auction_dates_to ) + ( intval( $relist_delay ) * 60 ) );
+}
+add_filter( 'woocommerce_simple_auctions_relist_auction_to_time', 'custom_woocommerce_simple_auctions_relist_auction_to_time', 10, 2 );
+function custom_woocommerce_simple_auctions_relist_auction_to_time( $to_time, $product ) {
+    $relist_duration = $product->get_auction_relist_duration();
+    $to_time         = date( 'Y-m-d H:i', current_time( 'timestamp' ) + ( $relist_duration * 60 ) );
+    return $to_time;
+}"
+MSAYjexK?source=archive,class-avia-instagram,Guenni007,PHP,Wednesday 1st of July 2026 01:36:09 AM CDT,"<?php
+namespace aviaFramework\widgets;
+
+use \WP_Error;
+use \AviaHelper;
+
+/**
+ * AVIA INSTAGRAM WIDGET
+ *
+ * Widget that displays your latest Instagram Photos
+ *
+ * Modified version - SECURITY HARDENED
+ * =====================================
+ *
+ * Adds a background caching of images on own server to avoid to access instagram to display the images
+ *
+ * Security fixes applied (vs. original):
+ * 1. sslverify no longer disabled when contacting instagram.com (MITM protection)
+ * 2. Host allowlist enforced before downloading any URL returned by instagram (SSRF protection)
+ * 3. Downloaded files are validated as real images (wp_check_filetype + getimagesize) before being kept
+ * 4. File permissions reduced from 0777 to 0644
+ * 5. Filenames are run through sanitize_file_name() instead of using raw basename() from remote data
+ * 6. download_url() calls are given an explicit timeout and downloaded files are size-checked
+ *
+ * @package AviaFramework
+ * @since ???
+ * @since 4.3.1         extended, improved and modified by günter
+ * @since 4.9           Code was moved from class-framework-widgets.php
+ * @since 4.3.1-secure  hardened by günter - see notes above
+ */
+if( ! defined( 'AVIA_FW' ) ) {  exit( 'No direct script access allowed' );  }
+
+
+if( ! class_exists( __NAMESPACE__ . '\avia_instagram_widget', false ) )
+{
+	class avia_instagram_widget extends \aviaFramework\widgets\base\Avia_Widget
+	{
+		/**
+		 * @since 4.3.1
+		 * @var array
+		 */
+		protected $upload_folders;
+
+		/**
+		 * Stores the expire time for cached images in seconds.
+		 *
+		 * @since 4.3.1
+		 * @var int
+		 */
+		protected $expire_time;
+
+		/**
+		 * @since 4.3.1
+		 * @var boolean
+		 */
+		protected $activate_cron;
+
+		/**
+		 * Holds all caching info for each widget instance.
+		 *
+		 * @since 4.3.1
+		 * @var array
+		 */
+		protected $cache;
+
+		/**
+		 * @since 4.3.1
+		 * @var array
+		 */
+		protected $cached_file_sizes;
+
+		/**
+		 * Allowed remote hosts for image downloads (SSRF protection).
+		 * Instagram/Meta serves media from these CDN domains. Anything else is rejected.
+		 *
+		 * @since 4.3.1-secure
+		 * @var array
+		 */
+		protected $allowed_download_hosts;
+
+		/**
+		 * Allowed mime types for cached image files.
+		 *
+		 * @since 4.3.1-secure
+		 * @var array
+		 */
+		protected $allowed_mime_types;
+
+		/**
+		 * Maximum accepted file size (bytes) for a single downloaded image.
+		 *
+		 * @since 4.3.1-secure
+		 * @var int
+		 */
+		protected $max_file_size;
+
+		public function __construct()
+		{
+			$id_base = 'avia-instagram-feed';
+			$name = THEMENAME . ' ' . __( 'Instagram', 'avia_framework' );
+
+			$widget_options = array(
+							'classname'				=> 'avia-instagram-feed avia_no_block_preview',
+							'description'			=> __( 'Displays your latest Instagram photos', 'avia_framework' ),
+							'show_instance_in_rest' => true,
+							'customize_selective_refresh' => false
+						);
+
+			parent::__construct( $id_base, $name, $widget_options );
+
+			$this->defaults = array(
+								'title'			=> __( 'Instagram', 'avia_framework' ),
+								'username'		=> '',
+								'cache'			=> apply_filters( 'avf_instagram_default_cache_location', '' ),		//	'' | 'server'
+								'number'		=> 9,
+								'columns'		=> 3,
+								'size'			=> 'thumbnail',
+								'target'		=> 'lightbox' ,
+								'link'			=> __( 'Follow Me!', 'avia_framework' ),
+								'avia_key'		=> ''
+							);
+
+			$this->upload_folders = wp_upload_dir();
+
+			if( is_ssl() )
+			{
+				$this->upload_folders['baseurl'] = str_replace( 'http://', 'https://', $this->upload_folders['baseurl'] );
+			}
+
+			$folder = apply_filters( 'avf_instagram_cache_folder_name', 'avia_instagram_cache' );
+
+			$this->upload_folders['instagram_dir'] = trailingslashit( trailingslashit( $this->upload_folders['basedir'] ) . $folder );
+			$this->upload_folders['instagram_url'] = trailingslashit( trailingslashit( $this->upload_folders['baseurl'] ) . $folder );
+
+			$this->expire_time = HOUR_IN_SECONDS * 2;
+
+			$this->expire_time = apply_filters_deprecated( 'null_instagram_cache_time', array( $this->expire_time ), '4.3.1', 'avf_instagram_file_cache_time', __( 'Adding possible file caching on server might need a longer period of time to invalidate cache.', 'avia_framework' ) );
+			$this->expire_time = apply_filters( 'avf_instagram_file_cache_time', $this->expire_time );
+
+			$this->activate_cron = ! ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON );
+			$this->activate_cron = apply_filters( 'avf_instagram_activate_cron', $this->activate_cron );
+
+			$this->cache = $this->get_cache();
+
+			$this->cached_file_sizes = array( 'thumbnail', 'small', 'large', 'original' );
+
+			/**
+			 * SECURITY: only these hosts may ever be contacted for a media download.
+			 * Adjust via filter if Meta/Instagram changes their CDN domains.
+			 *
+			 * @since 4.3.1-secure
+			 */
+			$this->allowed_download_hosts = apply_filters( 'avf_instagram_allowed_download_hosts', array(
+					'cdninstagram.com',
+					'fbcdn.net',
+				) );
+
+			/**
+			 * SECURITY: only these mime types are accepted for cached files.
+			 *
+			 * @since 4.3.1-secure
+			 */
+			$this->allowed_mime_types = apply_filters( 'avf_instagram_allowed_mime_types', array(
+					'jpg|jpeg|jpe' => 'image/jpeg',
+					'png'          => 'image/png',
+					'webp'         => 'image/webp',
+				) );
+
+			/**
+			 * SECURITY: reject anything larger than this (default 15 MB) - avoids disk-fill / DoS via
+			 * an attacker-controlled or compromised response serving an oversized payload.
+			 *
+			 * @since 4.3.1-secure
+			 */
+			$this->max_file_size = apply_filters( 'avf_instagram_max_file_size', 15 * MB_IN_BYTES );
+
+			/**
+			 * WP Cron job events
+			 */
+			if( $this->activate_cron )
+			{
+				add_action( 'av_instagram_scheduled_filecheck', array( $this, 'handler_scheduled_filecheck' ), 10 );
+			}
+
+			/**
+			 * Makes sure to keep cron job alive as fallback
+			 */
+			if( is_admin() )
+			{
+				add_action( 'admin_init', array( $this, 'handler_init_filecheck' ), 99999 );
+				add_action( 'delete_widget', array( $this, 'handler_delete_widget' ), 10, 3 );
+			}
+			else
+			{
+				add_action( 'init', array( $this, 'handler_init_filecheck' ), 99999 );
+			}
+
+		}
+
+		/**
+		 * @since 4.3.1
+		 */
+		public function __destruct()
+		{
+			parent::__destruct();
+
+			unset( $this->upload_folders );
+			unset( $this->cache );
+			unset( $this->cached_file_sizes );
+		}
+
+		/**
+		 * Returns the cache info array
+		 *
+		 * @since 4.3.1
+		 * @return array
+		 */
+		public function get_cache()
+		{
+			if( is_null( $this->cache ) )
+			{
+				$cache = get_option( 'avia_instagram_widgets_cache', '' );
+
+				if( is_array( $cache ) )
+				{
+					$this->cache = $cache;
+				}
+				else if( ! is_string( $cache ) || empty( $cache ) )
+				{
+					$this->cache = null;
+				}
+				else
+				{
+					$cache = json_decode( $cache, true );
+					$this->cache = is_array( $cache ) ? $cache : null;
+				}
+
+				if( empty( $this->cache ) )
+				{
+					$this->cache = array(
+							'last_updated'		=> 0,
+							'instances'			=> array()
+						);
+				}
+			}
+
+			return $this->cache;
+		}
+
+		/**
+		 * Update the cache array in DB
+		 *
+		 * @since 4.3.1
+		 * @param array|null $cache
+		 */
+		public function update_cache( ?array $cache = null )
+		{
+			if( ! is_null( $cache) )
+			{
+				$this->cache = $cache;
+			}
+
+			$save = json_encode( $this->cache );
+			update_option( 'avia_instagram_widgets_cache', $save );
+		}
+
+		/**
+		 * Ensure a valid instance array filled with defaults
+		 *
+		 * @since 4.3.1
+		 * @param array $instance_cache
+		 * @return array
+		 */
+		protected function parse_args_instance_cache( array $instance_cache )
+		{
+			$instance_cache = wp_parse_args( (array) $instance_cache, array(
+											'upload_folder'		=> '',
+											'path_error'		=> '',
+											'instagram_error'	=> '',
+											'upload_errors'		=> false,
+											'last_update'		=> 0,
+											'cached_list'		=> array(),
+											'instagram_list'	=> array()
+										));
+
+			return $instance_cache;
+		}
+
+		/**
+		 * Creates a unique key for the given instance for our cache array
+		 *
+		 * @since 4.3.1
+		 * @param array $instance
+		 * @param string $id_widget
+		 * @return string
+		 */
+		protected function create_avia_key( array $instance, $id_widget )
+		{
+			$k = 0;
+			$key = str_replace( $this->id_base . '-', '', $id_widget ) . '-' . AviaHelper::save_string( $instance['title'], '-' );
+
+			$orig_key = $key;
+			while( array_key_exists( $key, $this->cache['instances'] ) )
+			{
+				$key = $orig_key . ""-{$k}"";
+				$k++;
+			}
+
+			return $key;
+		}
+
+		/**
+		 * Output the widget in frontend
+		 *
+		 * NOTE: rendering logic (widget/form/update/block preview) is unchanged from the
+		 * original - the security issues in the original were all in the data-fetching /
+		 * file-caching layer below, not in output escaping, which already looked correct.
+		 *
+		 * @param array $args
+		 * @param array $instance
+		 */
+		public function widget( $args, $instance )
+		{
+			$instance = $this->parse_args_instance( $instance );
+
+			$fields = $this->get_field_names();
+
+			foreach( $instance as $key => $value )
+			{
+				if( in_array( $key, $fields ) )
+				{
+					$instance[ $key ] = esc_attr( $value );
+				}
+			}
+
+			$instance = apply_filters( 'avf_widget_front_instance', $instance, $args, get_called_class() );
+
+			if( $this->in_block_editor_preview( $args, $instance ) )
+			{
+				return;
+			}
+
+			extract( $args, EXTR_SKIP );
+			extract( $instance, EXTR_SKIP );
+
+			$original_cache = $cache;
+			$cache = apply_filters( 'avf_conditional_setting_external_links', $cache, __CLASS__, $this, $args, $instance );
+			if( ! in_array( $cache, array( '', 'server' ) ) )
+			{
+			   $cache = $original_cache;
+			}
+
+			$title = apply_filters( 'widget_title', $title, $args );
+
+			if( ( trim( $username ) == '' ) && ! is_user_logged_in() && ! current_user_can( 'edit_posts' ) )
+			{
+				return;
+			}
+
+			echo $before_widget;
+
+			if ( ! empty( $title ) )
+			{
+				echo $before_title . $title . $after_title;
+			}
+
+			do_action( 'aviw_before_widget', $instance );
+
+			if( $username != '' )
+			{
+				$errors = array();
+				$media_array = array();
+
+				$instance_cache = isset( $this->cache['instances'][ $instance['avia_key'] ] ) ? $this->cache['instances'][ $instance['avia_key'] ] : null;
+
+				if( ! is_null( $instance_cache ) )
+				{
+					if( ! empty( $instance_cache['instagram_error'] ) )
+					{
+						$errors =  array( $instance_cache['instagram_error'] );
+					}
+					if( ! empty( $instance_cache['upload_errors'] ) && ( 'server' == $instance['cache'] ) )
+					{
+						foreach( $instance_cache['cached_list'] as $img )
+						{
+							if( ! empty( $img['errors'] ) )
+							{
+								$errors = array_merge( $errors, $img['errors'] );
+							}
+						}
+					}
+
+					if( 'server' == $instance['cache'] )
+					{
+						$media_array = $instance_cache['cached_list'];
+
+						$url = trailingslashit( trailingslashit( $this->upload_folders['instagram_url'] ) . $instance_cache['upload_folder'] );
+
+						foreach( $media_array as $key => $media )
+						{
+							if( ! empty( $media['errors'] ) )
+							{
+								$errors = array_merge( $errors, $media['errors'] );
+							}
+
+							if( ! empty( $media[ $size ] ) )
+							{
+								$media_array[ $key ][ $size ] = $url . $media[ $size ];
+							}
+							if( ! empty( $media[ 'original' ] ) )
+							{
+								$media_array[ $key ]['original'] = $url . $media['original'];
+							}
+						}
+					}
+					else
+					{
+						$media_array = $instance_cache['instagram_list'];
+					}
+				}
+
+				if( ! empty( $errors ) && is_user_logged_in() && current_user_can( 'edit_posts' ) )
+				{
+					$errors = array_map( 'esc_html__', $errors );
+
+					$out = '';
+					$out .= '<div class=""av-instagram-errors"">';
+					$out .=		'<p class=""av-instagram-errors-msg av-instagram-admin"">' . esc_html__( 'Only visible for admins:', 'avia_framework' ) . '</p>';
+					$out .=		'<p class=""av-instagram-errors-msg av-instagram-admin"">';
+					$out .=			implode( '<br />', $errors );
+					$out .=		'</p>';
+					$out .= '</div>';
+
+					echo $out;
+				}
+
+				if( count( $media_array ) > 0 )
+				{
+					$ulclass = esc_attr( apply_filters( 'aviw_list_class', 'av-instagram-pics av-instagram-size-' . $size ) );
+					$rowclass = esc_attr( apply_filters( 'aviw_row_class', 'av-instagram-row' ) );
+					$liclass = esc_attr( apply_filters( 'aviw_item_class', 'av-instagram-item' ) );
+					$aclass = esc_attr( apply_filters( 'aviw_a_class', '' ) );
+					$imgclass = esc_attr( apply_filters( 'aviw_img_class', '' ) );
+
+					echo '<div class=""' . esc_attr( $ulclass ) . '"">';
+
+					$last_id = end( $media_array );
+					$last_id = $last_id['id'];
+
+					$rowcount = 0;
+					$itemcount = 0;
+					foreach ( $media_array as $item )
+					{
+						if( empty( $item[ $size ] ) )
+						{
+							continue;
+						}
+
+						if( $rowcount == 0 )
+						{
+							echo ""<div class='{$rowclass}'>"";
+						}
+
+						$rowcount ++;
+						$itemcount ++;
+
+						$targeting = $target;
+						if( $target == ""lightbox"" )
+						{
+							$targeting = """";
+							$item['link'] = ! empty( $item['original'] ) ? $item['original'] : $item[ $size ];
+						}
+
+						echo '<div class=""' . $liclass . '"">';
+						echo	'<a href=""' . esc_url( $item['link'] ) . '"" target=""' . esc_attr( $targeting ) . '""  class=""' . $aclass . ' ' . $imgclass . '"" title=""' . esc_attr( $item['description'] ) . '"" style=""background-image:url(' . esc_url( $item[ $size ] ) . ');"">';
+						echo	'</a>';
+						echo '</div>';
+
+						if( $rowcount % $columns == 0 || $last_id == $item['id'] || ( $itemcount >= $number ) )
+						{
+							echo '</div>';
+							$rowcount = 0;
+
+							if( $itemcount >= $number )
+							{
+								break;
+							}
+						}
+					}
+					echo '</div>';
+				}
+				else
+				{
+					echo '<p class=""av-instagram-errors-msg"">' . esc_html__( 'No images available at the moment', 'avia_framework' ) . '</p>';
+				}
+			}
+			else
+			{
+				echo '<p class=""av-instagram-errors-msg av-instagram-admin"">' . esc_html__( 'For admins only: Missing Instagram user name !!', 'avia_framework' ) . '</p>';
+			}
+
+			if ( $link != '' )
+			{
+				echo '<a class=""av-instagram-follow avia-button"" href=""https://instagram.com/' . esc_attr( trim( $username ) ) . '"" rel=""me"" target=""' . esc_attr( $target ) . '"">' . $link . '</a>';
+			}
+
+			do_action( 'aviw_after_widget', $instance );
+
+			echo $after_widget;
+		}
+
+		/**
+		 * Callback to output a custom block preview
+		 *
+		 * @since 4.9
+		 * @param array $args
+		 * @param array $instance
+		 * @return boolean
+		 */
+		protected function widget_block_preview( array $args, array $instance = array() )
+		{
+			echo isset( $args['before_widget'] ) ? $args['before_widget'] : '';
+
+			echo '<div class=""avia-preview-headline"">' . $this->name . '</div>';
+			echo '<div class=""avia-preview-info"">' . __( 'Title:', 'avia_framework' ) . ' ' . esc_html( $instance['title'] ) .  '</div>';
+			echo '<div class=""avia-preview-info"">' . __( 'Username:', 'avia_framework' ) . ' ' . esc_html( $instance['username'] ) .  '</div>';
+			echo '<div class=""avia-preview-in-front"">' . __( 'Content is only rendered in frontend.', 'avia_framework' ) . '</div>';
+
+			echo isset( $args['after_widget'] ) ? $args['after_widget'] : '';
+
+			return true;
+		}
+
+		/**
+		 * Output the form in backend
+		 *
+		 * @param array $instance
+		 */
+		public function form( $instance )
+		{
+			$instance = $this->parse_args_instance( $instance );
+			$fields = $this->get_field_names();
+
+			foreach( $instance as $key => $value )
+			{
+				if( in_array( $key, $fields ) )
+				{
+					switch( $key )
+					{
+						case 'number':
+						case 'columns':
+							$instance[ $key ] = absint( $value );
+							break;
+						default:
+							$instance[ $key ] = esc_attr( $value );
+							break;
+					}
+				}
+			}
+
+			extract( $instance );
+
+			?>
+			<p><label for=""<?php echo $this->get_field_id( 'title' ); ?>""><?php _e( 'Title', 'avia_framework' ); ?>: <input class=""widefat"" id=""<?php echo $this->get_field_id( 'title' ); ?>"" name=""<?php echo $this->get_field_name( 'title' ); ?>"" type=""text"" value=""<?php echo esc_attr( $title ); ?>"" /></label></p>
+			<p><label for=""<?php echo $this->get_field_id( 'username' ); ?>""><?php _e( 'Username', 'avia_framework' ); ?>: <input class=""widefat"" id=""<?php echo $this->get_field_id( 'username' ); ?>"" name=""<?php echo $this->get_field_name( 'username' ); ?>"" type=""text"" value=""<?php echo esc_attr( $username ); ?>"" /></label></p>
+			<p><label for=""<?php echo $this->get_field_id( 'cache' ); ?>""><?php _e( 'Location of your photos or videos', 'avia_framework' ); ?>:</label>
+				<select id=""<?php echo $this->get_field_id( 'cache' ); ?>"" name=""<?php echo $this->get_field_name( 'cache' ); ?>"" class=""widefat"">
+					<option value="""" <?php selected( '', $cache ) ?>><?php _e( 'Get from your instagram account (instagram server connection needed)', 'avia_framework' ); ?></option>
+					<option value=""server"" <?php selected( 'server', $cache ) ?>><?php _e( 'Cache on your server - no instagram connection needed on pageload', 'avia_framework' ); ?></option>
+				</select>
+			</p>
+			<p><label for=""<?php echo $this->get_field_id( 'number' ); ?>""><?php _e( 'Number of photos', 'avia_framework' ); ?>:</label>
+				<select id=""<?php echo $this->get_field_id( 'number' ); ?>"" name=""<?php echo $this->get_field_name( 'number' ); ?>"" class=""widefat"">
+					<?php for( $i = 1; $i <= 12; $i++ ) : ?>
+					<option value=""<?php echo $i; ?>"" <?php selected( $i, $number ) ?>><?php echo $i; ?></option>
+					<?php endfor; ?>
+				</select>
+			</p>
+			<p><label for=""<?php echo $this->get_field_id( 'columns' ); ?>""><?php _e( 'Number of columns', 'avia_framework' ); ?>:</label>
+				<select id=""<?php echo $this->get_field_id( 'columns' ); ?>"" name=""<?php echo $this->get_field_name( 'columns' ); ?>"" class=""widefat"">
+					<?php for( $i = 1; $i <= 6; $i++ ) : ?>
+					<option value=""<?php echo $i; ?>"" <?php selected( $i, $columns ) ?>><?php echo $i; ?></option>
+					<?php endfor; ?>
+				</select>
+			</p>
+			<p><label for=""<?php echo $this->get_field_id( 'size' ); ?>""><?php _e( 'Thumbnail size', 'avia_framework' ); ?>:</label>
+				<select id=""<?php echo $this->get_field_id( 'size' ); ?>"" name=""<?php echo $this->get_field_name( 'size' ); ?>"" class=""widefat"">
+					<option value=""thumbnail"" <?php selected( 'thumbnail', $size ) ?>><?php _e( 'Thumbnail', 'avia_framework' ); ?></option>
+					<option value=""small"" <?php selected( 'small', $size ) ?>><?php _e( 'Small', 'avia_framework' ); ?></option>
+					<option value=""large"" <?php selected( 'large', $size ) ?>><?php _e( 'Large', 'avia_framework' ); ?></option>
+					<option value=""original"" <?php selected( 'original', $size ) ?>><?php _e( 'Original', 'avia_framework' ); ?></option>
+				</select>
+			</p>
+			<p><label for=""<?php echo $this->get_field_id( 'target' ); ?>""><?php _e( 'Open links in', 'avia_framework' ); ?>:</label>
+				<select id=""<?php echo $this->get_field_id( 'target' ); ?>"" name=""<?php echo $this->get_field_name( 'target' ); ?>"" class=""widefat"">
+					<option value=""lightbox"" <?php selected( 'lightbox', $target ) ?>><?php _e( 'Lightbox', 'avia_framework' ); ?></option>
+					<option value=""_self"" <?php selected( '_self', $target ) ?>><?php _e( 'Current window (_self)', 'avia_framework' ); ?></option>
+					<option value=""_blank"" <?php selected( '_blank', $target ) ?>><?php _e( 'New window (_blank)', 'avia_framework' ); ?></option>
+				</select>
+			</p>
+			<p><label for=""<?php echo $this->get_field_id( 'link' ); ?>""><?php _e( 'Link text', 'avia_framework' ); ?>: <input class=""widefat"" id=""<?php echo $this->get_field_id( 'link' ); ?>"" name=""<?php echo $this->get_field_name( 'link' ); ?>"" type=""text"" value=""<?php echo esc_attr( $link ); ?>"" /></label></p>
+
+			<?php
+
+			if( ! $this->activate_cron )
+			{
+				echo '<p class=""av-instagram-no-cron"">';
+				echo	__( 'WP Cron jobs are disabled. To assure a regular update of cached data and an optimal pageload in frontend and backend we recommend to activate this.', 'avia_framework' );
+				echo '</p>';
+
+				$timestamp = ( $this->cache['last_updated'] != 0 ) ? $this->cache['last_updated'] + $this->expire_time : false;
+				$time = ( false !== $timestamp ) ? date( 'Y/m/d H:i a', $timestamp ) .  __( ' UTC', 'avia_framework' ) : __( 'No time available', 'avia_framework' );
+
+				echo '<p class=""av-instagram-next-update"">';
+				echo	__( 'The widget preloads and caches Instagram data for better performance.', 'avia_framework' )."" "";
+				echo	sprintf( __( 'Next update: %s', 'avia_framework' ), $time );
+				echo '</p>';
+			}
+			else
+			{
+				$timestamp = wp_next_scheduled( 'av_instagram_scheduled_filecheck' );
+				$time = ( false !== $timestamp ) ? date( ""Y/m/d H:i"", $timestamp ) .  __( ' UTC', 'avia_framework' ) : __( 'No time available', 'avia_framework' );
+
+				echo '<p class=""av-instagram-next-update"">';
+				echo	__( 'The widget preloads and caches Instagram data for better performance.', 'avia_framework' )."" "";
+				echo	sprintf( __( 'Next update: %s', 'avia_framework' ), $time );
+				echo '</p>';
+			}
+
+			if( empty( $instance['avia_key'] ) )
+			{
+				return;
+			}
+
+			if( empty( $this->cache['instances'][ $instance['avia_key'] ] ) )
+			{
+				return;
+			}
+
+			$instance_cache = $this->cache['instances'][ $instance['avia_key'] ];
+			$errors = array();
+
+			if( ! empty( $instance_cache['instagram_error'] ) )
+			{
+				$errors = (array) $instance_cache['instagram_error'];
+			}
+
+			if( 'server' == $instance['cache'] )
+			{
+				foreach( $instance_cache['cached_list'] as $image )
+				{
+					if( ! empty( $image['errors'] ) )
+					{
+						$errors = array_merge( $errors, $image['errors'] );
+					}
+				}
+			}
+
+			if( ! empty( $errors ) )
+			{
+				$errors = array_map( 'esc_html__', $errors );
+
+				$out  = '<div class=""av-instagram-errors"">';
+				$out .=		'<p class=""av-instagram-errors-msg av-instagram-error-headline"">' . esc_html__( 'Errors found:', 'avia_framework' ) . '</p>';
+				$out .=		'<p class=""av-instagram-errors-msg"">';
+				$out .=			implode( '<br />', $errors );
+				$out .=		'</p>';
+				$out .= '</div>';
+
+				echo $out;
+			}
+
+		}
+
+		/**
+		 * Update widget options
+		 *
+		 * @param array $new_instance
+		 * @param array $old_instance
+		 * @return array
+		 */
+		public function update( $new_instance, $old_instance )
+		{
+			$instance = $this->parse_args_instance( $old_instance );
+
+			$instance['title'] = strip_tags( $new_instance['title'] );
+			$instance['username'] = trim( strip_tags( $new_instance['username'] ) );
+			$instance['cache'] = ( $new_instance['cache'] == 'server' || $new_instance['cache'] == '' ) ? $new_instance['cache'] : apply_filters( 'avf_instagram_default_cache_location', 'server' );
+			$instance['number'] = ! absint( $new_instance['number'] ) ? 9 : $new_instance['number'];
+			$instance['columns'] = ! absint( $new_instance['columns'] ) ? 3 : $new_instance['columns'];
+			$instance['size'] = ( $new_instance['size'] == 'thumbnail' || $new_instance['size'] == 'large' || $new_instance['size'] == 'small' || $new_instance['size'] == 'original' ) ? $new_instance['size'] : 'large';
+			$instance['target'] = ( $new_instance['target'] == '_self' || $new_instance['target'] == '_blank'|| $new_instance['target'] == 'lightbox' ) ? $new_instance['target'] : '_self';
+			$instance['link'] = strip_tags( $new_instance['link'] );
+
+			if( empty( $instance['avia_key'] ) )
+			{
+				$key = $this->create_avia_key( $instance, $this->id );
+				$instance['avia_key'] = $key;
+				$this->cache['instances'][ $key ] = array();
+				$this->update_cache();
+			}
+
+			$this->update_single_instance( $instance, $this->id );
+
+			if( $this->activate_cron )
+			{
+				$this->restart_cron_job();
+			}
+
+			return $instance;
+		}
+
+		/**
+		 * Get info from instagram
+		 * based on https://gist.github.com/cosmocatalano/4544576
+		 *
+		 * SECURITY: sslverify is no longer disabled - the original code disabled TLS certificate
+		 * verification, which allowed a man-in-the-middle attacker to forge the ""instagram"" response
+		 * (and, downstream, control which files get downloaded and cached on the server).
+		 *
+		 * @since 4.3.1-secure hardened
+		 * @param string $username
+		 * @return array|\WP_Error
+		 */
+		protected function scrape_instagram( $username )
+		{
+			$username = strtolower( $username );
+			$username = str_replace( '@', '', $username );
+
+			$remote = wp_remote_get( 'https://www.instagram.com/' . trim( $username ), array(
+					'timeout' => 60,
+					// SECURITY: sslverify intentionally left at the WP default (true).
+					// Do NOT set 'sslverify' => false here.
+				) );
+
+			if ( is_wp_error( $remote ) )
+			{
+				return new WP_Error( 'site_down', __( 'Unable to communicate with Instagram.', 'avia_framework' ) );
+			}
+
+			$code = wp_remote_retrieve_response_code( $remote );
+			if ( 200 != $code )
+			{
+				$msg = wp_remote_retrieve_response_message( $remote );
+				if( empty( $msg ) )
+				{
+					$msg = __( 'Unknown error code', 'avia_framework' );
+				}
+				return new WP_Error( 'invalid_response', sprintf( __( 'Instagram returned error %d (= %s).', 'avia_framework' ), $code, $msg ) );
+			}
+
+			$shards = explode( 'window._sharedData = ', $remote['body'] );
+			if( ! isset( $shards[1] ) )
+			{
+				return new WP_Error( 'bad_json', __( 'Instagram has returned invalid data.', 'avia_framework' ) );
+			}
+
+			$insta_json = explode( ';</script>', $shards[1] );
+			$insta_array = json_decode( $insta_json[0], true );
+
+			if ( ! $insta_array )
+			{
+				return new WP_Error( 'bad_json', __( 'Instagram has returned invalid data.', 'avia_framework' ) );
+			}
+
+			if ( isset( $insta_array['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges'] ) )
+			{
+				$images = $insta_array['entry_data']['ProfilePage'][0]['graphql']['user']['edge_owner_to_timeline_media']['edges'];
+			}
+			else
+			{
+				return new WP_Error( 'bad_json_2', __( 'Instagram has returned invalid data.', 'avia_framework' ) );
+			}
+
+			if ( ! is_array( $images ) )
+			{
+				return new WP_Error( 'bad_array', __( 'Instagram has returned invalid data.', 'avia_framework' ) );
+			}
+
+			$instagram = array();
+
+			foreach ( $images as $image )
+			{
+				if ( ! empty( $image['node']['is_video'] ) )
+				{
+					$type = 'video';
+				}
+				else
+				{
+					$type = 'image';
+				}
+
+				$caption = __( 'Instagram Image', 'avia_framework' );
+
+				if ( ! empty( $image['node']['edge_media_to_caption']['edges'][0]['node']['text'] ) )
+				{
+					$caption = wp_kses( $image['node']['edge_media_to_caption']['edges'][0]['node']['text'], array() );
+				}
+
+				// SECURITY: every URL taken from the remote response is passed through
+				// is_allowed_download_url() before it is ever used - see download_from_instagram().
+				$instagram[] = array(
+						'description'   => $caption,
+						'link'		  	=> trailingslashit( '//instagram.com/p/' . $image['node']['shortcode'] ),
+						'time'		  	=> $image['node']['taken_at_timestamp'] ?? 0,
+						'comments'	  	=> $image['node']['edge_media_to_comment']['count'] ?? 0,
+						'likes'		 	=> $image['node']['edge_liked_by']['count'] ?? 0,
+						'thumbnail'	 	=> preg_replace( '/^https?\:/i', '', $image['node']['thumbnail_resources'][0]['src'] ?? '' ),
+						'small'			=> preg_replace( '/^https?\:/i', '', $image['node']['thumbnail_resources'][2]['src'] ?? '' ),
+						'large'			=> preg_replace( '/^https?\:/i', '', $image['node']['thumbnail_resources'][4]['src'] ?? '' ),
+						'original'		=> preg_replace( '/^https?\:/i', '', $image['node']['display_url'] ?? '' ),
+						'type'		  	=> $type,
+						'id'			=> $image['node']['id']
+					);
+			}
+
+			$aviw_images_only = false;
+			$aviw_images_only = apply_filters_deprecated( 'aviw_images_only', array( $aviw_images_only ), '4.3.1', 'avf_instagram_filter_files', __( 'Filter extended to filter images or videos', 'avia_framework' ) );
+
+			$show = $aviw_images_only ? array( 'image' ) : array();
+			$show = apply_filters( 'avf_instagram_filter_files', $show, $username );
+
+			if( ! empty( $show ) )
+			{
+				foreach( $instagram as $key => $media_item )
+				{
+					if( ! in_array( $media_item['type'], $show ) )
+					{
+						unset( $instagram[ $key ] );
+					}
+				}
+
+				$instagram = array_merge( $instagram );
+			}
+
+			if ( empty( $instagram ) )
+			{
+				return new WP_Error( 'no_images', __( 'Instagram did not return any images.', 'avia_framework' ) );
+			}
+
+			return $instagram;
+		}
+
+		/**
+		 * WP Cron handler for background uploads
+		 *
+		 * @since 4.3.1
+		 */
+		public function handler_scheduled_filecheck()
+		{
+			if( defined( 'WP_DEBUG ' ) && WP_DEBUG )
+			{
+				error_log( '******************  In avia_instagram_widget::handler_scheduled_filecheck started' );
+			}
+
+			$this->schedule_cron_job( $this->expire_time * 2 );
+
+			$settings = $this->get_settings();
+			if( ! empty( $settings ) )
+			{
+				$this->check_all_instances();
+			}
+
+			$this->schedule_cron_job( $this->expire_time * 2 );
+
+			$this->sync_data();
+
+			$this->schedule_cron_job( $this->expire_time );
+
+			if( defined( 'WP_DEBUG ' ) && WP_DEBUG )
+			{
+				error_log( '******************  In avia_instagram_widget::handler_scheduled_filecheck ended' );
+			}
+		}
+
+		/**
+		 * Synchronises directory and cache data structure.
+		 *
+		 * @since 4.3.1
+		 */
+		public function sync_data()
+		{
+			$settings = $this->get_settings();
+
+			if( empty( $settings ) && empty( $this->cache['instances'] ) )
+			{
+				if( is_dir( $this->upload_folders['instagram_dir'] ) )
+				{
+					avia_backend_delete_folder( $this->upload_folders['instagram_dir'] );
+					$this->cache['last_updated'] = time();
+					$this->update_cache();
+				}
+				return;
+			}
+
+			$instance_infos = (array) $this->cache['instances'];
+
+			$keys = array_keys( $instance_infos );
+			$keys_to_keep = array();
+
+			foreach ( $settings as $index => $setting )
+			{
+				if( in_array( $setting['avia_key'], $keys ) )
+				{
+					$keys_to_keep[] = $setting['avia_key'];
+				}
+			}
+
+			$keys_to_remove = array_diff( $keys, $keys_to_keep );
+
+			foreach( $keys_to_remove as $key )
+			{
+				$folder = $this->upload_folders['instagram_dir'] . $instance_infos[ $key ]['upload_folder'];
+				avia_backend_delete_folder( $folder );
+				unset( $this->cache['instances'][ $key ] );
+			}
+
+			$cache_dirs = is_dir( $this->upload_folders['instagram_dir'] ) ? scandir( $this->upload_folders['instagram_dir'] ) : false;
+			if( ! is_array( $cache_dirs ) )
+			{
+				return;
+			}
+
+			$cache_dirs = array_diff( $cache_dirs, array( '.', '..' ) );
+
+			$ref_dirs = array();
+			foreach( $this->cache['instances'] as $key => $instance_info )
+			{
+				if( isset( $instance_info['upload_folder'] ) )
+				{
+					$ref_dirs[] = $instance_info['upload_folder'];
+				}
+			}
+
+			$remove_dirs = array_diff( $cache_dirs, $ref_dirs );
+
+			foreach( $remove_dirs as $remove_dir )
+			{
+				avia_backend_delete_folder( $this->upload_folders['instagram_dir'] . $remove_dir );
+			}
+
+			if( empty( $this->cache['instances'] ) )
+			{
+				avia_backend_delete_folder( $this->upload_folders['instagram_dir'] );
+			}
+
+			$this->cache['last_updated'] = time();
+			$this->update_cache();
+		}
+
+		/**
+		 * WP Cron is disabled - we have to load files during pageload in admin area
+		 *
+		 * @since 4.3.1
+		 */
+		public function handler_init_filecheck()
+		{
+			$settings = $this->get_settings();
+			if( empty( $settings ) )
+			{
+				if( $this->activate_cron  )
+				{
+					$this->restart_cron_job();
+				}
+				return;
+			}
+
+			$instance = array_shift( $settings );
+			if( ! isset( $instance['avia_key'] ) || empty( $instance['avia_key'] ) )
+			{
+				$instances = $this->get_settings();
+				foreach( $instances as $key => &$instance )
+				{
+					$instance = $this->parse_args_instance( $instance );
+					$key = $this->create_avia_key( $instance, $this->id_base . ""-{$key}"" );
+					$instance['avia_key'] = $key;
+					$this->cache['instances'][ $key ] = array();
+				}
+				unset( $instance );
+				$this->save_settings( $instances );
+
+				$this->cache['last_updated'] = 0;
+				$this->update_cache();
+
+				$this->check_all_instances();
+			}
+
+			if( $this->activate_cron  )
+			{
+				$this->restart_cron_job();
+				return;
+			}
+
+			if( $this->cache['last_updated'] + $this->expire_time > time() )
+			{
+				return;
+			}
+
+			if( is_admin() )
+			{
+				$this->check_all_instances();
+			}
+		}
+
+		/**
+		 * Is called, when an instance of a widget is deleted.
+		 *
+		 * @since 4.3.1
+		 * @param string $widget_id
+		 * @param string $sidebar_id
+		 * @param string $id_base
+		 */
+		public function handler_delete_widget( $widget_id, $sidebar_id, $id_base )
+		{
+			$id = str_replace( $id_base . '-', '', $widget_id );
+
+			$settings = $this->get_settings();
+			if( empty( $settings ) || empty( $settings[ $id ] ) )
+			{
+				return;
+			}
+
+			$instance = $settings[ $id ];
+
+			$instance_info = isset( $this->cache['instances'][ $instance['avia_key'] ] ) ? $this->cache['instances'][ $instance['avia_key'] ] : array();
+			if( empty( $instance_info ) )
+			{
+				return;
+			}
+
+			$instance = $this->parse_args_instance( $instance );
+			$instance_info = $this->parse_args_instance_cache( $instance_info );
+
+			if( count( $settings ) <= 1 )
+			{
+				avia_backend_delete_folder( $this->upload_folders['instagram_dir'] );
+				$this->cache['instances'] = array();
+			}
+			else
+			{
+				$folder = $this->upload_folders['instagram_dir'] . $instance_info['upload_folder'];
+				avia_backend_delete_folder( $folder );
+				unset( $this->cache['instances'][ $instance['avia_key'] ] );
+			}
+
+			$this->update_cache();
+		}
+
+		/**
+		 * @since 4.3.1
+		 */
+		protected function restart_cron_job()
+		{
+		   $timestamp = wp_next_scheduled( 'av_instagram_scheduled_filecheck' );
+		   if( false === $timestamp )
+		   {
+			   $this->schedule_cron_job( $this->expire_time );
+			   return;
+		   }
+
+		   if( $timestamp > ( time() + $this->expire_time * 2 ) )
+		   {
+			   $this->schedule_cron_job( $this->expire_time * 2 );
+		   }
+		}
+
+		/**
+		 * @since 4.3.1
+		 * @param int $delay_seconds
+		 * @return boolean
+		 */
+		protected function schedule_cron_job( $delay_seconds = 0 )
+		{
+			$timestamp = wp_next_scheduled( 'av_instagram_scheduled_filecheck' );
+			if( false !== $timestamp )
+			{
+				wp_unschedule_hook( 'av_instagram_scheduled_filecheck' );
+			}
+
+			$timestamp = time() + $delay_seconds;
+
+			$scheduled = wp_schedule_single_event( $timestamp, 'av_instagram_scheduled_filecheck' );
+
+			return false !== $scheduled;
+		}
+
+		/**
+		 * @since 4.3.1
+		 */
+		protected function check_all_instances()
+		{
+			$settings = $this->get_settings();
+
+			foreach ( $settings as $key => $instance )
+			{
+				$id_widget = $this->id_base . ""-{$key}"";
+
+				if( false === is_active_widget( false, $id_widget, $this->id_base, false ) )
+				{
+					continue;
+				}
+
+				$this->update_single_instance( $instance, $id_widget );
+			}
+
+			$this->cache['last_updated'] = time();
+			$this->update_cache();
+		}
+
+		/**
+		 * @since 4.3.1
+		 * @param array $instance
+		 * @param string $id_widget
+		 * @return array
+		 */
+		protected function update_single_instance( array $instance, $id_widget )
+		{
+			set_time_limit( 0 );
+
+			$instance = $this->parse_args_instance( $instance );
+
+			if( empty( $instance['avia_key'] ) )
+			{
+				$key = $this->create_avia_key( $instance, $id_widget );
+				$instance['avia_key'] = $key;
+				$this->cache['instances'][ $key ] = array();
+			}
+
+			$instance_cache = isset( $this->cache['instances'][ $instance['avia_key'] ] ) ? $this->cache['instances'][ $instance['avia_key'] ] : array();
+			$instance_cache = $this->parse_args_instance_cache( $instance_cache );
+
+			if( ( 'server' == $instance['cache'] ) && empty( $instance_cache['upload_folder'] ) && ! empty( $instance['username'] ) )
+			{
+				$id = str_replace( $this->id_base . '-', '', $id_widget );
+				$f = empty( $instance['title'] ) ? $instance['username'] : $instance['title'];
+				$folder_name = substr( AviaHelper::save_string( $id . '-' . $f, '-' ), 0, 30 );
+				$folder = $this->upload_folders['instagram_dir'] . $folder_name;
+
+				$created = avia_backend_create_folder( $folder, false, 'unique' );
+				if( $created )
+				{
+					$split = pathinfo( $folder );
+					$instance_cache['upload_folder'] = $split['filename'];
+					$instance_cache['path_error'] = '';
+					$instance_cache['cached_list'] = array();
+				}
+				else
+				{
+					$instance_cache['path_error'] = sprintf( __( 'Unable to create cache folder ""%s"". Files will be loaded directly from instagram', 'avia_framework' ), $folder );
+				}
+			}
+
+			$username = $instance['username'];
+			$number = $instance['number'];
+
+			if( ! empty( $username) )
+			{
+				$media_array = $this->scrape_instagram( $username );
+
+				if ( ! is_wp_error( $media_array ) )
+				{
+					$instance_cache['instagram_error'] = '';
+					$instance_cache['instagram_list'] = array_slice( $media_array, 0, $number );
+
+					if( 'server' == $instance['cache'] )
+					{
+						$instance_cache = $this->cache_files_in_upload_directory( $media_array, $instance, $instance_cache );
+					}
+				}
+				else
+				{
+					$instance_cache['instagram_error'] = $media_array->get_error_message();
+				}
+			}
+			else
+			{
+				$instance_cache['instagram_error'] = __( 'You need to specify an Instagram username.', 'avia_framework' );
+				$instance_cache['instagram_list'] = array();
+				$instance_cache['cached_list'] = array();
+			}
+
+			$instance_cache['last_update'] = time();
+
+			$this->cache['instances'][ $instance['avia_key'] ] = $instance_cache;
+			$this->update_cache();
+
+			return $instance;
+		}
+
+		/**
+		 * Updates the local stored files in upload directory.
+		 *
+		 * @since 4.3.1
+		 * @param array $instagram_files
+		 * @param array $instance
+		 * @param array $instance_cache
+		 * @return array
+		 */
+		protected function cache_files_in_upload_directory( array $instagram_files, array $instance, array $instance_cache )
+		{
+			set_time_limit( 0 );
+
+			$cached_files = $instance_cache['cached_list'];
+
+			$new_cached_files = array();
+			$no_errors = 0;
+
+			foreach( $instagram_files as $instagram_file )
+			{
+				$id = $instagram_file['id'];
+
+				$found = false;
+				foreach( $cached_files as $key_cache => $cached_file )
+				{
+					if( $id == $cached_file['id'] )
+					{
+						if( ! empty( $cached_file['errors'] ) )
+						{
+							$this->remove_single_cached_files( $cached_file, $instance_cache );
+							unset( $cached_files[ $key_cache ] );
+							break;
+						}
+
+						$path = trailingslashit( $this->upload_folders['instagram_dir'] . $instance_cache['upload_folder'] );
+						foreach( $this->cached_file_sizes as $size )
+						{
+							if( empty( $cached_file[ $size ] ) || ! file_exists( $path . $cached_file[ $size ] ) )
+							{
+								$this->remove_single_cached_files( $cached_file, $instance_cache );
+								unset( $cached_files[ $key_cache ] );
+								break;
+							}
+						}
+
+						if( ! isset( $cached_files[ $key_cache ] ) )
+						{
+							break;
+						}
+
+						$ncf = $cached_file;
+
+						$ncf['description'] = $instagram_file['description'];
+						$ncf['link'] = $instagram_file['link'];
+						$ncf['time'] = $instagram_file['time'];
+						$ncf['comments'] = $instagram_file['comments'];
+						$ncf['likes'] = $instagram_file['likes'];
+						$ncf['type'] = $instagram_file['type'];
+
+						$new_cached_files[] = $ncf;
+
+						unset( $cached_files[ $key_cache ] );
+						$found = true;
+						break;
+					}
+				}
+
+				if( ! $found )
+				{
+					$new_cached_files[] = $this->download_from_instagram( $instagram_file, $instance, $instance_cache );
+				}
+
+				$last = $new_cached_files[ count( $new_cached_files ) - 1 ];
+
+				if( empty( $last['errors'] ) || ! empty( $last[ $instance['size'] ] ) )
+				{
+					$no_errors++;
+				}
+
+				if( $no_errors >= $instance['number'] || count( $new_cached_files ) > ( $instance['number'] * 2 ) )
+				{
+					break;
+				}
+			}
+
+			if( $no_errors < $instance['number'] )
+			{
+				foreach( $cached_files as $key_cache => $cached_file )
+				{
+					$new_cached_files[] = $cached_file;
+					if( empty( $cached_file['errors'] ) )
+					{
+						$no_errors++;
+					}
+
+					unset( $cached_files[ $key_cache ] );
+
+					if( $no_errors >= $instance['number'] )
+					{
+						break;
+					}
+				}
+			}
+
+			foreach( $cached_files as $key_cache => $cached_file )
+			{
+				$this->remove_single_cached_files( $cached_file, $instance_cache );
+				unset( $cached_files[ $key_cache ] );
+			}
+
+			$err_cnt = 0;
+			$count = 1;
+
+			foreach( $new_cached_files as $new_file )
+			{
+				if( ! empty( $new_file['errors'] ) )
+				{
+					$err_cnt++;
+				}
+				$count++;
+
+				if( $count > $instance['number'] )
+				{
+					break;
+				}
+			}
+
+			$instance_cache['upload_errors'] = ( 0 == $err_cnt ) ? false : $err_cnt;
+			$instance_cache['cached_list'] = $new_cached_files;
+
+			return $instance_cache;
+		}
+
+		/**
+		 * SECURITY: checks that a URL returned by instagram points to a host we explicitly
+		 * trust for media downloads, before we ever pass it to download_url(). Without this,
+		 * a compromised/forged response (e.g. via a MITM, or a future scraping bug) could make
+		 * this widget download and store an attacker-controlled file on the server.
+		 *
+		 * @since 4.3.1-secure
+		 * @param string $url
+		 * @return boolean
+		 */
+		protected function is_allowed_download_url( $url )
+		{
+			$host = wp_parse_url( $url, PHP_URL_HOST );
+
+			if( empty( $host ) )
+			{
+				return false;
+			}
+
+			$host = strtolower( $host );
+
+			foreach( $this->allowed_download_hosts as $allowed )
+			{
+				$allowed = strtolower( $allowed );
+
+				// exact match or proper subdomain match only (e.g. ""scontent.cdninstagram.com"" but not ""evilcdninstagram.com"")
+				if( $host === $allowed || substr( $host, -( strlen( $allowed ) + 1 ) ) === '.' . $allowed )
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		/**
+		 * SECURITY: validates that a locally saved temp file is actually an image of an
+		 * allowed type and within the size limit. Rejects anything else (e.g. a script or
+		 * executable disguised behind an image-looking URL/filename).
+		 *
+		 * @since 4.3.1-secure
+		 * @param string $tmp_path
+		 * @return boolean
+		 */
+		protected function is_valid_downloaded_image( $tmp_path )
+		{
+			if( ! file_exists( $tmp_path ) )
+			{
+				return false;
+			}
+
+			$filesize = filesize( $tmp_path );
+			if( false === $filesize || $filesize <= 0 || $filesize > $this->max_file_size )
+			{
+				return false;
+			}
+
+			// getimagesize() actually parses the image header - a renamed .php file will fail this check.
+			$info = @getimagesize( $tmp_path );
+			if( false === $info || empty( $info['mime'] ) )
+			{
+				return false;
+			}
+
+			if( ! in_array( $info['mime'], $this->allowed_mime_types, true ) )
+			{
+				return false;
+			}
+
+			return true;
+		}
+
+		/**
+		 * Downloads the files from instagram and stores them in local cache.
+		 *
+		 * SECURITY (vs. original):
+		 * - source URL is checked against an allowlist of trusted CDN hosts before download
+		 * - downloaded file is verified to actually be an allowed image type/size before being kept
+		 * - filename is sanitized instead of trusting the remote-supplied name verbatim
+		 * - permissions reduced from 0777 to 0644
+		 *
+		 * @since 4.3.1
+		 * @since 4.3.1-secure hardened
+		 * @param array $instagram_file
+		 * @param array $instance
+		 * @param array $instance_cache
+		 * @return array
+		 */
+		protected function download_from_instagram( array $instagram_file, array $instance, array $instance_cache )
+		{
+			$new_cached_file = $instagram_file;
+			$new_cached_file['errors'] = array();
+			$instagram_schema = 'https:';
+
+			$cache_path = trailingslashit( $this->upload_folders['instagram_dir'] . $instance_cache['upload_folder'] );
+
+			if( ! function_exists( 'download_url' ) )
+			{
+				require_once trailingslashit( ABSPATH ) . 'wp-admin/includes/file.php';
+			}
+
+			foreach( $this->cached_file_sizes as $size )
+			{
+				if( empty( $instagram_file[ $size ] ) )
+				{
+					$new_cached_file[ $size ] = '';
+					continue;
+				}
+
+				$remote_url = $instagram_schema . $instagram_file[ $size ];
+
+				// SECURITY: reject anything that doesn't point at a trusted instagram/meta CDN host.
+				if( ! $this->is_allowed_download_url( $remote_url ) )
+				{
+					$new_cached_file[ $size ] = '';
+					$new_cached_file['errors'][] = __( 'Rejected image URL from an untrusted host.', 'avia_framework' );
+					continue;
+				}
+
+				// SECURITY: sanitize the filename instead of trusting the remote name verbatim.
+				$fn = explode( '?', basename( $instagram_file[ $size ] ) );
+				$safe_name = sanitize_file_name( $fn[0] );
+
+				if( empty( $safe_name ) )
+				{
+					$new_cached_file[ $size ] = '';
+					$new_cached_file['errors'][] = __( 'Could not determine a safe filename for downloaded image.', 'avia_framework' );
+					continue;
+				}
+
+				$tmp_name = download_url( $remote_url, 30 );
+
+				if( is_wp_error( $tmp_name ) )
+				{
+					$new_cached_file[ $size ] = '';
+					$new_cached_file['errors'] = array_merge( $new_cached_file['errors'], $tmp_name->get_error_messages() );
+					continue;
+				}
+
+				// SECURITY: verify the downloaded file is actually an allowed image type/size
+				// before it is moved into the public uploads folder.
+				if( ! $this->is_valid_downloaded_image( $tmp_name ) )
+				{
+					@unlink( $tmp_name );
+					$new_cached_file[ $size ] = '';
+					$new_cached_file['errors'][] = __( 'Downloaded file failed image validation and was discarded.', 'avia_framework' );
+					continue;
+				}
+
+				$new_file_name = $size . '_' . $safe_name;
+				$new_name = $cache_path . $new_file_name;
+
+				$moved = avia_backend_rename_file( $tmp_name, $new_name );
+				if( is_wp_error( $moved ) )
+				{
+					@unlink( $tmp_name );
+					$new_cached_file[ $size ] = '';
+					$new_cached_file['errors'] = array_merge( $new_cached_file['errors'], $moved->get_error_messages() );
+					continue;
+				}
+
+				// SECURITY: 0644 instead of 0777 - files only ever need to be world-readable, never world-writable/executable.
+				if( ! chmod( $new_name, 0644 ) )
+				{
+					$new_cached_file['errors'][] = sprintf( __( 'Could not change user rights of file %s to 644 - file might not be visible in frontend.', 'avia_framework' ), $new_name );
+				}
+
+				$new_cached_file[ $size ] = $new_file_name;
+			}
+
+			return $new_cached_file;
+		}
+
+		/**
+		 * Removes all cached files from $cached_file_info
+		 *
+		 * @since 4.3.1
+		 * @param array $cached_file_info
+		 * @param array $instance_cache
+		 * @return array
+		 */
+		protected function remove_single_cached_files( array $cached_file_info, array $instance_cache )
+		{
+			$cache_path = trailingslashit( $this->upload_folders['instagram_dir'] . $instance_cache['upload_folder'] );
+
+			foreach( $this->cached_file_sizes as $size )
+			{
+				if( ! empty( $cached_file_info[ $size ] ) )
+				{
+					$file = $cache_path . $cached_file_info[ $size ];
+
+					if( file_exists( $file ) )
+					{
+						unlink( $file );
+					}
+					$cached_file_info[ $size ] = '';
+				}
+			}
+
+			return $cached_file_info;
+		}
+	}
+}"
+CAZu17iY?source=archive,42:SOURCE,z66is,text,Wednesday 1st of July 2026 12:00:46 AM CDT,display.42
+zhSn8htK?source=archive,42,z66is,text,Tuesday 30th of June 2026 11:38:45 PM CDT,"<?xml version=""1.0"" encoding=""utf-8""?>
+<svg xmlns=""http://www.w3.org/2000/svg"" width=""400"" height=""200"" viewBox=""0 0 400 200"">
+  <rect width=""100%"" height=""100%"" fill=""#ffffff""/>
+  <text x=""50%"" y=""50%"" font-family=""DejaVu Sans Mono, monospace"" font-size=""96"" fill=""#000000"" dominant-baseline=""middle"" text-anchor=""middle"">42</text>
+</svg>
+"
+C4DyVv5r?source=archive,The Desperate Mission 2,dgl_2,text,Tuesday 30th of June 2026 11:31:07 PM CDT,"They came out of hyperspace close to their destination. The Red Twins were hidden in a dense nebula, and they had to use the nav computer to make their way. Then, suddenly, they had a visual sighting, a red-dish haze that looked like one faint star. Obi-Wan gave their position to the spaceport, and they were cleared to land. Ferus dropped the cruiser neatly into the target landing area and then manually guided it to a parking space. He stretched. ""I could use a meal and a rest,"" he said. ""I'm afraid you'll have to wait a bit longer for that,” Obi-Wan said. Foreboding snaked through Ferus. He followed Obi-Wan's gaze out the viewscreen to the crowded
+spaceport. Parked only meters away was the Firespray attack ship. Boba Fett had found them.-Chpt.20"
+ct08v886?source=archive,The Desperate Mission 1,dgl_2,text,Tuesday 30th of June 2026 11:27:11 PM CDT,"Ferus doubted the booby-trapped explosion had stopped them. Although it would be a nice bonus if it had blown that laser cannon into a few choice pieces of scrap. ""Even if they survived that blast, there's no way they can find us, Ferus finally said. ""The tunnels are a maze, and they'll get lost. I'm lost! There's no way they―"" They heard the whistle of the rocket behind them. They dived to the floor as it zoomed overhead and thudded into the rock. The ceiling tilted, and rocks rained down, but the tunnel did not collapse. ""You were saying?"" Obi-Wan asked. ""Who are those guys?"" Ferus asked, coughing out the grit from his lungs, and they started to run.-Chpt.14"
+UNh9HSby?source=archive,Rebel Dawn 14,dgl_2,text,Tuesday 30th of June 2026 11:18:58 PM CDT,"""There's one aboard the Falcon. Chewie, you―""
+
+""Don't move, Solo,"" came a voice from the past. Han froze as Teroenza crawled out from where he'd been concealed behind the white jade fountain. The High Priest had a blaster rifle in his hand, and his eyes held a mad glitter that told Han there was no way to talk his way out of this one. ""Hands raised,"" the Priest directed. Han, Chewie and Bria all put their hands up. Han glanced at the others, trying frantically to think of a way to get out of this. But Teroenza had the drop on them good.... ""I shall enjoy this, Bria Tharen and Han Solo,"" Teroenza said. ""I have summoned a pilot, and he is coming to collect me from Colony Four. I shall be free of this wretched world ... and I shall have my treasure. I shall miss my mate, but, on the whole, not a bad bargain. Perhaps Desilijic can use my services....""
+
+""Hey,"" Han said, ""Jabba's a friend of mine. You kill me, he won't take it kindly."" Teroenza laughed wheezily.
+""Hutts do not have friends,"" he sa id. ""Farewell, Solo."" Pointing the blaster at Han, Teroenza's small, stubby finger began to tighten on the trigger. Han shut his eyes. He heard the sound of the blaster's whine and he felt nothing. No pain. No searing heat. After a prolonged moment, Han heard the sound of a body fall with
+a loud thud. He shot Bria instead of me! he thought, and opened his eyes. But the body on the floor belonged to Teroenza. There was a huge, gaping hole where the Priest's bulbous left eye had been. Han stared wildly, wondering if he'd gone mad and was imagining all this. What's going on? Beside him, Bria gasped. Han watched as Boba Fett stepped out of a dim corner of the room, his blaster rifle held in his arms. Oh, great! he thought. Now Fett will just kill us all!
+
+The bounty hunter kept them all covered as he walked to Teroenza's huge form, and then knelt on one knee. Keeping them covered with the blaster rifle with one hand, Fett used a vibro-saw with the other. The little instrument whirred, slicing easily through flesh and bone as Fett carefully cut off Teroenza's horn. Han's head was whirling with shock. Finally the bounty hunter rose to his feet again, and then began backing slowly away, the grisly trophy tucked under his arm. Han couldn't help it. ""You're leaving?"" he blurted. Did Boba Fett's mechanical voice hold a slight undercurrent of amu- sement? Han couldn't decide if he was imagining it. ""That's right,"" the bounty hunter said. ""The Priest is a Priority bounty. I'm not here for you."" And, having reached the opening in the wall, Boba Fett backed through it and vanished as suddenly as he'd appeared.-Chpt.14"
+P08wQiB0?source=archive,Rebel Dawn 13,dgl_2,text,Tuesday 30th of June 2026 11:16:42 PM CDT,"Zlarb, Magg, Spray ... and Gallandra. That was one tough fellow, that Gallandro. Be fun to watch him in a free-for-all against Boba Fett, weapons being equal. Gallandro could probably out-draw the bounty hunter ... but Fett's armor would give him some protection....Han couldn't decide which of them would win. And speculation was moot, after all, since Gal- landro had been reduced to a pile of charred meat and bone back on Dellalt, in Xim's ""treasure"" vaults.-Chpt.9"
+K41wW1bq?source=archive,Rebel Dawn 12,dgl_2,text,Tuesday 30th of June 2026 11:14:06 PM CDT,"“Don't move, Calrissian,"" Fett hissed, and moved out until he was in full view. The pound of running feet approached, and then, more or less at the same time, both groups of pirates converged from opposite sides of the corridor. Boba Fett, who had been checking his weaponry, tensed, ready to do battle. Against how many pirates? Twenty-five? Thirty? Maybe more.... Lando guessed.
+
+The two groups drew nearer, then slowed uncertainly. Lando didn't blame them. He wouldn't want to be the first person to fire on Boba Fett, even at these odds. Chances are that the bounty hunter would take quite a few attackers with him.
+
+""What's going on?"" a familiar strong alto bellowed from the back of one of the packs. Lando let out a gasp of relief. ""Boba Fett, in the name of all the hells of Barab, what are you doing here?""
+
+""Collecting a bounty,"" the hunter replied. “No quarrel with you, Captain Renthal. I'll take my bounty and a shuttle, and go.""-Chpt.8
+
+""Here is Han Solo's girlfriend."" Lando said. ""He risked his life to save your Y-wings and Renthal's Fist from being blasted by Peacekeeper during the Battle of Nar Shaddaa. Seems to me you owe him.""
+
+Again Fett was surprised. Bria Tharen and Han Solo? That was obviously in the far past, since Fett had been monitoring her actions for over a year, and she'd had no
+contact with Solo. Renthal blinked. “Bria? Her name is Bria? Like Solo's ship? This is that Bria?"" Calrissian nodded. ""Yes. She's that Bria."" Drea Renthal grimaced and swore. ""Lando... you just love to make my life complicated, don't you? I'm gonna take this out of your hide, baby? Okay... you're right, a debt is a debt."" 
+
+Reaching beneath her armored vest, she pulled out a heavy pouch. ""Jewelry and credit vouchers, Fett,"" she said. ""Should be over fifty thousand credits worth in here. Let 'em both go, and you can have your shuttle. I don't want a fight ... but I'm not letting you leave with them.""
+
+Boba Fett surveyed the assembled ranks of pirates, assessing his chances for fighting his way out. There
+were thirty-two pirates. Hardly good odds. Boba Fett's armor would protect him, possibly enough to allow him to escape, but Bria Tharen was wearing a strapless evening gown. She was certain to be hurt, perhaps killed, in any firefight. And her bounty called for a live, unharmed, delivery. Boba Fett looked at the heavily
+armed pirates, then at Bria Tharen, and experienced a tiny flare of something that he recognized, with dismay, as relief. Bria Tharen would not die today, or tomorrow, in agony, while the depraved High Priest of Ylesia rubbed his tiny hands and chortled with glee.
+
+Fett took a deep breath. ""The bounty on her is one hundred thousand,"" he said.
+
+""Whoo!"" Renthal looked over at Bria. ""Honey, what in the name of Kashyyyk's night demons have you been doing? All right, Fett, you bloodsucker."" Turning to her crew, she opened the pouch and held it out. ""C'mon, gentles. I'm collecting fifty percent of my share of the Queen right now. Put it here.""-Chpt.8"
+1UAKsXtr?source=archive,Rebel Dawn 10,dgl_2,text,Tuesday 30th of June 2026 11:10:17 PM CDT,"Who could he be? The alien had evidently dealt with Darnov, Feltran and even Treeska (and Bria knew his reputation at unarmed combat) in a matter of minutes.-Chpt.8"
+DCnQm85z?source=archive,Rebel Dawn 9,dgl_2,text,Tuesday 30th of June 2026 11:07:50 PM CDT,"Fett wandered the ship in his Anomid disguise, staying mostly to himself. He made a visual ID of Bria Tharen on the first day, and followed her to find out where her stateroom was. He discovered that she had a suite, and shared it with three men. Two of the men were older, and Fett figured that they, too, were officers in the Corellian resistance. The third man was in his mid-thirties, and, from the way he carried himself, was a seasoned combat veteran who was serving as security and bodyguard for the Corellian officers.-Chpt.8
+
+Boba Fett's peripheral vision was compromised by the mask he was wearing. Without his Mandalorian helmet with its special sensors, the bounty hunter had only an instant's warning of danger. He dodged just as the Rebel bodyguard struck, silent and with the expertise the two older men had lacked. The bounty hunter whirled away from the younger man, and as he did so, Fett whipped off the Anomid's heavy cloak and flung it into the bodyguard's face. With one smooth movement, his opponent disentangled himself and came in again. He was perhaps in his early thirties, and was bare-chested, barefoot, and wearing only shorts. The man had evidently been asleep in the other room when his officers had made their ill-fated attack. This fellow, Fett knew instantly, was a combat soldier, trained to use his hands and feet as weapons-and trained also in using the vibroblade he held in one hand. 
+
+Behind his two masks, Boba Fett smiled slightly, pleased to be challenged, and by someone who plainly knew what he was doing. He had another lethal dart he could have used, but he decided against it. A little exercise would be welcomed. It had been a long time since he'd indulged himself in unarmed combat; few foes were worthy of his time. The man was already dancing in, balanced, his eyes level, vibroblade ready for a disemboweling slash. Boba Fett let him come, then dodged at the last possible second, pulling himself into an arc like a null-gee dancer, and then spinning around, out of the way. As he moved, his hand moved out and dealt the soldier a stunning clip behind his right ear.
+The soldier managed to dodge at the last moment, though, and the blow that had been meant to render him unconscious only dazed him. He staggered a little, shook his head, then came Back for more. Boba Fett was pleased to oblige.
+
+They sidestepped around each other in a grim parody of the way Lando Calrissian and Bria Tharen had danced in the Star Winds Lounge only minutes before. The guard lunged again, and again Boba Fett waited, then evaded the movement at the last possible second. Another blow made the Corellian gasp-this time Fett's instep impacted with the back of his knee. The guard's leg buckled, and, for the first time, Fett saw fear in his eyes. He now knew he was totally outclassed, and yet he conquered his pain and weakness and moved in again. ""A man who knows his duty and does not shrink from it"" Fett thought. Admirable. His reward for his courage shall be a quick and easy death.... For the first time, Fett went on the attack. His foot lashed out in a precise blow, and impacted with the man's wrist with stunning force. 
+
+The vibroblade went flying. Fett spun in for the finish. Another sweep behind the other knee, and the man sagged, his legs unable to hold him. But that did not matter. Fett already had him around the neck in a grip as hard and relentless as durasteel. One quick, sideways jerk, and the guard sagged in his arms, dead. Boba Fett dragged the man over to the corner, and laid him down with the others.-Chpt.8"
+H67sWRGk?source=archive,Rebel Dawn 8,dgl_2,text,Tuesday 30th of June 2026 11:05:38 PM CDT,"The other man did not hesitate, but came straight in. Boba Fett swept aside the Anomid cape and stood poised as the man, with a wordless yell, attacked. The Rebel leader might have been a decent officer in planning strategy and attacks, but he was no expert at unarmed combat. Boba Fett blocked his blow with one forearm, then came in with a hard, lethal blow that crushed the Corellian's larynx. Fett watched dispassionately as the Rebel officer died. It took no more than a minute.-Chpt.8"
+6anxeywv?source=archive,Rebel Dawn 6,dgl_2,text,Tuesday 30th of June 2026 10:57:51 PM CDT,"Fett moved forward yet again, nudging his case along with him. It contained, in camouflaged compartments, his Mandalorian armor and several select weapons. The sides of the case were reinforced with durinium, an alloy that would resist sensor scans. And, in the outermost layer of the case, there were microminiature projection devices that would generate false readings about the contents to any scanning device. Fett finally reached the head of the line, and produced his IDs, ticket and credit vouchers. The ship's official who checked his reservati-
+on offered to call for a luggage droid, but Fett politely refused, his harsh voice reverberating through the vocalizer-mask.
+
+When he reached the safety of his cabin, Fett stowed his trunk, first making sure to activate its anti-theft protections. Anyone unfortunate enough to attempt to remove the trunk from Fett's cabin, or to try and open it, would lose digits—at minimum.-Chpt.8"
+bfSLJjV8?source=archive,Rebel Dawn 5,dgl_2,text,Tuesday 30th of June 2026 10:43:48 PM CDT,"Boba Fett stood in the queue waiting to board the luxury liner Queen of Empire, for her voyage to Velga Prime and points in between. The liner was the sister ship to Haj Shipping Lines' Star of Empire and was fully as large and opulent. Boba Fett was boarding the liner from an orbiting space docking platform, but there were nearly a thousand sentients waiting to board, so each line was several hundred beings long. The bounty hunter gauged the slow progress of the line, and figured it would be at least ten minutes before he'd be free to carry his large, heavy traveling case to his cabin. The line moved forward a few paces, and the bounty hunter shoved his heavy case along with his foot, as he moved with it. For just a moment he indulged himself in imagining what would happen were he suddenly to appear as his real self, as Boba Fett in his Mandalorian armor, instead of as he currently was, disguised as an Anomid. It was necessary from time to time, he'd discovered, to appear as a being other than himself. 
+
+Anomids were perfect beings to assume as disguises, since hardly any of their bodies showed in their ordinary street garb. They were willowy humanoids native to the Yablari system, and typically dressed in oversized robes that covered them from their hooded heads to their six-toed feet. They also wore gloves and vocalizer-masks, so hardly any of their translucent, whitish skin showed. Anomids had wispy grayish hair, leaf-shaped ears, and large silvery blue eyes. Boba Fett of course wore a head-
+mask beneath his vocalizer-mask, but it was a very good one, custom-made to fit over his own features so that it would move quite naturally on his face. Silver-blue ""eyes"" were built into the mask, and were specially engineered so he could see nearly as well as he could with his unaided eyes. Still, he felt somewhat n*ked without his armor and its extended senses. With his armor on he had a range of visual modes available to him, enhanced audio pickups, and a host of other sensor data displayed on the telltales inside his helmet. With nothing but the Anomid robes, hooded cloak, mask and gloves on, he felt light and vulnerable-too vulnerable. But it was necessary. If Boba Fett had attempted to book passage on the Queen as his true self, panic would have ensued.-Chpt.8"
+HSNehwvK?source=archive,Rebel Dawn 4,dgl_2,text,Tuesday 30th of June 2026 10:41:54 PM CDT,"In the meantime, Fett's trip to Teth would not be wasted. He'd checked with the Guild, and there was an open bounty here on their books, a rich, reclusive businessman who had a high-guarded and ""secure"" estate in the mountains of Teth. ""Secure"" that is, insofar as ordinary bounty hunters went, but Boba Fett was in a class by himself. The businessman's activities had
+been so predictable that planning was laughably easy. The man was a creature of habit. Boba Fett wouldn't even have to go up against his bodyguards, since this was a bounty permitting disintegrations. Only the kill was required. Boba Fett had found a vantage
+point in a laakwal tree that would allow him to erect a temporary blind, make the kill, then slip away
+before the bodyguards or security forces could even pinpoint his location. One shot would be all that he
+needed....-Chpt.4"
+nK6dBZQS?source=archive,Rebel Dawn 3,dgl_2,text,Tuesday 30th of June 2026 10:35:44 PM CDT,"Two days ago, when he'd first arrived on Teth, Boba Fett had located the current Rebel enclave, which was situated beneath the port city in a series of old storm drains and sub-basements. He'd infiltrated the outskirts of the base, via the ancient storm drains and ventilation shafts, enough to locate the base janitorial supplies. There he'd placed minuscule audio pickups on a number of small robot floor cleaners that roved freely from room to room, sucking up anything their tiny scanners identified as ""dirt."" 
+
+Since that time, he'd been monitoring the pickups, and today his preparations had paid off. Bria Tharen was in a meeting with two top-
+ranked Tethan Rebels. The tiny floor-cleaner, per its programmed in- structions, had scuttled out of their
+way when they'd entered the room, and was now biding its time in an inconspicuous corner.-Chpt.4"
+SH13Ufem?source=archive,Rebel Dawn 2,dgl_2,text,Tuesday 30th of June 2026 10:33:13 PM CDT,"When she was on her home planet of Corellia, she lived inside a series of secret Rebel command bases, with extensive security and guard mounts.
+
+Such high security was understandable... after all, the Rebels lived in fear of a full-scale attack by Imperial stormtroopers. So they kept the locations of their bases top-secret, and moved them continually. One bounty hunter—no matter how deadly and effective-stood little chance of getting close enough to manage a live capture. If only Besadii would have been satisfied with having Bria dead, Boba Fett was fairly sure he could have managed to kill her, even within the protection of a Rebel base. But live, unharmed capture was much
+more difficult.-Chpt.4"
+fBLf9aut?source=archive,Rebel Dawn 1,dgl_2,text,Tuesday 30th of June 2026 10:29:27 PM CDT,"Boba Fett sat in a sleazy rented flat on the Outer Rim world of Teth, listening to Bria Tharen meeting with the Tethan Rebel leaders. The most famous bounty hunter in the galaxy had many resources, including a spy network that most planets would have envied. Since he accepted Imperial assignments from time to time, he was often privy to communiqués and other information most Rebel Commands would have loved to see. 
+
+Even though she was a Rebel officer, the bounty on Bria Tharen had not been posted by the Empire. No, this was a far larger bounty, the sum of fifty thousand credits for a live, unharmed capture, no disintegrations permitted. Aruk the Hutt, the old leader of Besadii clan, had originally posted the bounty, but his heir, Durga, had continued it after his death, and had promised a bonus for delivery within three months. Boba Fett had been searching on and off for Bria Tharen for over a year now. The woman kept being sent out on ""deep cover"" assignments that made her extremely hard to trace. She had severed all ties with her family, probably to lessen the danger to them should she be captured by the Imperials. When she was on her home planet of Corellia, she lived inside a series of secret Rebel command bases, with extensive security and guard mounts. 
+
+Such high security was understandable... after all, the Rebels lived in fear of a full-scale attack by Imperial stormtroopers. So they kept the locations of their bases top-secret, and moved them continually. One bounty hunter—no matter how deadly and effective-stood little chance of getting close enough to manage a live capture. If only Besadii would have been satisfied with having Bria dead, Boba Fett was fairly sure he could have managed to kill her, even within the protection of a Rebel base. But live, unharmed capture was much
+more difficult....However, a few days ago, Boba Fett had learned through his spy network that there was a meeting scheduled for the underground Rebel movement on Teth. Taking a calculated risk that Bria would be there, he had flown Slave I to Teth two days ago. The risk had paid off; she had shown up yesterday evening.-Chpt.4"
+0VDgyzcC?source=archive,prompt - atividade pbl,CarlosWGama,text,Tuesday 30th of June 2026 06:28:57 PM CDT,"Crie para mim uma atividade baseada na metodologia PBL (Problem-Based Learning).
+
+- O trabalho será aplicado com alunos do ensino superior que estão aprendendo sobre [nome da disciplina], conceitos como: [nome dos assuntos]
+
+- Estruture esse trabalho demonstrando o passo a passo de como o trabalho deve ser aplicado com os alunos 
+
+- Por fim, me dê dicas como posso fazer para avaliar os trabalhos dos alunos
+"
+CJkurv18?source=archive,prompt - texto de ementa,CarlosWGama,text,Tuesday 30th of June 2026 06:20:32 PM CDT,"Imaginando que você é um professor do ensino superior da disciplina [NOME DISCIPLINA] do curso [NOME DO CURSO] e está querendo montar a ementa da sua disciplina.
+
+Usando como base a estrutura da ementa em anexo. Crie para mim a ementa da disciplina levando em consideração que é importante conter os assuntos:
+- [COLOCAR AQUI OS ASSUNTOS QUE GOSTARIA QUE TIVESSE]
+- ASSUNTO A
+- ASSUNTO B
+- ASSUNTO C
+
+[OPCIONAL]. Você pode sugerir outros assuntos que considerar relevantes, atuais e comuns em outras instituição de ensino, mas que tenham relação com a disciplina;
+
+Para as competências, selecione 3 a 5 competências que tenham relação com a disciplina dentre as competências abaixo:
+- [COLOCAR AQUI AS COMPETÊNCIAS DA DCN DO SEU CURSO]
+
+Não altere as seções ""METODOLOGIA DO ENSINO"" e ""METODOLOGIA DA AVALIAÇÃO"""
+Bzzhkymf?source=archive,900 TEXTS,pdffreedownload,text,Tuesday 30th of June 2026 04:12:00 AM CDT,"GSA URL REDIRECT PRO v2.70 CHECK (900 Texts That Plant Seeds of Romance):
+
+http://saleoffer.co/ArtofFlirting-196171
+http://poderdiario.com/ArtofFlirting477501
+https://beta.thryt.com/ArtofFlirting51174
+http://freeurlredirect.com/rtoflirting707149
+https://1borsa.com/rtoflirting231876
+https://come.ac/ArtofFlirting-127636
+https://alstr.in/ArtofFlirting-83160
+https://da.gd/ArtofFlirt
+https://gowedia.link/ArtofFlirting773646
+https://gnosis.link/ArtofFlirting-443851
+https://hiurls.com/ArtofFlirting-197684
+https://jbiv.com/ArtofFlirting597117
+https://digitalsnax.com/ArtofFlirting609704
+https://kisalt.co/ArtofFlirting353610
+https://autozed-h.com/ArtofFlirting575510
+https://avyc.io/ArtofFlirting477838
+https://lnkbits.com/ArtofFlirting620011
+https://linkulb.com/ArtofFlirting-379330
+https://makeachang-e.com/ArtofFlirting-730916
+https://m.clickto.cc/ArtofFlirting-608839
+https://onlineuniversalwork.com/rtoflirting804970
+https://pdfja.com/ArtofFlirting-316492
+https://plu.sh/artofflirting836400
+https://piti.nc/ArtofFlirting-495532
+https://s.bea.sh/ArtofFlirting625198
+https://nordwit.com/ArtofFlirting177696
+https://pedalhub.store/ArtofFlirting-641387
+https://qrlinkgenerator.com/ArtofFlirting545479
+https://shorto.link/ArtofFlirting525402
+https://shortmylink.co/ArtofFlirting828866
+https://short.vird.co/ArtofFlirting-466024
+https://share.goingsocial.gr/ArtofFlirting-698792
+https://trbs.link/ArtofFlirting383499
+https://supershort.to/ArtofFlirting134994
+https://sh.nz/ArtofFlirting721793
+https://ufasofilmebi.one/ArtofFlirting61287
+https://urlnub.com/ArtofFlirting907219
+https://vlblink.com/ArtofFlirting-72220
+https://3scomputers.com/ArtofFlirting719763
+
+Submission finished with 39 links with keywords...
+"
+7aHti9ga?source=archive,Deducts man was replaced,dgl_2,text,Monday 29th of June 2026 10:26:16 PM CDT,"""You knew him personally, sir?” said Ana.
+
+“I did,” said Kardas. “But only somewhat. He was rather new to my
+section.”
+
+“But you had met him before.”
+
+Kardas slowly furrowed his brow. “I… Well. Yes? Why?”
+
+“Had the rest of your delegation met him?”
+
+“Yes. Again—why?”
+
+“I beg your pardon, sir, but if I might ask… Do you have an engraver on
+staff here? One who might have also met Sujedo?”
+
+Kardas glanced at Signum Gorthaus. “I do. Why?”
+
+“I am simply testing a theory about his disappearance,” said Ana. “If it is
+true, then we can cut to it, and save your valuable time, sir.”
+
+The prificto extended a hand to his signum. “Gorthaus, I believe you
+served with Sujedo some six years ago—correct?”
+
+The young signum bowed in her seat. “Correct, sir.”
+
+“Then, if you would kindly oblige?”
+
+She shot to her feet. “Certainly, sir.”
+
+“Excellent,” said Ana, grinning. “Another engraver makes this much
+easier. Now. Please summon a memory of how tall Sujedo was, Signum.”
+
+Gorthaus blinked uncertainly, then did so, eyes fluttering. “Yes, ma’am.”
+“Now…hold out your hand to show exactly how tall the man was.”
+
+Again, Gorthaus blinked but did as Ana asked, holding out her hand as if
+touching an invisible man on the crown of his head. “That tall, ma’am.”
+Kardas’s eyebrows had now arched so high they were halfway up his
+brow, but he stayed quiet.
+
+“Din here has been to the Treasury bank today and spoken to the
+Treasury engraver there,” explained Ana, gesturing to me. “He asked him to
+display how tall Sujedo had been when he visited the bank. Now, Din—
+please show them the height Signum Tufwa indicated.”
+
+I stood and approached Gorthaus’s outstretched hand, feeling slightly
+ridiculous. My eyes fluttered as I summoned the memory, and I pointed on
+my shoulder to where Tufwa had touched; yet the spot I touched was a full
+four smallspan lower than the height Gorthaus was now indicating.
+
+“Is there a difference in height, Din?” Ana asked.
+
+“Ah…yes, ma’am,” I said. “Tufwa indicated the man was four smallspan
+shorter.”
+
+“I see,” said Ana softly. “How fascinating.”
+
+“I don’t understand,” said Kardas. He anxiously bit the tip of his thumb,
+then asked, “Are…are you suggesting that Sujedo was shorter that day at the
+bank?”
+
+“Allow me to test further,” said Ana. “Tell me, sir—was Sujedo an
+attentive man? Quick to notice things about people, and ask questions?”
+
+The prificto now looked bewildered. “Ah…no, I would not say that of
+him, Immunis.”
+
+“And yet,” said Ana, “the Apoth guard who accompanied him reported
+that Sujedo was clever, charming, and noticed several details about him that
+ordinary people would have missed. Does that sound like him, sir?”
+
+“N-no. No, that does not sound like him.”
+
+“I see,” said Ana. She was now oozing smug satisfaction. “Well, then, sir
+—what would you say is your assessment of all these reports of Sujedo? The
+height of the man, and his strange behavior?”
+
+Kardas turned this over. “I would say everyone has made some mistake,”
+
+he said finally, “and been looking at the wrong person entirely!”
+
+Ana’s grin widened. “Exactly. Exactly! I would say the same thing myself.
+In which case, the conclusion is obvious.”
+
+There was a beat of silence.
+
+“To me,” muttered Malo, “the conclusion is not obvious at all…”
+
+“I’m afraid I agree,” said Kardas.
+
+“Well, we are now faced with two impossible proposals,” said Ana.
+
+“Signum Malo—you say it was impossible for someone to be stolen out of a
+locked room in the top of a tower, then moved across the city and the jungle
+and the canals without anyone noticing. Yes?”
+
+“I do,” said Malo.
+
+“And you, Prificto,” said Ana, “you say now that it is impossible for all
+these witnesses to have seen the man you know to be Sujedo, correct, sir?”
+
+“I… suppose,” said Kardas.
+
+“Then one can only conclude,” she said, “that Sujedo was not stolen out
+of that room and spirited away to the jungle—because he was never in it to
+begin with. Because the man who arrived in this city claiming to be Sujedo,
+and indeed moved into his rooms and slept in his bed, was someone else—a
+complete and utter impostor.”
+
+- A Drop of Corruption, Chapter 10 pgs. 84-86"
+WdHAYbFT?source=archive,Guesses augment,dgl_2,text,Monday 29th of June 2026 10:01:07 PM CDT,"“It must be a dreadful situation indeed, sir,” said Ana, “if the king is
+proving resilient to even your talents.”
+
+Kardas smiled, puzzled. “Talents? What might you mean?”
+
+“I assume, sir,” Ana said, “that you are a Sublime? Specifically, an
+emitias?”
+
+The prificto regarded her warily. As he did, I glanced at his heralds but
+could not spy the symbol of the pear within the oval in the center: the sign of
+the emitias Sublimes, who were preternaturally skilled at reading human
+emotion, so much so that it was rumored they could smell and react to human
+pheromones.
+
+“What makes you say such a thing, Dolabra?” he asked mildly.
+
+“Well, I have met all manner of Sublimes in my day,” Ana said. “But only
+four have ever kissed my hand upon greeting me—and they have all been
+emitiasi. It’s a gesture I always respond so well to, but most others don’t have
+the gall! Yet they sense I desire it, as if they read my very mind.”
+
+“You assume so much,” said Kardas, “simply because I kissed your
+hand?”
+
+“Well, there is that, and I hear absolutely no surprise in your voice at the
+sight of my blindfold, nor the rest of my appearance. You seem an unusually
+socially deft officer, in other words! Suspiciously so. And such an augment
+would make sense, sir, you being a diplomat.”
+
+- A Drop of Corruption, Chapter 10 pgs. 81-82 "
+8t11fmgg?source=archive,Rarely washes hands,dgl_2,text,Monday 29th of June 2026 09:56:54 PM CDT,"His eye lingered for a fraction of a second on
+her blindfold; then he bowed low, took her by the right hand, and kissed one
+pale knuckle. “Always a delight to meet a member of the old country.”
+
+I stared, startled not only by the boldness of the gesture but also because I
+was aware of how rarely Ana washed her hands.
+
+- A Drop of Corruption, Chapter 10 pg. 80"
+y9HyKVfU?source=archive,Double lyre,dgl_2,text,Monday 29th of June 2026 09:48:29 PM CDT,"“Then could you possibly point Din in the direction of a place to procure
+another Pithian lyre?” asked Ana. She laid a hand on the instrument in her
+lap. “I’ve one here, but the Yarrow court is rather renowned for their duets, as
+you no doubt know. I believe I have a method of attaching two together so
+that I can attempt a duet on my own, but I would naturally need to have a
+second to do so.”
+
+Malo stared at her, boggled. “I… Yes, certainly, ma’am.”
+
+- A Drop of Corruption, Chapter 9 pg. 77"
+dyLa4xcj?source=archive,Busts her apprentice,dgl_2,text,Monday 29th of June 2026 09:03:27 PM CDT,"JUST BEFORE DAWN I SLIPPED out of the girl’s house to return to my
+own lodgings, exhausted and tottering. A fog was crawling out of the bay, so
+thick it was hard to see more than fifty span down the road, yet I’d engraved
+the path in my mind and knew the steps, even if I half-sleepwalked them
+now.
+
+When I finally approached my lodgings, I heard a voice ring out of the
+fog: “What have you been up to?”
+
+I stopped and spied Signum Tira Malo sitting on the stoop a few span
+down from my door. She smiled at me, her teeth dark from yet another lump
+of hina root.
+
+“You’ve been waiting at my door?” I said, surprised.
+
+“You said sunup,” she said, and gestured to the overcast skies. “The sun is
+almost up. I must say, I was confused to hear no heartbeats within your
+lodgings, nor the whisper of any breath. But to see you now, and…” She
+sniffed the air as I approached, and grinned. “…and to catch the scent of you,
+all is clear.”
+
+I scowled at her. “Do you pry in the affairs of all who walk this street?”
+
+“I do no prying! Would you have me stop up my ears and nose to keep
+your privacy? But do not feel shame, Kol. If anything, I am amazed.”
+
+“What?”
+
+“Why, you were so serious and frowned so much yesterday, I wondered if
+you had any blood in you at all. Yet obviously, you have that, and more—if
+it’s not all spent! How have you already managed to bed another? Have you
+even been here a full day?”
+
+- A Drop of Corruption, Chapter 9 pg. 71"
+HbHYREzz?source=archive,Can taste origin of oysters,dgl_2,text,Monday 29th of June 2026 08:25:51 PM CDT,"“I have a request,” she said. “I would like to see if you could go down to
+the waters there, preferably to a spot far from seaweed, and fetch me a pail of
+seawater.” She grinned so wide the corners of her mouth almost touched her
+ears. “I’m tasting the city, you see. The region. The seas.”
+
+I scratched my eyebrow with a thumbnail, awaiting the rest of it. “Are
+you, ma’am.”
+
+“Oh, yes. The oysters absorb what’s about them as they grow, you know. I
+can taste where they’re from.”
+
+“I did not think your appetite for oysters was so tremendous, ma’am.”
+
+“Oh, I’m not actually hungry, Din. Really, it’s that each oyster is different.
+You can taste in each one which reef they came from, which side they grew
+upon, which waters they flourished within. They are like melodies of the
+ocean itself rendered in flesh.”
+
+- A Drop of Corruption, Chapter 7 pgs. 53-54"
+UiTgKEiW?source=archive,Rotten Oysters,dgl_2,text,Monday 29th of June 2026 08:16:58 PM CDT,"“What’s this about?”
+
+“It’s, ah, the other Iudex officer, sir.”
+
+Instantly, my heart sank. “Oh. What’s she done?”
+
+“She’s on the patio, you see, and the…the smell, sir. She’s eating, but…
+but the smell of it, it’s awful, and I don’t know what to do!”
+
+I sighed. “Please lead the way.”
+
+I followed the porter around the side of the building. The wind rose ever
+so slightly, and I caught the powerful, noxious aroma of rotting sea life. We
+rounded the edge, and I came to a stop.
+
+A flagstone patio was laid out on the hill, overlooking the bay, complete
+with wicker chairs and table. It must have been a merry sight once, but no
+longer, for it had been turned into a graveyard of oyster shells.
+
+Nearly half of the patio was obscured by piles of glistening carapace and
+crust and nacre, the pools of the oysters’ cloudy liquor baking in the waning
+afternoon sun. I could hardly begin to count them; they had to be from several
+hundreds of oysters, at least. The heaps of shells rose gently to curl about the
+tea table in the center of the patio, almost like an embankment, and it was
+there, beside a soaking sack of unshucked shellfish, that my commanding
+officer Immunis Ana Dolabra sat hunched, plying another mollusk with a dull
+knife.
+
+“They’re all starting to turn,” whined the porter beside me. “We’ve
+already had complaints from the officers in the other quarters! The patio shall
+reek for days if we don’t clear it up soon, but she won’t stop or move
+elsewhere, and the things she has said to me, sir…”
+
+I watched as Ana pried open the shell, freed the flesh from within, tipped
+it into her mouth with a slurp, and tossed the shell over her shoulder. Though
+my stomach had mostly recovered, this sight—along with the aroma of such
+fetid sea life—set it rumbling again.
+
+Ana’s pale head shot up. She sniffed, then slowly turned to face me—
+though she could not see me, for her eyes were bound up in a thick red
+blindfold. As usual.
+
+“Din!” she said merrily. “You’re back!”
+
+“I am, ma’am,” I sighed. I dismissed the boy, then stepped about the
+heaps of shells, my boots crunching on the flagstones, until I came to stand
+behind her.
+
+[...]
+
+“I did not think your appetite for oysters was so tremendous, ma’am.”
+
+“Oh, I’m not actually hungry, Din. Really, it’s that each oyster is different.
+You can taste in each one which reef they came from, which side they grew
+upon, which waters they flourished within. They are like melodies of the
+ocean itself rendered in flesh.”
+
+- A Drop of Corruption, Chapter 7 pgs. 52-54"
+9icuJxpY?source=archive,Falcon Silos,J2897,text,Monday 29th of June 2026 03:43:53 PM CDT,"In the 2020s, attack drones were among the most significant new technologies in modern warfare. They became a common presence on the battlefield, forcing nations to invest billions in both their development and the systems designed to stop them.
+
+By the late 2030s, that answer had arrived in the form of the drone-chaser: a high-speed defensive drone kept dormant in underground silos near military bases and other high-value assets. When incoming drone swarms were detected, sections of the ground would open and a launch rocket carrying dozens of drone-chasers would fire towards the approaching threat.
+
+Once close to the enemy swarm, the rocket would release its payload above the formation. The drone-chasers would then dive like AI-controlled peregrine falcons, each one selecting a target before destroying it at close range with shotgun rounds. During prolonged engagements, they were recharged in mid-air by directional ultraviolet beams projected from the base below, allowing the swarm to remain airborne until the attack had been neutralised."
+UytpN50W?source=archive,MAGA250,pdffreedownload,text,Monday 29th of June 2026 01:28:39 AM CDT,"GSA URL REDIRECT PRO v2.70 CHECK (Trump 250th Anniversary Golden Badge):
+
+http://freeurlredirect.com/rump802512
+http://saleoffer.co/TrumpUSA-72763
+https://1borsa.com/rump103495
+http://poderdiario.com/TrumpUSA950886
+https://beta.thryt.com/TrumpUSA919008
+https://come.ac/TrumpUSA-862928
+https://da.gd/TrumpUSA84
+https://alstr.in/TrumpUSA-341826
+https://gowedia.link/TrumpUSA887104
+https://gnosis.link/TrumpUSA-987352
+https://hiurls.com/TrumpUSA-759841
+https://jbiv.com/TrumpUSA969258
+https://digitalsnax.com/TrumpUSA727127
+https://autozed-h.com/TrumpUSA307920
+https://avyc.io/TrumpUSA625881
+https://kisalt.co/TrumpUSA737071
+https://lnkbits.com/TrumpUSA572573
+https://makeachang-e.com/TrumpUSA-918786
+https://m.clickto.cc/TrumpUSA-144593
+https://onlineuniversalwork.com/rump432745
+https://plu.sh/trumpusa183104
+https://pdfja.com/TrumpUSA-205673
+https://piti.nc/TrumpUSA-635211
+https://s.bea.sh/TrumpUSA936944
+https://nordwit.com/TrumpUSA1244
+https://pedalhub.store/TrumpUSA-47075
+https://shortmylink.co/TrumpUSA285695
+https://share.goingsocial.gr/TrumpUSA-113634
+https://shorto.link/TrumpUSA115080
+https://qrlinkgenerator.com/TrumpUSA282252
+https://short.vird.co/TrumpUSA-683133
+https://trbs.link/TrumpUSA564852
+https://sh.nz/TrumpUSA316521
+https://supershort.to/TrumpUSA179738
+https://ufasofilmebi.one/TrumpUSA662565
+https://urlnub.com/TrumpUSA769952
+https://3scomputers.com/TrumpUSA659456
+https://vlblink.com/TrumpUSA-390742
+
+Submission finished with 38 short links...
+
+"
+ZQxyEP1Y?source=archive,Nightlight - Imprisoning Pitch,dgl_2,text,Sunday 28th of June 2026 04:29:31 PM CDT,"It was true! This boy had been the loyal friend and guardian of the young Man in the Moon. He had protected the Prince from nightmares, and his diamond dagger had pierced Pitch’s black heart at the height of the great battle. It was this act that caused the great explosion that saved the Man in the Moon and sent Pitch’s galleon plummeting to Earth, where it had crashed like a meteor and lay hidden deep under the ground for centuries. This spectral boy was a true hero.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 24"
+CCdY0UqF?source=archive,Ombric - Astral Projection,dgl_2,text,Sunday 28th of June 2026 04:26:38 PM CDT,"Pitch’s spell of enslavement had only partially afflicted Ombric. Like North’s, his physical body had been turned into a toy, but eons ago, Ombric had learned how to separate his mind from his body. He called it “astral projection” and used it only rarely.
+
+“It’s quite risky,” he explained to North. “One can never be entirely sure what the body may be up to while the mind is out and about, and it depletes one’s energy rather severely. I’ll be hungry for months now.” And, in fact, Ombric had been eating provisions from the infinity bag nonstop since he’d returned to his body. He seemed to relish telling North and Katherine about his adventure, for he paced back and forth excitedly.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 24"
+pW3xDnhk?source=archive,Katherine/Nightlight - Reindeer,dgl_2,text,Sunday 28th of June 2026 04:15:02 PM CDT,"Pitch drew his sword and readied to finish the lad. But something caused him to stop short: the improbable sight of a cluster of reindeer galloping down from the low-lying clouds, thundering directly toward him. Riding the lead reindeer was a young girl waving a dagger with the furious skill of a seasoned swashbuckler. And—how could it be?—they were riding on a sort of mist of light! 
+
+Before Pitch could gather his senses, the girl and her company pounded to the ground. Snow flying in every direction, they stampeded around Pitch. Then the girl dove forward, clinging to the pummel of her saddle with one hand, scooping up North and Ombric with the other. Pitch glared in disbelief as the entire entourage leaped back onto the lighted mist and vanished into the sky. He swung back to the spectral boy. But the boy, too, was gone, only an echo of laughter that refracted from mountain to mountain remained. Like a splinter under the skin, it taunted and infuriated Pitch.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 21"
+CMu7baEY?source=archive,Djinni - Swords,dgl_2,text,Sunday 28th of June 2026 03:38:11 PM CDT,"With the djinni’s help, he crafted a new set of swords and daggers forged from bits of the ancient meteor that had marked the founding of the village. 
+
+“Rich with stardust,” North remarked to the djinni. “The old man claims they can ward off any shadow.” 
+
+“So let it be done,” replied the djinni with a bow. The mechanical man’s response bemused North.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 16"
+jJXaneCA?source=archive,Djinni - Limits,dgl_2,text,Sunday 28th of June 2026 03:36:07 PM CDT,"“Djinni, I want to be able to become invisible!” demanded William the Absolute Youngest. 
+
+Sunlight glinted off the djinni’s shoulders. It paused, then, giving a sweeping bow, said, “That is a wish I cannot grant.” 
+
+“But why not? You’re supposed to do anything we ask!” said William the Almost Youngest. 
+
+“I am a djinni of the possible. I can do anything a machine or mortal may, but more effectively. To make you invisible would take magic. And magic is only for those with the wisdom to wield its power.” Then it bowed again humbly.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 15"
+wpbdrLbc?source=archive,Djinni - Throw,dgl_2,text,Sunday 28th of June 2026 03:34:47 PM CDT,"The djinni turned to her, and she asked excitedly, “Djinni, can you throw me as high into the air as you can and catch me?” 
+
+“As you command,” it answered. And quite effortlessly, it tossed Katherine so high that the villagers lost sight of her. They peered into the sky worriedly, North using a telescope of his own design. 
+
+“There she is!” he said at last, pointing to the small bank of clouds Katherine was gleefully skimming over. 
+
+Though the others watched uneasily, Katherine was delighted by her sudden journey into the atmosphere. She’d soared above the tallest trees in Santoff Claussen and passed a flock of startled geese. She soared higher than she had even imagined; below her, Santoff Claussen looked rather small, and the outside world very large and inviting. She trusted the djinni to catch her—after all, North had made it.
+
+[...]
+
+Whereas going up had been a delicious mix of terror and glee for Katherine, falling the rest of the way back down was entirely different. She was so deep in thought about the strange enchanted boy that she was barely aware that she was hurtling toward Earth. Nor did she notice Ombric emerge from Big Root, lean on his staff, and watch. She landed—to North’s great relief—gently and comfortably in the djinni’s outstretched arms. A wisp of wind touched her cheek, and she glanced up toward the small cloud once more.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 15"
+NQvucZUz?source=archive,Djinni - Boulders,dgl_2,text,Sunday 28th of June 2026 03:32:35 PM CDT,"THE DJINNI HAD BECOME the undisputed center of excitement in the village. It was able to do almost any task it was asked. “Djinni, can you move these boulders?” asked one of Old William’s sons, Not-as-Old William. “I was thinking of making a new tower.” 
+
+“As you command,” replied the mechanical man, and in minutes it had assembled, quite artfully, the hulking stones into a splendid tower, complete with turrets.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 15"
+irwiP55v?source=archive,North - Robot Djinni,dgl_2,text,Sunday 28th of June 2026 03:30:16 PM CDT,"He looked down proudly at his mechanical creation. At nearly eight feet tall, it was shaped like a man but built entirely of metal gears and clockwork, all in shades of metal—silver, bronze, copper, gold, and darker tones like gunmetal and iron. It was strangely beautiful, like something that hadn’t been made but had been dreamed into being. Around the chest, shoulders, and joints were plates that resembled armor but with intricate, graceful curves. The face and head were simply shaped, yet had a handsomeness that recalled a finely made toy. One slim silver key protruded from the area over the heart—that’s how North intended to wind up the djinni, he’d explained to the children. 
+
+All told, there was a wondrous quality about it that surprised them all, especially North. He’d built weapons and shields before. But the robot djinni was designed to do only good, and it looked the part. 
+
+North fastened the last chest plate over the treasure box, then turned the silver key five, six, seven times. There was a soft, almost musical whir of sound, then the robot djinni sat up. It looked at them with a curious expression, not of surprise, but as if it had been expecting to see them, and appeared to smile. North and the children erupted in cheers. 
+
+“What is your command?” the djinni asked in a smooth, measured voice.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 14"
+sxcU4gjd?source=archive,IT & AI,pdffreedownload,text,Friday 26th of June 2026 11:51:27 PM CDT,"GSA URL REDIRECT PRO v2.70 CHECK (Instant AI Agency):
+
+http://freeurlredirect.com/instantagency438392
+https://1borsa.com/instantagency368402
+http://saleoffer.co/instantAIagency-515052
+https://beta.thryt.com/instantAIagency428885
+http://owy.pl/instantAIagency-162171
+https://come.ac/instantAIagency-240776
+https://da.gd/instantAIa
+https://alstr.in/instantAIagency-290439
+https://gowedia.link/instantAIagency687979
+https://hiurls.com/instantAIagency-634855
+https://jbiv.com/instantAIagency298769
+https://gnosis.link/instantAIagency-462418
+https://kisalt.co/instantAIagency568482
+https://avyc.io/instantAIagency841069
+https://lnkbits.com/instantAIagency378957
+https://makeachang-e.com/instantAIagency-619957
+https://m.clickto.cc/instantAIagency-167098
+https://linkulb.com/instantAIagency-587688
+https://onlineuniversalwork.com/instantagency676126
+https://plu.sh/instantaiagency75552
+https://pdfja.com/instantAIagency-651418
+https://piti.nc/instantAIagency-962788
+https://pedalhub.store/instantAIagency-320767
+https://s.bea.sh/instantAIagency560340
+https://qrlinkgenerator.com/instantAIagency653260
+https://shortmylink.co/instantAIagency669793
+https://shorto.link/instantAIagency367670
+https://short.vird.co/instantAIagency-158094
+https://share.goingsocial.gr/instantAIagency-898009
+https://supershort.to/instantAIagency357517
+https://trbs.link/instantAIagency132598
+https://sh.nz/instantAIagency389033
+https://ufasofilmebi.one/instantAIagency832622
+https://tusviralesc.us/instantAIagency-864936
+https://urlnub.com/instantAIagency150660
+https://vlblink.com/instantAIagency-139077
+
+Submission Finished with 36 short links...
+
+"
+56pAvxhf?source=archive,Stationeers - Sign Tags from Power Distribution Building,SemlerPDX,HTML,Friday 26th of June 2026 03:22:35 PM CDT,"Stationeers Sign Tags from the Power Distribution Building shown on my YouTube video tour:
+https://www.youtube.com/watch?v=s45vYXD6dSI
+
+<sup>                    Max Watts Used</sup><br><b><color=green><size=+12>GREENHOUSE</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Watts Used</sup><br><b><color=orange><size=+12>WORKSHOP</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Watts Used</sup><br><b><color=#6b8e23><size=+12>MINING</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Watts Used</sup><br><b><color=yellow><size=+12>FURNACE</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Watts Used</sup><br><b><color=purple><size=+12>SPACEPORT</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Watts Used</sup><br><b><color=blue><size=+12>BATTERY ROOM</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                    Max Discharge</sup><br><b><color=white><size=+12>BATTERIES</size></b></color><br><sub>               Current Charge</sub>
+
+<sup>                 Surplus Watts Input</sup><br><b><color=red><size=+12>POWER OUTPUT</size></b></color><br><sub>               Current Watts Used</sub>
+
+<sup>                Max Watts Produced</sup><br><b><color=white><size=+12>POWER INPUT</size></b></color><br><sub>           Current Watts Produced</sub>
+
+
+<b><color=red><size=-6>TOTAL POWER</size></b></color><br><b><color=white><size=+16>Maximum</size></b></color><br><b><color=red><size=-6>CONSUMPTION</size></b></color>
+
+<b><color=red><size=-6>TOTAL POWER</size></b></color><br><b><color=white><size=+16>Average</size></b></color><br><b><color=red><size=-6>CONSUMPTION</size></b></color>
+
+<b><color=red><size=-6>TOTAL POWER</size></b></color><br><b><color=white><size=+16>Minimum</size></b></color><br><b><color=red><size=-6>CONSUMPTION</size></b></color>
+
+"
+R8WUbFEK?source=archive,PM: Shopify Client Edits,webpagefx,text,Friday 26th of June 2026 11:03:39 AM CDT,"Hi Design!
+
+I need your help with client site edits for the Shopify redesign for [insert here]!
+ 
+Link to edits: [insert here]
+ 
+Keeper Access:[add detailed instructions]
+ 
+Thanks!
+ "
+arZu9he1?source=archive,PM: Shopify Assigning Design Task 2,webpagefx,text,Friday 26th of June 2026 10:58:27 AM CDT,"Hi Design!
+
+[Note to PM: this is Task 2 for the Designer]
+ 
+This is a time holder for theme edits from task 1 [insert thread]
+ 
+Thanks!
+ "
+Rj7ZLfTi?source=archive,PM: Shopify Assigning Design Task 1,webpagefx,text,Friday 26th of June 2026 10:53:22 AM CDT,"Hi Design!
+
+We are ready to get started on designing the new Shopify redesign for [insert here]!
+
+We need to customize the [homepage, product page, and text page] of their selected theme.
+
+Specs (including their selected theme) are outlined here: [insert link]
+
+Keeper Access:[add detailed instructions]
+
+Thanks!
+
+ 
+"
+Eg11GTSX?source=archive,Commodore Callback 8020,Bug9519,text,Friday 26th of June 2026 01:00:50 AM CDT,"https://order.commodore.net/callback-privacy?ref=d2lsbC5idWdzdGFyLmVkd2FyZHMyN0BnbWFpbC5jb20%3D
+
+Commodore Callback 8020: Internot Phone, bridge between smart phones and dumb phones."
+5NWcu7v4?source=archive,JOIN ME HERE IN THIS MAGIC PLACE,z66is,text,Thursday 25th of June 2026 07:47:01 PM CDT,https://web.archive.org/web/20260626011225/https://pastebin.com/raw/5NWcu7v4
+hf2fZZ4z?source=archive,North - Levitation,dgl_2,text,Thursday 25th of June 2026 06:30:44 PM CDT,"“Well, old boy, get ready for something you’ve never seen. I’m ready to combine man-made devices with your ancient hocus-pocus,” North proclaimed, levitating honey into Ombric’s cup.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 13"
+FNgaYLCK?source=archive,North - Learning Magic,dgl_2,text,Thursday 25th of June 2026 06:27:41 PM CDT,"He worked with gusto, and regularly overstepped his new abilities without properly thinking things through. When creating a ball that would never stop bouncing, he added too much bounce. After the ball hit the ground, it rocketed up to the sky with such force that it could easily have traveled to Mars. 
+
+In another experiment he tried to make a young cat stay forever kitten-size. First, he accidentally shrunk the animal to the size of a microbe, then overcompensated. A regular-sized kitten is cute, but one that is twelve feet tall is a problem. The cat tried to eat Petrov and the bear repeatedly, even after being returned to a normal size. 
+
+This was all a welcome diversion for the village, a chance to laugh again. But North was not the type to take setbacks in stride. He fumed for days whenever things didn’t go as he’d intended. Sometimes these angry moods would cause small catastrophes. Furniture would burst into flames, or very small thunderclouds (usually no bigger than a pillow) would follow North around until he calmed.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 13"
+FQLLzq35?source=archive,North - languages,dgl_2,text,Thursday 25th of June 2026 06:24:32 PM CDT,"And so he took sanctuary in Ombric’s books. To steal treasures from every country in Europe and the Russias, a bandit needed to read and speak in their various languages. So North had no trouble diving into ancient Italian texts or even Greek or Latin.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 13"
+wgy29vDW?source=archive,Nightlight - Wind,dgl_2,text,Thursday 25th of June 2026 06:22:46 PM CDT,"WHILE NORTH RECOVERED IN Big Root, the spectral boy rollicked across the planet as he pleased, from the wilds of Canada to the Himalayas to Arabian desert sands, riding on the wind or on fleets of clouds he’d commandeer at his whim. He could outrun any moonbeam and took prankish pleasure in hiding from them. He could never sit still for long. It was as if he’d been locked inside for ten thousand rainy days. 
+
+Which wasn’t far from the truth. Being locked inside Pitch’s cold heart had been like a prison. Still, it wasn’t the dagger that kept Pitch paralyzed all that time, but the goodness of the spectral boy. The boy thawed the tiny fragment of goodness that still lived inside Pitch and kept his evil frozen, unable to act.
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 11"
+JNamyi9N?source=archive,Katherine/General Belief,dgl_2,text,Thursday 25th of June 2026 06:15:25 PM CDT,"The village would never be the same. That seemed certain. But Ombric’s first lesson to anyone who lived in Santoff Claussen was simple: There’s a little bit of wizard in everyone. That magic’s real power was in belief. That every spell began, “I believe. I believe. I believe.” Old William picked up the two halves of Ombric’s staff and fit them back together precisely along the break. He looked at Katherine intently. 
+
+She instantly understood. “Ombric’s first lesson,” she whispered. She ran her fingers along the break, smoothing the splinters down into the staff. “I believe. I believe. I believe,” she said. The deafening howl of the grief from the villagers did not abate. But through the tumult, that first lesson came back to everyone. Old William, then others, began to repeat the words. “I believe. I believe. I believe.” Over and over. And, powered by belief, the broken staff was made whole again. 
+
+The atmosphere began to lighten in waves. The wind slowly stilled. The air became as quiet as a midnight snow. Time itself seemed to stop. The villagers could feel magic all around them. And when they opened their eyes, there stood Ombric, looking so very Ombric-like! As if nothing had happened at all. And behind him stood the bear! His wounds were gone—vanished!—but his fur was now as white as a cloud. And in his giant front paws he held the man like a sleeping child. Ombric took the staff that Katherine, beaming brighter than even the sunlight, held up to him. 
+
+“Thank you for remembering,” Ombric said. He ran his hands along the worn wood pensively, rubbing a thumb along the scar of the crack. Then he motioned to the man in the bear’s arms. “The wounded stranger helped save us. It would be rude to not return the favor.”
+
+Nicholas Saint North and the Battle of the Nightmare King Chapter 10"
